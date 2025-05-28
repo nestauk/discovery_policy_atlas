@@ -1,0 +1,70 @@
+# ========================================
+# 📦 Dependencies
+# ========================================
+**/node_modules/
+**/.pnp/
+.pnp.*
+
+# Yarn v2+
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ========================================
+# 🧪 Testing and Coverage
+# ========================================
+**/coverage/
+
+# ========================================
+# ⚙️ Build and Production Artifacts
+# ========================================
+**/dist/
+**/build/
+**/.next/
+**/out/
+
+# ========================================
+# 🧪 TypeScript and Development Files
+# ========================================
+*.tsbuildinfo
+next-env.d.ts
+
+# ========================================
+# 🔐 Environment and Secrets
+# ========================================
+**/.env
+**/.env.*
+.env
+.env.*
+!**/.env.example
+
+# ========================================
+# 🔧 Logs and Debugging
+# ========================================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log
+
+# ========================================
+# 🗃️ OS and Editor-Specific Files
+# ========================================
+.DS_Store
+Thumbs.db
+
+# ========================================
+# 📁 Python (Backend)
+# ========================================
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+
+# ========================================
+# 🚀 Deployment and Platforms
+# ========================================
+**/.vercel/
+.vercel/
