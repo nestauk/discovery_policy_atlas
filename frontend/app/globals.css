@@ -120,3 +120,100 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Add these component classes */
+@layer components {
+  /* Page layouts */
+  .page-container {
+    @apply max-w-6xl mx-auto space-y-6;
+  }
+  
+  .page-header {
+    @apply text-3xl font-bold;
+  }
+  
+  .page-description {
+    @apply text-muted-foreground mt-2;
+  }
+  
+  /* Form components */
+  .form-grid {
+    @apply grid grid-cols-2 gap-4;
+  }
+  
+  .form-field {
+    @apply space-y-2;
+  }
+  
+  /* Paper card styles */
+  .paper-card {
+    @apply border-gray-300;
+  }
+  
+  .paper-card-relevant {
+    @apply border-green-500;
+  }
+  
+  .paper-title {
+    @apply text-lg leading-tight flex-1;
+  }
+  
+  .paper-metadata {
+    @apply flex flex-wrap gap-2 text-sm;
+  }
+  
+  .paper-abstract {
+    @apply text-sm text-muted-foreground line-clamp-3;
+  }
+  
+  /* Badge variants */
+  .badge-relevant {
+    @apply bg-green-600;
+  }
+  
+  /* AI screening info */
+  .ai-screening-box {
+    @apply text-sm text-muted-foreground bg-muted p-2 rounded;
+  }
+  
+  /* Summary stats */
+  .summary-grid {
+    @apply grid grid-cols-3 gap-4 text-center;
+  }
+  
+  .summary-value {
+    @apply text-2xl font-bold;
+  }
+  
+  .summary-value-highlight {
+    @apply text-2xl font-bold text-green-600;
+  }
+  
+  .summary-label {
+    @apply text-sm text-muted-foreground;
+  }
+  
+  /* Link styles */
+  .paper-link {
+    @apply text-sm text-primary hover:underline inline-flex items-center gap-1;
+  }
+  
+  /* Error states */
+  .error-card {
+    @apply border-destructive;
+  }
+  
+  /* Loading states */
+  .loading-spinner {
+    @apply mr-2 h-4 w-4 animate-spin;
+  }
+}
