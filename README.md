@@ -151,9 +151,9 @@ OPENALEX_EMAIL=         # Your email (optional, for OpenAlex politeness)
 
 ## 🚧 Roadmap (tentative)
 
-- [ ] Database integration (PostgreSQL)
+- [x] Search result screening and synthesis with LLMs
+- [ ] Database integration (PostgreSQL) and "project management" implementation
 - [ ] Real user authentication
-- [ ] Search result screening and synthesis with LLMs
 - [ ] PDF processing
 - [ ] Deployment to cloud
 
