@@ -114,16 +114,26 @@ npm run dev
 
 ```
 discovery_policy_atlas/
-├── frontend/             # Next.js frontend application
-│   ├── app/              # App router pages
-│   ├── components/       # React components
-│   │   ├── ui/           # shadcn/ui components
-│   │   └── auth/         # Authentication components
-│   └── auth.ts           # NextAuth configuration
-├── backend/              # FastAPI backend application
-│   ├── main.py           # Main API application
-│   └── .env              # Environment variables
-└── README.md             # This file
+│
+├── backend/
+│   ├── app/
+│   │   ├── api/           # FastAPI routes (e.g., routes.py)
+│   │   ├── core/          # Core models and config (models.py, config.py)
+│   │   ├── services/      # Main backend services
+│   │   ├── utils/         # Utility modules
+│   ├── main.py            
+│   └── .venv/             # Python virtual environment
+│
+├── frontend/
+│   ├── app/               # Next.js app directory
+│   ├── components/
+│   │   ├── search/        # Search-related React components
+│   │   ├── ui/            # UI primitives/components
+│   ├── types/             # TypeScript types
+│   ├── public/            # Static assets
+│   ├── lib/               # Frontend utility libraries
+│
+├── docs/
 ```
 
 ## 📝 Environment Variables
