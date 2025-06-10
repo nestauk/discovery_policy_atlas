@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from typing import Union
 import uuid
@@ -8,7 +8,7 @@ from app.core.models import (
     MediaCloudSearchRequest,
     SimpleSearchResult,
 )
-
+from app.core.auth import get_current_user, CurrentUser
 
 from app.services.openalex import OpenAlexService
 from app.services.mediacloud import MediaCloudService
@@ -17,9 +17,19 @@ from app.services.summary import SummaryService
 
 router = APIRouter()
 
+@router.get("/api/me")
+async def get_me(current_user: CurrentUser = Depends(get_current_user)):
+    """Test endpoint to verify Clerk authentication"""
+    return {
+        "user_id": current_user.user_id,
+        "email": current_user.email
+    }
 
 @router.post("/api/search", response_model=SimpleSearchResult)
-async def enhanced_search(request: SearchRequest):
+async def enhanced_search(
+    request: SearchRequest,
+    current_user: CurrentUser = Depends(get_current_user)
+):
     """Enhanced search with screening, extraction, and synthesis"""
     session_id = str(uuid.uuid4())[:8]
     
@@ -90,7 +100,10 @@ async def enhanced_search(request: SearchRequest):
     
     
 @router.post("/api/summary")
-async def get_summary(request: Request):
+async def get_summary(
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user)
+):
     data = await request.json()
     papers = data.get("papers", [])
     extraction_fields = data.get("extraction_fields", [])

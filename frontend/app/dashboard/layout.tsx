@@ -1,6 +1,6 @@
 'use client'
 
-import { useSession, signOut } from 'next-auth/react'
+import { useUser, useClerk } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import Link from 'next/link'
@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Search, Brain, Beaker } from 'lucide-react'
+import { ProjectSelector } from '@/components/ProjectSelector'
 
 const sidebarItems = [
   { name: 'Search', href: '/dashboard/search', icon: Search },
@@ -27,20 +28,21 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { data: session, status } = useSession()
+  const { user, isSignedIn, isLoaded } = useUser()
+  const { signOut } = useClerk()
   const router = useRouter()
   const pathname = usePathname()
 
   useEffect(() => {
-    if (status === 'loading') return
-    if (!session) router.push('/login')
-  }, [session, status, router])
+    if (!isLoaded) return
+    if (!isSignedIn) router.push('/login')
+  }, [isSignedIn, isLoaded, router])
 
-  if (status === 'loading') {
+  if (!isLoaded) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>
   }
 
-  if (!session) {
+  if (!isSignedIn) {
     return null
   }
 
@@ -48,13 +50,16 @@ export default function DashboardLayout({
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
       <div className="w-64 bg-card border-r">
-        <div className="p-6">
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <span className="text-3xl">🌐</span>
-            Policy Atlas
-          </h1>
-        </div>
-        <nav className="space-y-2 px-3">
+        <nav className="space-y-2 px-3 mt-6">
+          <ProjectSelector
+            currentQuery=""
+            currentFilters={{}}
+            onProjectSelect={(query: string, filters: any, projectId: string) => {
+              // Navigate to search page with the selected project
+              router.push(`/dashboard/search?project=${projectId}`)
+            }}
+          />
+          <div className="border-b border-gray-200 my-2" />
           {sidebarItems.map((item) => (
             <Link key={item.name} href={item.href}>
               <Button
@@ -71,40 +76,6 @@ export default function DashboardLayout({
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        {/* Top Bar */}
-        <header className="h-16 border-b bg-card px-6 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
-            {sidebarItems.find(item => item.href === pathname)?.name || 'Dashboard'}
-          </h2>
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback>
-                    {session.user?.name?.charAt(0) || 'U'}
-                  </AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="end" forceMount>
-              <DropdownMenuLabel className="font-normal">
-                <div className="flex flex-col space-y-1">
-                  <p className="text-sm font-medium leading-none">{session.user?.name}</p>
-                  <p className="text-xs leading-none text-muted-foreground">
-                    {session.user?.email}
-                  </p>
-                </div>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => signOut({ callbackUrl: '/login' })}>
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </header>
-
-        {/* Page Content */}
         <main className="flex-1 overflow-y-auto p-6">
           {children}
         </main>
