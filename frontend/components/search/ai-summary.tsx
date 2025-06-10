@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useAPI } from '@/lib/api'
 
 interface AiSummaryProps {
   papers: any[]
@@ -9,19 +10,17 @@ export function AiSummary({ papers, extractionFields }: AiSummaryProps) {
   const [summary, setSummary] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const { fetchWithAuth } = useAPI()
 
   const handleGenerate = async () => {
     setLoading(true)
     setSummary('')
     setError('')
     try {
-      const res = await fetch('http://localhost:8000/api/summary', {
+      const data = await fetchWithAuth('/api/summary', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ papers, extraction_fields: extractionFields }),
       })
-      if (!res.ok) throw new Error('Failed to generate summary')
-      const data = await res.json()
       setSummary(data.summary)
     } catch (err) {
       setError('Failed to generate summary. Please try again.')

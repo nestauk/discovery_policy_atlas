@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { ProjectSelector } from '@/components/ProjectSelector'
 import type { SearchParams } from '@/types/search'
 
 interface SearchFormProps {
@@ -15,20 +16,49 @@ interface SearchFormProps {
   isLoading: boolean
   screeningEnabled: boolean
   onScreeningEnabledChange: (enabled: boolean) => void
+  initialQuery?: string
+  initialFilters?: any
 }
 
-export function SearchForm({ onSearch, isLoading, screeningEnabled, onScreeningEnabledChange }: SearchFormProps) {
-  const [query, setQuery] = useState('')
-  const [source, setSource] = useState<'openalex' | 'mediacloud'>('openalex')
+export function SearchForm({ 
+  onSearch, 
+  isLoading, 
+  screeningEnabled, 
+  onScreeningEnabledChange,
+  initialQuery = '',
+  initialFilters = {}
+}: SearchFormProps) {
+  const [query, setQuery] = useState(initialQuery)
+  const [source, setSource] = useState<'openalex' | 'mediacloud'>(initialFilters.source || 'openalex')
   const [showAdvanced, setShowAdvanced] = useState(false)
   
   // Advanced options
-  const [minCitations, setMinCitations] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [maxResults, setMaxResults] = useState('10')
-  const [inclusionCriteria, setInclusionCriteria] = useState('')
-  const [extractionFields, setExtractionFields] = useState<string[]>([])
+  const [minCitations, setMinCitations] = useState(initialFilters.min_citations?.toString() || '')
+  const [dateFrom, setDateFrom] = useState(initialFilters.date_from || '')
+  const [dateTo, setDateTo] = useState(initialFilters.date_to || '')
+  const [maxResults, setMaxResults] = useState(initialFilters.max_results?.toString() || '10')
+  const [inclusionCriteria, setInclusionCriteria] = useState(initialFilters.inclusion_criteria || '')
+  const [extractionFields, setExtractionFields] = useState<string[]>(initialFilters.extraction_fields || [])
+
+  // Update form when initial values change
+  useEffect(() => {
+    console.log('Initial values changed:', { initialQuery, initialFilters })
+    setQuery(initialQuery)
+    setSource(initialFilters.source || 'openalex')
+    setMinCitations(initialFilters.min_citations?.toString() || '')
+    setDateFrom(initialFilters.date_from || '')
+    setDateTo(initialFilters.date_to || '')
+    setMaxResults(initialFilters.max_results?.toString() || '10')
+    setInclusionCriteria(initialFilters.inclusion_criteria || '')
+    setExtractionFields(initialFilters.extraction_fields || [])
+  }, [initialQuery, initialFilters])
+
+  const handleProjectSelect = (query: string, filters: any, projectId: string) => {
+    console.log('Project selected in form:', { query, filters, projectId })
+    // The parent component will handle this through the URL change
+    // and pass down new initialQuery and initialFilters
+    window.history.pushState({}, '', `/dashboard/search?project=${projectId}`)
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,6 +88,20 @@ export function SearchForm({ onSearch, isLoading, screeningEnabled, onScreeningE
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <ProjectSelector
+            currentQuery={query}
+            currentFilters={{
+              source,
+              max_results: parseInt(maxResults) || 10,
+              min_citations: minCitations ? parseInt(minCitations) : undefined,
+              date_from: dateFrom,
+              date_to: dateTo,
+              inclusion_criteria: inclusionCriteria,
+              extraction_fields: extractionFields,
+            }}
+            onProjectSelect={handleProjectSelect}
+          />
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="query">Search Query</Label>

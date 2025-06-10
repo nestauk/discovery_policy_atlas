@@ -17,6 +17,12 @@ dependencies = [
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.6.14",
     "mkdocstrings>=0.29.1",
+    "sqlalchemy>=2.0.41",
+    "alembic>=1.16.1",
+    "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.10",
+    "pyjwt>=2.10.1",
+    "cryptography>=45.0.3",
 ]
 
 [tool.uv]
