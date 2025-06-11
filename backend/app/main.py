@@ -11,12 +11,13 @@ from app.api.projects import router as projects_router
 # Configure logging
 logging.basicConfig(
     level=settings.LOG_LEVEL,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 # Create logs directory if it doesn't exist
 Path("logs").mkdir(exist_ok=True)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,11 +26,11 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
-    
+
     # Create necessary directories
     Path(settings.TEMP_FILES_DIR).mkdir(parents=True, exist_ok=True)
     Path(settings.EXPORT_FILES_DIR).mkdir(parents=True, exist_ok=True)
-    
+
     # Validate settings
     try:
         settings.validate_llm_settings()
@@ -37,18 +38,15 @@ async def lifespan(app: FastAPI):
     except ValueError as e:
         logger.error(f"Settings validation failed: {e}")
         raise
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down application")
 
+
 # Create FastAPI app
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    version=settings.VERSION,
-    lifespan=lifespan
-)
+app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -63,14 +61,16 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(projects_router)
 
+
 # Health check endpoint at root
 @app.get("/")
 async def root():
     return {
         "message": f"{settings.PROJECT_NAME}",
         "version": settings.VERSION,
-        "status": "running"
+        "status": "running",
     }
+
 
 @app.get("/health")
 async def health_check():
@@ -85,23 +85,26 @@ async def health_check():
             "llm_model": settings.LLM_MODEL,
             "openalex_configured": bool(settings.OPENALEX_EMAIL),
             "mediacloud_configured": bool(settings.MEDIACLOUD_API_KEY),
-        }
+        },
     }
-    
+
     # Check API keys
     if settings.LLM_PROVIDER == "openai":
         health_status["openai_configured"] = bool(settings.OPENAI_API_KEY)
-    
+
     return health_status
+
 
 @app.get("/debug/routes")
 async def debug_routes():
     routes_list = []
     for route in app.routes:
         if hasattr(route, "methods") and hasattr(route, "path"):
-            routes_list.append({
-                "path": route.path,
-                "methods": list(route.methods) if route.methods else [],
-                "name": route.name
-            })
+            routes_list.append(
+                {
+                    "path": route.path,
+                    "methods": list(route.methods) if route.methods else [],
+                    "name": route.name,
+                }
+            )
     return {"routes": routes_list}

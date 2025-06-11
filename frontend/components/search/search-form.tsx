@@ -17,7 +17,25 @@ interface SearchFormProps {
   screeningEnabled: boolean
   onScreeningEnabledChange: (enabled: boolean) => void
   initialQuery?: string
-  initialFilters?: any
+  initialFilters?: SearchParams
+}
+
+interface AdvancedOptionsProps {
+  source: 'openalex' | 'mediacloud'
+  maxResults: string
+  setMaxResults: (value: string) => void
+  minCitations: string
+  setMinCitations: (value: string) => void
+  dateFrom: string
+  setDateFrom: (value: string) => void
+  dateTo: string
+  setDateTo: (value: string) => void
+  inclusionCriteria: string
+  setInclusionCriteria: (value: string) => void
+  extractionFields: string[]
+  setExtractionFields: (value: string[]) => void
+  screeningEnabled: boolean
+  onScreeningEnabledChange: (enabled: boolean) => void
 }
 
 export function SearchForm({ 
@@ -26,7 +44,11 @@ export function SearchForm({
   screeningEnabled, 
   onScreeningEnabledChange,
   initialQuery = '',
-  initialFilters = {}
+  initialFilters = {
+    query: '',
+    source: 'openalex',
+    max_results: 10
+  }
 }: SearchFormProps) {
   const [query, setQuery] = useState(initialQuery)
   const [source, setSource] = useState<'openalex' | 'mediacloud'>(initialFilters.source || 'openalex')
@@ -53,7 +75,7 @@ export function SearchForm({
     setExtractionFields(initialFilters.extraction_fields || [])
   }, [initialQuery, initialFilters])
 
-  const handleProjectSelect = (query: string, filters: any, projectId: string) => {
+  const handleProjectSelect = (query: string, filters: SearchParams, projectId: string) => {
     console.log('Project selected in form:', { query, filters, projectId })
     // The parent component will handle this through the URL change
     // and pass down new initialQuery and initialFilters
@@ -91,6 +113,7 @@ export function SearchForm({
           <ProjectSelector
             currentQuery={query}
             currentFilters={{
+              query,
               source,
               max_results: parseInt(maxResults) || 10,
               min_citations: minCitations ? parseInt(minCitations) : undefined,
@@ -116,7 +139,7 @@ export function SearchForm({
             
             <div className="space-y-2">
               <Label htmlFor="source">Data Source</Label>
-              <Select value={source} onValueChange={(v: any) => setSource(v)}>
+              <Select value={source} onValueChange={(v: 'openalex' | 'mediacloud') => setSource(v)}>
                 <SelectTrigger id="source">
                   <SelectValue />
                 </SelectTrigger>
@@ -153,34 +176,11 @@ export function SearchForm({
                 setInclusionCriteria={setInclusionCriteria}
                 extractionFields={extractionFields}
                 setExtractionFields={setExtractionFields}
+                screeningEnabled={screeningEnabled}
+                onScreeningEnabledChange={onScreeningEnabledChange}
               />
             </CollapsibleContent>
           </Collapsible>
-
-          {/* Inclusion Criteria with inline screening checkbox */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 mb-1">
-              <Label htmlFor="inclusionCriteria" className="mb-0">
-                Inclusion Criteria
-              </Label>
-              <input
-                id="screeningEnabled"
-                type="checkbox"
-                checked={screeningEnabled}
-                onChange={e => onScreeningEnabledChange(e.target.checked)}
-                className="h-4 w-4 accent-primary"
-                style={{ marginLeft: 8 }}
-                title="Enable AI Screening"
-              />
-              <span className="text-xs text-muted-foreground">Enable AI Screening</span>
-            </div>
-            <Input
-              id="inclusionCriteria"
-              placeholder="e.g., 'Human studies published after 2015 with at least 20 participants'"
-              value={inclusionCriteria}
-              onChange={(e) => setInclusionCriteria(e.target.value)}
-            />
-          </div>
 
           <Button type="submit" disabled={isLoading || !query.trim()} className="w-full">
             {isLoading ? (
@@ -198,7 +198,6 @@ export function SearchForm({
   )
 }
 
-// Separate component for advanced options
 function AdvancedOptions({
   source,
   maxResults,
@@ -213,7 +212,9 @@ function AdvancedOptions({
   setInclusionCriteria,
   extractionFields,
   setExtractionFields,
-}: any) {
+  screeningEnabled,
+  onScreeningEnabledChange,
+}: AdvancedOptionsProps) {
   const handleFieldChange = (idx: number, value: string) => {
     const updated = [...extractionFields]
     updated[idx] = value
@@ -224,6 +225,21 @@ function AdvancedOptions({
 
   return (
     <div className="space-y-4 mt-4">
+      {/* Screening Toggle */}
+      <div className="flex items-center gap-2">
+        <input
+          id="screeningEnabled"
+          type="checkbox"
+          checked={screeningEnabled}
+          onChange={e => onScreeningEnabledChange(e.target.checked)}
+          className="h-4 w-4 accent-primary"
+          title="Enable AI Screening"
+        />
+        <Label htmlFor="screeningEnabled" className="text-sm text-muted-foreground">
+          Enable AI Screening
+        </Label>
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="maxResults">Max Results</Label>
@@ -273,6 +289,18 @@ function AdvancedOptions({
           />
         </div>
       </div>
+
+      {/* Inclusion Criteria */}
+      <div className="space-y-2">
+        <Label htmlFor="inclusionCriteria">Inclusion Criteria</Label>
+        <Input
+          id="inclusionCriteria"
+          placeholder="e.g., 'Human studies published after 2015 with at least 20 participants'"
+          value={inclusionCriteria}
+          onChange={(e) => setInclusionCriteria(e.target.value)}
+        />
+      </div>
+
       {/* Additional Extraction Fields */}
       <div className="space-y-2">
         <Label>Additional Extraction Fields</Label>

@@ -1,7 +1,7 @@
-import os
 import pandas as pd
-from typing import Optional, List
+from typing import Optional
 from datetime import date
+
 try:
     import mediacloud.api
 except ImportError:
@@ -17,6 +17,7 @@ from discovery_utils.utils.llm.llm_utils import get_llm
 
 UK_COLLECTION_NAME = "United Kingdom - National"
 
+
 def resolve_collection_id(api_key: str, collection_name: str) -> int:
     """
     Return the numerical collection_id that exactly matches `collection_name`.
@@ -25,16 +26,17 @@ def resolve_collection_id(api_key: str, collection_name: str) -> int:
     dir_api = mediacloud.api.DirectoryApi(api_key)
     # The Directory endpoint is paginated; we loop until a match is found
     offset = 0
-    PAGE = 250            # tune as desired (max 500)
+    PAGE = 250  # tune as desired (max 500)
     while True:
         page = dir_api.collection_list(limit=PAGE, offset=offset)
         for coll in page["results"]:
             if coll["name"].lower() == collection_name.lower():
                 return coll["id"]
-        if page["next"] is None:     # no more pages
+        if page["next"] is None:  # no more pages
             break
         offset += PAGE
     raise ValueError(f"Collection '{collection_name}' not found")
+
 
 class MediaCloudService:
     def __init__(self):
@@ -73,17 +75,14 @@ class MediaCloudService:
         date_to: Optional[date] = None,
     ) -> pd.DataFrame:
         today = date.today()
-        start_date = (date_from or today)
-        end_date = (date_to or today)
+        start_date = date_from or today
+        end_date = date_to or today
         print(start_date)
         all_stories = []
         pagination_token = None
         while len(all_stories) < max_results:
             page, pagination_token = self.api.story_list(
-                query,
-                start_date,
-                end_date,
-                pagination_token=pagination_token
+                query, start_date, end_date, pagination_token=pagination_token
             )
             all_stories += page
             if not pagination_token or len(all_stories) >= max_results:
@@ -93,12 +92,19 @@ class MediaCloudService:
         # Build DataFrame
         df = pd.DataFrame(all_stories)
         # Standardize columns
-        df = df.rename(columns={"id": "id", "title": "title", "description": "abstract", "publish_date": "publish_date"})
+        df = df.rename(
+            columns={
+                "id": "id",
+                "title": "title",
+                "description": "abstract",
+                "publish_date": "publish_date",
+            }
+        )
         if "abstract" not in df.columns:
             df["abstract"] = ""
-        df["content"] = df["abstract"].fillna('')  # Use description as content
+        df["content"] = df["abstract"].fillna("")  # Use description as content
 
-        # Go to each website and scrape the content 
+        # Go to each website and scrape the content
         if Fetcher is not None:
             for idx, row in df.iterrows():
                 if (not row.get("abstract")) and row.get("url"):
@@ -108,6 +114,6 @@ class MediaCloudService:
                         df.at[idx, "content"] = summary
 
         return df[["id", "title", "abstract", "content", "publish_date"]]
-    
+
     def format_for_screening(self, df: pd.DataFrame):
-        return df.set_index('id')[['title', 'content']].to_dict('index')
+        return df.set_index("id")[["title", "content"]].to_dict("index")
