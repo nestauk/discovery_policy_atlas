@@ -7,7 +7,7 @@ interface PaperCardProps {
   paper: Paper
 }
 
-export function PaperCard({ paper }: PaperCardProps) {
+export function PaperCard({ paper }: PaperCardProps) { 
   return (
     <Card className={paper.is_relevant ? 'paper-card-relevant' : 'paper-card'}>
       <CardHeader>
