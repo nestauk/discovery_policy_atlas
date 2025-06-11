@@ -110,7 +110,29 @@ npm run dev
 3. Navigate to the Search tab
 4. Try searching for "heat pumps" or any academic topic
 
-## 📁 Project Structure
+### 6. Pre-commit Hooks
+
+The project uses pre-commit hooks to ensure code quality. The hooks are configured in `backend/.pre-commit-config.yaml` and handle both frontend and backend linting:
+
+- **Backend**: Uses Ruff for Python linting and formatting
+- **Frontend**: Uses ESLint for TypeScript/JavaScript linting
+
+To set up pre-commit hooks:
+```bash
+# Navigate to backend directory
+cd backend
+
+# Install dev dependencies (includes pre-commit)
+uv sync --dev
+
+# Install the git hooks
+uv run pre-commit install
+
+# Check all files
+uv run pre-commit run --all-files
+```
+
+## �� Project Structure
 
 ```
 discovery_policy_atlas/
@@ -121,6 +143,7 @@ discovery_policy_atlas/
 │   │   ├── core/          # Core models and config (models.py, config.py)
 │   │   ├── services/      # Main backend services
 │   │   ├── utils/         # Utility modules
+│   │   └── ...
 │   ├── main.py            
 │   └── .venv/             # Python virtual environment
 │
@@ -129,6 +152,7 @@ discovery_policy_atlas/
 │   ├── components/
 │   │   ├── search/        # Search-related React components
 │   │   ├── ui/            # UI primitives/components
+│   │   └── ...
 │   ├── types/             # TypeScript types
 │   ├── public/            # Static assets
 │   ├── lib/               # Frontend utility libraries
