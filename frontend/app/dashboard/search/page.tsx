@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
 import { SearchForm } from '@/components/search/search-form'
@@ -18,9 +18,45 @@ export default function SearchPage() {
   const [error, setError] = useState('')
   const [screeningEnabled, setScreeningEnabled] = useState(true)
   const [currentQuery, setCurrentQuery] = useState('')
-  const [currentFilters, setCurrentFilters] = useState<any>({})
+  const [currentFilters, setCurrentFilters] = useState<SearchParams>({
+    query: '',
+    source: 'openalex',
+    max_results: 10
+  })
   const { fetchWithAuth } = useAPI()
   const { user } = useUser()
+
+  const handleProjectSelect = useCallback(async (projectId: string) => {
+    try {
+      const project = await fetchWithAuth(`/api/projects/${projectId}?clerk_user_id=${user?.id}`)
+      console.log('SearchPage - Project loaded:', {
+        id: project.id,
+        name: project.name,
+        query: project.query,
+        filters: project.filters,
+        created_at: project.created_at
+      })
+      
+      // Update current state
+      setCurrentQuery(project.query)
+      setCurrentFilters({
+        query: project.query,
+        source: project.filters.source || 'openalex',
+        max_results: project.filters.max_results || 10,
+        min_citations: project.filters.min_citations,
+        date_from: project.filters.date_from,
+        date_to: project.filters.date_to,
+        inclusion_criteria: project.filters.inclusion_criteria,
+        extraction_fields: project.filters.extraction_fields || []
+      })
+      
+      // Don't trigger search automatically
+      // Let the user review and modify the parameters first
+    } catch (error) {
+      console.error('Error loading project:', error)
+      setError('Failed to load project')
+    }
+  }, [fetchWithAuth, user?.id, setCurrentQuery, setCurrentFilters, setError])
 
   // Handle project selection from URL
   useEffect(() => {
@@ -28,7 +64,7 @@ export default function SearchPage() {
     if (projectId) {
       handleProjectSelect(projectId)
     }
-  }, [searchParams])
+  }, [searchParams, handleProjectSelect])
 
   const handleSearch = async (params: SearchParams) => {
     setIsLoading(true)
@@ -48,31 +84,6 @@ export default function SearchPage() {
       console.error('Search error:', err)
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  const handleProjectSelect = async (projectId: string) => {
-    try {
-      const project = await fetchWithAuth(`/api/projects/${projectId}?clerk_user_id=${user?.id}`)
-      console.log('Project loaded:', project)
-      
-      // Update current state
-      setCurrentQuery(project.query)
-      setCurrentFilters({
-        source: project.filters.source || 'openalex',
-        max_results: project.filters.max_results || 10,
-        min_citations: project.filters.min_citations,
-        date_from: project.filters.date_from,
-        date_to: project.filters.date_to,
-        inclusion_criteria: project.filters.inclusion_criteria,
-        extraction_fields: project.filters.extraction_fields || [],
-      })
-      
-      // Don't trigger search automatically
-      // Let the user review and modify the parameters first
-    } catch (error) {
-      console.error('Error loading project:', error)
-      setError('Failed to load project')
     }
   }
 

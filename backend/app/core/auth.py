@@ -19,39 +19,41 @@ if not CLERK_JWT_ISSUER:
 JWKS_URL = f"{CLERK_JWT_ISSUER}/.well-known/jwks.json"
 jwks_client = PyJWKClient(JWKS_URL)
 
+
 class CurrentUser:
     def __init__(self, user_id: str, email: Optional[str] = None):
         self.user_id = user_id
         self.email = email
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> CurrentUser:
     """Verify Clerk JWT token and return user info"""
     token = credentials.credentials
-    
+
     try:
         # Get the signing key
         signing_key = jwks_client.get_signing_key_from_jwt(token)
-        
+
         # Decode and verify the token
         payload = jwt.decode(
             token,
             signing_key.key,
             algorithms=["RS256"],
             issuer=CLERK_JWT_ISSUER,
-            options={"verify_exp": True}
+            options={"verify_exp": True},
         )
-        
+
         # Extract user info
         user_id = payload.get("sub")
         email = payload.get("email")
-        
+
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token: no user ID")
-        
+
         return CurrentUser(user_id=user_id, email=email)
-        
+
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError as e:

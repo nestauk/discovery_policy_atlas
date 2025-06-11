@@ -5,8 +5,7 @@ import os
 
 # Database URL
 DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/policy_atlas"
+    "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/policy_atlas"
 )
 
 # Create async engine
@@ -17,11 +16,8 @@ engine = create_async_engine(
 )
 
 # Create async session factory
-AsyncSessionLocal = sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
 
 # Dependency for FastAPI
 async def get_db():
@@ -29,4 +25,4 @@ async def get_db():
         try:
             yield session
         finally:
-            await session.close() 
+            await session.close()

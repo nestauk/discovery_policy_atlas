@@ -1,21 +1,11 @@
 'use client'
 
-import { useUser, useClerk } from '@clerk/nextjs'
+import { useUser } from '@clerk/nextjs' // can also output useClerk
 import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Search, Brain, Beaker } from 'lucide-react'
-import { ProjectSelector } from '@/components/ProjectSelector'
 
 const sidebarItems = [
   { name: 'Search', href: '/dashboard/search', icon: Search },
@@ -28,8 +18,8 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { user, isSignedIn, isLoaded } = useUser()
-  const { signOut } = useClerk()
+  const { isSignedIn, isLoaded } = useUser() // can also output user object
+  // const { signOut } = useClerk()
   const router = useRouter()
   const pathname = usePathname()
 
@@ -51,7 +41,7 @@ export default function DashboardLayout({
       {/* Sidebar */}
       <div className="w-64 bg-card border-r">
         <nav className="space-y-2 px-3 mt-6">
-          <ProjectSelector
+          {/* <ProjectSelector
             currentQuery=""
             currentFilters={{}}
             onProjectSelect={(query: string, filters: any, projectId: string) => {
@@ -59,7 +49,7 @@ export default function DashboardLayout({
               router.push(`/dashboard/search?project=${projectId}`)
             }}
           />
-          <div className="border-b border-gray-200 my-2" />
+          <div className="border-b border-gray-200 my-2" /> */}
           {sidebarItems.map((item) => (
             <Link key={item.name} href={item.href}>
               <Button

@@ -1,24 +1,26 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useUser } from '@clerk/nextjs'
 import { Select, Button, Modal, Input, message } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
 import { useAPI } from '@/lib/api'
+import { SearchParams } from '@/types/search'
+
 
 interface Project {
   id: string
   name: string
   description: string | null
   query: string
-  filters: any
+  filters: SearchParams
   created_at: string
 }
 
 interface ProjectSelectorProps {
   currentQuery: string
-  currentFilters: any
-  onProjectSelect: (query: string, filters: any, projectId: string) => void
+  currentFilters: SearchParams
+  onProjectSelect: (query: string, filters: SearchParams, projectId: string) => void
 }
 
 export function ProjectSelector({
@@ -33,7 +35,7 @@ export function ProjectSelector({
   const [existingProject, setExistingProject] = useState<Project | null>(null)
   const { fetchWithAuth } = useAPI()
 
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => {
     if (!user?.id) {
       console.log('No user ID available')
       return
@@ -48,7 +50,7 @@ export function ProjectSelector({
       console.error('Error fetching projects:', error)
       message.error('Failed to load saved projects')
     }
-  }
+  }, [user?.id, fetchWithAuth])
 
   useEffect(() => {
     if (user?.id) {
@@ -57,7 +59,7 @@ export function ProjectSelector({
     } else {
       console.log('No user ID available')
     }
-  }, [user?.id])
+  }, [user?.id, fetchProjects])
 
   const handleSave = async () => {
     if (!user?.id) {
@@ -101,7 +103,13 @@ export function ProjectSelector({
     try {
       console.log('Selecting project:', projectId)
       const project = await fetchWithAuth(`/api/projects/${projectId}?clerk_user_id=${user.id}`)
-      console.log('Project loaded:', project)
+      console.log('Project loaded:', {
+        id: project.id,
+        name: project.name,
+        query: project.query,
+        filters: project.filters,
+        created_at: project.created_at
+      })
       
       // Call the parent's onProjectSelect with the project data
       onProjectSelect(project.query, project.filters, project.id)

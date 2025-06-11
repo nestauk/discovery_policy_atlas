@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useAPI } from '@/lib/api'
+import { Paper } from '@/types/search'
 
 interface AiSummaryProps {
-  papers: any[]
+  papers: Paper[]
   extractionFields: string[]
 }
 
@@ -23,6 +24,7 @@ export function AiSummary({ papers, extractionFields }: AiSummaryProps) {
       })
       setSummary(data.summary)
     } catch (err) {
+      console.error('Summary generation error:', err)
       setError('Failed to generate summary. Please try again.')
     } finally {
       setLoading(false)
