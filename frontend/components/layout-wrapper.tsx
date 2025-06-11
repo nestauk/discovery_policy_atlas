@@ -1,6 +1,6 @@
 'use client'
 
-import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkProvider } from "@clerk/nextjs"; 
 import { usePathname } from "next/navigation";
 import { Header } from "@/components/header";
 import { Inter } from 'next/font/google'
