@@ -2,6 +2,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, List, Union
 from functools import lru_cache
 from pydantic import field_validator
+import json
+import logging
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -12,17 +17,66 @@ class Settings(BaseSettings):
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
 
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    # CORS - Use Union to prevent automatic JSON parsing
+    BACKEND_CORS_ORIGINS: Union[str, List[str]] = ["http://localhost:3000"]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
         """Parse CORS origins from string or list input"""
+        # Track what happened for logging
+        default_origins = ["http://localhost:3000"]
+
+        if v is None:
+            logger.warning(
+                "BACKEND_CORS_ORIGINS not set, using default: %s", default_origins
+            )
+            return default_origins
+
         if isinstance(v, str):
-            # Handle comma-separated string
-            return [origin.strip() for origin in v.split(",")]
-        return v
+            # Handle empty string
+            if not v.strip():
+                logger.warning(
+                    "BACKEND_CORS_ORIGINS is empty, using default: %s", default_origins
+                )
+                return default_origins
+
+            # Try JSON parsing first
+            if v.strip().startswith("["):
+                try:
+                    parsed = json.loads(v)
+                    logger.info("BACKEND_CORS_ORIGINS parsed from JSON: %s", parsed)
+                    return parsed
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        "Failed to parse BACKEND_CORS_ORIGINS as JSON: %s", e
+                    )
+
+            # Fall back to comma-separated
+            origins = [origin.strip() for origin in v.split(",") if origin.strip()]
+            if origins:
+                logger.info(
+                    "BACKEND_CORS_ORIGINS parsed from comma-separated: %s", origins
+                )
+                return origins
+            else:
+                logger.warning(
+                    "BACKEND_CORS_ORIGINS parsing failed, using default: %s",
+                    default_origins,
+                )
+                return default_origins
+
+        if isinstance(v, list):
+            logger.info("BACKEND_CORS_ORIGINS using list value: %s", v)
+            return v
+
+        # Unexpected type
+        logger.error(
+            "BACKEND_CORS_ORIGINS has unexpected type %s, using default: %s",
+            type(v),
+            default_origins,
+        )
+        return default_origins
 
     # Server
     HOST: str = "0.0.0.0"
