@@ -10,7 +10,12 @@ export function useAPI() {
       throw new Error("No authentication token available");
     }
     
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${url}`, {
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    // Remove trailing slash from baseUrl and leading slash from url if present
+    const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+    const cleanUrl = url.replace(/^\//, '');
+    
+    const response = await fetch(`${cleanBaseUrl}/${cleanUrl}`, {
       ...options,
       headers: {
         ...options.headers,
