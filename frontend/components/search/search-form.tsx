@@ -8,7 +8,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Loader2, ChevronDown, ChevronUp } from 'lucide-react'
-import { ProjectSelector } from '@/components/ProjectSelector'
 import type { SearchParams } from '@/types/search'
 
 interface SearchFormProps {
@@ -75,13 +74,6 @@ export function SearchForm({
     setExtractionFields(initialFilters.extraction_fields || [])
   }, [initialQuery, initialFilters])
 
-  const handleProjectSelect = (query: string, filters: SearchParams, projectId: string) => {
-    console.log('Project selected in form:', { query, filters, projectId })
-    // The parent component will handle this through the URL change
-    // and pass down new initialQuery and initialFilters
-    window.history.pushState({}, '', `/dashboard/search?project=${projectId}`)
-  }
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!query.trim()) return
@@ -110,21 +102,6 @@ export function SearchForm({
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <ProjectSelector
-            currentQuery={query}
-            currentFilters={{
-              query,
-              source,
-              max_results: parseInt(maxResults) || 10,
-              min_citations: minCitations ? parseInt(minCitations) : undefined,
-              date_from: dateFrom,
-              date_to: dateTo,
-              inclusion_criteria: inclusionCriteria,
-              extraction_fields: extractionFields,
-            }}
-            onProjectSelect={handleProjectSelect}
-          />
-
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="query">Search Query</Label>
