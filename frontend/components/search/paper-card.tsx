@@ -14,7 +14,7 @@ export function PaperCard({ paper }: PaperCardProps) {
         <div className="space-y-2">
           <div className="flex items-start justify-between">
             <CardTitle className="paper-title">
-              {paper.title}
+              <a href={paper.id} target="_blank">{paper.title}</a>
             </CardTitle>
             {paper.is_relevant && (
               <Badge className="ml-2 badge-relevant">
@@ -22,15 +22,15 @@ export function PaperCard({ paper }: PaperCardProps) {
               </Badge>
             )}
           </div>
-          <PaperMetadata paper={paper} />
+          {/* <PaperMetadata paper={paper} /> */}
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
         <AuthorsList authors={paper.authors} />
-        <RelevanceInfo paper={paper} />
         {paper.abstract && (
           <p className="paper-abstract">{paper.abstract}</p>
         )}
+        <RelevanceInfo paper={paper} />
         {/* Show extracted extra fields if present */}
         {Object.entries(paper)
           .filter(([key, value]) => key.startsWith('extra_field_') && value && value !== '')
@@ -45,21 +45,20 @@ export function PaperCard({ paper }: PaperCardProps) {
   )
 }
 
-function PaperMetadata({ paper }: { paper: Paper }) {
-  return (
-    <div className="paper-metadata">
-      <span>{paper.publication_year}</span>
-      <span>•</span>
-      <span>{paper.cited_by_count} citations</span>
-      {paper.venue && (
-        <>
-          <span>•</span>
-          <span>{paper.venue}</span>
-        </>
-      )}
-    </div>
-  )
-}
+// function PaperMetadata({ paper }: { paper: Paper }) {
+//   return (
+//     <div className="paper-metadata">
+//       <span>{paper.publication_year}</span>
+//       <span><a href={paper.id} target="_blank">Link</a></span>
+//       {paper.venue && (
+//         <>
+//           <span>•</span>
+//           <span>{paper.venue}</span>
+//         </>
+//       )}
+//     </div>
+//   )
+// }
 
 function AuthorsList({ authors }: { authors: string[] }) {
   if (!authors?.length) return null
