@@ -49,7 +49,9 @@ class OpenAlexService:
             page["abstract"] = page["abstract"]
 
         # Create DataFrame with only needed columns
-        df = pd.DataFrame(results)[["id", "title", "abstract"]]
+        df = pd.DataFrame(results)[["id", "title", "abstract"]].drop_duplicates(
+            subset="id"
+        )
 
         # Clean up the data
         df["abstract"] = df["abstract"].fillna("No abstract available")
