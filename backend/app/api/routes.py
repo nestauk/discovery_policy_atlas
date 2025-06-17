@@ -97,9 +97,10 @@ async def get_summary(
     data = await request.json()
     papers = data.get("papers", [])
     extraction_fields = data.get("extraction_fields", [])
+    prompt = data.get("prompt", None)
     # You can use config or env for model params
     summary_service = SummaryService(
-        model_name="gpt-4o", temperature=0.2, max_tokens=1024
+        model_name="gpt-4.1-mini", temperature=0.2, max_tokens=1024
     )
-    summary = summary_service.summarize(papers, extraction_fields)
+    summary = summary_service.summarize(papers, extraction_fields, prompt)
     return JSONResponse(content={"summary": summary})
