@@ -10,6 +10,7 @@ import { ErrorMessage } from '@/components/search/error-message'
 import { AiSummary } from '@/components/search/ai-summary'
 import type { SearchParams, SearchResult } from '@/types/search'
 import { useAPI } from '@/lib/api'
+import { useSearchStore } from '@/lib/searchStore'
 
 export default function SearchPage() {
   const searchParams = useSearchParams()
@@ -17,27 +18,25 @@ export default function SearchPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [screeningEnabled, setScreeningEnabled] = useState(true)
-  const [currentQuery, setCurrentQuery] = useState('')
-  const [currentFilters, setCurrentFilters] = useState<SearchParams>({
-    query: '',
-    source: 'openalex',
-    max_results: 10
-  })
   const { fetchWithAuth } = useAPI()
   const { user } = useUser()
+
+  // Zustand store
+  const { searchParams: persistedParams, setSearchParams } = useSearchStore()
+
+  // Local state for form
+  const [currentQuery, setCurrentQuery] = useState(persistedParams.query)
+  const [currentFilters, setCurrentFilters] = useState<SearchParams>(persistedParams)
+
+  // Sync local state with zustand on mount (or when persistedParams changes)
+  useEffect(() => {
+    setCurrentQuery(persistedParams.query)
+    setCurrentFilters(persistedParams)
+  }, [persistedParams])
 
   const handleProjectSelect = useCallback(async (projectId: string) => {
     try {
       const project = await fetchWithAuth(`/api/projects/${projectId}?clerk_user_id=${user?.id}`)
-      console.log('SearchPage - Project loaded:', {
-        id: project.id,
-        name: project.name,
-        query: project.query,
-        filters: project.filters,
-        created_at: project.created_at
-      })
-      
-      // Update current state
       setCurrentQuery(project.query)
       setCurrentFilters({
         query: project.query,
@@ -49,16 +48,15 @@ export default function SearchPage() {
         inclusion_criteria: project.filters.inclusion_criteria,
         extraction_fields: project.filters.extraction_fields || []
       })
-      
-      // Don't trigger search automatically
-      // Let the user review and modify the parameters first
     } catch (error) {
-      console.error('Error loading project:', error)
-      setError('Failed to load project')
+      console.error('Failed to load project:', error)
+      const errorMessage = error instanceof Error 
+        ? `Failed to load project: ${error.message}`
+        : 'Failed to load project: Unknown error'
+      setError(errorMessage)
     }
-  }, [fetchWithAuth, user?.id, setCurrentQuery, setCurrentFilters, setError])
+  }, [fetchWithAuth, user?.id])
 
-  // Handle project selection from URL
   useEffect(() => {
     const projectId = searchParams.get('project')
     if (projectId) {
@@ -72,16 +70,19 @@ export default function SearchPage() {
     setResults(null)
     setCurrentQuery(params.query)
     setCurrentFilters(params)
-
+    setSearchParams(params) // Persist to zustand
     try {
       const data = await fetchWithAuth('/api/search', {
         method: 'POST',
         body: JSON.stringify({ ...params, screening_enabled: screeningEnabled }),
       })
       setResults(data)
-    } catch (err) {
-      setError('Failed to search. Please try again.')
-      console.error('Search error:', err)
+    } catch (error) {
+      console.error('Search failed:', error)
+      const errorMessage = error instanceof Error 
+        ? `Search failed: ${error.message}`
+        : 'Search failed: Unknown error'
+      setError(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -95,7 +96,6 @@ export default function SearchPage() {
           Search and screen academic papers with AI
         </p>
       </div>
-
       <SearchForm 
         onSearch={handleSearch} 
         isLoading={isLoading} 
@@ -104,9 +104,7 @@ export default function SearchPage() {
         initialQuery={currentQuery}
         initialFilters={currentFilters}
       />
-      
       {error && <ErrorMessage message={error} />}
-      
       {results && (
         <>
           <SearchSummary results={results} />

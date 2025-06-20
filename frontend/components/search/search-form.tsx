@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader2, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
 import type { SearchParams } from '@/types/search'
+import { useSearchStore } from '@/lib/searchStore'
 
 interface SearchFormProps {
   onSearch: (params: SearchParams) => void
@@ -20,7 +21,7 @@ interface SearchFormProps {
 }
 
 interface AdvancedOptionsProps {
-  source: 'openalex' | 'mediacloud'
+  source: 'openalex' | 'mediacloud' | 'overton'
   maxResults: string
   setMaxResults: (value: string) => void
   minCitations: string
@@ -35,6 +36,15 @@ interface AdvancedOptionsProps {
   setExtractionFields: (value: string[]) => void
   screeningEnabled: boolean
   onScreeningEnabledChange: (enabled: boolean) => void
+  // Overton-specific fields
+  sourceCountry: string
+  setSourceCountry: (value: string) => void
+  sourceType: string
+  setSourceType: (value: string) => void
+  topics: string
+  setTopics: (value: string) => void
+  classifications: string
+  setClassifications: (value: string) => void
 }
 
 export function SearchForm({ 
@@ -50,7 +60,7 @@ export function SearchForm({
   }
 }: SearchFormProps) {
   const [query, setQuery] = useState(initialQuery)
-  const [source, setSource] = useState<'openalex' | 'mediacloud'>(initialFilters.source || 'openalex')
+  const [source, setSource] = useState<'openalex' | 'mediacloud' | 'overton'>(initialFilters.source || 'openalex')
   const [showAdvanced, setShowAdvanced] = useState(false)
   
   // Advanced options
@@ -60,6 +70,31 @@ export function SearchForm({
   const [maxResults, setMaxResults] = useState(initialFilters.max_results?.toString() || '10')
   const [inclusionCriteria, setInclusionCriteria] = useState(initialFilters.inclusion_criteria || '')
   const [extractionFields, setExtractionFields] = useState<string[]>(initialFilters.extraction_fields || [])
+  
+  // Overton-specific fields
+  const [sourceCountry, setSourceCountry] = useState(initialFilters.source_country || '')
+  const [sourceType, setSourceType] = useState(initialFilters.source_type || '')
+  const [topics, setTopics] = useState(initialFilters.topics || '')
+  const [classifications, setClassifications] = useState(initialFilters.classifications || '')
+
+  // Zustand store
+  const { reset: resetStore } = useSearchStore()
+
+  // Store initial values for reset functionality
+  const initialValues = {
+    query: initialQuery,
+    source: initialFilters.source || 'openalex',
+    minCitations: initialFilters.min_citations?.toString() || '',
+    dateFrom: initialFilters.date_from || '',
+    dateTo: initialFilters.date_to || '',
+    maxResults: initialFilters.max_results?.toString() || '10',
+    inclusionCriteria: initialFilters.inclusion_criteria || '',
+    extractionFields: initialFilters.extraction_fields || [],
+    sourceCountry: initialFilters.source_country || '',
+    sourceType: initialFilters.source_type || '',
+    topics: initialFilters.topics || '',
+    classifications: initialFilters.classifications || '',
+  }
 
   // Update form when initial values change
   useEffect(() => {
@@ -72,7 +107,31 @@ export function SearchForm({
     setMaxResults(initialFilters.max_results?.toString() || '10')
     setInclusionCriteria(initialFilters.inclusion_criteria || '')
     setExtractionFields(initialFilters.extraction_fields || [])
+    setSourceCountry(initialFilters.source_country || '')
+    setSourceType(initialFilters.source_type || '')
+    setTopics(initialFilters.topics || '')
+    setClassifications(initialFilters.classifications || '')
   }, [initialQuery, initialFilters])
+
+  const handleReset = () => {
+    // Reset local form state
+    setQuery(initialValues.query)
+    setSource(initialValues.source as 'openalex' | 'mediacloud' | 'overton')
+    setMinCitations(initialValues.minCitations)
+    setDateFrom(initialValues.dateFrom)
+    setDateTo(initialValues.dateTo)
+    setMaxResults(initialValues.maxResults)
+    setInclusionCriteria(initialValues.inclusionCriteria)
+    setExtractionFields([...initialValues.extractionFields])
+    setSourceCountry(initialValues.sourceCountry)
+    setSourceType(initialValues.sourceType)
+    setTopics(initialValues.topics)
+    setClassifications(initialValues.classifications)
+    setShowAdvanced(false)
+    
+    // Reset persisted Zustand store
+    resetStore()
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -90,6 +149,16 @@ export function SearchForm({
       if (minCitations) params.min_citations = parseInt(minCitations)
       if (dateFrom) params.date_from = dateFrom
       if (dateTo) params.date_to = dateTo
+    } else if (source === 'overton') {
+      if (dateFrom) params.date_from = dateFrom
+      if (dateTo) params.date_to = dateTo
+      if (sourceCountry) params.source_country = sourceCountry
+      if (sourceType) params.source_type = sourceType
+      if (topics) params.topics = topics
+      if (classifications) params.classifications = classifications
+    } else if (source === 'mediacloud') {
+      if (dateFrom) params.date_from = dateFrom
+      if (dateTo) params.date_to = dateTo
     }
 
     onSearch(params)
@@ -98,7 +167,20 @@ export function SearchForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Search Parameters</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle>Search Parameters</CardTitle>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleReset}
+            disabled={isLoading}
+            className="flex items-center gap-2"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reset
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -116,13 +198,14 @@ export function SearchForm({
             
             <div className="space-y-2">
               <Label htmlFor="source">Data Source</Label>
-              <Select value={source} onValueChange={(v: 'openalex' | 'mediacloud') => setSource(v)}>
+              <Select value={source} onValueChange={(v: 'openalex' | 'mediacloud' | 'overton') => setSource(v)}>
                 <SelectTrigger id="source">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openalex">Research</SelectItem>
-                  <SelectItem value="mediacloud">News</SelectItem>
+                  <SelectItem value="overton">Overton (policy)</SelectItem>
+                  <SelectItem value="openalex">OpenAlex (research)</SelectItem>
+                  <SelectItem value="mediacloud">MediaCloud (news)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -155,6 +238,14 @@ export function SearchForm({
                 setExtractionFields={setExtractionFields}
                 screeningEnabled={screeningEnabled}
                 onScreeningEnabledChange={onScreeningEnabledChange}
+                sourceCountry={sourceCountry}
+                setSourceCountry={setSourceCountry}
+                sourceType={sourceType}
+                setSourceType={setSourceType}
+                topics={topics}
+                setTopics={setTopics}
+                classifications={classifications}
+                setClassifications={setClassifications}
               />
             </CollapsibleContent>
           </Collapsible>
@@ -191,6 +282,14 @@ function AdvancedOptions({
   setExtractionFields,
   screeningEnabled,
   onScreeningEnabledChange,
+  sourceCountry,
+  setSourceCountry,
+  sourceType,
+  setSourceType,
+  topics,
+  setTopics,
+  classifications,
+  setClassifications,
 }: AdvancedOptionsProps) {
   const handleFieldChange = (idx: number, value: string) => {
     const updated = [...extractionFields]
@@ -266,6 +365,61 @@ function AdvancedOptions({
           />
         </div>
       </div>
+
+      {/* Overton-specific fields */}
+      {source === 'overton' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="sourceCountry">Source Country</Label>
+            <Input
+              id="sourceCountry"
+              placeholder="e.g., USA, UK, France"
+              value={sourceCountry}
+              onChange={(e) => setSourceCountry(e.target.value)}
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="sourceType">Source Type</Label>
+            <Select value={sourceType} onValueChange={setSourceType}>
+              <SelectTrigger id="sourceType">
+                <SelectValue placeholder="Select source type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="government">Government</SelectItem>
+                <SelectItem value="think tank">Think Tank</SelectItem>
+                <SelectItem value="ngo">NGO</SelectItem>
+                <SelectItem value="academic">Academic</SelectItem>
+                <SelectItem value="international">International</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
+
+      {source === 'overton' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="topics">Topics</Label>
+            <Input
+              id="topics"
+              placeholder="e.g., Climate Change, Energy, Health"
+              value={topics}
+              onChange={(e) => setTopics(e.target.value)}
+            />
+          </div>
+          
+          <div className="space-y-2">
+            <Label htmlFor="classifications">Classifications</Label>
+            <Input
+              id="classifications"
+              placeholder="e.g., environment, economy, politics"
+              value={classifications}
+              onChange={(e) => setClassifications(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Inclusion Criteria */}
       <div className="space-y-2">
