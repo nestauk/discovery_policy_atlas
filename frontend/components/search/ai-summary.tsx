@@ -11,8 +11,8 @@ interface AiSummaryProps {
 }
 
 const TEMPLATES = {
-  short: 'Write a short, high-level summary of the main findings and themes.',
-  detailed: 'Write a detailed, in-depth summary covering all key findings, themes, and nuances from the papers.'
+  short: 'Write a short external line summarising the main findings.',
+  detailed: 'Write a detailed, in-depth summary covering all key findings, themes, and nuances from the documents.'
 }
 
 export function AiSummary({ papers, extractionFields }: AiSummaryProps) {
@@ -45,7 +45,7 @@ export function AiSummary({ papers, extractionFields }: AiSummaryProps) {
   }
 
   return (
-    <Card className="mt-8 max-w-2xl mx-auto">
+    <Card className="mt-8">
       <CardHeader>
         <CardTitle>AI Summary</CardTitle>
       </CardHeader>

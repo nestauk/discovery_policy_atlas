@@ -61,6 +61,7 @@ async def enhanced_search(
             published_before=request.date_to,
             topics=request.topics,
             classifications=request.classifications,
+            semantic_search=getattr(request, "semantic_search", True),
         )
     else:
         raise ValueError(f"Unsupported search request type: {type(request)}")

@@ -10,8 +10,9 @@ export interface SearchParams {
     // Overton-specific fields
     source_country?: string
     source_type?: string
-    topics?: string
+    topics?: string[]
     classifications?: string
+    semantic_search?: boolean
   }
   
   export interface Paper {

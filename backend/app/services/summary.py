@@ -19,9 +19,10 @@ class SummaryService:
             fields = [
                 f"{k}: {v}" for k, v in p.items() if k.startswith("extra_field_") and v
             ]
-            # Always include id and title for reference linking
+            # Prioritize doi for original source, then overton_url, then id
+            url = p.get("doi") or p.get("overton_url") or p.get("id", "")
             return (
-                f"[{idx+1}] Title: {p.get('title', '')}\nOpenAlex: {p.get('id', '')}\n"
+                f"[{idx+1}] Title: {p.get('title', '')}\nURL: {url}\n"
                 + "\n".join(fields)
             )
 
@@ -29,29 +30,25 @@ class SummaryService:
             format_paper(p, idx) for idx, p in enumerate(papers_list)
         )
         # Prompt
-        system_message = "You are an expert research summariser."
+        system_message = "You are an expert policy and research summariser."
         user_message = (
-            "Given the following papers and their extracted fields, write a concise summary "
+            "Given the following documents and their extracted fields, write a concise summary "
             "focusing on main themes and key information, using British English.\n\n"
-            # Use numbered in-text citations, e.g., [1], [2], etc.
-            "Use numbered in-text references (e.g., [1], [2]) to refer to the papers within the summary.\n"
-            # All in-text citations must be HTML <a> links with class="ai-summary-link"
-            'Each in-text reference should be an HTML <a> tag with class="ai-summary-link" linking to the paper\'s OpenAlex URL.\n'
-            'For example <a href="openalex-id" class="ai-summary-link">[1]</a>\n'
-            # Provide a reference list at the end of the summary
-            "At the end of the summary, add double line break and then include a Reference List: numbered HTML <ol> list with the correct numbering.\n"
-            "It is important that the reference list is numbered from 1 to the number of papers, and that the numbering is consistent with the in-text references.\n"
-            'For example <ol><li><a href="openalex-id" class="ai-summary-link">[number] Paper title</a></li></ol>\n'
-            # Each reference in the list should be the paper title as a hyperlink to its OpenAlex page
-            'Each list item should be the paper\'s title as an <a> tag (with class="ai-summary-link") '
-            "that links to the corresponding OpenAlex URL.\n"
-            'All links should have target="_blank"'
-            # Numbering must match between in-text references and list
+            "Use numbered in-text references (e.g., [1], [2]) to refer to the documents within the summary.\n"
+            'Each in-text reference should be an HTML <a> tag with class="ai-summary-link" linking to the document\'s URL.\n'
+            'For example, in-text: <a href="document-url" class="ai-summary-link">[1]</a>\n'
+            "\n"
+            "At the end of the summary, after a double line break, include a Reference List as a numbered HTML <ol> list. "
+            'Each item must be an <a> tag (with class="ai-summary-link" and target="_blank") that starts with the same number as the in-text citation, followed by the document title, and links to the document\'s URL.\n'
+            "For example:\n"
+            '<ol>\n  <li><a href="document-url" class="ai-summary-link" target="_blank">[1] Document title</a></li>\n  <li><a href="document-url" class="ai-summary-link" target="_blank">[2] Document title</a></li>\n</ol>\n'
+            "\nThe numbering in the reference list must exactly match the in-text citations.\n"
+            "Each reference in the list must begin with the same number as the in-text citation, e.g., [1], [2], etc., inside the <a> tag.\n"
+            'All links should have target="_blank".\n'
             "Ensure that reference numbering is strictly sequential and consistent between in-text citations and the list "
-            "(i.e., the first paper mentioned is [1], the second is [2], and so on).\n"
-            # Reiterate styling requirement for consistency
+            "(i.e., the first document mentioned is [1], the second is [2], and so on).\n"
             'All hyperlinks—both in-text and in the reference list—must include class="ai-summary-link".\n\n'
-            # Placeholder for the actual input (e.g., list of papers and their metadata)
+            "Do not omit the numbers in the reference list. Each reference must start with its number in square brackets, matching the in-text citation.\n\n"
             "{input}"
         )
         if prompt:

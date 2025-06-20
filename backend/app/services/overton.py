@@ -18,12 +18,13 @@ class OvertonService:
         published_before: Optional[date] = None,
         topics: Optional[str] = None,
         classifications: Optional[str] = None,
+        semantic_search: bool = True,
     ) -> pd.DataFrame:
         """Search Overton for policy documents using the Overton API"""
 
         # Build search parameters
         search_params = {
-            "query": query,
+            ("squery" if semantic_search else "query"): query,
             "min_similarity": 0.3,
             "sort": "relevance",
         }

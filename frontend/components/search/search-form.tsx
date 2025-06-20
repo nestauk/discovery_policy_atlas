@@ -41,10 +41,10 @@ interface AdvancedOptionsProps {
   setSourceCountry: (value: string) => void
   sourceType: string
   setSourceType: (value: string) => void
-  topics: string
-  setTopics: (value: string) => void
-  classifications: string
-  setClassifications: (value: string) => void
+  // topics: string
+  // setTopics: (value: string) => void
+  // classifications: string
+  // setClassifications: (value: string) => void
 }
 
 export function SearchForm({ 
@@ -55,12 +55,12 @@ export function SearchForm({
   initialQuery = '',
   initialFilters = {
     query: '',
-    source: 'openalex',
+    source: 'overton',
     max_results: 10
   }
 }: SearchFormProps) {
   const [query, setQuery] = useState(initialQuery)
-  const [source, setSource] = useState<'openalex' | 'mediacloud' | 'overton'>(initialFilters.source || 'openalex')
+  const [source, setSource] = useState<'openalex' | 'mediacloud' | 'overton'>(initialFilters.source || 'overton')
   const [showAdvanced, setShowAdvanced] = useState(false)
   
   // Advanced options
@@ -74,8 +74,9 @@ export function SearchForm({
   // Overton-specific fields
   const [sourceCountry, setSourceCountry] = useState(initialFilters.source_country || '')
   const [sourceType, setSourceType] = useState(initialFilters.source_type || '')
-  const [topics, setTopics] = useState(initialFilters.topics || '')
-  const [classifications, setClassifications] = useState(initialFilters.classifications || '')
+  const [semanticSearch, setSemanticSearch] = useState(initialFilters.semantic_search ?? false)
+  // const [topics, setTopics] = useState(Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '')
+  // const [classifications, setClassifications] = useState(initialFilters.classifications || '')
 
   // Zustand store
   const { reset: resetStore } = useSearchStore()
@@ -83,7 +84,7 @@ export function SearchForm({
   // Store initial values for reset functionality
   const initialValues = {
     query: initialQuery,
-    source: initialFilters.source || 'openalex',
+    source: initialFilters.source || 'overton',
     minCitations: initialFilters.min_citations?.toString() || '',
     dateFrom: initialFilters.date_from || '',
     dateTo: initialFilters.date_to || '',
@@ -92,15 +93,16 @@ export function SearchForm({
     extractionFields: initialFilters.extraction_fields || [],
     sourceCountry: initialFilters.source_country || '',
     sourceType: initialFilters.source_type || '',
-    topics: initialFilters.topics || '',
-    classifications: initialFilters.classifications || '',
+    semanticSearch: initialFilters.semantic_search ?? false,
+    // topics: Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '',
+    // classifications: initialFilters.classifications || '',
   }
 
   // Update form when initial values change
   useEffect(() => {
     console.log('Initial values changed:', { initialQuery, initialFilters })
     setQuery(initialQuery)
-    setSource(initialFilters.source || 'openalex')
+    setSource(initialFilters.source || 'overton')
     setMinCitations(initialFilters.min_citations?.toString() || '')
     setDateFrom(initialFilters.date_from || '')
     setDateTo(initialFilters.date_to || '')
@@ -109,8 +111,9 @@ export function SearchForm({
     setExtractionFields(initialFilters.extraction_fields || [])
     setSourceCountry(initialFilters.source_country || '')
     setSourceType(initialFilters.source_type || '')
-    setTopics(initialFilters.topics || '')
-    setClassifications(initialFilters.classifications || '')
+    setSemanticSearch(initialFilters.semantic_search ?? false)
+    // setTopics(Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '')
+    // setClassifications(initialFilters.classifications || '')
   }, [initialQuery, initialFilters])
 
   const handleReset = () => {
@@ -125,8 +128,9 @@ export function SearchForm({
     setExtractionFields([...initialValues.extractionFields])
     setSourceCountry(initialValues.sourceCountry)
     setSourceType(initialValues.sourceType)
-    setTopics(initialValues.topics)
-    setClassifications(initialValues.classifications)
+    setSemanticSearch(false)
+    // setTopics(initialValues.topics)
+    // setClassifications(initialValues.classifications)
     setShowAdvanced(false)
     
     // Reset persisted Zustand store
@@ -154,8 +158,12 @@ export function SearchForm({
       if (dateTo) params.date_to = dateTo
       if (sourceCountry) params.source_country = sourceCountry
       if (sourceType) params.source_type = sourceType
-      if (topics) params.topics = topics
-      if (classifications) params.classifications = classifications
+      params.semantic_search = semanticSearch
+      // if (topics) {
+      //   // Convert comma-separated string to array
+      //   params.topics = topics.split(',').map(t => t.trim()).filter(t => t.length > 0)
+      // }
+      // if (classifications) params.classifications = classifications
     } else if (source === 'mediacloud') {
       if (dateFrom) params.date_from = dateFrom
       if (dateTo) params.date_to = dateTo
@@ -198,16 +206,32 @@ export function SearchForm({
             
             <div className="space-y-2">
               <Label htmlFor="source">Data Source</Label>
-              <Select value={source} onValueChange={(v: 'openalex' | 'mediacloud' | 'overton') => setSource(v)}>
-                <SelectTrigger id="source">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="overton">Overton (policy)</SelectItem>
-                  <SelectItem value="openalex">OpenAlex (research)</SelectItem>
-                  <SelectItem value="mediacloud">MediaCloud (news)</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <Select value={source} onValueChange={(v: 'openalex' | 'mediacloud' | 'overton') => setSource(v)}>
+                  <SelectTrigger id="source">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="overton">Overton (policy)</SelectItem>
+                    <SelectItem value="openalex">OpenAlex (research)</SelectItem>
+                    <SelectItem value="mediacloud">MediaCloud (news)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {source === 'overton' && (
+                  <div className="flex items-center ml-2">
+                    <input
+                      id="semanticSearch"
+                      type="checkbox"
+                      checked={semanticSearch}
+                      onChange={e => setSemanticSearch(e.target.checked)}
+                      className="h-4 w-4 accent-primary"
+                    />
+                    <Label htmlFor="semanticSearch" className="ml-1 text-xs text-muted-foreground">
+                      Semantic Search
+                    </Label>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -242,10 +266,10 @@ export function SearchForm({
                 setSourceCountry={setSourceCountry}
                 sourceType={sourceType}
                 setSourceType={setSourceType}
-                topics={topics}
-                setTopics={setTopics}
-                classifications={classifications}
-                setClassifications={setClassifications}
+                // topics={topics}
+                // setTopics={setTopics}
+                // classifications={classifications}
+                // setClassifications={setClassifications}
               />
             </CollapsibleContent>
           </Collapsible>
@@ -286,10 +310,10 @@ function AdvancedOptions({
   setSourceCountry,
   sourceType,
   setSourceType,
-  topics,
-  setTopics,
-  classifications,
-  setClassifications,
+  // topics,
+  // setTopics,
+  // classifications,
+  // setClassifications,
 }: AdvancedOptionsProps) {
   const handleFieldChange = (idx: number, value: string) => {
     const updated = [...extractionFields]
@@ -397,7 +421,7 @@ function AdvancedOptions({
         </div>
       )}
 
-      {source === 'overton' && (
+      {/* {source === 'overton' && (
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="topics">Topics</Label>
@@ -419,7 +443,7 @@ function AdvancedOptions({
             />
           </div>
         </div>
-      )}
+      )} */}
 
       {/* Inclusion Criteria */}
       <div className="space-y-2">

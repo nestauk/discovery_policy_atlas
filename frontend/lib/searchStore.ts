@@ -12,6 +12,7 @@ const defaultParams: SearchParams = {
   query: '',
   source: 'overton',
   max_results: 10,
+  semantic_search: false,
 }
 
 export const useSearchStore = create<SearchStoreState>()(

@@ -33,6 +33,7 @@ class OvertonSearchRequest(BaseSearchRequest):
     date_to: Optional[date] = None
     topics: Optional[str] = None
     classifications: Optional[str] = None
+    semantic_search: Optional[bool] = True
 
 
 # Unified search request
