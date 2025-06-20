@@ -8,6 +8,7 @@ import { SearchSummary } from '@/components/search/search-summary'
 import { PapersList } from '@/components/search/papers-list'
 import { ErrorMessage } from '@/components/search/error-message'
 import { AiSummary } from '@/components/search/ai-summary'
+import { DownloadButton } from '@/components/search/download-button'
 import type { SearchParams, SearchResult } from '@/types/search'
 import { useAPI } from '@/lib/api'
 import { useSearchStore } from '@/lib/searchStore'
@@ -108,6 +109,13 @@ export default function SearchPage() {
       {results && (
         <>
           <SearchSummary results={results} />
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">Results</h2>
+            <DownloadButton 
+              downloadKey={results.download_key} 
+              className="ml-4"
+            />
+          </div>
           <PapersList papers={results.papers} />
           <AiSummary 
             papers={results.papers} 

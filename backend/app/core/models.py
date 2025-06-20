@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
-from datetime import date
+from datetime import date, datetime
 
 
 # Base search request with common parameters
@@ -70,6 +70,22 @@ class SimpleSearchResult(BaseModel):
     total_found: int
     total_screened: int
     total_relevant: int
+
+
+class SearchResultWithDownload(BaseModel):
+    papers: List[Dict[str, Any]]
+    total_found: int
+    total_screened: int
+    total_relevant: int
+    download_key: Optional[str] = None
+
+
+class DownloadCacheEntry(BaseModel):
+    df_data: Dict[str, Any]  # Serialized DataFrame data
+    query: str
+    user_id: str
+    created_at: datetime
+    expires_at: datetime
 
 
 # class SearchResult(BaseModel):

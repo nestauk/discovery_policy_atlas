@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Request, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import uuid
+import io
+from datetime import datetime
 from app.core.models import (
     SearchRequest,
     OpenAlexSearchRequest,
     MediaCloudSearchRequest,
     OvertonSearchRequest,
-    SimpleSearchResult,
+    SearchResultWithDownload,
 )
 from app.core.auth import get_current_user, CurrentUser
 
@@ -15,8 +17,12 @@ from app.services.mediacloud import MediaCloudService
 from app.services.overton import OvertonService
 from app.services.screening import ScreeningService
 from app.services.summary import SummaryService
+from app.services.download import download_service
+import logging
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 
 @router.get("/api/me")
@@ -25,7 +31,7 @@ async def get_me(current_user: CurrentUser = Depends(get_current_user)):
     return {"user_id": current_user.user_id, "email": current_user.email}
 
 
-@router.post("/api/search", response_model=SimpleSearchResult)
+@router.post("/api/search", response_model=SearchResultWithDownload)
 async def enhanced_search(
     request: SearchRequest, current_user: CurrentUser = Depends(get_current_user)
 ):
@@ -100,11 +106,54 @@ async def enhanced_search(
 
     papers_list = relevant_df.to_dict("records")
 
-    return SimpleSearchResult(
+    # Store DataFrame for download if we have relevant results
+    download_key = None
+    if len(relevant_df) > 0:
+        try:
+            download_key = download_service.store_dataframe(
+                relevant_df, request.query, current_user.user_id
+            )
+        except ValueError as e:
+            # DataFrame too large - log warning but continue without download
+            logger.warning(f"Could not store DataFrame for download: {e}")
+            download_key = None
+
+    return SearchResultWithDownload(
         papers=papers_list,
         total_found=len(papers_df),
         total_screened=len(screening_df),
         total_relevant=len(relevant_df),
+        download_key=download_key,
+    )
+
+
+@router.get("/api/download/{download_key}")
+async def download_csv(
+    download_key: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Download search results as CSV"""
+    # Get DataFrame from cache
+    df = download_service.get_dataframe(download_key, current_user.user_id)
+
+    if df is None:
+        return JSONResponse(
+            status_code=404, content={"error": "Download not found or expired"}
+        )
+
+    # Convert DataFrame to CSV
+    csv_buffer = io.StringIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_buffer.seek(0)
+
+    # Create filename with timestamp
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"search_results_{timestamp}.csv"
+
+    # Return as streaming response
+    return StreamingResponse(
+        io.BytesIO(csv_buffer.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
