@@ -14,7 +14,7 @@ export function PaperCard({ paper }: PaperCardProps) {
         <div className="space-y-2">
           <div className="flex items-start justify-between">
             <CardTitle className="paper-title">
-              <a href={paper.id} target="_blank">{paper.title}</a>
+              <a href={paper.doi || paper.overton_url} target="_blank">{paper.title}</a>
             </CardTitle>
             {paper.is_relevant && (
               <Badge className="ml-2 badge-relevant">
@@ -30,6 +30,33 @@ export function PaperCard({ paper }: PaperCardProps) {
         {paper.abstract && (
           <p className="paper-abstract">{paper.abstract}</p>
         )}
+        
+        {/* Overton-specific metadata */}
+        {(paper.source_country || paper.source_type || paper.topics) && (
+          <div className="flex flex-wrap gap-2">
+            {paper.source_country && (
+              <Badge variant="outline" className="text-xs">
+                {paper.source_country}
+              </Badge>
+            )}
+            {paper.source_type && (
+              <Badge variant="outline" className="text-xs">
+                {paper.source_type}
+              </Badge>
+            )}
+            {paper.topics && paper.topics.slice(0, 3).map((topic, idx) => (
+              <Badge key={idx} variant="secondary" className="text-xs">
+                {topic}
+              </Badge>
+            ))}
+            {paper.topics && paper.topics.length > 3 && (
+              <Badge variant="outline" className="text-xs">
+                +{paper.topics.length - 3} more topics
+              </Badge>
+            )}
+          </div>
+        )}
+        
         <RelevanceInfo paper={paper} />
         {/* Show extracted extra fields if present */}
         {Object.entries(paper)
@@ -39,7 +66,7 @@ export function PaperCard({ paper }: PaperCardProps) {
               <span className="font-medium">{key.replace('extra_field_', 'Extracted Field ')}:</span> {value}
             </div>
         ))}
-        {paper.doi && <PaperLink doi={paper.doi} />}
+        {(paper.doi || paper.overton_url) && <PaperLink doi={paper.doi} overtonUrl={paper.overton_url} />}
       </CardContent>
     </Card>
   )
@@ -93,16 +120,19 @@ function RelevanceInfo({ paper }: { paper: Paper }) {
   )
 }
 
-function PaperLink({ doi }: { doi: string }) {
+function PaperLink({ doi, overtonUrl }: { doi?: string; overtonUrl?: string }) {
+  const url = doi || overtonUrl
+  const linkText = doi ? 'View Paper' : 'View Policy Document'
+  
   return (
     <div className="pt-2">
       <a
-        href={doi}
+        href={url}
         target="_blank"
         rel="noopener noreferrer"
         className="paper-link"
       >
-        View Paper
+        {linkText}
         <ExternalLink className="h-3 w-3" />
       </a>
     </div>

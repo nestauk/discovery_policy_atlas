@@ -1,12 +1,18 @@
 export interface SearchParams {
     query: string
-    source: 'openalex' | 'mediacloud'
+    source: 'openalex' | 'mediacloud' | 'overton'
     max_results: number
     min_citations?: number
     date_from?: string
     date_to?: string
     inclusion_criteria?: string
     extraction_fields?: string[]
+    // Overton-specific fields
+    source_country?: string
+    source_type?: string
+    topics?: string[]
+    classifications?: string
+    semantic_search?: boolean
   }
   
   export interface Paper {
@@ -21,6 +27,12 @@ export interface SearchParams {
     is_relevant: boolean
     relevance_reason?: string
     confidence?: number
+    // Additional fields for Overton documents
+    topics?: string[]
+    source_country?: string
+    source_type?: string
+    published_on?: string
+    overton_url?: string
   }
   
   export interface SearchResult {

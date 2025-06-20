@@ -25,8 +25,19 @@ class MediaCloudSearchRequest(BaseSearchRequest):
     date_to: Optional[date] = None
 
 
+class OvertonSearchRequest(BaseSearchRequest):
+    source: Literal["overton"] = "overton"
+    source_country: Optional[str] = None
+    source_type: Optional[str] = None
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    topics: Optional[str] = None
+    classifications: Optional[str] = None
+    semantic_search: Optional[bool] = True
+
+
 # Unified search request
-SearchRequest = OpenAlexSearchRequest | MediaCloudSearchRequest
+SearchRequest = OpenAlexSearchRequest | MediaCloudSearchRequest | OvertonSearchRequest
 
 
 # Result models

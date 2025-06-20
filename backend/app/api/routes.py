@@ -5,12 +5,14 @@ from app.core.models import (
     SearchRequest,
     OpenAlexSearchRequest,
     MediaCloudSearchRequest,
+    OvertonSearchRequest,
     SimpleSearchResult,
 )
 from app.core.auth import get_current_user, CurrentUser
 
 from app.services.openalex import OpenAlexService
 from app.services.mediacloud import MediaCloudService
+from app.services.overton import OvertonService
 from app.services.screening import ScreeningService
 from app.services.summary import SummaryService
 
@@ -48,6 +50,22 @@ async def enhanced_search(
             date_from=request.date_from,
             date_to=request.date_to,
         )
+    elif isinstance(request, OvertonSearchRequest):
+        service = OvertonService()
+        papers_df = await service.search(
+            query=request.query,
+            max_results=request.max_results,
+            source_country=request.source_country,
+            source_type=request.source_type,
+            published_after=request.date_from,
+            published_before=request.date_to,
+            topics=request.topics,
+            classifications=request.classifications,
+            semantic_search=getattr(request, "semantic_search", True),
+        )
+    else:
+        raise ValueError(f"Unsupported search request type: {type(request)}")
+
     screening_enabled = getattr(request, "screening_enabled", False)
     if not screening_enabled:
         # Skip screening, mark all as relevant

@@ -90,6 +90,9 @@ class Settings(BaseSettings):
     MEDIACLOUD_API_KEY: Optional[str] = None
     MEDIACLOUD_BASE_URL: str = "https://api.mediacloud.org/api/v4"
 
+    # Overton Configuration
+    OVERTON_API_KEY: Optional[str] = None
+
     # LLM Configuration
     OPENAI_API_KEY: Optional[str] = None
 
