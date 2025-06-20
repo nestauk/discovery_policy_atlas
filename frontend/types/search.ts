@@ -40,4 +40,5 @@ export interface SearchParams {
     total_found: number
     total_screened: number
     total_relevant: number
+    download_key?: string
   }

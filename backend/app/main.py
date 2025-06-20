@@ -7,6 +7,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.api.routes import router
 from app.api.projects import router as projects_router
+from app.services.download import download_service
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +39,16 @@ async def lifespan(app: FastAPI):
     except ValueError as e:
         logger.error(f"Settings validation failed: {e}")
         raise
+
+    # Clean up expired downloads on startup (useful when app wakes up from sleep)
+    try:
+        cleaned = download_service.force_cleanup()
+        if cleaned > 0:
+            logger.info(f"Cleaned up {cleaned} expired download entries on startup")
+        else:
+            logger.info("No expired downloads to clean up on startup")
+    except Exception as e:
+        logger.error(f"Error cleaning up downloads on startup: {e}")
 
     yield
 
