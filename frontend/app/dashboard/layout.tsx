@@ -5,9 +5,10 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Search, Brain, Beaker } from 'lucide-react'
+import { Search, Brain, Beaker, Home } from 'lucide-react'
 
 const sidebarItems = [
+  { name: 'Home', href: '/dashboard/home', icon: Home },
   { name: 'Search', href: '/dashboard/search', icon: Search },
   { name: 'Synthesis', href: '/dashboard/synthesis', icon: Brain },
   { name: 'Simulation', href: '/dashboard/simulation', icon: Beaker },

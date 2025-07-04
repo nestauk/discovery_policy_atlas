@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -230,12 +231,14 @@ export function SearchForm({
                   </span>
                 </Tooltip>
               </Label>
-              <Input
+              <Textarea
                 id="query"
                 placeholder="e.g., parenting interventions"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={isLoading}
+                rows={1.5}
+                className="min-h-[54px]"
               />
             </div>
             
@@ -485,18 +488,20 @@ function AdvancedOptions({
         <>
           <div className="space-y-2">
             <Label htmlFor="inclusionCriteria" className="flex items-center gap-1">
-              Inclusion Criteria
+              Inclusion and Exclusion Criteria
               <Tooltip content="Specific criteria for screening paper summaries: e.g., particular research focus or study type.">
                 <span tabIndex={0} className="focus:outline-none cursor-pointer">
                   <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about inclusion criteria" />
                 </span>
               </Tooltip>
             </Label>
-            <Input
+            <Textarea
               id="inclusionCriteria"
               placeholder="e.g., Interventions regarding parents of young children (0-5 years of age)"
               value={inclusionCriteria}
               onChange={(e) => setInclusionCriteria(e.target.value)}
+              rows={1.5}
+              className="min-h-[54px]"
             />
           </div>
           <div className="space-y-2">
@@ -511,7 +516,7 @@ function AdvancedOptions({
             {extractionFields.map((field: string, idx: number) => (
               <div key={idx} className="flex items-center gap-2 mb-2">
                 <Input
-                  placeholder="e.g., Country or countries that is the focus of the document (n/a if not reported)"
+                  placeholder="e.g., Country or countries that are the focus of the study (n/a if not reported)"
                   value={field}
                   onChange={(e) => handleFieldChange(idx, e.target.value)}
                 />
