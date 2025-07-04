@@ -11,14 +11,15 @@ import { Loader2, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
 import type { SearchParams } from '@/types/search'
 import { useSearchStore } from '@/lib/searchStore'
 import { SEARCH_DEFAULTS } from '@/lib/constants'
+import { Switch } from '@/components/ui/switch'
 
 interface SearchFormProps {
   onSearch: (params: SearchParams) => void
   isLoading: boolean
-  screeningEnabled: boolean
-  onScreeningEnabledChange: (enabled: boolean) => void
   initialQuery?: string
   initialFilters?: SearchParams
+  screeningEnabled: boolean
+  onScreeningEnabledChange: (enabled: boolean) => void
 }
 
 interface AdvancedOptionsProps {
@@ -42,23 +43,19 @@ interface AdvancedOptionsProps {
   setSourceCountry: (value: string) => void
   sourceType: string
   setSourceType: (value: string) => void
-  // topics: string
-  // setTopics: (value: string) => void
-  // classifications: string
-  // setClassifications: (value: string) => void
 }
 
 export function SearchForm({ 
   onSearch, 
   isLoading, 
-  screeningEnabled, 
-  onScreeningEnabledChange,
   initialQuery = '',
   initialFilters = {
     query: '',
     source: SEARCH_DEFAULTS.SOURCE,
     max_results: SEARCH_DEFAULTS.MAX_RESULTS
-  }
+  },
+  screeningEnabled,
+  onScreeningEnabledChange
 }: SearchFormProps) {
   const [query, setQuery] = useState(initialQuery)
   const [source, setSource] = useState<'openalex' | 'overton'>(initialFilters.source || 'overton')
@@ -76,8 +73,6 @@ export function SearchForm({
   const [sourceCountry, setSourceCountry] = useState(initialFilters.source_country || '')
   const [sourceType, setSourceType] = useState(initialFilters.source_type || '')
   const [semanticSearch, setSemanticSearch] = useState(initialFilters.semantic_search ?? false)
-  // const [topics, setTopics] = useState(Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '')
-  // const [classifications, setClassifications] = useState(initialFilters.classifications || '')
 
   // Zustand store
   const { reset: resetStore } = useSearchStore()
@@ -95,8 +90,6 @@ export function SearchForm({
     sourceCountry: initialFilters.source_country || '',
     sourceType: initialFilters.source_type || '',
     semanticSearch: initialFilters.semantic_search ?? false,
-    // topics: Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '',
-    // classifications: initialFilters.classifications || '',
   }
 
   // Update form when initial values change
@@ -113,8 +106,6 @@ export function SearchForm({
     setSourceCountry(initialFilters.source_country || '')
     setSourceType(initialFilters.source_type || '')
     setSemanticSearch(initialFilters.semantic_search ?? false)
-    // setTopics(Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '')
-    // setClassifications(initialFilters.classifications || '')
   }, [initialQuery, initialFilters])
 
   const handleReset = () => {
@@ -130,10 +121,7 @@ export function SearchForm({
     setSourceCountry(initialValues.sourceCountry)
     setSourceType(initialValues.sourceType)
     setSemanticSearch(false)
-    // setTopics(initialValues.topics)
-    // setClassifications(initialValues.classifications)
     setShowAdvanced(false)
-    
     // Reset persisted Zustand store
     resetStore()
   }
@@ -142,12 +130,13 @@ export function SearchForm({
     e.preventDefault()
     if (!query.trim()) return
 
-    const params: SearchParams = {
+    const params: SearchParams & { screening_enabled: boolean } = {
       query,
       source,
       max_results: parseInt(maxResults) || SEARCH_DEFAULTS.MAX_RESULTS,
       inclusion_criteria: inclusionCriteria,
       extraction_fields: extractionFields.filter(f => f.trim() !== ''),
+      screening_enabled: screeningEnabled,
     }
 
     if (source === 'openalex') {
@@ -160,11 +149,6 @@ export function SearchForm({
       if (sourceCountry) params.source_country = sourceCountry
       if (sourceType) params.source_type = sourceType
       params.semantic_search = semanticSearch
-      // if (topics) {
-      //   // Convert comma-separated string to array
-      //   params.topics = topics.split(',').map(t => t.trim()).filter(t => t.length > 0)
-      // }
-      // if (classifications) params.classifications = classifications
     }
 
     onSearch(params)
@@ -263,10 +247,6 @@ export function SearchForm({
                 setSourceCountry={setSourceCountry}
                 sourceType={sourceType}
                 setSourceType={setSourceType}
-                // topics={topics}
-                // setTopics={setTopics}
-                // classifications={classifications}
-                // setClassifications={setClassifications}
               />
             </CollapsibleContent>
           </Collapsible>
@@ -275,7 +255,7 @@ export function SearchForm({
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Searching and screening...
+                {screeningEnabled ? 'Searching and screening...' : 'Searching...'}
               </>
             ) : (
               'Search'
@@ -307,10 +287,6 @@ function AdvancedOptions({
   setSourceCountry,
   sourceType,
   setSourceType,
-  // topics,
-  // setTopics,
-  // classifications,
-  // setClassifications,
 }: AdvancedOptionsProps) {
   const handleFieldChange = (idx: number, value: string) => {
     const updated = [...extractionFields]
@@ -322,21 +298,6 @@ function AdvancedOptions({
 
   return (
     <div className="space-y-4 mt-4">
-      {/* Screening Toggle */}
-      <div className="flex items-center gap-2">
-        <input
-          id="screeningEnabled"
-          type="checkbox"
-          checked={screeningEnabled}
-          onChange={e => onScreeningEnabledChange(e.target.checked)}
-          className="h-4 w-4 accent-primary"
-          title="Enable AI Screening"
-        />
-        <Label htmlFor="screeningEnabled" className="text-sm text-muted-foreground">
-          Enable AI Screening
-        </Label>
-      </div>
-
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="maxResults">Max Results</Label>
@@ -417,61 +378,52 @@ function AdvancedOptions({
           </div>
         </div>
       )}
-
-      {/* {source === 'overton' && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="topics">Topics</Label>
-            <Input
-              id="topics"
-              placeholder="e.g., Climate Change, Energy, Health"
-              value={topics}
-              onChange={(e) => setTopics(e.target.value)}
-            />
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="classifications">Classifications</Label>
-            <Input
-              id="classifications"
-              placeholder="e.g., environment, economy, politics"
-              value={classifications}
-              onChange={(e) => setClassifications(e.target.value)}
-            />
-          </div>
-        </div>
-      )} */}
-
-      {/* Inclusion Criteria */}
-      <div className="space-y-2">
-        <Label htmlFor="inclusionCriteria">Inclusion Criteria</Label>
-        <Input
-          id="inclusionCriteria"
-          placeholder="e.g., 'Human studies published after 2015 with at least 20 participants'"
-          value={inclusionCriteria}
-          onChange={(e) => setInclusionCriteria(e.target.value)}
+      
+      {/* Move AI Screening toggle here, use Switch */}
+      <div className="flex items-center gap-2 mt-2">
+        <Switch
+          id="screeningEnabled"
+          checked={screeningEnabled}
+          onCheckedChange={onScreeningEnabledChange}
         />
+        <Label htmlFor="screeningEnabled" className="text-sm text-muted-foreground">
+          Enable AI Screening
+        </Label>
       </div>
 
-      {/* Additional Extraction Fields */}
-      <div className="space-y-2">
-        <Label>Additional Extraction Fields</Label>
-        {extractionFields.map((field: string, idx: number) => (
-          <div key={idx} className="flex items-center gap-2 mb-2">
+      {/* Only show these if screeningEnabled is true */}
+      {screeningEnabled && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="inclusionCriteria">Inclusion Criteria</Label>
             <Input
-              placeholder="e.g., 'Sample size', 'Effect size', 'Methodology'"
-              value={field}
-              onChange={(e) => handleFieldChange(idx, e.target.value)}
+              id="inclusionCriteria"
+              placeholder="e.g., 'Human studies published after 2015 with at least 20 participants'"
+              value={inclusionCriteria}
+              onChange={(e) => setInclusionCriteria(e.target.value)}
             />
-            <Button type="button" variant="ghost" size="icon" onClick={() => handleRemoveField(idx)} aria-label="Remove field">
-              <span className="text-destructive text-lg">&minus;</span>
+          </div>
+          <div className="space-y-2">
+            <Label>Additional Extraction Fields</Label>
+            {extractionFields.map((field: string, idx: number) => (
+              <div key={idx} className="flex items-center gap-2 mb-2">
+                <Input
+                  placeholder="e.g., 'Sample size', 'Effect size', 'Methodology'"
+                  value={field}
+                  onChange={(e) => handleFieldChange(idx, e.target.value)}
+                />
+                <Button type="button" variant="ghost" size="icon" onClick={() => handleRemoveField(idx)} aria-label="Remove field">
+                  <span className="text-destructive text-lg">&minus;</span>
+                </Button>
+              </div>
+            ))}
+            <Button type="button" variant="outline" onClick={handleAddField}>
+              + Add Extraction Field
             </Button>
           </div>
-        ))}
-        <Button type="button" variant="outline" onClick={handleAddField}>
-          + Add Extraction Field
-        </Button>
-      </div>
+        </>
+      )}
+
     </div>
   )
 }
