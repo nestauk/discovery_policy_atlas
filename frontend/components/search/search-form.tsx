@@ -64,8 +64,8 @@ export function SearchForm({
   
   // Advanced options
   const [minCitations, setMinCitations] = useState(initialFilters.min_citations?.toString() || '')
-  const [dateFrom, setDateFrom] = useState(initialFilters.date_from || '')
-  const [dateTo, setDateTo] = useState(initialFilters.date_to || '')
+  const [dateFrom, setDateFrom] = useState(initialFilters.date_from || SEARCH_DEFAULTS.DATE_FROM)
+  const [dateTo, setDateTo] = useState(initialFilters.date_to || SEARCH_DEFAULTS.DATE_TO)
   const [maxResults, setMaxResults] = useState(initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString())
   const [inclusionCriteria, setInclusionCriteria] = useState(initialFilters.inclusion_criteria || '')
   const [extractionFields, setExtractionFields] = useState<string[]>(initialFilters.extraction_fields || [])
@@ -85,8 +85,8 @@ export function SearchForm({
     query: initialQuery,
     source: initialFilters.source || 'overton',
     minCitations: initialFilters.min_citations?.toString() || '',
-    dateFrom: initialFilters.date_from || '',
-    dateTo: initialFilters.date_to || '',
+    dateFrom: initialFilters.date_from || SEARCH_DEFAULTS.DATE_FROM,
+    dateTo: initialFilters.date_to || SEARCH_DEFAULTS.DATE_TO,
     maxResults: initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString(),
     inclusionCriteria: initialFilters.inclusion_criteria || '',
     extractionFields: initialFilters.extraction_fields || [],
@@ -101,8 +101,8 @@ export function SearchForm({
     setQuery(initialQuery)
     setSource(initialFilters.source || 'overton')
     setMinCitations(initialFilters.min_citations?.toString() || '')
-    setDateFrom(initialFilters.date_from || '')
-    setDateTo(initialFilters.date_to || '')
+    setDateFrom(initialFilters.date_from || SEARCH_DEFAULTS.DATE_FROM)
+    setDateTo(initialFilters.date_to || SEARCH_DEFAULTS.DATE_TO)
     setMaxResults(initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString())
     setInclusionCriteria(initialFilters.inclusion_criteria || '')
     setExtractionFields(initialFilters.extraction_fields || [])
@@ -128,8 +128,8 @@ export function SearchForm({
     setQuery(initialValues.query)
     setSource(initialValues.source as 'openalex' | 'overton')
     setMinCitations(initialValues.minCitations)
-    setDateFrom(initialValues.dateFrom)
-    setDateTo(initialValues.dateTo)
+    setDateFrom(initialValues.dateFrom || SEARCH_DEFAULTS.DATE_FROM)
+    setDateTo(initialValues.dateTo || SEARCH_DEFAULTS.DATE_TO)
     setMaxResults(initialValues.maxResults)
     setInclusionCriteria(initialValues.inclusionCriteria)
     setExtractionFields([...initialValues.extractionFields])
@@ -141,6 +141,8 @@ export function SearchForm({
         : (initialValues.source === 'overton' ? true : false)
     )
     setShowAdvanced(false)
+    // Enable AI screening after reset
+    onScreeningEnabledChange(true)
     // Reset persisted Zustand store
     resetStore()
   }
@@ -209,7 +211,7 @@ export function SearchForm({
               </Label>
               <Input
                 id="query"
-                placeholder="e.g., climate change policy"
+                placeholder="e.g., parenting interventions"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={isLoading}
@@ -439,7 +441,7 @@ function AdvancedOptions({
           <div className="space-y-2">
             <Label htmlFor="inclusionCriteria" className="flex items-center gap-1">
               Inclusion Criteria
-              <Tooltip content="Specific criteria for screening paper summaries: eg, particular research focus or study type.">
+              <Tooltip content="Specific criteria for screening paper summaries: e.g., particular research focus or study type.">
                 <span tabIndex={0} className="focus:outline-none cursor-pointer">
                   <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about inclusion criteria" />
                 </span>
@@ -447,15 +449,15 @@ function AdvancedOptions({
             </Label>
             <Input
               id="inclusionCriteria"
-              placeholder="e.g., 'Human studies published after 2015 with at least 20 participants'"
+              placeholder="e.g., Interventions regarding parents of young children (0-5 years of age)"
               value={inclusionCriteria}
               onChange={(e) => setInclusionCriteria(e.target.value)}
             />
           </div>
           <div className="space-y-2">
             <Label className="flex items-center gap-1">
-              Additional Extraction Fields
-              <Tooltip content="List extra fields you want the AI to extract from each paper: eg, Sample size, Effect size.">
+              Extraction Fields
+              <Tooltip content="List extra fields you want the AI to extract from each paper: e.g., Sample size, Effect size.">
                 <span tabIndex={0} className="focus:outline-none cursor-pointer">
                   <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about extraction fields" />
                 </span>
@@ -464,7 +466,7 @@ function AdvancedOptions({
             {extractionFields.map((field: string, idx: number) => (
               <div key={idx} className="flex items-center gap-2 mb-2">
                 <Input
-                  placeholder="e.g., 'Sample size', 'Effect size', 'Methodology'"
+                  placeholder="e.g., Country or countries that is the focus of the document (n/a if not reported)"
                   value={field}
                   onChange={(e) => handleFieldChange(idx, e.target.value)}
                 />
