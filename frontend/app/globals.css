@@ -218,6 +218,16 @@
   .loading-spinner {
     @apply mr-2 h-4 w-4 animate-spin;
   }
+  
+  .paper-title-link {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .paper-title-link:hover {
+    color: #2563eb; /* Tailwind blue-600 */
+    text-decoration: underline;
+  }
 }
 
 html, body {

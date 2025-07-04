@@ -8,19 +8,35 @@ interface PaperCardProps {
 }
 
 export function PaperCard({ paper }: PaperCardProps) { 
+  // Helper to get the correct link for the title
+  const getTitleLink = () => {
+    if (paper.doi) {
+      // If DOI is already a URL, use it; otherwise, construct the URL
+      return paper.doi.startsWith('http') ? paper.doi : `https://doi.org/${paper.doi}`
+    }
+    return paper.overton_url
+  }
+
   return (
     <Card className={paper.is_relevant ? 'paper-card-relevant' : 'paper-card'}>
       <CardHeader>
         <div className="space-y-2">
           <div className="flex items-start justify-between">
             <CardTitle className="paper-title">
-              <a href={paper.doi || paper.overton_url} target="_blank">{paper.title}</a>
+              {getTitleLink() ? (
+                <a 
+                  href={getTitleLink()} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="paper-title-link"
+                >
+                  {paper.title}
+                </a>
+              ) : (
+                paper.title
+              )}
             </CardTitle>
-            {paper.is_relevant && (
-              <Badge className="ml-2 badge-relevant">
-                Relevant
-              </Badge>
-            )}
+            {/* Removed Relevant badge */}
           </div>
           {/* <PaperMetadata paper={paper} /> */}
         </div>
