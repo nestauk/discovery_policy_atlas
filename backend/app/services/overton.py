@@ -34,7 +34,8 @@ class OvertonService:
         if source_country:
             search_params["source_country"] = source_country
         if source_type:
-            search_params["source_type"] = source_type
+            if source_type.strip() and source_type != "all":
+                search_params["source_type"] = source_type
         if published_after:
             search_params["published_after"] = published_after.isoformat()
         if published_before:
