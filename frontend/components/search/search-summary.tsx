@@ -15,11 +15,7 @@ export function SearchSummary({ results }: SearchSummaryProps) {
         <div className="summary-grid">
           <div>
             <p className="summary-value">{results.total_found}</p>
-            <p className="summary-label">Papers Found</p>
-          </div>
-          <div>
-            <p className="summary-value">{results.total_screened}</p>
-            <p className="summary-label">Screened by AI</p>
+            <p className="summary-label">Papers Retrieved</p>
           </div>
           <div>
             <p className="summary-value-highlight">{results.total_relevant}</p>

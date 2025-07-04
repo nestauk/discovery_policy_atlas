@@ -189,7 +189,7 @@
   
   /* Summary stats */
   .summary-grid {
-    @apply grid grid-cols-3 gap-4 text-center;
+    @apply grid grid-cols-2 gap-4 justify-items-center text-center;
   }
   
   .summary-value {

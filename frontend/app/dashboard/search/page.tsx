@@ -93,9 +93,9 @@ export default function SearchPage() {
   return (
     <div className="page-container">
       <div>
-        <h1 className="page-header">Search policy and research papers</h1>
+        <h1 className="page-header">Search</h1>
         <p className="page-description">
-          Search and screen policy and academic research documents with AI
+          Search and screen policy and academic research data with AI
         </p>
       </div>
       <SearchForm 
