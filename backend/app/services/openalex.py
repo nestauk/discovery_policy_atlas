@@ -16,7 +16,7 @@ class OpenAlexService:
     async def search(
         self,
         query: str,
-        max_results: int = 10,
+        max_results: int = settings.DEFAULT_MAX_RESULTS,
         min_citations: Optional[int] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,

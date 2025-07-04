@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { SearchParams } from '@/types/search'
+import { SEARCH_DEFAULTS } from './constants'
 
 interface SearchStoreState {
   searchParams: SearchParams
@@ -10,9 +11,9 @@ interface SearchStoreState {
 
 const defaultParams: SearchParams = {
   query: '',
-  source: 'overton',
-  max_results: 10,
-  semantic_search: false,
+  source: SEARCH_DEFAULTS.SOURCE,
+  max_results: SEARCH_DEFAULTS.MAX_RESULTS,
+  semantic_search: SEARCH_DEFAULTS.SEMANTIC_SEARCH,
 }
 
 export const useSearchStore = create<SearchStoreState>()(

@@ -10,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Loader2, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
 import type { SearchParams } from '@/types/search'
 import { useSearchStore } from '@/lib/searchStore'
+import { SEARCH_DEFAULTS } from '@/lib/constants'
 
 interface SearchFormProps {
   onSearch: (params: SearchParams) => void
@@ -21,7 +22,7 @@ interface SearchFormProps {
 }
 
 interface AdvancedOptionsProps {
-  source: 'openalex' | 'mediacloud' | 'overton'
+  source: 'openalex' | 'overton'
   maxResults: string
   setMaxResults: (value: string) => void
   minCitations: string
@@ -55,19 +56,19 @@ export function SearchForm({
   initialQuery = '',
   initialFilters = {
     query: '',
-    source: 'overton',
-    max_results: 10
+    source: SEARCH_DEFAULTS.SOURCE,
+    max_results: SEARCH_DEFAULTS.MAX_RESULTS
   }
 }: SearchFormProps) {
   const [query, setQuery] = useState(initialQuery)
-  const [source, setSource] = useState<'openalex' | 'mediacloud' | 'overton'>(initialFilters.source || 'overton')
+  const [source, setSource] = useState<'openalex' | 'overton'>(initialFilters.source || 'overton')
   const [showAdvanced, setShowAdvanced] = useState(false)
   
   // Advanced options
   const [minCitations, setMinCitations] = useState(initialFilters.min_citations?.toString() || '')
   const [dateFrom, setDateFrom] = useState(initialFilters.date_from || '')
   const [dateTo, setDateTo] = useState(initialFilters.date_to || '')
-  const [maxResults, setMaxResults] = useState(initialFilters.max_results?.toString() || '10')
+  const [maxResults, setMaxResults] = useState(initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString())
   const [inclusionCriteria, setInclusionCriteria] = useState(initialFilters.inclusion_criteria || '')
   const [extractionFields, setExtractionFields] = useState<string[]>(initialFilters.extraction_fields || [])
   
@@ -88,7 +89,7 @@ export function SearchForm({
     minCitations: initialFilters.min_citations?.toString() || '',
     dateFrom: initialFilters.date_from || '',
     dateTo: initialFilters.date_to || '',
-    maxResults: initialFilters.max_results?.toString() || '10',
+    maxResults: initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString(),
     inclusionCriteria: initialFilters.inclusion_criteria || '',
     extractionFields: initialFilters.extraction_fields || [],
     sourceCountry: initialFilters.source_country || '',
@@ -106,7 +107,7 @@ export function SearchForm({
     setMinCitations(initialFilters.min_citations?.toString() || '')
     setDateFrom(initialFilters.date_from || '')
     setDateTo(initialFilters.date_to || '')
-    setMaxResults(initialFilters.max_results?.toString() || '10')
+    setMaxResults(initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString())
     setInclusionCriteria(initialFilters.inclusion_criteria || '')
     setExtractionFields(initialFilters.extraction_fields || [])
     setSourceCountry(initialFilters.source_country || '')
@@ -119,7 +120,7 @@ export function SearchForm({
   const handleReset = () => {
     // Reset local form state
     setQuery(initialValues.query)
-    setSource(initialValues.source as 'openalex' | 'mediacloud' | 'overton')
+    setSource(initialValues.source as 'openalex' | 'overton')
     setMinCitations(initialValues.minCitations)
     setDateFrom(initialValues.dateFrom)
     setDateTo(initialValues.dateTo)
@@ -144,7 +145,7 @@ export function SearchForm({
     const params: SearchParams = {
       query,
       source,
-      max_results: parseInt(maxResults) || 10,
+      max_results: parseInt(maxResults) || SEARCH_DEFAULTS.MAX_RESULTS,
       inclusion_criteria: inclusionCriteria,
       extraction_fields: extractionFields.filter(f => f.trim() !== ''),
     }
@@ -164,9 +165,6 @@ export function SearchForm({
       //   params.topics = topics.split(',').map(t => t.trim()).filter(t => t.length > 0)
       // }
       // if (classifications) params.classifications = classifications
-    } else if (source === 'mediacloud') {
-      if (dateFrom) params.date_from = dateFrom
-      if (dateTo) params.date_to = dateTo
     }
 
     onSearch(params)
@@ -207,14 +205,13 @@ export function SearchForm({
             <div className="space-y-2">
               <Label htmlFor="source">Data Source</Label>
               <div className="flex items-center gap-2">
-                <Select value={source} onValueChange={(v: 'openalex' | 'mediacloud' | 'overton') => setSource(v)}>
+                <Select value={source} onValueChange={(v: 'openalex' | 'overton') => setSource(v)}>
                   <SelectTrigger id="source">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="overton">Overton (policy)</SelectItem>
                     <SelectItem value="openalex">OpenAlex (research)</SelectItem>
-                    <SelectItem value="mediacloud">MediaCloud (news)</SelectItem>
                   </SelectContent>
                 </Select>
                 {source === 'overton' && (
@@ -349,7 +346,7 @@ function AdvancedOptions({
             value={maxResults}
             onChange={(e) => setMaxResults(e.target.value)}
             min="1"
-            max="100"
+            max={SEARCH_DEFAULTS.MAX_RESULTS_LIMIT.toString()}
           />
         </div>
         
