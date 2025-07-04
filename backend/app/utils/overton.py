@@ -50,6 +50,13 @@ class OvertonClient:
             "format": "json",
             "api_key": self.api_key,
         }
+
+        # Add per page parameter based on max_results
+        if max_results is not None and max_results < 50:
+            params["pp"] = max_results
+        else:
+            params["pp"] = 50  # Default page size
+
         if query is not None:
             params["query"] = query
         if squery is not None:
