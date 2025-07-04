@@ -135,6 +135,8 @@
   /* Page layouts */
   .page-container {
     @apply max-w-6xl mx-auto space-y-6;
+    height: 100%;
+    overflow: visible;
   }
   
   .page-header {
@@ -216,4 +218,9 @@
   .loading-spinner {
     @apply mr-2 h-4 w-4 animate-spin;
   }
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
 }

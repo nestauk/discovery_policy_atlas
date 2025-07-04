@@ -7,11 +7,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Loader2, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
+import { Loader2, ChevronDown, ChevronUp, RotateCcw, Info } from 'lucide-react'
 import type { SearchParams } from '@/types/search'
 import { useSearchStore } from '@/lib/searchStore'
 import { SEARCH_DEFAULTS } from '@/lib/constants'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip } from '@/components/ui/tooltip'
 
 interface SearchFormProps {
   onSearch: (params: SearchParams) => void
@@ -72,7 +73,9 @@ export function SearchForm({
   // Overton-specific fields
   const [sourceCountry, setSourceCountry] = useState(initialFilters.source_country || '')
   const [sourceType, setSourceType] = useState(initialFilters.source_type || '')
-  const [semanticSearch, setSemanticSearch] = useState(initialFilters.semantic_search ?? false)
+  const [semanticSearch, setSemanticSearch] = useState(
+    initialFilters.semantic_search ?? (initialFilters.source === 'overton' ? true : false)
+  )
 
   // Zustand store
   const { reset: resetStore } = useSearchStore()
@@ -105,8 +108,20 @@ export function SearchForm({
     setExtractionFields(initialFilters.extraction_fields || [])
     setSourceCountry(initialFilters.source_country || '')
     setSourceType(initialFilters.source_type || '')
-    setSemanticSearch(initialFilters.semantic_search ?? false)
-  }, [initialQuery, initialFilters])
+    setSemanticSearch(
+      initialFilters.semantic_search ?? (initialFilters.source === 'overton' ? true : false)
+    )
+  }, [initialQuery, initialFilters, initialFilters.semantic_search])
+
+  // When the source changes, enable semantic search by default for Overton
+  useEffect(() => {
+    if (source === 'overton' && semanticSearch === false && initialFilters.semantic_search === undefined) {
+      setSemanticSearch(true)
+    }
+    if (source === 'openalex' && semanticSearch === true && initialFilters.semantic_search === undefined) {
+      setSemanticSearch(false)
+    }
+  }, [source, semanticSearch, initialFilters.semantic_search])
 
   const handleReset = () => {
     // Reset local form state
@@ -120,7 +135,11 @@ export function SearchForm({
     setExtractionFields([...initialValues.extractionFields])
     setSourceCountry(initialValues.sourceCountry)
     setSourceType(initialValues.sourceType)
-    setSemanticSearch(false)
+    setSemanticSearch(
+      initialValues.semanticSearch !== undefined
+        ? initialValues.semanticSearch
+        : (initialValues.source === 'overton' ? true : false)
+    )
     setShowAdvanced(false)
     // Reset persisted Zustand store
     resetStore()
@@ -176,7 +195,18 @@ export function SearchForm({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="query">Search Query</Label>
+              <Label htmlFor="query" className="flex items-center gap-1">
+                Search Query
+                <Tooltip content={
+                  source === 'overton'
+                    ? 'Enter boolean search query with keywords - or free text queries if Semantic Search is enabled - to search for relevant policy documents in Overton.'
+                    : 'Enter boolean search query with keywords to search for academic research papers in OpenAlex.'
+                }>
+                  <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                    <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about search query" />
+                  </span>
+                </Tooltip>
+              </Label>
               <Input
                 id="query"
                 placeholder="e.g., climate change policy"
@@ -207,8 +237,13 @@ export function SearchForm({
                       onChange={e => setSemanticSearch(e.target.checked)}
                       className="h-4 w-4 accent-primary"
                     />
-                    <Label htmlFor="semanticSearch" className="ml-1 text-xs text-muted-foreground">
+                    <Label htmlFor="semanticSearch" className="ml-1 text-xs text-muted-foreground flex items-center gap-1">
                       Semantic Search
+                      <Tooltip content="Semantic search uses AI to find relevant documents based on meaning, not just keywords. This may improve results for complex queries.">
+                        <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                          <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about semantic search" />
+                        </span>
+                      </Tooltip>
                     </Label>
                   </div>
                 )}
@@ -300,7 +335,14 @@ function AdvancedOptions({
     <div className="space-y-4 mt-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="maxResults">Max Results</Label>
+          <Label htmlFor="maxResults" className="flex items-center gap-1">
+            Max Results
+            <Tooltip content="We recommend starting with smaller values (<50), refining your search, and then increasing the number of results. Higher values will take longer to load.">
+              <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about max results" />
+              </span>
+            </Tooltip>
+          </Label>
           <Input
             id="maxResults"
             type="number"
@@ -395,7 +437,14 @@ function AdvancedOptions({
       {screeningEnabled && (
         <>
           <div className="space-y-2">
-            <Label htmlFor="inclusionCriteria">Inclusion Criteria</Label>
+            <Label htmlFor="inclusionCriteria" className="flex items-center gap-1">
+              Inclusion Criteria
+              <Tooltip content="Specific criteria for screening paper summaries: eg, particular research focus or study type.">
+                <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                  <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about inclusion criteria" />
+                </span>
+              </Tooltip>
+            </Label>
             <Input
               id="inclusionCriteria"
               placeholder="e.g., 'Human studies published after 2015 with at least 20 participants'"
@@ -404,7 +453,14 @@ function AdvancedOptions({
             />
           </div>
           <div className="space-y-2">
-            <Label>Additional Extraction Fields</Label>
+            <Label className="flex items-center gap-1">
+              Additional Extraction Fields
+              <Tooltip content="List extra fields you want the AI to extract from each paper: eg, Sample size, Effect size.">
+                <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                  <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about extraction fields" />
+                </span>
+              </Tooltip>
+            </Label>
             {extractionFields.map((field: string, idx: number) => (
               <div key={idx} className="flex items-center gap-2 mb-2">
                 <Input
