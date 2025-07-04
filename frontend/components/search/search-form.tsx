@@ -412,11 +412,11 @@ function AdvancedOptions({
                 <SelectValue placeholder="Select source type" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="all">All</SelectItem>
                 <SelectItem value="government">Government</SelectItem>
+                <SelectItem value="igo">IGO</SelectItem>
                 <SelectItem value="think tank">Think Tank</SelectItem>
-                <SelectItem value="ngo">NGO</SelectItem>
-                <SelectItem value="academic">Academic</SelectItem>
-                <SelectItem value="international">International</SelectItem>
+                <SelectItem value="legislative body">Legislative Body</SelectItem>
               </SelectContent>
             </Select>
           </div>
