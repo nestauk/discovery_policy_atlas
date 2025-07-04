@@ -70,7 +70,7 @@ class MediaCloudService:
     async def search(
         self,
         query: str,
-        max_results: int = 10,
+        max_results: int = settings.DEFAULT_MAX_RESULTS,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
     ) -> pd.DataFrame:

@@ -2,6 +2,7 @@ import pandas as pd
 from typing import Dict, Optional
 from datetime import date
 from app.utils.overton import OvertonClient
+from app.core.config import settings
 
 
 class OvertonService:
@@ -11,7 +12,7 @@ class OvertonService:
     async def search(
         self,
         query: str,
-        max_results: int = 10,
+        max_results: int = settings.DEFAULT_MAX_RESULTS,
         source_country: Optional[str] = None,
         source_type: Optional[str] = None,
         published_after: Optional[date] = None,
@@ -31,9 +32,33 @@ class OvertonService:
 
         # Add optional filters
         if source_country:
-            search_params["source_country"] = source_country
+            # Simplified special region handling using frontend labels
+            if source_country == "All":
+                # Do not set any filter for 'All'
+                pass
+            elif source_country == "All but UK":
+                search_params["source_country"] = "_:uxf"
+            elif source_country == "UK":
+                search_params["source_country"] = "UK"
+            elif source_country in [
+                "OECD members",
+                "Non-OECD members",
+                "G20",
+                "G7",
+                "North America",
+                "South and Central America",
+                "Europe",
+                "Nordics",
+                "APAC",
+                "Africa",
+            ]:
+                # Pass frontend label directly as source_region
+                search_params["source_region"] = source_country
+            else:
+                search_params["source_country"] = source_country
         if source_type:
-            search_params["source_type"] = source_type
+            if source_type.strip() and source_type != "all":
+                search_params["source_type"] = source_type
         if published_after:
             search_params["published_after"] = published_after.isoformat()
         if published_before:
@@ -43,14 +68,20 @@ class OvertonService:
         if classifications:
             search_params["classifications"] = classifications
 
-        # Get results from Overton API
-        response = self.client.search_documents(**search_params)
+        # Get results from Overton API using efficient pagination
+        response = self.client.search_documents(
+            max_results=max_results, fetch_mode="up_to_max", **search_params
+        )
 
-        # Extract documents from response
-        documents = response.get("results", [])
-
-        # Limit results to max_results
-        documents = documents[: min(max_results, len(documents))]
+        # Handle response format (single response or list of responses)
+        if isinstance(response, list):
+            # Multiple pages - combine all results
+            documents = []
+            for page_response in response:
+                documents.extend(page_response.get("results", []))
+        else:
+            # Single page response
+            documents = response.get("results", [])
 
         # Convert to DataFrame
         results = []

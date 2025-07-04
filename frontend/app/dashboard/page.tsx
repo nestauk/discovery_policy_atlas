@@ -7,8 +7,8 @@ export default function DashboardPage() {
   const router = useRouter()
   
   useEffect(() => {
-    // Redirect to search page by default
-    router.push('/dashboard/search')
+    // Redirect to home page by default
+    router.push('/dashboard/home')
   }, [router])
 
   return null

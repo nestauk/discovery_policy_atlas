@@ -12,6 +12,7 @@ import { DownloadButton } from '@/components/search/download-button'
 import type { SearchParams, SearchResult } from '@/types/search'
 import { useAPI } from '@/lib/api'
 import { useSearchStore } from '@/lib/searchStore'
+import { SEARCH_DEFAULTS } from '@/lib/constants'
 
 export default function SearchPage() {
   const searchParams = useSearchParams()
@@ -42,7 +43,7 @@ export default function SearchPage() {
       setCurrentFilters({
         query: project.query,
         source: project.filters.source || 'openalex',
-        max_results: project.filters.max_results || 10,
+        max_results: project.filters.max_results || SEARCH_DEFAULTS.MAX_RESULTS,
         min_citations: project.filters.min_citations,
         date_from: project.filters.date_from,
         date_to: project.filters.date_to,
@@ -92,9 +93,9 @@ export default function SearchPage() {
   return (
     <div className="page-container">
       <div>
-        <h1 className="page-header">Search Papers</h1>
+        <h1 className="page-header">Search</h1>
         <p className="page-description">
-          Search and screen academic papers with AI
+          Search and screen policy and academic research data with AI
         </p>
       </div>
       <SearchForm 

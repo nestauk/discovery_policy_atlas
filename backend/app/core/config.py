@@ -116,7 +116,8 @@ class Settings(BaseSettings):
     MEDIACLOUD_RATE_LIMIT: int = 5  # requests per second
 
     # Search Defaults
-    DEFAULT_MAX_RESULTS: int = 10
+    DEFAULT_MAX_RESULTS: int = 50
+    MAX_SEARCH_RESULTS: int = 1000  # Maximum allowed search results
     DEFAULT_MIN_CITATIONS: int = 5
 
     # Logging

@@ -16,7 +16,7 @@ class OpenAlexService:
     async def search(
         self,
         query: str,
-        max_results: int = 10,
+        max_results: int = settings.DEFAULT_MAX_RESULTS,
         min_citations: Optional[int] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
@@ -48,8 +48,10 @@ class OpenAlexService:
         for page in results:
             page["abstract"] = page["abstract"]
 
-        # Create DataFrame with only needed columns
-        df = pd.DataFrame(results)[["id", "title", "abstract"]].drop_duplicates(
+        # Some results may not have a DOI, so use get with default None
+        for page in results:
+            page["doi"] = page.get("doi")
+        df = pd.DataFrame(results)[["id", "title", "abstract", "doi"]].drop_duplicates(
             subset="id"
         )
 

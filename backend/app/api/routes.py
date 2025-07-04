@@ -73,6 +73,9 @@ async def enhanced_search(
         raise ValueError(f"Unsupported search request type: {type(request)}")
 
     screening_enabled = getattr(request, "screening_enabled", False)
+    logger.info(
+        f"screening_enabled received: {screening_enabled} (type: {type(screening_enabled)})"
+    )
     if not screening_enabled:
         # Skip screening, mark all as relevant
         papers_df["is_relevant"] = True

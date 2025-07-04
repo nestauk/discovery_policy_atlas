@@ -1,12 +1,15 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
 from datetime import date, datetime
+from app.core.config import settings
 
 
 # Base search request with common parameters
 class BaseSearchRequest(BaseModel):
     query: str
-    max_results: int = Field(default=10, ge=1, le=100)
+    max_results: int = Field(
+        default=settings.DEFAULT_MAX_RESULTS, ge=1, le=settings.MAX_SEARCH_RESULTS
+    )
     inclusion_criteria: Optional[str] = None
     extraction_fields: Optional[List[str]] = None
     screening_enabled: Optional[bool] = True

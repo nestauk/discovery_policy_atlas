@@ -4,24 +4,28 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Loader2, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
+import { Loader2, ChevronDown, ChevronUp, RotateCcw, Info } from 'lucide-react'
 import type { SearchParams } from '@/types/search'
 import { useSearchStore } from '@/lib/searchStore'
+import { SEARCH_DEFAULTS } from '@/lib/constants'
+import { Switch } from '@/components/ui/switch'
+import { Tooltip } from '@/components/ui/tooltip'
 
 interface SearchFormProps {
   onSearch: (params: SearchParams) => void
   isLoading: boolean
-  screeningEnabled: boolean
-  onScreeningEnabledChange: (enabled: boolean) => void
   initialQuery?: string
   initialFilters?: SearchParams
+  screeningEnabled: boolean
+  onScreeningEnabledChange: (enabled: boolean) => void
 }
 
 interface AdvancedOptionsProps {
-  source: 'openalex' | 'mediacloud' | 'overton'
+  source: 'openalex' | 'overton'
   maxResults: string
   setMaxResults: (value: string) => void
   minCitations: string
@@ -41,42 +45,59 @@ interface AdvancedOptionsProps {
   setSourceCountry: (value: string) => void
   sourceType: string
   setSourceType: (value: string) => void
-  // topics: string
-  // setTopics: (value: string) => void
-  // classifications: string
-  // setClassifications: (value: string) => void
 }
+
+// Special regions and country list for Source Country dropdown
+const SPECIAL_REGIONS = [
+  'All',
+  'UK',
+  'All but UK',
+  'OECD members',
+  'Non-OECD members',
+  'G20',
+  'G7',
+  'North America',
+  'South and Central America',
+  'Europe',
+  'Nordics',
+  'APAC',
+  'Africa',
+];
+
+const COUNTRY_LIST = [
+  'USA', 'Spain', 'Japan', 'Canada', 'Germany', 'Sweden', 'Australia', 'France', 'Brazil', 'Netherlands', 'Italy', 'Portugal', 'Peru', 'Mexico', 'Turkey', 'Austria', 'Singapore', 'China', 'Switzerland', 'Belgium', 'Philippines', 'South Africa', 'Ireland', 'Denmark', 'Taiwan', 'Uruguay', 'Colombia', 'Romania', 'Finland', 'Thailand', 'Norway', 'Czech Republic', 'Chile', 'Indonesia', 'New Zealand', 'India', 'Argentina', 'Tanzania', 'Latvia', 'Slovakia', 'Lithuania', 'Slovenia', 'Bulgaria', 'Iceland', 'Greece', 'Paraguay', 'Hungary', 'Luxembourg', 'Estonia', 'Ukraine', 'Morocco', 'Serbia', 'Trinidad and Tobago', 'Cyprus', 'Ecuador', 'Georgia', 'Moldova', 'South Korea', 'Sri Lanka', 'Malaysia', 'Uganda', 'Kosovo', 'North Macedonia', 'Lebanon', 'El Salvador', 'Honduras', 'Belarus', 'Micronesia', 'Russia', 'Panama', 'Israel', 'Kenya', 'Maldives', 'Iran', 'Bosnia and Herzegovina', 'Afghanistan', 'Egypt', 'Croatia', 'Barbados', 'Bolivia', 'Tunisia', 'Vietnam', 'Costa Rica', 'Mauritius', 'Oman', 'Jamaica', 'Nigeria', 'Montenegro', 'Bahamas', 'Iraq', 'Cambodia', 'Bangladesh', 'Azerbaijan', 'Nepal', 'Ghana', 'Mongolia', 'Timor Leste', 'Bhutan', 'Cameroon', 'Brunei', 'Liberia', 'Saudi Arabia', 'Ethiopia', 'Pakistan', 'Papua New Guinea', 'Venezuela', 'Namibia', 'Albania', 'Guyana', 'Syria', 'Nicaragua', 'Kyrgyzstan', 'Malta', 'Haiti', 'Cape Verde', 'Samoa', 'Uzbekistan', 'Qatar', 'Myanmar', 'Benin', 'Mauritania', 'Mozambique', 'Algeria', 'Zambia', 'Solomon Islands', 'Kiribati', 'Kuwait', 'Armenia', 'Jordan', 'Burkina Faso', 'Andorra', 'Palau', 'Botswana', 'Mali', 'Bahrain', 'Rwanda', 'Senegal', 'Belize', 'United Arab Emirates', 'Fiji', 'Vanuatu', 'Libya', 'Suriname', 'Cuba', 'Laos', 'Togo', 'Tonga', 'Eswatini', 'Angola', 'Tajikistan', 'Ivory Coast', 'Guinea', 'Zimbabwe', 'Malawi', 'Marshall Islands', 'Burundi', 'Niger', 'Madagascar', 'Sudan', 'Somalia', 'Turkmenistan', 'Tuvalu', 'Seychelles', 'South Sudan', 'Sao Tome and Principe', 'Central African Republic', 'Sierra Leone', 'Yemen', 'Democratic Republic Of The Congo', 'San Marino', 'Chad', 'Palestine', 'Vatican City', 'Nauru', 'Kazakhstan', 'Equatorial Guinea', 'Lesotho', 'Monaco', 'North Korea', 'Saint Kitts and Nevis', 'Liechtenstein', 'Djibouti', 'Comoros', 'Gambia', 'Gabon', 'Eritrea', 'Guinea-Bissau'
+];
 
 export function SearchForm({ 
   onSearch, 
   isLoading, 
-  screeningEnabled, 
-  onScreeningEnabledChange,
   initialQuery = '',
   initialFilters = {
     query: '',
-    source: 'overton',
-    max_results: 10
-  }
+    source: SEARCH_DEFAULTS.SOURCE,
+    max_results: SEARCH_DEFAULTS.MAX_RESULTS
+  },
+  screeningEnabled,
+  onScreeningEnabledChange
 }: SearchFormProps) {
   const [query, setQuery] = useState(initialQuery)
-  const [source, setSource] = useState<'openalex' | 'mediacloud' | 'overton'>(initialFilters.source || 'overton')
+  const [source, setSource] = useState<'openalex' | 'overton'>(initialFilters.source || 'overton')
   const [showAdvanced, setShowAdvanced] = useState(false)
   
   // Advanced options
   const [minCitations, setMinCitations] = useState(initialFilters.min_citations?.toString() || '')
-  const [dateFrom, setDateFrom] = useState(initialFilters.date_from || '')
-  const [dateTo, setDateTo] = useState(initialFilters.date_to || '')
-  const [maxResults, setMaxResults] = useState(initialFilters.max_results?.toString() || '10')
+  const [dateFrom, setDateFrom] = useState(initialFilters.date_from || SEARCH_DEFAULTS.DATE_FROM)
+  const [dateTo, setDateTo] = useState(initialFilters.date_to || SEARCH_DEFAULTS.DATE_TO)
+  const [maxResults, setMaxResults] = useState(initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString())
   const [inclusionCriteria, setInclusionCriteria] = useState(initialFilters.inclusion_criteria || '')
   const [extractionFields, setExtractionFields] = useState<string[]>(initialFilters.extraction_fields || [])
   
   // Overton-specific fields
-  const [sourceCountry, setSourceCountry] = useState(initialFilters.source_country || '')
-  const [sourceType, setSourceType] = useState(initialFilters.source_type || '')
-  const [semanticSearch, setSemanticSearch] = useState(initialFilters.semantic_search ?? false)
-  // const [topics, setTopics] = useState(Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '')
-  // const [classifications, setClassifications] = useState(initialFilters.classifications || '')
+  const [sourceCountry, setSourceCountry] = useState(initialFilters.source_country || 'All')
+  const [sourceType, setSourceType] = useState(initialFilters.source_type || 'all')
+  const [semanticSearch, setSemanticSearch] = useState(
+    initialFilters.semantic_search ?? (initialFilters.source === 'overton' ? true : false)
+  )
 
   // Zustand store
   const { reset: resetStore } = useSearchStore()
@@ -86,16 +107,14 @@ export function SearchForm({
     query: initialQuery,
     source: initialFilters.source || 'overton',
     minCitations: initialFilters.min_citations?.toString() || '',
-    dateFrom: initialFilters.date_from || '',
-    dateTo: initialFilters.date_to || '',
-    maxResults: initialFilters.max_results?.toString() || '10',
+    dateFrom: initialFilters.date_from || SEARCH_DEFAULTS.DATE_FROM,
+    dateTo: initialFilters.date_to || SEARCH_DEFAULTS.DATE_TO,
+    maxResults: initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString(),
     inclusionCriteria: initialFilters.inclusion_criteria || '',
     extractionFields: initialFilters.extraction_fields || [],
-    sourceCountry: initialFilters.source_country || '',
-    sourceType: initialFilters.source_type || '',
+    sourceCountry: initialFilters.source_country || 'All',
+    sourceType: initialFilters.source_type || 'all',
     semanticSearch: initialFilters.semantic_search ?? false,
-    // topics: Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '',
-    // classifications: initialFilters.classifications || '',
   }
 
   // Update form when initial values change
@@ -104,35 +123,48 @@ export function SearchForm({
     setQuery(initialQuery)
     setSource(initialFilters.source || 'overton')
     setMinCitations(initialFilters.min_citations?.toString() || '')
-    setDateFrom(initialFilters.date_from || '')
-    setDateTo(initialFilters.date_to || '')
-    setMaxResults(initialFilters.max_results?.toString() || '10')
+    setDateFrom(initialFilters.date_from || SEARCH_DEFAULTS.DATE_FROM)
+    setDateTo(initialFilters.date_to || SEARCH_DEFAULTS.DATE_TO)
+    setMaxResults(initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString())
     setInclusionCriteria(initialFilters.inclusion_criteria || '')
     setExtractionFields(initialFilters.extraction_fields || [])
-    setSourceCountry(initialFilters.source_country || '')
-    setSourceType(initialFilters.source_type || '')
-    setSemanticSearch(initialFilters.semantic_search ?? false)
-    // setTopics(Array.isArray(initialFilters.topics) ? initialFilters.topics.join(', ') : initialFilters.topics || '')
-    // setClassifications(initialFilters.classifications || '')
-  }, [initialQuery, initialFilters])
+    setSourceCountry(initialFilters.source_country || 'All')
+    setSourceType(initialFilters.source_type || 'all')
+    setSemanticSearch(
+      initialFilters.semantic_search ?? (initialFilters.source === 'overton' ? true : false)
+    )
+  }, [initialQuery, initialFilters, initialFilters.semantic_search])
+
+  // When the source changes, enable semantic search by default for Overton
+  useEffect(() => {
+    if (source === 'overton' && semanticSearch === false && initialFilters.semantic_search === undefined) {
+      setSemanticSearch(true)
+    }
+    if (source === 'openalex' && semanticSearch === true && initialFilters.semantic_search === undefined) {
+      setSemanticSearch(false)
+    }
+  }, [source, semanticSearch, initialFilters.semantic_search])
 
   const handleReset = () => {
     // Reset local form state
     setQuery(initialValues.query)
-    setSource(initialValues.source as 'openalex' | 'mediacloud' | 'overton')
+    setSource(initialValues.source as 'openalex' | 'overton')
     setMinCitations(initialValues.minCitations)
-    setDateFrom(initialValues.dateFrom)
-    setDateTo(initialValues.dateTo)
+    setDateFrom(initialValues.dateFrom || SEARCH_DEFAULTS.DATE_FROM)
+    setDateTo(initialValues.dateTo || SEARCH_DEFAULTS.DATE_TO)
     setMaxResults(initialValues.maxResults)
     setInclusionCriteria(initialValues.inclusionCriteria)
     setExtractionFields([...initialValues.extractionFields])
-    setSourceCountry(initialValues.sourceCountry)
-    setSourceType(initialValues.sourceType)
-    setSemanticSearch(false)
-    // setTopics(initialValues.topics)
-    // setClassifications(initialValues.classifications)
+    setSourceCountry('All')
+    setSourceType('all')
+    setSemanticSearch(
+      initialValues.semanticSearch !== undefined
+        ? initialValues.semanticSearch
+        : (initialValues.source === 'overton' ? true : false)
+    )
     setShowAdvanced(false)
-    
+    // Enable AI screening after reset
+    onScreeningEnabledChange(true)
     // Reset persisted Zustand store
     resetStore()
   }
@@ -141,12 +173,13 @@ export function SearchForm({
     e.preventDefault()
     if (!query.trim()) return
 
-    const params: SearchParams = {
+    const params: SearchParams & { screening_enabled: boolean } = {
       query,
       source,
-      max_results: parseInt(maxResults) || 10,
+      max_results: parseInt(maxResults) || SEARCH_DEFAULTS.MAX_RESULTS,
       inclusion_criteria: inclusionCriteria,
       extraction_fields: extractionFields.filter(f => f.trim() !== ''),
+      screening_enabled: screeningEnabled,
     }
 
     if (source === 'openalex') {
@@ -159,14 +192,6 @@ export function SearchForm({
       if (sourceCountry) params.source_country = sourceCountry
       if (sourceType) params.source_type = sourceType
       params.semantic_search = semanticSearch
-      // if (topics) {
-      //   // Convert comma-separated string to array
-      //   params.topics = topics.split(',').map(t => t.trim()).filter(t => t.length > 0)
-      // }
-      // if (classifications) params.classifications = classifications
-    } else if (source === 'mediacloud') {
-      if (dateFrom) params.date_from = dateFrom
-      if (dateTo) params.date_to = dateTo
     }
 
     onSearch(params)
@@ -194,27 +219,39 @@ export function SearchForm({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="query">Search Query</Label>
-              <Input
+              <Label htmlFor="query" className="flex items-center gap-1">
+                Search Query
+                <Tooltip content={
+                  source === 'overton'
+                    ? 'Enter boolean search query with keywords - or free text queries if Semantic Search is enabled - to search for relevant policy documents in Overton.'
+                    : 'Enter boolean search query with keywords to search for academic research papers in OpenAlex.'
+                }>
+                  <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                    <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about search query" />
+                  </span>
+                </Tooltip>
+              </Label>
+              <Textarea
                 id="query"
-                placeholder="e.g., climate change policy"
+                placeholder="e.g., parenting interventions"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 disabled={isLoading}
+                rows={1.5}
+                className="min-h-[54px]"
               />
             </div>
             
             <div className="space-y-2">
               <Label htmlFor="source">Data Source</Label>
               <div className="flex items-center gap-2">
-                <Select value={source} onValueChange={(v: 'openalex' | 'mediacloud' | 'overton') => setSource(v)}>
+                <Select value={source} onValueChange={(v: 'openalex' | 'overton') => setSource(v)}>
                   <SelectTrigger id="source">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="overton">Overton (policy)</SelectItem>
                     <SelectItem value="openalex">OpenAlex (research)</SelectItem>
-                    <SelectItem value="mediacloud">MediaCloud (news)</SelectItem>
                   </SelectContent>
                 </Select>
                 {source === 'overton' && (
@@ -226,8 +263,13 @@ export function SearchForm({
                       onChange={e => setSemanticSearch(e.target.checked)}
                       className="h-4 w-4 accent-primary"
                     />
-                    <Label htmlFor="semanticSearch" className="ml-1 text-xs text-muted-foreground">
+                    <Label htmlFor="semanticSearch" className="ml-1 text-xs text-muted-foreground flex items-center gap-1">
                       Semantic Search
+                      <Tooltip content="Semantic search uses AI to find relevant documents based on meaning, not just keywords. This may improve results for complex queries.">
+                        <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                          <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about semantic search" />
+                        </span>
+                      </Tooltip>
                     </Label>
                   </div>
                 )}
@@ -266,10 +308,6 @@ export function SearchForm({
                 setSourceCountry={setSourceCountry}
                 sourceType={sourceType}
                 setSourceType={setSourceType}
-                // topics={topics}
-                // setTopics={setTopics}
-                // classifications={classifications}
-                // setClassifications={setClassifications}
               />
             </CollapsibleContent>
           </Collapsible>
@@ -278,7 +316,7 @@ export function SearchForm({
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Searching and screening...
+                {screeningEnabled ? 'Searching and screening...' : 'Searching...'}
               </>
             ) : (
               'Search'
@@ -310,10 +348,6 @@ function AdvancedOptions({
   setSourceCountry,
   sourceType,
   setSourceType,
-  // topics,
-  // setTopics,
-  // classifications,
-  // setClassifications,
 }: AdvancedOptionsProps) {
   const handleFieldChange = (idx: number, value: string) => {
     const updated = [...extractionFields]
@@ -325,31 +359,23 @@ function AdvancedOptions({
 
   return (
     <div className="space-y-4 mt-4">
-      {/* Screening Toggle */}
-      <div className="flex items-center gap-2">
-        <input
-          id="screeningEnabled"
-          type="checkbox"
-          checked={screeningEnabled}
-          onChange={e => onScreeningEnabledChange(e.target.checked)}
-          className="h-4 w-4 accent-primary"
-          title="Enable AI Screening"
-        />
-        <Label htmlFor="screeningEnabled" className="text-sm text-muted-foreground">
-          Enable AI Screening
-        </Label>
-      </div>
-
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="maxResults">Max Results</Label>
+          <Label htmlFor="maxResults" className="flex items-center gap-1">
+            Max Results
+            <Tooltip content="We recommend starting with smaller values (<50), refining your search, and then increasing the number of results. Higher values will take longer to load.">
+              <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about max results" />
+              </span>
+            </Tooltip>
+          </Label>
           <Input
             id="maxResults"
             type="number"
             value={maxResults}
             onChange={(e) => setMaxResults(e.target.value)}
             min="1"
-            max="100"
+            max={SEARCH_DEFAULTS.MAX_RESULTS_LIMIT.toString()}
           />
         </div>
         
@@ -395,86 +421,117 @@ function AdvancedOptions({
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="sourceCountry">Source Country</Label>
-            <Input
-              id="sourceCountry"
-              placeholder="e.g., USA, UK, France"
+            <Select
               value={sourceCountry}
-              onChange={(e) => setSourceCountry(e.target.value)}
-            />
+              onValueChange={setSourceCountry}
+            >
+              <SelectTrigger id="sourceCountry">
+                <SelectValue placeholder="Select country or region" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72 overflow-y-auto">
+                {/* Special regions at the top */}
+                {SPECIAL_REGIONS.map(region => (
+                  <SelectItem key={region} value={region}>
+                    {region}
+                  </SelectItem>
+                ))}
+                {/* Divider */}
+                <div className="border-t my-1" />
+                {/* Country list */}
+                {[...COUNTRY_LIST].sort((a, b) => a.localeCompare(b)).map(country => (
+                  <SelectItem key={country.toLowerCase().replace(/\s+/g, '_')} value={country}>
+                    {country}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="sourceType">Source Type</Label>
+            <Label htmlFor="sourceType" className="flex items-center gap-1">
+              Source Type
+              <Tooltip content="Type of organization that published the policy document: e.g., Government, Think Tank, IGO. The 'All' option also includes Legislative and Judicial Bodies.">
+                <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                  <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about source type" />
+                </span>
+              </Tooltip>
+            </Label>
             <Select value={sourceType} onValueChange={setSourceType}>
               <SelectTrigger id="sourceType">
                 <SelectValue placeholder="Select source type" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="all">All</SelectItem>
                 <SelectItem value="government">Government</SelectItem>
+                <SelectItem value="igo">IGO</SelectItem>
                 <SelectItem value="think tank">Think Tank</SelectItem>
-                <SelectItem value="ngo">NGO</SelectItem>
-                <SelectItem value="academic">Academic</SelectItem>
-                <SelectItem value="international">International</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </div>
       )}
-
-      {/* {source === 'overton' && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="topics">Topics</Label>
-            <Input
-              id="topics"
-              placeholder="e.g., Climate Change, Energy, Health"
-              value={topics}
-              onChange={(e) => setTopics(e.target.value)}
-            />
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="classifications">Classifications</Label>
-            <Input
-              id="classifications"
-              placeholder="e.g., environment, economy, politics"
-              value={classifications}
-              onChange={(e) => setClassifications(e.target.value)}
-            />
-          </div>
-        </div>
-      )} */}
-
-      {/* Inclusion Criteria */}
-      <div className="space-y-2">
-        <Label htmlFor="inclusionCriteria">Inclusion Criteria</Label>
-        <Input
-          id="inclusionCriteria"
-          placeholder="e.g., 'Human studies published after 2015 with at least 20 participants'"
-          value={inclusionCriteria}
-          onChange={(e) => setInclusionCriteria(e.target.value)}
+      
+      {/* Move AI Screening toggle here, use Switch */}
+      <div className="flex items-center gap-2 mt-2">
+        <Switch
+          id="screeningEnabled"
+          checked={screeningEnabled}
+          onCheckedChange={onScreeningEnabledChange}
         />
+        <Label htmlFor="screeningEnabled" className="text-sm text-muted-foreground">
+          Enable AI Screening
+        </Label>
       </div>
 
-      {/* Additional Extraction Fields */}
-      <div className="space-y-2">
-        <Label>Additional Extraction Fields</Label>
-        {extractionFields.map((field: string, idx: number) => (
-          <div key={idx} className="flex items-center gap-2 mb-2">
-            <Input
-              placeholder="e.g., 'Sample size', 'Effect size', 'Methodology'"
-              value={field}
-              onChange={(e) => handleFieldChange(idx, e.target.value)}
+      {/* Only show these if screeningEnabled is true */}
+      {screeningEnabled && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="inclusionCriteria" className="flex items-center gap-1">
+              Inclusion and Exclusion Criteria
+              <Tooltip content="Specific criteria for screening paper summaries: e.g., particular research focus or study type.">
+                <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                  <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about inclusion criteria" />
+                </span>
+              </Tooltip>
+            </Label>
+            <Textarea
+              id="inclusionCriteria"
+              placeholder="e.g., Interventions regarding parents of young children (0-5 years of age)"
+              value={inclusionCriteria}
+              onChange={(e) => setInclusionCriteria(e.target.value)}
+              rows={1.5}
+              className="min-h-[54px]"
             />
-            <Button type="button" variant="ghost" size="icon" onClick={() => handleRemoveField(idx)} aria-label="Remove field">
-              <span className="text-destructive text-lg">&minus;</span>
+          </div>
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1">
+              Extraction Fields
+              <Tooltip content="List extra fields you want the AI to extract from each paper: e.g., Sample size, Effect size.">
+                <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                  <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about extraction fields" />
+                </span>
+              </Tooltip>
+            </Label>
+            {extractionFields.map((field: string, idx: number) => (
+              <div key={idx} className="flex items-center gap-2 mb-2">
+                <Input
+                  placeholder="e.g., Country or countries that are the focus of the study (n/a if not reported)"
+                  value={field}
+                  onChange={(e) => handleFieldChange(idx, e.target.value)}
+                />
+                <Button type="button" variant="ghost" size="icon" onClick={() => handleRemoveField(idx)} aria-label="Remove field">
+                  <span className="text-destructive text-lg">&minus;</span>
+                </Button>
+              </div>
+            ))}
+            <Button type="button" variant="outline" onClick={handleAddField}>
+              + Add Extraction Field
             </Button>
           </div>
-        ))}
-        <Button type="button" variant="outline" onClick={handleAddField}>
-          + Add Extraction Field
-        </Button>
-      </div>
+        </>
+      )}
+
     </div>
   )
 }

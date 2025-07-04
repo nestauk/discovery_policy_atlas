@@ -1,6 +1,6 @@
 export interface SearchParams {
     query: string
-    source: 'openalex' | 'mediacloud' | 'overton'
+    source: 'openalex' | 'overton'
     max_results: number
     min_citations?: number
     date_from?: string
