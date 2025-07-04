@@ -32,7 +32,30 @@ class OvertonService:
 
         # Add optional filters
         if source_country:
-            search_params["source_country"] = source_country
+            # Simplified special region handling using frontend labels
+            if source_country == "All":
+                # Do not set any filter for 'All'
+                pass
+            elif source_country == "All but UK":
+                search_params["source_country"] = "_:uxf"
+            elif source_country == "UK":
+                search_params["source_country"] = "UK"
+            elif source_country in [
+                "OECD members",
+                "Non-OECD members",
+                "G20",
+                "G7",
+                "North America",
+                "South and Central America",
+                "Europe",
+                "Nordics",
+                "APAC",
+                "Africa",
+            ]:
+                # Pass frontend label directly as source_region
+                search_params["source_region"] = source_country
+            else:
+                search_params["source_country"] = source_country
         if source_type:
             if source_type.strip() and source_type != "all":
                 search_params["source_type"] = source_type

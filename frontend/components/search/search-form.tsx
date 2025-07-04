@@ -46,6 +46,27 @@ interface AdvancedOptionsProps {
   setSourceType: (value: string) => void
 }
 
+// Special regions and country list for Source Country dropdown
+const SPECIAL_REGIONS = [
+  'All',
+  'UK',
+  'All but UK',
+  'OECD members',
+  'Non-OECD members',
+  'G20',
+  'G7',
+  'North America',
+  'South and Central America',
+  'Europe',
+  'Nordics',
+  'APAC',
+  'Africa',
+];
+
+const COUNTRY_LIST = [
+  'USA', 'Spain', 'Japan', 'Canada', 'Germany', 'Sweden', 'Australia', 'France', 'Brazil', 'Netherlands', 'Italy', 'Portugal', 'Peru', 'Mexico', 'Turkey', 'Austria', 'Singapore', 'China', 'Switzerland', 'Belgium', 'Philippines', 'South Africa', 'Ireland', 'Denmark', 'Taiwan', 'Uruguay', 'Colombia', 'Romania', 'Finland', 'Thailand', 'Norway', 'Czech Republic', 'Chile', 'Indonesia', 'New Zealand', 'India', 'Argentina', 'Tanzania', 'Latvia', 'Slovakia', 'Lithuania', 'Slovenia', 'Bulgaria', 'Iceland', 'Greece', 'Paraguay', 'Hungary', 'Luxembourg', 'Estonia', 'Ukraine', 'Morocco', 'Serbia', 'Trinidad and Tobago', 'Cyprus', 'Ecuador', 'Georgia', 'Moldova', 'South Korea', 'Sri Lanka', 'Malaysia', 'Uganda', 'Kosovo', 'North Macedonia', 'Lebanon', 'El Salvador', 'Honduras', 'Belarus', 'Micronesia', 'Russia', 'Panama', 'Israel', 'Kenya', 'Maldives', 'Iran', 'Bosnia and Herzegovina', 'Afghanistan', 'Egypt', 'Croatia', 'Barbados', 'Bolivia', 'Tunisia', 'Vietnam', 'Costa Rica', 'Mauritius', 'Oman', 'Jamaica', 'Nigeria', 'Montenegro', 'Bahamas', 'Iraq', 'Cambodia', 'Bangladesh', 'Azerbaijan', 'Nepal', 'Ghana', 'Mongolia', 'Timor Leste', 'Bhutan', 'Cameroon', 'Brunei', 'Liberia', 'Saudi Arabia', 'Ethiopia', 'Pakistan', 'Papua New Guinea', 'Venezuela', 'Namibia', 'Albania', 'Guyana', 'Syria', 'Nicaragua', 'Kyrgyzstan', 'Malta', 'Haiti', 'Cape Verde', 'Samoa', 'Uzbekistan', 'Qatar', 'Myanmar', 'Benin', 'Mauritania', 'Mozambique', 'Algeria', 'Zambia', 'Solomon Islands', 'Kiribati', 'Kuwait', 'Armenia', 'Jordan', 'Burkina Faso', 'Andorra', 'Palau', 'Botswana', 'Mali', 'Bahrain', 'Rwanda', 'Senegal', 'Belize', 'United Arab Emirates', 'Fiji', 'Vanuatu', 'Libya', 'Suriname', 'Cuba', 'Laos', 'Togo', 'Tonga', 'Eswatini', 'Angola', 'Tajikistan', 'Ivory Coast', 'Guinea', 'Zimbabwe', 'Malawi', 'Marshall Islands', 'Burundi', 'Niger', 'Madagascar', 'Sudan', 'Somalia', 'Turkmenistan', 'Tuvalu', 'Seychelles', 'South Sudan', 'Sao Tome and Principe', 'Central African Republic', 'Sierra Leone', 'Yemen', 'Democratic Republic Of The Congo', 'San Marino', 'Chad', 'Palestine', 'Vatican City', 'Nauru', 'Kazakhstan', 'Equatorial Guinea', 'Lesotho', 'Monaco', 'North Korea', 'Saint Kitts and Nevis', 'Liechtenstein', 'Djibouti', 'Comoros', 'Gambia', 'Gabon', 'Eritrea', 'Guinea-Bissau'
+];
+
 export function SearchForm({ 
   onSearch, 
   isLoading, 
@@ -71,8 +92,8 @@ export function SearchForm({
   const [extractionFields, setExtractionFields] = useState<string[]>(initialFilters.extraction_fields || [])
   
   // Overton-specific fields
-  const [sourceCountry, setSourceCountry] = useState(initialFilters.source_country || '')
-  const [sourceType, setSourceType] = useState(initialFilters.source_type || '')
+  const [sourceCountry, setSourceCountry] = useState(initialFilters.source_country || 'All')
+  const [sourceType, setSourceType] = useState(initialFilters.source_type || 'all')
   const [semanticSearch, setSemanticSearch] = useState(
     initialFilters.semantic_search ?? (initialFilters.source === 'overton' ? true : false)
   )
@@ -90,8 +111,8 @@ export function SearchForm({
     maxResults: initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString(),
     inclusionCriteria: initialFilters.inclusion_criteria || '',
     extractionFields: initialFilters.extraction_fields || [],
-    sourceCountry: initialFilters.source_country || '',
-    sourceType: initialFilters.source_type || '',
+    sourceCountry: initialFilters.source_country || 'All',
+    sourceType: initialFilters.source_type || 'all',
     semanticSearch: initialFilters.semantic_search ?? false,
   }
 
@@ -106,8 +127,8 @@ export function SearchForm({
     setMaxResults(initialFilters.max_results?.toString() || SEARCH_DEFAULTS.MAX_RESULTS.toString())
     setInclusionCriteria(initialFilters.inclusion_criteria || '')
     setExtractionFields(initialFilters.extraction_fields || [])
-    setSourceCountry(initialFilters.source_country || '')
-    setSourceType(initialFilters.source_type || '')
+    setSourceCountry(initialFilters.source_country || 'All')
+    setSourceType(initialFilters.source_type || 'all')
     setSemanticSearch(
       initialFilters.semantic_search ?? (initialFilters.source === 'overton' ? true : false)
     )
@@ -133,8 +154,8 @@ export function SearchForm({
     setMaxResults(initialValues.maxResults)
     setInclusionCriteria(initialValues.inclusionCriteria)
     setExtractionFields([...initialValues.extractionFields])
-    setSourceCountry(initialValues.sourceCountry)
-    setSourceType(initialValues.sourceType)
+    setSourceCountry('All')
+    setSourceType('all')
     setSemanticSearch(
       initialValues.semanticSearch !== undefined
         ? initialValues.semanticSearch
@@ -397,16 +418,41 @@ function AdvancedOptions({
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="sourceCountry">Source Country</Label>
-            <Input
-              id="sourceCountry"
-              placeholder="e.g., USA, UK, France"
+            <Select
               value={sourceCountry}
-              onChange={(e) => setSourceCountry(e.target.value)}
-            />
+              onValueChange={setSourceCountry}
+            >
+              <SelectTrigger id="sourceCountry">
+                <SelectValue placeholder="Select country or region" />
+              </SelectTrigger>
+              <SelectContent className="max-h-72 overflow-y-auto">
+                {/* Special regions at the top */}
+                {SPECIAL_REGIONS.map(region => (
+                  <SelectItem key={region} value={region}>
+                    {region}
+                  </SelectItem>
+                ))}
+                {/* Divider */}
+                <div className="border-t my-1" />
+                {/* Country list */}
+                {[...COUNTRY_LIST].sort((a, b) => a.localeCompare(b)).map(country => (
+                  <SelectItem key={country.toLowerCase().replace(/\s+/g, '_')} value={country}>
+                    {country}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           
           <div className="space-y-2">
-            <Label htmlFor="sourceType">Source Type</Label>
+            <Label htmlFor="sourceType" className="flex items-center gap-1">
+              Source Type
+              <Tooltip content="Type of organization that published the policy document: e.g., Government, Think Tank, IGO. The 'All' option also includes Legislative and Judicial Bodies.">
+                <span tabIndex={0} className="focus:outline-none cursor-pointer">
+                  <Info className="w-3.5 h-3.5 text-muted-foreground" aria-label="Info about source type" />
+                </span>
+              </Tooltip>
+            </Label>
             <Select value={sourceType} onValueChange={setSourceType}>
               <SelectTrigger id="sourceType">
                 <SelectValue placeholder="Select source type" />
@@ -416,7 +462,6 @@ function AdvancedOptions({
                 <SelectItem value="government">Government</SelectItem>
                 <SelectItem value="igo">IGO</SelectItem>
                 <SelectItem value="think tank">Think Tank</SelectItem>
-                <SelectItem value="legislative body">Legislative Body</SelectItem>
               </SelectContent>
             </Select>
           </div>
