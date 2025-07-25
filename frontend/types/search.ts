@@ -33,6 +33,10 @@ export interface SearchParams {
     source_type?: string
     published_on?: string
     overton_url?: string
+    // AI-generated summary
+    top_line?: string
+    // Extracted fields (dynamically added based on extraction_fields parameter)
+    [key: string]: string | number | boolean | string[] | undefined
   }
   
   export interface SearchResult {

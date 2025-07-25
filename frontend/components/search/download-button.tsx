@@ -87,6 +87,7 @@ export function DownloadButton({ downloadKey, disabled, className }: DownloadBut
       disabled={disabled || isDownloading}
       variant="outline"
       className={className}
+      data-download-key={downloadKey}
     >
       <Download className="h-4 w-4 mr-2" />
       {isDownloading ? 'Downloading...' : 'Download CSV'}

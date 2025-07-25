@@ -6,6 +6,8 @@ import { useUser } from '@clerk/nextjs'
 import { SearchForm } from '@/components/search/search-form'
 import { SearchSummary } from '@/components/search/search-summary'
 import { PapersList } from '@/components/search/papers-list'
+import { PapersTable } from '@/components/search/papers-table'
+import { ViewToggle } from '@/components/search/view-toggle'
 import { ErrorMessage } from '@/components/search/error-message'
 import { AiSummary } from '@/components/search/ai-summary'
 import { DownloadButton } from '@/components/search/download-button'
@@ -20,6 +22,7 @@ export default function SearchPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [screeningEnabled, setScreeningEnabled] = useState(true)
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table')
   const { fetchWithAuth } = useAPI()
   const { user } = useUser()
 
@@ -111,13 +114,22 @@ export default function SearchPage() {
         <>
           <SearchSummary results={results} />
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Results</h2>
+            <div className="flex items-center space-x-4">
+              <h2 className="text-xl font-semibold">Results</h2>
+              <ViewToggle currentView={viewMode} onViewChange={setViewMode} />
+            </div>
             <DownloadButton 
               downloadKey={results.download_key} 
               className="ml-4"
             />
           </div>
-          <PapersList papers={results.papers} />
+          {viewMode === 'cards' ? (
+            <PapersList papers={results.papers} />
+          ) : (
+            <PapersTable 
+              papers={results.papers} 
+            />
+          )}
           <AiSummary 
             papers={results.papers} 
             extractionFields={Object.keys(results.papers?.[0] || {}).filter(k => k.startsWith('extra_field_'))} 
