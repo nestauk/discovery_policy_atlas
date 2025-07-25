@@ -24,6 +24,11 @@ class ScreeningService:
                 "description": "Brief explanation of why it is or isn't relevant",
             },
             {
+                "name": "top_line",
+                "type": "str",
+                "description": "A concise, one-sentence top line summary with 15 words max, that clearly states the main takeaway or insight as it directly answers the research question or search query. Use clear, declarative language without introductory phrases (e.g. avoid 'This document outlines...'). Focus on delivering the core message or conclusion in plain terms, as if highlighting the key point for an executive summary.",
+            },
+            {
                 "name": "confidence",
                 "type": "float",
                 "description": "Confidence score from 0.0 to 1.0",

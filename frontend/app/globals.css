@@ -51,8 +51,8 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.145 0 0);
+  --primary-foreground: oklch(1 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
@@ -233,4 +233,75 @@
 html, body {
   height: 100%;
   /* overflow: hidden; */
+}
+
+/* Ant Design integration */
+.ant-table-wrapper {
+  @apply rounded-lg border border-gray-200 bg-white;
+}
+
+.ant-table-thead > tr > th {
+  @apply bg-gray-50 font-semibold text-gray-700 py-2;
+}
+
+.ant-table-tbody > tr > td {
+  @apply border-gray-200 py-2 bg-white;
+}
+
+.ant-table-tbody > tr:hover > td {
+  @apply bg-green-50;
+}
+
+.ant-table-tbody > tr.bg-green-50 > td {
+  @apply bg-green-50;
+}
+
+/* Force table background colors with higher specificity */
+.ant-table-wrapper {
+  background-color: white !important;
+}
+
+.ant-table-tbody > tr > td {
+  background-color: white !important;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background-color: #f0fdf4 !important; /* green-50 */
+}
+
+.ant-btn {
+  @apply rounded-md;
+}
+
+.ant-btn-primary {
+  color: white !important;
+}
+
+.ant-btn-default {
+  color: #000 !important;
+}
+
+.ant-input {
+  @apply rounded-md;
+}
+
+.ant-tag {
+  @apply text-xs;
+}
+
+/* shadcn/ui Button fixes - only for primary buttons */
+button[data-slot="button"][class*="bg-primary"] {
+  color: white !important;
+}
+
+/* Ensure primary buttons have white text */
+button[data-slot="button"]:has([class*="bg-primary"]) {
+  color: white !important;
+}
+
+/* Utility classes */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

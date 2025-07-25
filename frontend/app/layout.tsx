@@ -1,5 +1,6 @@
 // import { Inter } from 'next/font/google'
 import './globals.css'
+import 'antd/dist/reset.css'
 import { LayoutWrapper } from '@/components/layout-wrapper';
 
 export const metadata = {
