@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useMemo } from 'react'
-import { Table, Input, Button, Space } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
-import type { ColumnsType, ColumnType } from 'antd/es/table'
+import { useMemo } from 'react'
+import { Table } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import type { Paper } from '@/types/search'
 
 interface PapersTableProps {
@@ -18,9 +17,6 @@ interface DataType extends Paper {
 }
 
 export function PapersTable({ papers }: PapersTableProps) {
-  const [searchText, setSearchText] = useState('')
-  const [searchedColumn, setSearchedColumn] = useState<string>('')
-
   // Transform papers data for the table
   const tableData: DataType[] = useMemo(() => {
     return papers.map((paper) => ({
@@ -59,119 +55,7 @@ export function PapersTable({ papers }: PapersTableProps) {
     }))
   }, [papers])
 
-  // Filter data based on search text
-  const filteredData = useMemo(() => {
-    if (!searchText) return tableData
-    
-    return tableData.filter((record) => {
-      const searchLower = searchText.toLowerCase()
-      // Check base fields
-      const baseMatch = (
-        record.title.toLowerCase().includes(searchLower) ||
-        record.authorsDisplay.toLowerCase().includes(searchLower) ||
-        record.source_country?.toLowerCase().includes(searchLower) ||
-        record.top_line?.toLowerCase().includes(searchLower) ||
-        record.publication_year.toString().includes(searchLower) ||
-        record.cited_by_count.toString().includes(searchLower) ||
-        (record.confidence && record.confidence.toString().includes(searchLower))
-      )
-      
-      // Check extracted fields
-      const extractedMatch = extractedFields.some(field => {
-        const value = record[field.dataIndex as keyof DataType]
-        return value && String(value).toLowerCase().includes(searchLower)
-      })
-      
-      return baseMatch || extractedMatch
-    })
-  }, [tableData, searchText])
 
-  // Search functionality
-  const handleSearch = (
-    selectedKeys: string[],
-    confirm: () => void,
-    dataIndex: keyof DataType,
-  ) => {
-    confirm()
-    setSearchText(selectedKeys[0])
-    setSearchedColumn(dataIndex)
-  }
-
-  const handleReset = (clearFilters: () => void) => {
-    clearFilters()
-    setSearchText('')
-  }
-
-  const getColumnSearchProps = (dataIndex: keyof DataType): ColumnType<DataType> => ({
-    filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters, close }) => (
-      <div style={{ padding: 8 }} onKeyDown={(e) => e.stopPropagation()}>
-        <Input
-          placeholder={`Search ${dataIndex}`}
-          value={selectedKeys[0]}
-          onChange={(e) => setSelectedKeys(e.target.value ? [e.target.value] : [])}
-          onPressEnter={() => handleSearch(selectedKeys as string[], confirm, dataIndex)}
-          style={{ marginBottom: 8, display: 'block' }}
-        />
-        <Space>
-          <Button
-            type="primary"
-            onClick={() => handleSearch(selectedKeys as string[], confirm, dataIndex)}
-            icon={<SearchOutlined />}
-            size="small"
-            style={{ width: 90 }}
-          >
-            Search
-          </Button>
-          <Button
-            onClick={() => clearFilters && handleReset(clearFilters)}
-            size="small"
-            style={{ width: 90 }}
-          >
-            Reset
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              confirm({ closeDropdown: false })
-              setSearchText((selectedKeys as string[])[0])
-              setSearchedColumn(dataIndex)
-            }}
-          >
-            Filter
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              close()
-            }}
-          >
-            Close
-          </Button>
-        </Space>
-      </div>
-    ),
-    filterIcon: (filtered: boolean) => (
-      <SearchOutlined style={{ color: filtered ? '#1677ff' : undefined }} />
-    ),
-    onFilter: (value, record): boolean =>
-      record[dataIndex]
-        ?.toString()
-        .toLowerCase()
-        .includes((value as string).toLowerCase()) || false,
-    onFilterDropdownOpenChange: (visible) => {
-      if (visible) {
-        setTimeout(() => document.getElementById('search-input')?.focus(), 100)
-      }
-    },
-    render: (text) =>
-      searchedColumn === dataIndex ? (
-        <span style={{ backgroundColor: '#ffc069' }}>{text}</span>
-      ) : (
-        text
-      ),
-  })
 
   // Combine base columns with extracted field columns
   const columns: ColumnsType<DataType> = [
@@ -188,7 +72,6 @@ export function PapersTable({ papers }: PapersTableProps) {
       dataIndex: 'title',
       key: 'title',
       width: '25%',
-      ...getColumnSearchProps('title'),
       render: (text, record) => (
         <a 
           href={record.doi ? `${record.doi}` : record.overton_url} 
@@ -264,13 +147,13 @@ export function PapersTable({ papers }: PapersTableProps) {
     <div className="space-y-4">
       <div className="flex justify-end">
         <div className="text-sm text-gray-500">
-          Showing {filteredData.length} results
+          Showing {tableData.length} results
         </div>
       </div>
       
       <Table
         columns={columns}
-        dataSource={filteredData}
+        dataSource={tableData}
         pagination={{
           pageSize: 20,
           showSizeChanger: true,
