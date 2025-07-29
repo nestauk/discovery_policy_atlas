@@ -1,0 +1,31 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [ dev, create_docs ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v1
+      with:
+        version: "latest"
+    
+    - name: Install dependencies
+      run: |
+        cd backend
+        uv sync
+    
+    - name: Build and deploy with mkdocs
+      run: |
+        cd backend
+        uv run mkdocs gh-deploy --config-file ../mkdocs.yml --force 

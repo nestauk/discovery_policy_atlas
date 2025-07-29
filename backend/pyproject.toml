@@ -33,6 +33,9 @@ override-dependencies = [
 dev = [
     "pytest>=8.3.5",
     "pytest-asyncio>=1.0.0",
-    "pre-commit>=3.6.0",  # For managing git hooks
-    "ruff>=0.3.0",        # Python linter and formatter
+    "pre-commit>=3.6.0", # For managing git hooks
+    "ruff>=0.3.0", # Python linter and formatter
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.6.14",
+    "mkdocstrings[python]>=0.29.1",
 ]
