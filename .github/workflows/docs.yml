@@ -2,9 +2,9 @@ name: Deploy Documentation
 
 on:
   push:
-    branches: [ main ]
+    branches: [ dev, create_docs ]
   pull_request:
-    branches: [ main ]
+    branches: [ dev ]
 
 jobs:
   deploy:
@@ -37,7 +37,7 @@ jobs:
         cp docs/CNAME site/CNAME
     
     - name: Deploy to GitHub Pages
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/create_docs'
       uses: peaceiris/actions-gh-pages@v3
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
