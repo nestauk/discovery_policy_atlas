@@ -29,13 +29,18 @@ jobs:
       run: |
         cd backend
         uv run mkdocs build --config-file ../mkdocs.yml --site-dir ../site
+        ls -la ../site
     
-
+    - name: Debug site directory
+      run: |
+        echo "Current directory: $(pwd)"
+        echo "Site directory contents:"
+        ls -la site/
+        echo "Site directory exists: $(test -d site && echo 'YES' || echo 'NO')"
     
     - name: Deploy to GitHub Pages
       if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/create_docs'
       uses: peaceiris/actions-gh-pages@v3
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./site
-        cname: your-domain.com  # Optional: if you have a custom domain 
+        publish_dir: ./site 
