@@ -25,20 +25,7 @@ jobs:
         cd backend
         uv sync
     
-    - name: Build documentation
+    - name: Build and deploy with mkdocs
       run: |
         cd backend
-        uv run mkdocs build --config-file ../mkdocs.yml --site-dir site
-    
-    - name: Debug site directory
-      run: |
-        echo "Current directory: $(pwd)"
-        echo "Contents of backend/site:"
-        ls -la backend/site/
-    
-    - name: Deploy to GitHub Pages
-      if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/create_docs'
-      uses: peaceiris/actions-gh-pages@v3
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: backend/site 
+        uv run mkdocs gh-deploy --config-file ../mkdocs.yml --force 
