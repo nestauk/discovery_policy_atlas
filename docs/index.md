@@ -1,4 +1,4 @@
-# 🌐 Policy Atlas Documentation
+# 🌐 Policy Atlas
 
 Welcome to the Policy Atlas documentation! This comprehensive guide will help you understand, set up, and contribute to our AI-powered policy design platform.
 
