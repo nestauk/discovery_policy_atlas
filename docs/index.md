@@ -1,27 +1,34 @@
 # 🌐 Policy Atlas
 
-Welcome to the Policy Atlas documentation! This comprehensive guide will help you understand, set up, and contribute to our AI-powered policy design platform.
+Policy Atlas is a web application designed to streamline policy evidence exploration. The app will help policy analysts and researchers to **search** and **synthesise** policy evidence, and **simulate** policy interventions.
 
-## 🎯 What is Policy Atlas?
+This technical documentation will help you understand, set up, and contribute to our AI-powered policy design platform. 
 
-Policy Atlas is a web application designed to streamline policy evidence exploration. We're harnessing AI to improve policy design, helping users search, synthesise, and simulate policy interventions.
+⚠️ This is a work-in-progress and subject to substantial changes in the next few months!
 
-### Key Features
+## Tech Stack
 
-- **🔍 Search**: Query academic and policy papers from multiple sources
-- **🧠 Synthesis**: AI-powered research synthesis across multiple sources
-- **🎯 Simulation**: Policy outcome modeling based on evidence
-- **📊 Analysis**: Advanced screening and analysis tools
+### Frontend
+- **Next.js 14** (App Router) - React framework
+- **TypeScript** - Type safety
+- **Tailwind CSS** - Styling
+- **Clerk** - Authentication
 
-## 🚀 Quick Start
+### Backend
+- **FastAPI** - Python web framework
+- **uv** - Python package manager
+- **OpenAlex API** - Academic paper database
+- **Overton API** - Grey literature database
+
+
+<!-- ## Quick Start
 
 1. **[Installation](getting-started/installation.md)** - Set up your development environment
-2. **[Configuration](getting-started/configuration.md)** - Configure the application
-3. **[API Reference](backend/api-reference.md)** - Explore the backend API
+2. **[API Reference](backend/api-reference.md)** - Explore the backend API
 4. **[Interactive API Docs](http://localhost:8000/docs)** - Test endpoints directly in your browser
 5. **[Frontend Guide](frontend/overview.md)** - Understand the React/Next.js frontend
 
-## 🏗️ Architecture
+## Architecture
 
 Policy Atlas consists of two main components:
 
@@ -93,4 +100,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Need help?** Check out our [Getting Started](getting-started/quick-start.md) guide or open an issue on GitHub. 
+**Need help?** Check out our [Getting Started](getting-started/quick-start.md) guide or open an issue on GitHub.  -->

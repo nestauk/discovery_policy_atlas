@@ -44,29 +44,13 @@ dev_addr: 127.0.0.1:8080
 # Navigation
 nav:
   - Home: index.md
-  - Getting Started:
-    - Quick Start: getting-started/quick-start.md
-    - Installation: getting-started/installation.md
-    - Configuration: getting-started/configuration.md
+  - Setup:
+    - Installation: setup/installation.md
   - Backend:
     - Overview: backend/overview.md
-    - API Reference: backend/api-reference.md
-    - Services: backend/services.md
-    - Database: backend/database.md
-    - Models: backend/models.md
+    - API documentation: backend/api.md
   - Frontend:
     - Overview: frontend/overview.md
-    - Components: frontend/components.md
-    - Pages: frontend/pages.md
-    - State Management: frontend/state.md
-  - Development:
-    - Contributing: development/contributing.md
-    - Testing: development/testing.md
-    - Deployment: development/deployment.md
-  - API Documentation:
-    - Interactive Docs: api/interactive-docs.md
-    - OpenAPI: api/openapi.md
-    - Endpoints: api/endpoints.md
 
 # Markdown extensions
 markdown_extensions:
