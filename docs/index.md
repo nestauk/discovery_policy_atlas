@@ -8,6 +8,9 @@ This technical documentation will help you understand, set up, and contribute to
 
 ## Tech Stack
 
+We are using **Next.js** for frontend (a framework based on javascript) and Python for backend. 
+We're still early in development (validating the concept) and hence this might change over time.
+
 ### Frontend
 - **Next.js 15** - React framework with App Router
 - **React 19** - UI library
