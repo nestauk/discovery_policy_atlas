@@ -96,6 +96,13 @@ class Settings(BaseSettings):
     # LLM Configuration
     OPENAI_API_KEY: Optional[str] = None
 
+    # Supabase Configuration
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_KEY: Optional[str] = None
+
+    # Development/Testing
+    MOCK_OPENAI: bool = False
+
     # LLM Model Settings
     LLM_PROVIDER: str = "openai"  # "openai" or "anthropic"
     LLM_MODEL: str = "gpt-4o-mini"  # or "claude-3-haiku-20240307"
