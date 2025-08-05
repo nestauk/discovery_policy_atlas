@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Search, Brain, Beaker, ExternalLink, Mail, ArrowRight, ChevronDown, Database } from 'lucide-react'
 import { useState } from 'react'
 
@@ -46,11 +47,21 @@ export default function HomePage() {
       {/* Welcome Section */}
       <section id="welcome" className="space-y-6">
         <div className="text-center space-y-4">
-          <h1 className="text-4xl font-bold tracking-tight">Welcome to Policy Atlas</h1>
+          <div className="flex items-center justify-center gap-3">
+            <h1 className="text-4xl font-bold tracking-tight">Welcome to Policy Atlas</h1>
+            <Tooltip content={
+              <p className="max-w-xs">
+                Alpha means this is an early prototype with limited functionality. 
+                Features may be incomplete, unstable, or subject to change. 
+                We&apos;re actively developing and improving the tool.
+              </p>
+            }>
+              <Badge variant="default" className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1 -mt-2">ALPHA</Badge>
+            </Tooltip>
+          </div>
           <p className="text-xl max-w-4xl mx-auto leading-relaxed">
-            Policy Atlas is a new AI-powered tool being developed by <Link href="https://www.nesta.org.uk" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">Nesta</Link> to help UK policymakers quickly explore, 
-            synthesise and simulate policy evidence. 
-            It will enable faster, deeper engagement with complex research and policy data, supporting more innovative and effective policymaking.
+            AI-powered tool for UK policymakers, developed by <Link href="https://www.nesta.org.uk" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">Nesta</Link>
+          
           </p>
         </div>
 
@@ -93,8 +104,15 @@ export default function HomePage() {
             </div>
 
             <div className="flex flex-wrap gap-3 pt-4">
+                          <Link href="/agent">
+              {/* <Button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Brain className="h-4 w-4" />
+                  New: AI Evidence Synthesis
+                  <ArrowRight className="h-4 w-4" />
+                </Button> */}
+              </Link>
               <Link href="/dashboard/search">
-                <Button className="flex items-center gap-2">
+                <Button type="submit" className="flex items-center gap-2">
                   <Search className="h-4 w-4" />
                   Start searching
                   <ArrowRight className="h-4 w-4" />
@@ -114,7 +132,7 @@ export default function HomePage() {
       {/* Getting Started Guide */}
       <section id="getting-started" className="space-y-8">
         <div className="text-center">
-          <h2 className="text-3xl font-bold tracking-tight">Getting Started</h2>
+          <h2 className="text-3xl font-bold tracking-tight">User tutorial</h2>
           <p className="text-muted-foreground mt-2">
             Follow this tutorial to make the most of Policy Atlas
           </p>

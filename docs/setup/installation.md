@@ -85,6 +85,10 @@ OVERTON_API_KEY=
 LLM_SERVICE=OpenAI
 OPENAI_API_KEY=
 
+# Supabase logging (optional)
+SUPABASE_URL=
+SUPABASE_KEY=
+
 # Clerk auth
 CLERK_SECRET_KEY=
 CLERK_PUBLISHABLE_KEY=
@@ -92,6 +96,9 @@ CLERK_JWT_ISSUER=
 
 # Allowed incoming sources to backend API calls
 BACKEND_CORS_ORIGINS = your-app.url,http://localhost:3000
+
+# Development/testing
+MOCK_OPENAI=false
 ```
 
 ## Step 4: Database setup

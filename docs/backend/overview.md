@@ -45,6 +45,7 @@ backend/
 │   │
 │   ├── services/                   # Business logic services
 │   │   ├── download.py             # File download service
+│   │   ├── logging.py              # Supabase logging service
 │   │   ├── mediacloud.py           # MediaCloud API integration
 │   │   ├── openalex.py             # OpenAlex API integration
 │   │   ├── overton.py              # Overton API integration
@@ -108,3 +109,20 @@ The JWT issuer URL is provided by Clerk and used to validate tokens. The backend
 ### Protected endpoints
 
 All main API endpoints (search, synthesis) require authentication. The `/health` endpoint is public for monitoring purposes.
+
+## Database
+
+We're experimenting with Supabase as a database solution. For example, we're using it to implement logging user search queries.
+
+### Example Schema
+
+```sql
+CREATE TABLE searches (
+  search_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  search_query TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+

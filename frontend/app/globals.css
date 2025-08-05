@@ -299,6 +299,12 @@ button[data-slot="button"]:has([class*="bg-primary"]) {
   color: white !important;
 }
 
+/* Blue button fixes - ensure white text on blue backgrounds */
+button[data-slot="button"][class*="bg-blue-600"],
+button[data-slot="button"][class*="bg-blue-700"] {
+  color: white !important;
+}
+
 /* Utility classes */
 .truncate {
   overflow: hidden;

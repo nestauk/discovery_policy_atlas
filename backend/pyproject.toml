@@ -23,6 +23,8 @@ dependencies = [
     "psycopg2-binary>=2.9.10",
     "pyjwt>=2.10.1",
     "cryptography>=45.0.3",
+    "openai>=1.0.0",
+    "supabase>=2.0.0",
 ]
 
 [tool.uv]
