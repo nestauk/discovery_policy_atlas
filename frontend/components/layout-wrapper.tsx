@@ -14,11 +14,12 @@ export function LayoutWrapper({
 }) {
   const pathname = usePathname();
   const isLoginPage = pathname === '/login';
+  const isAgentPage = pathname?.startsWith('/agent');
 
   return (
     <ClerkProvider>
       <body className={inter.className}>
-        {!isLoginPage && <Header />}
+        {!isLoginPage && !isAgentPage && <Header />}
         {children}
       </body>
     </ClerkProvider>

@@ -93,10 +93,17 @@ export default function HomePage() {
             </div>
 
             <div className="flex flex-wrap gap-3 pt-4">
+                          <Link href="/agent">
+              <Button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700">
+                  <Brain className="h-4 w-4" />
+                  New: AI Evidence Synthesis
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
               <Link href="/dashboard/search">
-                <Button className="flex items-center gap-2">
+                <Button variant="outline" className="flex items-center gap-2">
                   <Search className="h-4 w-4" />
-                  Start searching
+                  Classic Search
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
