@@ -4,8 +4,9 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Search } from 'lucide-react'
-
 
 
 export default function AgentSearchPage() {
@@ -32,9 +33,20 @@ export default function AgentSearchPage() {
             {/* <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
               <Search className="h-8 w-8 text-white" />
             </div> */}
-            <h1 className="text-4xl font-bold text-slate-900 mb-4">
-              Find global policy evidence
-            </h1>
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <h1 className="text-4xl font-bold text-slate-900">
+                Find global policy evidence
+              </h1>
+              <Tooltip content={
+                <p className="max-w-xs">
+                  Alpha means this is an early prototype with limited functionality. 
+                  Features may be incomplete, unstable, or subject to change. 
+                  We&apos;re actively developing and improving the tool.
+                </p>
+              }>
+                <Badge variant="default" className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-2 py-0.5 -mt-1">ALPHA</Badge>
+              </Tooltip>
+            </div>
             <p className="text-lg text-slate-600 max-w-2xl mx-auto">
               
             </p>
@@ -51,7 +63,7 @@ export default function AgentSearchPage() {
                   </label>
                   <div className="relative">
                     <textarea
-                      placeholder="e.g., What are the most effective interventions for reducing childhood obesity?"
+                      placeholder="e.g., What are the most effective parenting interventions?"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       className="w-full min-h-[120px] p-4 text-base border border-slate-200 rounded-md focus:border-blue-500 focus:ring-blue-500 resize-y"
