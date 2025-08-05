@@ -59,7 +59,7 @@ export default function AgentSearchPage() {
                 {/* Research Question */}
                 <div>
                   <label className="block font-medium text-slate-700 mb-3">
-                    Research Question
+                    Research question
                   </label>
                   <div className="relative">
                     <textarea

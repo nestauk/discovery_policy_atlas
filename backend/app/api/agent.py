@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List
@@ -7,6 +7,7 @@ import asyncio
 import logging
 from openai import AsyncOpenAI
 from app.core.config import settings
+from app.core.auth import get_current_user, CurrentUser
 from app.services.logging import logging_service
 
 logger = logging.getLogger(__name__)
@@ -34,13 +35,17 @@ class LogSearchRequest(BaseModel):
 
 
 @router.post("/api/agent/log-search")
-async def log_search(request: LogSearchRequest):
+async def log_search(
+    request: LogSearchRequest, current_user: CurrentUser = Depends(get_current_user)
+):
     """
     Log a search query to Supabase
     """
     try:
         search_id = await logging_service.log_search(
-            project_id=request.project_id, search_query=request.search_query
+            project_id=request.project_id,
+            search_query=request.search_query,
+            user_id=current_user.user_id,
         )
 
         if search_id:
@@ -54,10 +59,12 @@ async def log_search(request: LogSearchRequest):
 
 
 @router.get("/api/agent/debug")
-async def debug_agent():
+async def debug_agent(current_user: CurrentUser = Depends(get_current_user)):
     """Debug endpoint to test authentication"""
     return {
         "message": "Agent API is working!",
+        "user_id": current_user.user_id,
+        "email": current_user.email,
         "openai_configured": bool(settings.OPENAI_API_KEY),
     }
 
@@ -162,7 +169,10 @@ Example format:
 
 
 @router.post("/api/agent/refine-query")
-async def refine_query(request: QueryRefinementRequest):
+async def refine_query(
+    request: QueryRefinementRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     Generate refined query suggestions using AI
     """
@@ -183,7 +193,10 @@ async def refine_query(request: QueryRefinementRequest):
 
 
 @router.post("/api/agent/refine-query/stream")
-async def refine_query_stream(request: QueryRefinementRequest):
+async def refine_query_stream(
+    request: QueryRefinementRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     Stream refined query suggestions using AI
     """

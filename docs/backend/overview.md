@@ -114,3 +114,15 @@ All main API endpoints (search, synthesis) require authentication. The `/health`
 
 We're experimenting with Supabase as a database solution. For example, we're using it to implement logging user search queries.
 
+### Example Schema
+
+```sql
+CREATE TABLE searches (
+  search_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  search_query TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+

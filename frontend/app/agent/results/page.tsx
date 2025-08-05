@@ -16,7 +16,9 @@ import {
   Shield,
   Lightbulb,
   BookOpen,
-  Star
+  Star,
+  ArrowRight,
+  ChevronDown
 } from 'lucide-react'
 
 // Mock data for the results
@@ -67,6 +69,7 @@ const mockResults = {
 
 export default function ResultsPage() {
   const [activeTab, setActiveTab] = useState('summary')
+  const [expandedRecommendation, setExpandedRecommendation] = useState<number | null>(null)
   const router = useRouter()
   const urlSearchParams = useSearchParams()
 
@@ -76,6 +79,10 @@ export default function ResultsPage() {
 
   const handleNewSearch = () => {
     router.push('/agent')
+  }
+
+  const toggleRecommendation = (index: number) => {
+    setExpandedRecommendation(expandedRecommendation === index ? null : index)
   }
 
   return (
@@ -232,12 +239,176 @@ export default function ResultsPage() {
             </TabsContent>
 
             <TabsContent value="policy" className="p-6 m-0">
-              <div className="flex items-center justify-center h-96">
-                <div className="text-center">
-                  <TrendingUp className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-slate-900 mb-2">Policy Analysis</h3>
-                  <p className="text-slate-600">Policy recommendations and analysis coming soon</p>
+              <div className="w-full max-w-4xl mx-auto">
+                {/* Policy Recommendations Section */}
+                <div className="mb-8">
+                  <div className="space-y-3">
+                    {[
+                      "Implement stricter regulations on youth-targeted vaping products.",
+                      "Consider public health impacts in product approval processes.",
+                      "Enhance enforcement against illegal vape products to protect youth.",
+                      "Develop comprehensive public health campaigns to educate about vaping risks.",
+                      "Collaborate with international bodies to harmonize vaping product regulations."
+                    ].map((recommendation, index) => (
+                      <Card 
+                        key={index} 
+                        className="border border-slate-200 bg-white cursor-pointer hover:shadow-md transition-shadow"
+                        onClick={() => toggleRecommendation(index)}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex items-center gap-4">
+                            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
+                              <span className="text-white font-semibold text-sm">
+                                {index + 1}
+                              </span>
+                            </div>
+                            <p className="text-slate-900 flex-1 leading-tight">
+                              {recommendation}
+                            </p>
+                            <div 
+                              className="flex-shrink-0 cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleRecommendation(index)
+                              }}
+                            >
+                              {expandedRecommendation === index ? (
+                                <ChevronDown className="h-4 w-4 text-slate-400" />
+                              ) : (
+                                <ArrowRight className="h-4 w-4 text-slate-400" />
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Expanded Content */}
+                          {expandedRecommendation === index && (
+                            <div className="mt-4 pt-4 border-t border-slate-200">
+                              <div className="space-y-4">
+                                {/* Best Evidence */}
+                                <div>
+                                  <h4 className="font-medium text-slate-900 mb-2">Evidence</h4>
+                                  <div className="bg-slate-50 rounded-lg p-3">
+                                    <p className="text-sm text-slate-700 mb-2">
+                                      {index === 0 && '"Countries with comprehensive vaping restrictions saw 35% reduction in youth initiation rates."'}
+                                      {index === 1 && '"Public health impact assessments in product approval processes reduced harmful product introductions by 42%."'}
+                                      {index === 2 && '"Enhanced enforcement programs resulted in 60% reduction in illegal vape product availability in schools."'}
+                                      {index === 3 && '"Comprehensive public health campaigns led to 28% decrease in youth vaping initiation rates."'}
+                                      {index === 4 && '"International harmonization of vaping regulations reduced cross-border illicit trade by 45%."'}
+                                    </p>
+                                    <div className="flex items-center gap-2 text-xs text-slate-600">
+                                      <span className="font-medium">Source:</span>
+                                      <a 
+                                        href="https://openalex.org/placeholder" 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800 underline"
+                                      >
+                                        {index === 0 && "Rodriguez et al., 2023 - International Policy Review"}
+                                        {index === 1 && "Chen & Williams, 2023 - Public Health Policy"}
+                                        {index === 2 && "Thompson et al., 2023 - Law Enforcement Studies"}
+                                        {index === 3 && "Davis & Kim, 2023 - Health Communication Research"}
+                                        {index === 4 && "Global Policy Institute, 2023 - International Relations"}
+                                      </a>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {/* Implementation Guidance */}
+                                <div>
+                                  <h4 className="font-medium text-slate-900 mb-2">Implementation Guidance</h4>
+                                  <ul className="space-y-2 text-sm text-slate-700">
+                                    {index === 0 && (
+                                      <>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Establish age verification systems for online and retail sales</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Implement flavor restrictions targeting youth appeal</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Set minimum price requirements to reduce affordability</span>
+                                        </li>
+                                      </>
+                                    )}
+                                    {index === 1 && (
+                                      <>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Require health impact assessments for all new vaping products</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Establish independent review panels with public health expertise</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Implement post-market surveillance requirements</span>
+                                        </li>
+                                      </>
+                                    )}
+                                    {index === 2 && (
+                                      <>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Increase penalties for illegal vape product distribution</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Establish dedicated enforcement units with specialized training</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Implement anonymous reporting systems for illegal sales</span>
+                                        </li>
+                                      </>
+                                    )}
+                                    {index === 3 && (
+                                      <>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Develop age-appropriate educational materials for schools</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Partner with healthcare providers for community outreach</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Utilize social media platforms for targeted messaging</span>
+                                        </li>
+                                      </>
+                                    )}
+                                    {index === 4 && (
+                                      <>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Establish bilateral agreements with neighboring countries</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Participate in international vaping policy forums</span>
+                                        </li>
+                                        <li className="flex items-start gap-2">
+                                          <span className="text-blue-600 flex-shrink-0 mt-0.5">•</span>
+                                          <span>Share best practices and enforcement strategies globally</span>
+                                        </li>
+                                      </>
+                                    )}
+                                  </ul>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
                 </div>
+
+
               </div>
             </TabsContent>
 

@@ -29,13 +29,16 @@ class LoggingService:
                 "Supabase credentials not configured - logging will be disabled"
             )
 
-    async def log_search(self, project_id: str, search_query: str) -> Optional[str]:
+    async def log_search(
+        self, project_id: str, search_query: str, user_id: str
+    ) -> Optional[str]:
         """
         Log a search query to Supabase
 
         Args:
             project_id: The project ID (placeholder for now)
             search_query: The user's search query after refinement
+            user_id: The Clerk user ID
 
         Returns:
             search_id: The generated search ID, or None if logging failed
@@ -52,13 +55,16 @@ class LoggingService:
                 "search_id": search_id,
                 "project_id": project_id,
                 "search_query": search_query,
+                "user_id": user_id,
                 "created_at": datetime.utcnow().isoformat(),
             }
 
             # Insert into the searches table
             result = self.supabase.table("searches").insert(search_data).execute()  # noqa: F841
 
-            logger.info(f"Successfully logged search with ID: {search_id}")
+            logger.info(
+                f"Successfully logged search with ID: {search_id} for user: {user_id}"
+            )
             return search_id
 
         except Exception as e:

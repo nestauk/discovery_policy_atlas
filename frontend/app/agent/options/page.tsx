@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ArrowLeft, MessageSquare, Edit3, Loader2 } from 'lucide-react'
+import { useAPI } from '@/lib/api'
 
 export default function OptionsPage() {
   const [originalQuery, setOriginalQuery] = useState('')
@@ -20,6 +21,7 @@ export default function OptionsPage() {
   const queryTextareaRef = useRef<HTMLTextAreaElement>(null)
   const router = useRouter()
   const urlSearchParams = useSearchParams()
+  const { fetchWithAuth } = useAPI()
 
   useEffect(() => {
     const query = urlSearchParams?.get('query') || ''
@@ -59,19 +61,15 @@ export default function OptionsPage() {
     setSuggestedRefinements([]) // Clear previous suggestions
     
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      console.log('Making streaming API call to:', `${baseUrl}/api/agent/refine-query/stream`)
+      console.log('Making streaming API call to: api/agent/refine-query/stream')
       
-      const response = await fetch(`${baseUrl}/api/agent/refine-query/stream`, {
+      const response = await fetchWithAuth('api/agent/refine-query/stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           query: query,
           max_suggestions: 3
         })
-      })
+      }, true)
       
       console.log('Response status:', response.status)
       
@@ -153,25 +151,20 @@ export default function OptionsPage() {
     console.log('handleSelectOriginal called')
     // Log the search
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      console.log('Logging original search to:', `${baseUrl}/api/agent/log-search`)
+      console.log('Logging original search to: api/agent/log-search')
       console.log('Original search data:', {
         project_id: 'test-project',
         search_query: originalQuery
       })
       
-      const response = await fetch(`${baseUrl}/api/agent/log-search`, {
+      const result = await fetchWithAuth('api/agent/log-search', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           project_id: 'test-project',
           search_query: originalQuery
         })
       })
       
-      const result = await response.json()
       console.log('Log original search response:', result)
       
     } catch (err) {
@@ -209,25 +202,20 @@ export default function OptionsPage() {
     console.log('handleSelectRefinement called with:', refinement)
     // Log the search
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      console.log('Logging search to:', `${baseUrl}/api/agent/log-search`)
+      console.log('Logging search to: api/agent/log-search')
       console.log('Search data:', {
         project_id: 'test-project',
         search_query: refinement.title
       })
       
-      const response = await fetch(`${baseUrl}/api/agent/log-search`, {
+      const result = await fetchWithAuth('api/agent/log-search', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           project_id: 'test-project',
           search_query: refinement.title
         })
       })
       
-      const result = await response.json()
       console.log('Log search response:', result)
       
     } catch (err) {
@@ -277,9 +265,7 @@ export default function OptionsPage() {
               variant="outline"
               onClick={async () => {
                 try {
-                  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-                  const response = await fetch(`${baseUrl}/api/agent/debug`);
-                  const data = await response.json();
+                  const data = await fetchWithAuth('api/agent/debug');
                   console.log('Debug response:', data);
                   alert('Check console for debug info');
                 } catch (err) {

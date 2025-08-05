@@ -3,7 +3,7 @@ import { useAuth } from "@clerk/nextjs";
 export function useAPI() {
   const { getToken } = useAuth();
   
-  const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
+  const fetchWithAuth = async (url: string, options: RequestInit = {}, isStreaming: boolean = false) => {
     const token = await getToken();
     
     if (!token) {
@@ -28,7 +28,9 @@ export function useAPI() {
       throw new Error(`API call failed: ${response.statusText}`);
     }
     
-    return response.json();
+    // For streaming responses, return the raw response
+    // For regular API calls, parse as JSON
+    return isStreaming ? response : response.json();
   };
   
   return { fetchWithAuth };
