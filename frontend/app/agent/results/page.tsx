@@ -1,25 +1,32 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { useAPI } from '@/lib/api'
+import { PapersTable } from '@/components/search/papers-table'
+import { ViewToggle } from '@/components/search/view-toggle'
+import { Paper } from '@/types/search'
 import { 
   FileText, 
   Download, 
   Search, 
   TrendingUp,
   Globe,
-  Shield,
   Lightbulb,
   BookOpen,
   Star,
   ArrowRight,
-  ChevronDown
+  ChevronDown,
+  Bot
 } from 'lucide-react'
+import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
+import { ChatInterface } from '@/components/chatbot/ChatInterface'
+import { useChatbotStore } from '@/lib/chatbotStore'
 
 // Mock data for the results
 const mockResults = {
@@ -70,20 +77,113 @@ const mockResults = {
 export default function ResultsPage() {
   const [activeTab, setActiveTab] = useState('summary')
   const [expandedRecommendation, setExpandedRecommendation] = useState<number | null>(null)
+  const [evidenceViewMode, setEvidenceViewMode] = useState<'cards' | 'table'>('cards')
+  const { 
+    isOpen, 
+    setIsOpen, 
+    clearMessages, 
+    searchResults, 
+    searchInProgress, 
+    searchCompleted,
+    setSearchResults,
+    setSearchInProgress,
+    setSearchCompleted,
+    conversationId,
+    setConversationState
+  } = useChatbotStore()
+  const { fetchWithAuth } = useAPI()
   const router = useRouter()
   const urlSearchParams = useSearchParams()
+  const query = urlSearchParams.get('query') || ''
+  const hasAutoOpenedRef = useRef(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+
+  // Trigger search if not already completed
+  useEffect(() => {
+    const performSearch = async () => {
+      if (query && !searchCompleted && !searchInProgress) {
+        setSearchInProgress(true)
+        setSearchError(null)
+        
+        try {
+          const results = await fetchWithAuth('/api/agent/search', {
+            method: 'POST',
+            body: JSON.stringify({ 
+              query,
+              conversation_id: conversationId 
+            })
+          })
+          
+          setSearchResults(results)
+          setSearchCompleted(true)
+          
+          // Update conversation state to chat if evidence was found
+          if (results.conversation_updated) {
+            setConversationState('chat')
+          }
+        } catch (error) {
+          console.error('Search failed:', error)
+          setSearchError(error instanceof Error ? error.message : 'Search failed')
+        } finally {
+          setSearchInProgress(false)
+        }
+      }
+    }
+    
+    performSearch()
+  }, [query, searchCompleted, searchInProgress, conversationId, fetchWithAuth, setSearchResults, setSearchInProgress, setSearchCompleted, setConversationState])
 
   useEffect(() => {
-    // URL params are available via urlSearchParams if needed
-  }, [urlSearchParams])
+    // Auto-show chatbot when arriving from chat page (only once)
+    if (query && !isOpen && !hasAutoOpenedRef.current) {
+      hasAutoOpenedRef.current = true
+      const timer = setTimeout(() => {
+        setIsOpen(true)
+      }, 1000) // Small delay to let the page load
+      return () => clearTimeout(timer)
+    }
+  }, [query, isOpen, setIsOpen])
 
   const handleNewSearch = () => {
+    // Clear conversation and start fresh
+    clearMessages()
     router.push('/agent')
   }
 
   const toggleRecommendation = (index: number) => {
     setExpandedRecommendation(expandedRecommendation === index ? null : index)
   }
+
+  // Use real search results or defaults
+  const displayResults = searchResults || {
+    papers: [],
+    total_found: 0,
+    total_screened: 0,
+    total_relevant: 0
+  }
+
+  // Transform papers for table compatibility
+  const transformedPapers: Paper[] = displayResults.papers.map((paper: Record<string, unknown>) => ({
+    // Ensure required fields for table component
+    id: String(paper.id || `paper-${Math.random()}`),
+    title: String(paper.title || 'Untitled'),
+    doi: String(paper.doi || ''),
+    publication_year: paper.published_date ? new Date(String(paper.published_date)).getFullYear() : new Date().getFullYear(),
+    cited_by_count: Number(paper.cited_by_count || 0),
+    authors: Array.isArray(paper.authors) ? paper.authors.map(String) : (paper.authors ? [String(paper.authors)] : ['Unknown']),
+    is_relevant: Boolean(paper.is_relevant !== false), // Default to true if not specified
+    // Include other properties that might be present
+    abstract: paper.abstract ? String(paper.abstract) : undefined,
+    venue: paper.venue ? String(paper.venue) : undefined,
+    relevance_reason: paper.relevance_reason ? String(paper.relevance_reason) : undefined,
+    confidence: paper.confidence ? Number(paper.confidence) : undefined,
+    topics: Array.isArray(paper.topics) ? paper.topics.map(String) : undefined,
+    source_country: paper.source_country ? String(paper.source_country) : undefined,
+    source_type: paper.source_type ? String(paper.source_type) : undefined,
+    published_on: paper.published_on ? String(paper.published_on) : undefined,
+    overton_url: paper.overton_url ? String(paper.overton_url) : undefined,
+    top_line: paper.top_line ? String(paper.top_line) : undefined
+  }))
 
   return (
     <div className="flex-1 flex flex-col">
@@ -93,15 +193,29 @@ export default function ResultsPage() {
           <div className="flex flex-col">
             <h1 className="text-3xl font-bold text-slate-900">Search results</h1>
             <div className="flex items-center gap-2">
-              <Badge variant="secondary" className="bg-green-100 text-green-700">
-                {mockResults.sourcesFound} Sources Found
-              </Badge>
-              <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
-                {mockResults.confidence}
-              </Badge>
-              <Badge variant="secondary" className="bg-blue-100 text-blue-700">
-                {mockResults.quality}
-              </Badge>
+              {searchInProgress && (
+                <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                  Searching...
+                </Badge>
+              )}
+              {searchError && (
+                <Badge variant="secondary" className="bg-red-100 text-red-700">
+                  Search Error
+                </Badge>
+              )}
+              {searchCompleted && (
+                <>
+                  <Badge variant="secondary" className="bg-green-100 text-green-700">
+                    {displayResults.total_relevant} Relevant Sources
+                  </Badge>
+                  <Badge variant="secondary" className="bg-yellow-100 text-yellow-700">
+                    {displayResults.total_found} Total Found
+                  </Badge>
+                  <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                    AI Screened
+                  </Badge>
+                </>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -119,6 +233,11 @@ export default function ResultsPage() {
 
       {/* Main Content */}
       <div className="flex-1 bg-slate-50">
+        {/* Chatbot Notification */}
+        <div className="px-6 pt-4">
+
+        </div>
+        
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
           <div className="px-6 pt-4">
             <TabsList className="grid w-full grid-cols-5">
@@ -134,13 +253,13 @@ export default function ResultsPage() {
                 <TrendingUp className="h-4 w-4" />
                 Policy
               </TabsTrigger>
-              <TabsTrigger value="generator" className="flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                Generator
-              </TabsTrigger>
               <TabsTrigger value="insights" className="flex items-center gap-2">
                 <Lightbulb className="h-4 w-4" />
                 Insights
+              </TabsTrigger>              
+              <TabsTrigger value="assistant" className="flex items-center gap-2">
+                <Bot className="h-4 w-4" />
+                Assistant
               </TabsTrigger>
             </TabsList>
           </div>
@@ -194,47 +313,145 @@ export default function ResultsPage() {
 
             <TabsContent value="evidence" className="p-6 m-0">
               <div className="w-full">
-                <div className="space-y-6">
-                  {mockResults.evidence.map((study, index) => (
-                    <Card key={index} className="border-slate-200">
-                      <CardContent className="p-6">
-                        <div className="flex justify-between items-start mb-4">
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-lg text-slate-900 mb-2">
-                              {study.title}
-                            </h3>
-                            <p className="text-slate-600 text-sm mb-2">
-                              {study.authors} • {study.journal}
-                            </p>
-                            <Badge variant="outline" className="text-xs">
-                              {study.type}
-                            </Badge>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-medium text-slate-900">
-                              {study.relevance}% Relevance
-                            </div>
-                            <Progress value={study.relevance} className="w-20 mt-1" />
-                          </div>
-                        </div>
-                        
-                        <div className="bg-slate-50 rounded-lg p-4 mb-4">
-                          <h4 className="font-medium text-slate-900 mb-2">Key Finding</h4>
-                          <p className="text-slate-700 text-sm leading-relaxed">
-                            {study.keyFinding}
-                          </p>
-                        </div>
+                {/* View Toggle Header */}
+                {searchCompleted && displayResults.papers.length > 0 && (
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-lg font-medium text-slate-900">Evidence ({displayResults.papers.length} documents)</h3>
+                    <ViewToggle currentView={evidenceViewMode} onViewChange={setEvidenceViewMode} />
+                  </div>
+                )}
 
-                        <div>
-                          <h4 className="font-medium text-slate-900 mb-2">Methodology</h4>
-                          <p className="text-slate-600 text-sm">
-                            {study.methodology}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
+                {searchInProgress && (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                      <p className="text-slate-600">Searching and screening evidence...</p>
+                    </div>
+                  </div>
+                )}
+                
+                {searchError && (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <p className="text-red-600 mb-2">Error searching for evidence</p>
+                      <p className="text-slate-600 text-sm">{searchError}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {searchCompleted && displayResults.papers.length === 0 && (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-slate-900 mb-2">No relevant evidence found</h3>
+                      <p className="text-slate-600">Try refining your search query or adjusting the scope</p>
+                    </div>
+                  </div>
+                )}
+                
+                {searchCompleted && displayResults.papers.length > 0 && (
+                  <>
+                    {/* Table View */}
+                    {evidenceViewMode === 'table' && (
+                      <PapersTable papers={transformedPapers} />
+                    )}
+
+                    {/* Cards View */}
+                    {evidenceViewMode === 'cards' && (
+                      <div className="space-y-6">
+                        {transformedPapers.map((paper: Paper, index: number) => (
+                          <Card key={paper.id || index} className="border-slate-200">
+                            <CardContent className="p-6">
+                              <div className="flex justify-between items-start mb-4">
+                                <div className="flex-1">
+                                  <h3 className="font-semibold text-lg text-slate-900 mb-2">
+                                    {paper.title || 'Untitled'}
+                                  </h3>
+                                  <p className="text-slate-600 text-sm mb-2">
+                                    {Array.isArray(paper.authors) ? paper.authors.join(', ') : 'Unknown authors'} 
+                                    {paper.publication_year && ` • ${paper.publication_year}`}
+                                  </p>
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Badge variant="outline" className="text-xs">
+                                      Policy Document
+                                    </Badge>
+                                    {paper.source_country && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {paper.source_country}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-sm font-medium text-slate-900">
+                                    {Math.round((paper.confidence || 0) * 100)}% Confidence
+                                  </div>
+                                  <Progress value={(paper.confidence || 0) * 100} className="w-20 mt-1" />
+                                </div>
+                              </div>
+                              
+                              {paper.top_line && (
+                                <div className="bg-slate-50 rounded-lg p-4 mb-4">
+                                  <h4 className="font-medium text-slate-900 mb-2">Key Finding</h4>
+                                  <p className="text-slate-700 text-sm leading-relaxed">
+                                    {paper.top_line}
+                                  </p>
+                                </div>
+                              )}
+
+                              {paper.relevance_reason && (
+                                <div className="mb-4">
+                                  <h4 className="font-medium text-slate-900 mb-2">Relevance</h4>
+                                  <p className="text-slate-600 text-sm">
+                                    {paper.relevance_reason}
+                                  </p>
+                                </div>
+                              )}
+
+                              {paper.abstract && (
+                                <div className="mb-4">
+                                  <h4 className="font-medium text-slate-900 mb-2">Abstract</h4>
+                                  <p className="text-slate-600 text-sm line-clamp-3">
+                                    {paper.abstract}
+                                  </p>
+                                </div>
+                              )}
+
+                              {(paper.doi || paper.overton_url || paper.id) && (
+                                <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+                                  <span className="text-slate-500 text-xs">Source:</span>
+                                  {paper.doi && (
+                                    <a 
+                                      href={paper.doi.startsWith('http') ? paper.doi : `https://doi.org/${paper.doi}`} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:text-blue-800 text-xs underline"
+                                    >
+                                      DOI Link
+                                    </a>
+                                  )}
+                                  {!paper.doi && paper.overton_url && (
+                                    <a 
+                                      href={paper.overton_url} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:text-blue-800 text-xs underline"
+                                    >
+                                      View Document
+                                    </a>
+                                  )}
+                                  {!paper.doi && !paper.overton_url && paper.id && (
+                                    <span className="text-slate-500 text-xs">ID: {paper.id}</span>
+                                  )}
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </TabsContent>
 
@@ -412,14 +629,12 @@ export default function ResultsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="generator" className="p-6 m-0">
-              <div className="flex items-center justify-center h-96">
-                <div className="text-center">
-                  <Shield className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-slate-900 mb-2">Report Generator</h3>
-                  <p className="text-slate-600">Automated report generation coming soon</p>
-                </div>
-              </div>
+            <TabsContent value="assistant" className="m-0 h-[600px]">
+              <ChatInterface 
+                autoFocus={true}
+                placeholder="Continue refining your research question or ask about the evidence..."
+                className="h-full"
+              />
             </TabsContent>
 
             <TabsContent value="insights" className="p-6 m-0">
@@ -434,6 +649,13 @@ export default function ResultsPage() {
           </div>
         </Tabs>
       </div>
+
+      {/* Floating Chatbot Widget */}
+      <ChatbotWidget 
+        isOpen={isOpen}
+        onToggle={() => setIsOpen(!isOpen)}
+        researchQuestion={query}
+      />
     </div>
   )
 }

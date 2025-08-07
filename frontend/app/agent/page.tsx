@@ -7,20 +7,25 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Search } from 'lucide-react'
+import { useChatbotStore } from '@/lib/chatbotStore'
 
 
 export default function AgentSearchPage() {
   const [query, setQuery] = useState('')
   const router = useRouter()
+  const { clearMessages } = useChatbotStore()
 
   const handleSearch = () => {
     if (!query.trim()) return
     
-    // Store search parameters and navigate directly to options page
+    // Clear previous conversation and start fresh
+    clearMessages()
+    
+    // Store search parameters and navigate directly to chatbot page
     const searchParams = new URLSearchParams()
     searchParams.set('query', query.trim())
     
-    router.push(`/agent/options?${searchParams.toString()}`)
+    router.push(`/agent/chatbot?${searchParams.toString()}`)
   }
 
   return (

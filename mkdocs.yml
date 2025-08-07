@@ -46,6 +46,8 @@ nav:
   - Home: index.md
   - Setup:
     - Installation: setup/installation.md
+  - Flow:
+    - Workflow: flow/chatbot.md
   - Backend:
     - Overview: backend/overview.md
     - API documentation: backend/api.md
