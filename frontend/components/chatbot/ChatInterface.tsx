@@ -299,17 +299,8 @@ export function ChatInterface({
         {messages.length === 0 && (
           <div className="text-center py-8">
             <Bot className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-slate-900 mb-2">Policy Research Assistant</h3>
-            <p className="text-slate-600 mb-4">I&apos;m here to help you refine your policy research question and find relevant evidence.</p>
-            <div className="text-sm text-slate-500 bg-slate-50 rounded-lg p-4 max-w-md mx-auto">
-              <p className="mb-2"><strong>I can help you:</strong></p>
-              <ul className="list-disc list-inside space-y-1 text-left">
-                <li>Clarify your research outcomes</li>
-                <li>Define your scope and demographics</li>
-                <li>Suggest related policy areas to explore</li>
-                <li>Discuss the evidence we found</li>
-              </ul>
-            </div>
+            <h3 className="text-lg font-medium text-slate-900 mb-2">Policy Assistant</h3>
+            <p className="text-slate-600 mb-4">I&apos;m here to help you refine your research questions and find relevant evidence.</p>
           </div>
         )}
 

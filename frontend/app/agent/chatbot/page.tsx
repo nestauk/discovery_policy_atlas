@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+// import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
@@ -60,17 +60,17 @@ export default function ChatbotPage() {
               </Tooltip>
               
               <div>
-                <h1 className="text-lg font-semibold text-slate-900">Policy Research Assistant</h1>
-                <p className="text-sm text-slate-600">Refine your research question and scope</p>
+                <h1 className="text-3xl font-semibold text-slate-900">Refine your question</h1>
+                {/* <p className="text-sm text-slate-600">Refine your research question and scope</p> */}
               </div>
             </div>
             
             <div className="flex items-center gap-3">
-              {query && (
+              {/* {query && (
                 <Badge variant="outline" className="text-xs max-w-xs truncate">
                   {query}
                 </Badge>
-              )}
+              )} */}
             </div>
           </div>
         </div>
