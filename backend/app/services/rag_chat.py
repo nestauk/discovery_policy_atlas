@@ -33,7 +33,7 @@ class RAGChatService:
         self,
         user_message: str,
         conversation_history: List[Dict[str, Any]],
-        project_id: str = "test_project",
+        project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
     ) -> str:
         """Generate a response using RAG over the collected evidence"""
 

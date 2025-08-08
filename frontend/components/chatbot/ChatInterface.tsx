@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Send, Bot, User, Search } from 'lucide-react'
 import { useChatbotStore } from '@/lib/chatbotStore'
+import { useProjectStore } from '@/lib/projectStore'
 import { useAPI } from '@/lib/api'
 import ReactMarkdown from 'react-markdown'
 
@@ -35,7 +36,7 @@ export function ChatInterface({
   enableAutoScroll = true,
   onAutoStartComplete
 }: ChatInterfaceProps) {
-  const { 
+  const {
     messages, 
     addMessage, 
     conversationId,
@@ -48,6 +49,7 @@ export function ChatInterface({
     setOutcomesDefined,
     setScopeDefined
   } = useChatbotStore()
+  const { activeProject } = useProjectStore()
   
   const [inputMessage, setInputMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -96,6 +98,7 @@ export function ChatInterface({
             body: JSON.stringify({
               message: autoStartQuery,
               conversation_id: conversationId,
+              project_id: activeProject?.id,
               state: conversationState
             })
           })
@@ -151,7 +154,12 @@ export function ChatInterface({
 
         } catch (error) {
           console.error('Auto-start chat error:', error)
-          setError('Failed to start conversation. Please try again.')
+          const errorMessage = error instanceof Error ? error.message : 'Failed to start conversation'
+          if (errorMessage.includes('Authentication failed') || errorMessage.includes('authentication token')) {
+            setError('Please refresh the page and sign in again to start the conversation.')
+          } else {
+            setError('Failed to start conversation. Please try again.')
+          }
         } finally {
           setIsAutoStarting(false)
           onAutoStartComplete?.()
@@ -184,6 +192,7 @@ export function ChatInterface({
         body: JSON.stringify({
           message: userMessage.content,
           conversation_id: conversationId,
+          project_id: activeProject?.id,
           state: conversationState
         })
       })
@@ -239,16 +248,27 @@ export function ChatInterface({
 
     } catch (error) {
       console.error('Chat API error:', error)
-      setError('Failed to send message. Please try again.')
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message'
       
-      // Add error message to chat
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: 'I apologize, but I encountered an issue. Please try again.',
-        timestamp: new Date()
+      if (errorMessage.includes('Authentication failed') || errorMessage.includes('authentication token')) {
+        setError('Please refresh the page and sign in again to continue the conversation.')
+        const authErrorMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: 'I apologize, but your session has expired. Please refresh the page and sign in again to continue our conversation.',
+          timestamp: new Date()
+        }
+        addMessage(authErrorMessage)
+      } else {
+        setError('Failed to send message. Please try again.')
+        const errorMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: 'I apologize, but I encountered an issue. Please try again.',
+          timestamp: new Date()
+        }
+        addMessage(errorMessage)
       }
-      addMessage(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -312,10 +332,22 @@ export function ChatInterface({
                   <Bot className="h-3 w-3" />
                 )}
                 <span className="text-xs opacity-70">
-                  {message.timestamp.toLocaleTimeString([], { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  })}
+                  {(() => {
+                    try {
+                      const timestamp = message.timestamp instanceof Date 
+                        ? message.timestamp 
+                        : new Date(message.timestamp);
+                      return timestamp.toLocaleTimeString([], { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      });
+                    } catch {
+                      return new Date().toLocaleTimeString([], { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      });
+                    }
+                  })()}
                 </span>
               </div>
               <div className="text-sm prose prose-sm max-w-none">

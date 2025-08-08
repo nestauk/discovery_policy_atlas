@@ -37,8 +37,8 @@ export default function ChatbotPage() {
     }
   }, [query, setMessages, setResearchQuestion])
 
-  // Show start search button when evidence search is ready OR after sufficient conversation
-  const showStartSearch = evidenceSearchReady || messages.length >= 4
+  // Show start search button when evidence search is ready OR after first chatbot response
+  const showStartSearch = evidenceSearchReady || messages.length >= 2
 
   const handleStartSearch = () => {
     router.push(`/agent/results?query=${encodeURIComponent(query)}`)

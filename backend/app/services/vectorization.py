@@ -46,7 +46,9 @@ class VectorizationService:
             raise
 
     async def store_document(
-        self, paper: Dict[str, Any], project_id: str = "test_project"
+        self,
+        paper: Dict[str, Any],
+        project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
     ) -> Optional[str]:
         """Store a document and its sections in Supabase"""
         try:
@@ -62,7 +64,9 @@ class VectorizationService:
                 "content": paper.get("content", ""),
                 "source_type": "overton",  # Default for now
                 "source_country": paper.get("source_country"),
-                "published_date": paper.get("published_date"),
+                # Prefer explicit publication_date, then published_on
+                "published_date": paper.get("publication_date")
+                or paper.get("published_on"),
                 "doi": paper.get("doi"),
                 "overton_url": paper.get("overton_url"),
                 "confidence": paper.get("confidence", 0.0),
@@ -72,6 +76,21 @@ class VectorizationService:
                     "is_relevant": paper.get("is_relevant", True),
                     "cited_by_count": paper.get("cited_by_count", 0),
                     "publication_year": paper.get("publication_year"),
+                    # Newly extracted structured fields
+                    "key_facts": paper.get("key_facts", [])
+                    if isinstance(paper.get("key_facts"), list)
+                    else (
+                        []
+                        if paper.get("key_facts") in (None, "")
+                        else [paper.get("key_facts")]
+                    ),
+                    "policy_recommendations": paper.get("policy_recommendations", [])
+                    if isinstance(paper.get("policy_recommendations"), list)
+                    else (
+                        []
+                        if paper.get("policy_recommendations") in (None, "")
+                        else [paper.get("policy_recommendations")]
+                    ),
                 },
             }
 
@@ -153,7 +172,9 @@ class VectorizationService:
                 logger.error(f"Error creating chunk {chunk['chunk_type']}: {e}")
 
     async def store_search_results(
-        self, papers: List[Dict[str, Any]], project_id: str = "test_project"
+        self,
+        papers: List[Dict[str, Any]],
+        project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
     ) -> Dict[str, Any]:
         """Store multiple papers from search results"""
         stored_count = 0
@@ -183,7 +204,7 @@ class VectorizationService:
     async def search_similar_content(
         self,
         query: str,
-        project_id: str = "test_project",
+        project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
         match_threshold: float = 0.8,
         match_count: int = 5,
     ) -> List[Dict[str, Any]]:
@@ -210,7 +231,7 @@ class VectorizationService:
             return []
 
     def get_project_documents(
-        self, project_id: str = "test_project"
+        self, project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
     ) -> List[Dict[str, Any]]:
         """Get all documents for a project"""
         try:

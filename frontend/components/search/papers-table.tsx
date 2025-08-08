@@ -65,23 +65,33 @@ export function PapersTable({ papers }: PapersTableProps) {
       key: 'publication_year',
       width: '8%',
       sorter: (a, b) => a.publication_year - b.publication_year,
-      render: (text) => <span>{text}</span>,
+      render: (text) => (
+        <span>{text && text > 0 ? text : 'Unknown'}</span>
+      ),
     },
     {
       title: 'Title',
       dataIndex: 'title',
       key: 'title',
       width: '25%',
-      render: (text, record) => (
-        <a 
-          href={record.doi ? `${record.doi}` : record.overton_url} 
-          target="_blank" 
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:text-blue-800 hover:underline"
-        >
-          {text}
-        </a>
-      ),
+      render: (text, record) => {
+        const maxLength = 100 // Truncate after 100 characters for titles
+        
+        return (
+          <a 
+            href={record.doi ? `${record.doi}` : record.overton_url} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 hover:underline"
+            title={text} // Show full title on hover
+          >
+            {text.length > maxLength 
+              ? `${text.substring(0, maxLength)}...` 
+              : text
+            }
+          </a>
+        )
+      },
       sorter: (a, b) => a.title.localeCompare(b.title),
     },
     {
@@ -111,11 +121,19 @@ export function PapersTable({ papers }: PapersTableProps) {
       key: 'authors',
       width: '20%',
       sorter: (a, b) => a.authorsDisplay.localeCompare(b.authorsDisplay),
-      render: (text, record) => (
-        <div className="truncate" title={record.authors?.join(', ') || 'Unknown'}>
-          {record.authors?.join(', ') || 'Unknown'}
-        </div>
-      ),
+      render: (text, record) => {
+        const authorsText = record.authors?.join(', ') || 'Unknown'
+        const maxLength = 80 // Truncate after 80 characters
+        
+        return (
+          <div className="text-sm text-gray-700 whitespace-normal leading-tight" title={authorsText}>
+            {authorsText.length > maxLength 
+              ? `${authorsText.substring(0, maxLength)}...` 
+              : authorsText
+            }
+          </div>
+        )
+      },
     },
     {
       title: 'Citations',

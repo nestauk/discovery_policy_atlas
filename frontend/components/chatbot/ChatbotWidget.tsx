@@ -40,7 +40,8 @@ export function ChatbotWidget({ isOpen, onToggle, researchQuestion }: ChatbotWid
         }
       ])
     }
-  }, [researchQuestion, messages.length, setMessages, setResearchQuestion])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [researchQuestion, messages.length]) // setters are stable from Zustand store
 
   return (
     <>

@@ -143,7 +143,29 @@ export const useChatbotStore = create<ChatbotState>()(
         scopeDefined: state.scopeDefined,
         searchResults: state.searchResults,
         searchCompleted: state.searchCompleted
-      })
+      }),
+      // Custom serialization to handle Date objects
+      serialize: (state) => {
+        const typedState = state as { messages?: Message[] }
+        return JSON.stringify({
+          ...state,
+          messages: (typedState.messages || []).map((msg: Message) => ({
+            ...msg,
+            timestamp: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : msg.timestamp
+          }))
+        })
+      },
+      // Custom deserialization to convert timestamp strings back to Date objects
+      deserialize: (str) => {
+        const state = JSON.parse(str)
+        return {
+          ...state,
+          messages: (state.messages || []).map((msg: { id: string; role: 'user' | 'assistant'; content: string; timestamp: string }) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }))
+        }
+      }
     }
   )
 ) 

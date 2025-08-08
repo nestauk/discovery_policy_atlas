@@ -5,20 +5,21 @@ import { useRouter, usePathname } from 'next/navigation'
 import { useEffect } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Search, FileText, History, FolderOpen } from 'lucide-react'
+import { Search, FileText, FolderOpen } from 'lucide-react'
+import { useProjectStore } from '@/lib/projectStore'
 
 const sidebarItems = [
   { name: 'Projects', href: '/agent/projects', icon: FolderOpen },
-  { name: 'Search Hub', href: '/agent', icon: Search },
-  { name: 'Search History', href: '/agent/history', icon: History },
-  { name: 'Saved Evidence', href: '/agent/evidence', icon: FileText },
+  { name: 'Results', href: '/agent/results', icon: FileText },
+  { name: 'Search', href: '/agent', icon: Search },
+  // { name: 'Search History', href: '/agent/history', icon: History },
 ]
 
-const quickStats = [
-  { label: 'Searches Today', value: '12' },
-  { label: 'Evidence Saved', value: '47' },
-  { label: 'Policy Areas', value: '8' },
-]
+// const quickStats = [
+//   { label: 'Searches Today', value: '12' },
+//   { label: 'Evidence Saved', value: '47' },
+//   { label: 'Policy Areas', value: '8' },
+// ]
 
 export default function AgentLayout({
   children,
@@ -28,6 +29,7 @@ export default function AgentLayout({
   const { isSignedIn, isLoaded, user } = useUser()
   const router = useRouter()
   const pathname = usePathname()
+  const { activeProject } = useProjectStore()
 
   useEffect(() => {
     if (!isLoaded) return
@@ -59,7 +61,9 @@ export default function AgentLayout({
         <div className="px-6 pb-4">
           <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
             <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">ACTIVE PROJECT</p>
-            <p className="text-sm font-semibold text-slate-900">Youth Vaping Policy</p>
+            <p className="text-sm font-semibold text-slate-900">
+              {activeProject ? activeProject.name : 'No project selected'}
+            </p>
           </div>
         </div>
 
@@ -82,7 +86,7 @@ export default function AgentLayout({
         </div>
 
         {/* Quick Stats */}
-        <div className="p-4 border-t border-slate-100">
+        {/* <div className="p-4 border-t border-slate-100">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">QUICK STATS</p>
           <div className="space-y-2">
             {quickStats.map((stat) => (
@@ -92,7 +96,7 @@ export default function AgentLayout({
               </div>
             ))}
           </div>
-        </div>
+        </div> */}
 
         {/* Spacer to push user section to bottom */}
         <div className="flex-1"></div>

@@ -6,6 +6,8 @@ import json
 import asyncio
 import logging
 import uuid
+import pandas as pd
+import math
 from enum import Enum
 from datetime import datetime
 from openai import AsyncOpenAI
@@ -18,6 +20,7 @@ from app.services.screening import ScreeningService
 from app.services.vectorization import vectorization_service
 from app.services.rag_chat import rag_chat_service
 from app.services.simplified_conversation_manager import simplified_conversation_manager
+from app.services.advanced_rag import advanced_rag_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -59,6 +62,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
+    project_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -405,8 +409,245 @@ def get_or_create_conversation(
     return conversation
 
 
+async def generate_insights_background(query: str, project_id: str, session_id: str):
+    """Background task to generate insights after search completion"""
+    try:
+        logger.info(
+            f"Background insights generation started for project {project_id} | session: {session_id}"
+        )
+
+        # Extract insights using the advanced RAG service
+        insights = await advanced_rag_service.extract_key_insights(
+            user_query=query, project_id=project_id
+        )
+
+        # Review the insights
+        review = await advanced_rag_service.review_insights(insights)
+
+        # If not approved and quality is low, try once more with enhanced query
+        if not review.approved and review.score < 0.6:
+            logger.info(
+                f"Insights quality below threshold ({review.score:.2f}), retrying with enhanced query..."
+            )
+            enhanced_query = f"{query} - provide detailed analysis with specific evidence and data points"
+            insights = await advanced_rag_service.extract_key_insights(
+                user_query=enhanced_query, project_id=project_id
+            )
+            review = await advanced_rag_service.review_insights(insights)
+
+        # Save insights to project (always save, even if not fully approved)
+        insights_data = {
+            "extraction": insights.model_dump(),
+            "review": review.model_dump(),
+            "query": query,
+            "extracted_at": datetime.utcnow().isoformat(),
+            "quality_score": review.score,
+            "auto_generated": True,  # Mark as automatically generated
+            "session_id": session_id,
+        }
+
+        # Update project with insights
+        result = (
+            vectorization_service.supabase.table("projects")
+            .update(
+                {
+                    "key_insights": insights_data,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            )
+            .eq("id", project_id)
+            .execute()
+        )
+
+        if result.data:
+            logger.info(
+                f"✅ Background insights saved to project {project_id} | "
+                f"Quality: {review.score * 100:.0f}% | "
+                f"Approved: {review.approved} | "
+                f"Insights: {len(insights.insights)}"
+            )
+
+            # If insights are approved, trigger policy recommendations generation
+            if review.approved and len(insights.insights) >= 2:
+                try:
+                    logger.info(
+                        f"Starting policy recommendations generation for project {project_id}"
+                    )
+                    asyncio.create_task(
+                        generate_policy_recommendations_background(
+                            query, project_id, session_id, insights
+                        )
+                    )
+                    logger.info(
+                        f"Initiated background policy recommendations for project {project_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to initiate policy recommendations: {e}")
+        else:
+            logger.error(
+                f"❌ Failed to save background insights to project {project_id}"
+            )
+
+    except Exception as e:
+        logger.error(
+            f"❌ Error in background insights generation for project {project_id}: {e}"
+        )
+        import traceback
+
+        traceback.print_exc()
+
+
+async def generate_policy_recommendations_background(
+    query: str, project_id: str, session_id: str, insights: any
+):
+    """Background task to generate policy recommendations after insights completion"""
+    try:
+        logger.info(
+            f"Background policy recommendations started for project {project_id} | session: {session_id}"
+        )
+
+        # Generate policy recommendations
+        recommendations = await advanced_rag_service.generate_policy_recommendations(
+            user_query=query, insights=insights, project_id=project_id
+        )
+
+        # Review the recommendations
+        review = await advanced_rag_service.review_recommendations(recommendations)
+
+        # If not approved and quality is low, try once more
+        if not review.approved and review.score < 0.6:
+            logger.info(
+                f"Recommendations quality below threshold ({review.score:.2f}), retrying..."
+            )
+            enhanced_query = f"{query} - provide specific, actionable policy recommendations with implementation guidance"
+            recommendations = (
+                await advanced_rag_service.generate_policy_recommendations(
+                    user_query=enhanced_query, insights=insights, project_id=project_id
+                )
+            )
+            review = await advanced_rag_service.review_recommendations(recommendations)
+
+        # Save recommendations to project
+        recommendations_data = {
+            "recommendations": recommendations.model_dump(),
+            "review": review.model_dump(),
+            "query": query,
+            "generated_at": datetime.utcnow().isoformat(),
+            "quality_score": review.score,
+            "auto_generated": True,
+            "session_id": session_id,
+        }
+
+        # Update project with recommendations
+        result = (
+            vectorization_service.supabase.table("projects")
+            .update(
+                {
+                    "policy_recommendations": recommendations_data,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            )
+            .eq("id", project_id)
+            .execute()
+        )
+
+        if result.data:
+            logger.info(
+                f"✅ Background recommendations saved to project {project_id} | "
+                f"Quality: {review.score * 100:.0f}% | "
+                f"Approved: {review.approved} | "
+                f"Recommendations: {len(recommendations.recommendations)}"
+            )
+
+            # If recommendations are approved, trigger executive brief generation
+            if review.approved and len(recommendations.recommendations) >= 1:
+                try:
+                    logger.info(
+                        f"Starting executive brief generation for project {project_id}"
+                    )
+                    asyncio.create_task(
+                        generate_executive_brief_background(
+                            query, project_id, session_id, insights, recommendations
+                        )
+                    )
+                    logger.info(
+                        f"Initiated background executive brief for project {project_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to initiate executive brief: {e}")
+        else:
+            logger.error(
+                f"❌ Failed to save background recommendations to project {project_id}"
+            )
+
+    except Exception as e:
+        logger.error(
+            f"❌ Error in background recommendations generation for project {project_id}: {e}"
+        )
+        import traceback
+
+        traceback.print_exc()
+
+
+async def generate_executive_brief_background(
+    query: str, project_id: str, session_id: str, insights: any, recommendations: any
+):
+    """Background task to generate executive brief after recommendations completion"""
+    try:
+        logger.info(
+            f"Background executive brief started for project {project_id} | session: {session_id}"
+        )
+
+        # Generate executive brief
+        brief = await advanced_rag_service.generate_executive_brief(
+            user_query=query,
+            insights=insights,
+            recommendations=recommendations,
+            project_id=project_id,
+        )
+
+        # Save brief to project
+        brief_data = {
+            "brief": brief.model_dump(),
+            "query": query,
+            "generated_at": datetime.utcnow().isoformat(),
+            "auto_generated": True,
+            "session_id": session_id,
+        }
+
+        # Update project with executive brief
+        result = (
+            vectorization_service.supabase.table("projects")
+            .update(
+                {
+                    "executive_brief": brief_data,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            )
+            .eq("id", project_id)
+            .execute()
+        )
+
+        if result.data:
+            logger.info(f"✅ Background executive brief saved to project {project_id}")
+        else:
+            logger.error(
+                f"❌ Failed to save background executive brief to project {project_id}"
+            )
+
+    except Exception as e:
+        logger.error(
+            f"❌ Error in background executive brief generation for project {project_id}: {e}"
+        )
+        import traceback
+
+        traceback.print_exc()
+
+
 async def generate_policy_assistant_response(
-    conversation: ConversationRecord, user_message: str
+    conversation: ConversationRecord,
+    user_message: str,
+    project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
 ) -> tuple[str, str, str, bool, bool, bool]:
     """Generate response using simplified LangChain conversation manager or RAG"""
 
@@ -415,7 +656,7 @@ async def generate_policy_assistant_response(
         if conversation.state == "chat":
             # Check if evidence is available
             evidence_check = await rag_chat_service.check_evidence_availability(
-                "test_project"
+                project_id
             )
 
             if evidence_check["has_evidence"]:
@@ -433,7 +674,7 @@ async def generate_policy_assistant_response(
                     )
 
                 rag_response = await rag_chat_service.generate_rag_response(
-                    user_message, message_dicts, "test_project"
+                    user_message, message_dicts, project_id
                 )
 
                 return (
@@ -513,7 +754,11 @@ async def chat_with_policy_assistant(
             evidence_ready,
             outcomes_defined,
             scope_defined,
-        ) = await generate_policy_assistant_response(conversation, request.message)
+        ) = await generate_policy_assistant_response(
+            conversation,
+            request.message,
+            request.project_id or "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+        )
 
         # Add assistant message to conversation
         assistant_message = ChatMessage(
@@ -642,18 +887,67 @@ async def search_papers(
     """
     query = request.get("query", "")
     conversation_id = request.get("conversation_id")
+    project_id = request.get(
+        "project_id", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+    )  # Default to test project UUID for backward compatibility
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
 
     session_id = str(uuid.uuid4())[:8]
-    logger.info(f"Starting agent search for query: {query}")
+    logger.info(
+        f"Starting agent search for query: {query} | session: {session_id} | project: {project_id} | conversation: {conversation_id}"
+    )
 
     try:
-        # Use Overton semantic search
+        # Run both Overton and OpenAlex searches in parallel
         overton_service = OvertonService()
-        papers_df = await overton_service.search(
+        openalex_service = OpenAlexService()
+
+        # Execute searches concurrently
+        overton_task = overton_service.search(
             query=query, max_results=20, semantic_search=True
         )
+        openalex_task = openalex_service.search_for_agent(
+            query=query, max_results=20, focus_on_reviews=True
+        )
+
+        overton_df, openalex_df = await asyncio.gather(
+            overton_task, openalex_task, return_exceptions=True
+        )
+
+        # Handle any exceptions from the searches
+        if isinstance(overton_df, Exception):
+            logger.error(f"Overton search failed: {overton_df}")
+            overton_df = pd.DataFrame()
+
+        if isinstance(openalex_df, Exception):
+            logger.error(f"OpenAlex search failed: {openalex_df}")
+            openalex_df = pd.DataFrame()
+
+        # Combine results from both sources
+        all_papers = []
+        papers_df = pd.DataFrame()
+
+        # Add Overton results
+        if not overton_df.empty:
+            overton_papers = overton_df.copy()
+            overton_papers["source"] = "overton"
+            all_papers.append(overton_papers)
+            logger.info(f"Overton returned {len(overton_papers)} papers")
+
+        # Add OpenAlex results
+        if not openalex_df.empty:
+            openalex_papers = openalex_df.copy()
+            openalex_papers["source"] = "openalex"
+            all_papers.append(openalex_papers)
+            logger.info(f"OpenAlex returned {len(openalex_papers)} papers")
+
+        # Combine all results if we have any
+        if all_papers:
+            papers_df = pd.concat(all_papers, ignore_index=True)
+            # Remove duplicates based on title similarity (basic deduplication)
+            papers_df = papers_df.drop_duplicates(subset=["title"], keep="first")
+            logger.info(f"Combined search returned {len(papers_df)} unique papers")
 
         if papers_df.empty:
             return {
@@ -661,9 +955,16 @@ async def search_papers(
                 "total_found": 0,
                 "total_screened": 0,
                 "total_relevant": 0,
+                "sources_used": ["overton", "openalex"],
+                "overton_count": 0,
+                "openalex_count": 0,
             }
 
-        # Format papers for screening
+        # Format papers for screening - ensure we have the required columns
+        # Both services should provide 'id', 'title', and 'content' columns
+        if "content" not in papers_df.columns and "abstract" in papers_df.columns:
+            papers_df["content"] = papers_df["abstract"].str[:1000]
+
         screening_texts = overton_service.format_for_screening(papers_df)
 
         # Perform AI screening
@@ -674,34 +975,183 @@ async def search_papers(
         screening_df = await screening_service.screen_batch(screening_texts, session_id)
 
         # Merge papers with screening results
-        relevant_df = (
-            papers_df.merge(screening_df, left_on="id", right_on="id", how="left")
-            .assign(
-                is_relevant=lambda x: x["is_relevant"].fillna(False),
-                relevance_reason=lambda x: x["relevance_reason"].fillna("Not screened"),
-                confidence=lambda x: x["confidence"].fillna(0.0),
-                top_line=lambda x: x["top_line"].fillna(""),
-            )
-            .query("is_relevant == True")
-            .sort_values("confidence", ascending=False)
+        merged_df = papers_df.merge(
+            screening_df, left_on="id", right_on="id", how="left"
         )
 
-        # Convert to list for response
+        # Clean NaN values before filtering
+        merged_df["is_relevant"] = merged_df["is_relevant"].fillna(False)
+        merged_df["relevance_reason"] = merged_df["relevance_reason"].fillna(
+            "Not screened"
+        )
+        merged_df["confidence"] = merged_df["confidence"].fillna(0.0)
+        merged_df["top_line"] = merged_df["top_line"].fillna("")
+        # Default new list fields to []
+        if "key_facts" not in merged_df.columns:
+            merged_df["key_facts"] = [[] for _ in range(len(merged_df))]
+        else:
+            merged_df["key_facts"] = merged_df["key_facts"].apply(
+                lambda v: v
+                if isinstance(v, list)
+                else ([] if pd.isna(v) else ([v] if v not in ("", None) else []))
+            )
+        if "policy_recommendations" not in merged_df.columns:
+            merged_df["policy_recommendations"] = [[] for _ in range(len(merged_df))]
+        else:
+            merged_df["policy_recommendations"] = merged_df[
+                "policy_recommendations"
+            ].apply(
+                lambda v: v
+                if isinstance(v, list)
+                else ([] if pd.isna(v) else ([v] if v not in ("", None) else []))
+            )
+
+        # Filter for relevant papers using boolean indexing instead of query
+        relevant_df = merged_df[merged_df["is_relevant"]].copy()
+        relevant_df = relevant_df.sort_values("confidence", ascending=False)
+
+        # Convert to list for response and clean NaN values
         papers_list = relevant_df.to_dict("records")
 
+        # Clean any NaN values that might cause JSON serialization issues
+        for paper in papers_list:
+            for key, value in paper.items():
+                # Check for NaN values safely
+                is_nan = False
+                try:
+                    if isinstance(value, float) and math.isnan(value):
+                        is_nan = True
+                    elif value is None:
+                        is_nan = True
+                except (TypeError, ValueError):
+                    # Not a number type, skip
+                    pass
+
+                if is_nan:
+                    if key in ["confidence"]:
+                        paper[key] = 0.0
+                    elif key in ["is_relevant"]:
+                        paper[key] = False
+                    elif key in ["cited_by_count", "publication_year"]:
+                        paper[key] = 0
+                    elif key in ["key_facts", "policy_recommendations"]:
+                        paper[key] = []
+                    else:
+                        # Default to empty string for scalar text fields
+                        paper[key] = ""
+
         # Store results in Supabase with vectorization (background task)
+        project_stats_updated = False
         if papers_list:
             try:
                 vectorization_result = await vectorization_service.store_search_results(
-                    papers_list, project_id="test_project"
+                    papers_list, project_id=project_id
                 )
                 logger.info(f"Vectorization result: {vectorization_result}")
+
+                # Update project stats after storing results
+                try:
+                    # Count all documents for this project to set total evidence_count
+                    count_result = (
+                        vectorization_service.supabase.table("documents")
+                        .select("id", count="exact")
+                        .eq("project_id", project_id)
+                        .execute()
+                    )
+                    total_evidence_count = (
+                        count_result.count
+                        if hasattr(count_result, "count")
+                        else len(count_result.data or [])
+                    )
+
+                    update_data = {
+                        "evidence_count": total_evidence_count,
+                        "last_search_date": datetime.utcnow().isoformat(),
+                        "last_search_query": query,
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }
+                    (
+                        vectorization_service.supabase.table("projects")
+                        .update(update_data)
+                        .eq("id", project_id)
+                        .execute()
+                    )
+                    logger.info(
+                        f"Updated project {project_id} stats (evidence_count={total_evidence_count})"
+                    )
+                    project_stats_updated = True
+                except Exception as e:
+                    logger.warning(f"Failed to update project stats: {e}")
+
+                # Automatically generate insights after successful vectorization
+                if (
+                    len(papers_list) >= 3
+                ):  # Only generate insights if we have sufficient evidence
+                    try:
+                        logger.info(
+                            f"Starting automatic insights generation for project {project_id}"
+                        )
+
+                        # Use the search query as the insights query
+                        insights_query = f"What are the key findings and insights from the evidence about: {query}"
+
+                        # Generate insights in the background (don't block the search response)
+                        asyncio.create_task(
+                            generate_insights_background(
+                                insights_query, project_id, session_id
+                            )
+                        )
+
+                        logger.info(
+                            f"Initiated background insights generation for project {project_id}"
+                        )
+
+                    except Exception as e:
+                        logger.warning(f"Failed to initiate insights generation: {e}")
+                        # Don't fail the search if insights generation fails to start
+
             except Exception as e:
                 logger.error(f"Error during vectorization: {e}")
                 # Don't fail the request if vectorization fails
 
+        # Ensure project stats are up-to-date even if no papers were stored
+        if not project_stats_updated:
+            try:
+                count_result = (
+                    vectorization_service.supabase.table("documents")
+                    .select("id", count="exact")
+                    .eq("project_id", project_id)
+                    .execute()
+                )
+                total_evidence_count = (
+                    count_result.count
+                    if hasattr(count_result, "count")
+                    else len(count_result.data or [])
+                )
+                update_data = {
+                    "evidence_count": total_evidence_count,
+                    "last_search_date": datetime.utcnow().isoformat(),
+                    "last_search_query": query,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+                (
+                    vectorization_service.supabase.table("projects")
+                    .update(update_data)
+                    .eq("id", project_id)
+                    .execute()
+                )
+                logger.info(
+                    f"Ensured project {project_id} stats updated (evidence_count={total_evidence_count})"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to ensure project stats update: {e}")
+
+        # Calculate source-specific counts
+        overton_count = len(overton_df) if not overton_df.empty else 0
+        openalex_count = len(openalex_df) if not openalex_df.empty else 0
+
         logger.info(
-            f"Search completed: {len(papers_df)} found, {len(relevant_df)} relevant"
+            f"Search completed: {len(papers_df)} found ({overton_count} from Overton, {openalex_count} from OpenAlex), {len(relevant_df)} relevant"
         )
 
         # Update conversation state to "chat" if conversation_id is provided and results found
@@ -721,6 +1171,9 @@ async def search_papers(
             "total_found": len(papers_df),
             "total_screened": len(screening_df),
             "total_relevant": len(relevant_df),
+            "sources_used": ["overton", "openalex"],
+            "overton_count": overton_count,
+            "openalex_count": openalex_count,
             "conversation_updated": conversation_id is not None
             and len(relevant_df) > 0,
         }
@@ -728,3 +1181,168 @@ async def search_papers(
     except Exception as e:
         logger.error(f"Error in agent search: {e}")
         raise HTTPException(status_code=500, detail="Failed to search for papers")
+
+
+class AdvancedRAGRequest(BaseModel):
+    query: str
+    project_id: Optional[str] = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+
+
+@router.post("/api/agent/extract-insights")
+async def extract_key_insights(
+    request: AdvancedRAGRequest, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Extract key insights from evidence using advanced RAG"""
+    try:
+        # Extract insights
+        insights = await advanced_rag_service.extract_key_insights(
+            user_query=request.query, project_id=request.project_id
+        )
+
+        # Review the insights
+        review = await advanced_rag_service.review_insights(insights)
+
+        # If not approved and we haven't retried, try once more
+        if not review.approved and review.score < 0.6:
+            logger.info("Insights quality below threshold, retrying extraction...")
+            insights = await advanced_rag_service.extract_key_insights(
+                user_query=f"{request.query} - provide more detailed analysis",
+                project_id=request.project_id,
+            )
+            review = await advanced_rag_service.review_insights(insights)
+
+        # Save insights to project if approved
+        if review.approved:
+            try:
+                insights_data = {
+                    "extraction": insights.model_dump(),
+                    "review": review.model_dump(),
+                    "query": request.query,
+                    "extracted_at": datetime.utcnow().isoformat(),
+                    "quality_score": review.score,
+                }
+
+                # Update project with insights
+                vectorization_service.supabase.table("projects").update(
+                    {
+                        "key_insights": insights_data,
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }
+                ).eq("id", request.project_id).execute()
+
+                logger.info(f"Saved insights to project {request.project_id}")
+
+            except Exception as save_error:
+                logger.error(f"Error saving insights to project: {save_error}")
+                # Don't fail the request if saving fails
+
+        return {
+            "insights": insights.model_dump(),
+            "review": review.model_dump(),
+            "quality_score": review.score,
+            "approved": review.approved,
+            "saved_to_project": review.approved,
+        }
+
+    except Exception as e:
+        logger.error(f"Error extracting insights: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to extract insights: {str(e)}"
+        )
+
+
+@router.get("/api/agent/evidence-status/{project_id}")
+async def check_evidence_status(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Check if evidence is available for advanced RAG analysis"""
+    try:
+        evidence_check = await rag_chat_service.check_evidence_availability(project_id)
+
+        # Get additional details for advanced RAG
+        documents = vectorization_service.get_project_documents(project_id)
+
+        document_summaries = []
+        for doc in documents[:10]:  # Show first 10
+            document_summaries.append(
+                {
+                    "title": doc.get("title", ""),
+                    "confidence": doc.get("confidence", 0.0),
+                    "source_country": doc.get("source_country", ""),
+                    "top_line": doc.get("top_line", ""),
+                }
+            )
+
+        return {
+            "has_evidence": evidence_check["has_evidence"],
+            "document_count": evidence_check["document_count"],
+            "ready_for_advanced_rag": evidence_check["document_count"] >= 3,
+            "document_summaries": document_summaries,
+            "recommendation": (
+                "Ready for advanced analysis"
+                if evidence_check["document_count"] >= 3
+                else "Need more evidence for comprehensive analysis"
+            ),
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking evidence status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check evidence status")
+
+
+class RestartAnalysisRequest(BaseModel):
+    project_id: str
+    query: Optional[str] = None
+
+
+@router.post("/api/agent/restart-analysis")
+async def restart_analysis(
+    request: RestartAnalysisRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Manually restart insights → recommendations → executive brief generation"""
+    try:
+        project_id = request.project_id
+        if not project_id:
+            raise HTTPException(status_code=400, detail="project_id is required")
+
+        # Build insights query
+        # Prefer the project's last_search_query if available
+        try:
+            proj = (
+                vectorization_service.supabase.table("projects")
+                .select("last_search_query")
+                .eq("id", project_id)
+                .single()
+                .execute()
+            )
+            saved_query = (
+                (proj.data or {}).get("last_search_query")
+                if hasattr(proj, "data")
+                else None
+            )
+        except Exception:
+            saved_query = None
+
+        base_query = (
+            request.query or saved_query or f"Policy analysis for project {project_id}"
+        )
+        insights_query = f"What are the key findings and insights from the evidence about: {base_query}"
+
+        session_id = str(uuid.uuid4())[:8]
+        logger.info(
+            f"Manual restart of analysis for project {project_id} | session: {session_id}"
+        )
+
+        # Kick off background insights generation; downstream steps are chained
+        asyncio.create_task(
+            generate_insights_background(insights_query, project_id, session_id)
+        )
+
+        return {"started": True, "session_id": session_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error restarting analysis: {e}")
+        raise HTTPException(status_code=500, detail="Failed to restart analysis")

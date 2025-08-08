@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, JSON, Text
+from sqlalchemy import Column, String, DateTime, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 import uuid
@@ -15,10 +15,9 @@ class Project(Base):
     name = Column(String, nullable=False)
     description = Column(Text)
 
-    # Search parameters
-    query = Column(String, nullable=False)
-    filters = Column(JSON, default={})  # year_range, publication_types, etc.
-    status = Column(String, default="pending")  # pending, running, completed, failed
+    # Evidence tracking
+    evidence_count = Column(Integer, default=0)
+    last_search_date = Column(DateTime, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
