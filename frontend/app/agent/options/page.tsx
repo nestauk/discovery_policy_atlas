@@ -430,3 +430,27 @@
 //     </div>
 //   )
 // }
+
+// Temporary placeholder component to make this a valid module
+// This file is currently disabled but kept for future use
+export default function OptionsPage() {
+  return (
+    <div className="flex-1 flex flex-col bg-slate-50 min-h-screen">
+      <div className="border-b border-slate-200 bg-white px-8 py-6">
+        <h1 className="text-3xl font-bold text-slate-900">Options Page</h1>
+        <p className="text-slate-600 mt-1">This page is currently disabled</p>
+      </div>
+      <main className="flex-1 p-8 bg-slate-50">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-yellow-800 mb-2">Page Temporarily Disabled</h2>
+            <p className="text-yellow-700">
+              This options page is currently disabled but kept for future use. 
+              The full functionality is commented out in the source code.
+            </p>
+          </div>
+        </div>
+      </main>
+    </div>
+  )
+}
