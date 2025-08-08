@@ -112,12 +112,14 @@ class OvertonService:
                 if content
                 else "No content available",  # Limit to 1000 chars
                 "authors": authors,
-                "publication_year": doc.get("published_on", "").split("-")[0]
+                "publication_date": doc.get("published_on", ""),
+                "publication_year": int(doc.get("published_on", "").split("-")[0])
                 if doc.get("published_on")
-                else "",
+                and doc.get("published_on").split("-")[0].isdigit()
+                else None,
                 "venue": doc.get("source", {}).get("title", ""),
                 "doi": doc.get("document_url", ""),
-                "citation_count": doc.get("citation_count", 0),
+                "cited_by_count": doc.get("citation_count", 0),
                 "topics": topics_list,
                 "source_country": doc.get("source", {}).get("country", ""),
                 "source_type": doc.get("source", {}).get("type", ""),

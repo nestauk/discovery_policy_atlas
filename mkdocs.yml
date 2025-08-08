@@ -46,12 +46,15 @@ nav:
   - Home: index.md
   - Setup:
     - Installation: setup/installation.md
+  - Flow:
+    - Chatbot Workflow: flow/chatbot.md
+    - Project Management: flow/project-management.md
   - Backend:
     - Overview: backend/overview.md
     - API documentation: backend/api.md
+    - Database: backend/database.md
   - Frontend:
     - Overview: frontend/overview.md
-    - Agents: frontend/agent.md
 
 # Markdown extensions
 markdown_extensions:

@@ -83,6 +83,36 @@ class SearchResultWithDownload(BaseModel):
     download_key: Optional[str] = None
 
 
+# Project models
+class ProjectCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class ProjectResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    evidence_count: int
+    last_search_date: Optional[datetime] = None
+    last_search_query: Optional[str] = None
+    key_insights: Optional[Dict[str, Any]] = None
+    policy_recommendations: Optional[Dict[str, Any]] = None
+    executive_brief: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectList(BaseModel):
+    projects: List[ProjectResponse]
+    total: int
+
+
 class DownloadCacheEntry(BaseModel):
     df_data: Dict[str, Any]  # Serialized DataFrame data
     query: str

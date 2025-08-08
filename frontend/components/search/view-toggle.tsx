@@ -10,8 +10,8 @@ interface ViewToggleProps {
 
 export function ViewToggle({ currentView, onViewChange }: ViewToggleProps) {
   return (
-    <div className="flex items-center space-x-2">
-      <span className="text-sm text-muted-foreground mr-2">View:</span>
+    <div className="flex items-center px-4">
+      <span className="text-sm text-muted-foreground mr-2"></span>
       <Button
         variant={currentView === 'cards' ? 'default' : 'outline'}
         size="sm"
@@ -21,6 +21,7 @@ export function ViewToggle({ currentView, onViewChange }: ViewToggleProps) {
         <List className="h-4 w-4" />
         <span className="text-current">Cards</span>
       </Button>
+      <div className="w-2"></div>
       <Button
         variant={currentView === 'table' ? 'default' : 'outline'}
         size="sm"

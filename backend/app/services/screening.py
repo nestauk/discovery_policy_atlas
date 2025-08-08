@@ -29,6 +29,16 @@ class ScreeningService:
                 "description": "A concise, one-sentence top line summary with 15 words max, that clearly states the main takeaway or insight as it directly answers the research question or search query. Use clear, declarative language without introductory phrases (e.g. avoid 'This document outlines...'). Focus on delivering the core message or conclusion in plain terms, as if highlighting the key point for an executive summary.",
             },
             {
+                "name": "key_facts",
+                "type": "str",
+                "description": "A comma-separated list (1-2 items) of the most specific, quantitative facts reported by the source (e.g., numbers, percentages, dates).",
+            },
+            {
+                "name": "policy_recommendations",
+                "type": "str",
+                "description": "A comma-separatedlist of concrete policy recommendations mentioned in the text, if any.",
+            },
+            {
                 "name": "confidence",
                 "type": "float",
                 "description": "Confidence score from 0.0 to 1.0",
@@ -82,11 +92,34 @@ class ScreeningService:
                     logger.error(f"File contents: {f.read()}")
                 raise
 
-            # Ensure all expected columns exist
-            expected_cols = ["id", "is_relevant", "relevance_reason", "confidence"]
-            for col in expected_cols:
+            # Ensure all expected columns exist with correct default types
+            expected_defaults = {
+                "id": None,
+                "is_relevant": False,
+                "relevance_reason": "",
+                "top_line": "",
+                "key_facts": [],
+                "policy_recommendations": [],
+                "confidence": None,
+            }
+
+            for col, default_value in expected_defaults.items():
                 if col not in df.columns:
-                    df[col] = None if col != "is_relevant" else False
+                    if isinstance(default_value, list):
+                        df[col] = [list() for _ in range(len(df))]
+                    else:
+                        df[col] = default_value
+
+            # Normalize list-typed columns in case they came as strings/nulls
+            for list_col in ["key_facts", "policy_recommendations"]:
+                if list_col in df.columns:
+                    df[list_col] = df[list_col].apply(
+                        lambda v: v
+                        if isinstance(v, list)
+                        else (
+                            [] if pd.isna(v) else ([v] if v not in ("", None) else [])
+                        )
+                    )
 
             # Convert to proper types
             df["is_relevant"] = df["is_relevant"].astype(bool)
@@ -98,7 +131,15 @@ class ScreeningService:
             logger.error(f"Screening failed: {str(e)}")
             # Return empty DataFrame on error
             return pd.DataFrame(
-                columns=["id", "is_relevant", "relevance_reason", "confidence"]
+                columns=[
+                    "id",
+                    "is_relevant",
+                    "relevance_reason",
+                    "top_line",
+                    "key_facts",
+                    "policy_recommendations",
+                    "confidence",
+                ]
             )
 
         finally:
