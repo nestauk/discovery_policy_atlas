@@ -105,6 +105,7 @@ Return ONLY the boolean query string, nothing else."""
             try:
                 # Extract authors with proper null checks
                 authors = []
+                author_institution_countries = set()
                 if page.get("authorships"):
                     for authorship in page["authorships"]:
                         if authorship and isinstance(authorship, dict):
@@ -113,6 +114,14 @@ Return ONLY the boolean query string, nothing else."""
                                 display_name = author.get("display_name")
                                 if display_name:
                                     authors.append(display_name)
+                            # Collect institution country codes
+                            institutions = authorship.get("institutions") or []
+                            if isinstance(institutions, list):
+                                for inst in institutions:
+                                    if isinstance(inst, dict):
+                                        cc = inst.get("country_code")
+                                        if cc:
+                                            author_institution_countries.add(cc)
 
                 # Extract publication date
                 publication_date = None
@@ -130,6 +139,32 @@ Return ONLY the boolean query string, nothing else."""
                         display_name = source.get("display_name")
                         if display_name:
                             venue = display_name
+                # Access/links
+                landing_page_url = None
+                pdf_url = None
+                primary_is_oa = None
+                if isinstance(primary_location, dict):
+                    landing_page_url = primary_location.get("landing_page_url")
+                    pdf_url = primary_location.get("pdf_url")
+                    primary_is_oa = primary_location.get("is_oa")
+
+                # Prefer best_oa_location if available (mirrors typical OA handling)
+                best_oa_location = page.get("best_oa_location") or {}
+                open_access = page.get("open_access") or {}
+                is_oa = (
+                    best_oa_location.get("is_oa")
+                    if isinstance(best_oa_location, dict)
+                    and "is_oa" in best_oa_location
+                    else open_access.get("is_oa", primary_is_oa)
+                )
+                oa_url = open_access.get("oa_url")
+                if isinstance(best_oa_location, dict):
+                    landing_page_url = (
+                        best_oa_location.get("landing_page_url") or landing_page_url
+                    )
+                    pdf_url = best_oa_location.get("pdf_url") or pdf_url
+                # Prefer explicit PDF url; fallback to oa_url
+                pdf_url = pdf_url or oa_url
 
                 # Extract citation count
                 cited_by_count = page.get("cited_by_count", 0)
@@ -150,6 +185,12 @@ Return ONLY the boolean query string, nothing else."""
                     "work_type": work_type,
                     "source_country": "Academic",  # OpenAlex is academic literature
                     "source_type": "Academic Paper",
+                    "landing_page_url": landing_page_url,
+                    "pdf_url": pdf_url,
+                    "is_oa": is_oa,
+                    "author_institution_countries": sorted(author_institution_countries)
+                    if author_institution_countries
+                    else [],
                 }
                 processed_results.append(processed_result)
             except Exception as e:
@@ -351,3 +392,34 @@ Return ONLY the boolean query string, nothing else."""
         """Format papers for LLM screening"""
         # Create dictionary with title and content
         return df.set_index("id")[["title", "content"]].to_dict("index")
+
+    async def fetch_raw(
+        self,
+        query: str,
+        max_results: int = settings.DEFAULT_MAX_RESULTS,
+        min_citations: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> list:
+        """Return raw OpenAlex works (list of dicts) for debugging/export."""
+        try:
+            works_query = Works().search_filter(title_and_abstract=query)
+            if min_citations:
+                works_query = works_query.filter(cited_by_count=f">{min_citations}")
+            if date_from:
+                works_query = works_query.filter(
+                    from_publication_date=date_from.isoformat()
+                )
+            if date_to:
+                works_query = works_query.filter(
+                    to_publication_date=date_to.isoformat()
+                )
+            results = []
+            for page in works_query.paginate(
+                per_page=min(25, max_results), n_max=max_results
+            ):
+                results.extend(page)
+            return results
+        except Exception as e:
+            logger.error("OpenAlex raw fetch failed: %s", e)
+            return []

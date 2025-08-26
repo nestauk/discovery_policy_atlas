@@ -2,6 +2,8 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 import uuid
 import io
+import pandas as pd
+from pathlib import Path
 from datetime import datetime
 from app.core.models import (
     SearchRequest,
@@ -11,12 +13,15 @@ from app.core.models import (
     SearchResultWithDownload,
 )
 from app.core.auth import get_current_user, CurrentUser
+from app.core.config import settings
 
 from app.services.openalex import OpenAlexService
 from app.services.mediacloud import MediaCloudService
 from app.services.overton import OvertonService
 from app.services.screening import ScreeningService
 from app.services.summary import SummaryService
+from app.services.analysis.service import AnalysisService
+from app.services.analysis.schemas import RunConfig
 from app.services.download import download_service
 import logging
 
@@ -174,3 +179,144 @@ async def get_summary(
     )
     summary = summary_service.summarize(papers, extraction_fields, prompt)
     return JSONResponse(content={"summary": summary})
+
+
+@router.post("/api/analysis/run")
+async def run_analysis(request: Request):
+    """Trigger the deterministic analysis pipeline with switches for screening/extraction/RAG."""
+    body = await request.json()
+    config = RunConfig(
+        query=body.get("query", ""),
+        sources=body.get("sources", ["openalex", "overton"]),
+        date_from=body.get("since"),
+        date_to=body.get("until"),
+        limit=int(body.get("limit", 200)),
+        screening_enabled=bool(body.get("screening", False)),
+        relevance_enabled=bool(body.get("relevance_enabled", True)),
+        retrieval_mode=body.get("mode", "semantic"),
+        boolean_query=body.get("boolean_query"),
+        use_abstracts_only=bool(body.get("use_abstracts_only", False)),
+    )
+
+    service = AnalysisService(export_dir=settings.EXPORT_FILES_DIR)
+    result = await service.run(config)
+    return JSONResponse(
+        content={
+            "run_id": result.run_id,
+            "total_references": result.total_references,
+            "relevant_references": result.relevant_references,
+            "references_csv_path": result.references_csv_path,
+            "extractions_json_path": result.extractions_json_path,
+        }
+    )
+
+
+@router.get("/api/analysis/{run_id}/references")
+async def get_analysis_references(run_id: str):
+    """Get the references CSV for a specific analysis run"""
+
+    # Construct the path to the references CSV
+    references_path = (
+        Path(settings.EXPORT_FILES_DIR) / f"run_{run_id}" / "references.csv"
+    )
+
+    if not references_path.exists():
+        return JSONResponse(
+            status_code=404, content={"error": f"References not found for run {run_id}"}
+        )
+
+    try:
+        # Read CSV and convert to JSON
+        df = pd.read_csv(references_path)
+        # Replace NaN values with None for JSON serialization
+        df = df.fillna("")
+        references_data = df.to_dict("records")
+
+        return JSONResponse(
+            content={
+                "run_id": run_id,
+                "total_references": len(references_data),
+                "references": references_data,
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error reading references for run {run_id}: {e}")
+        return JSONResponse(
+            status_code=500, content={"error": f"Failed to read references: {str(e)}"}
+        )
+
+
+@router.get("/api/analysis/{run_id}/extractions")
+async def get_analysis_extractions(run_id: str):
+    """Get the extractions JSON for a specific analysis run"""
+    import json
+    from pathlib import Path
+
+    # Construct the path to the extractions JSON
+    extractions_path = (
+        Path(settings.EXPORT_FILES_DIR) / f"run_{run_id}" / "extractions.json"
+    )
+
+    if not extractions_path.exists():
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Extractions not found for run {run_id}"},
+        )
+
+    try:
+        # Read JSON file
+        with open(extractions_path, "r", encoding="utf-8") as f:
+            extractions_data = json.load(f)
+
+        return JSONResponse(content=extractions_data)
+    except Exception as e:
+        logger.error(f"Error reading extractions for run {run_id}: {e}")
+        return JSONResponse(
+            status_code=500, content={"error": f"Failed to read extractions: {str(e)}"}
+        )
+
+
+@router.get("/api/analysis/runs")
+async def list_analysis_runs():
+    """List all available analysis runs"""
+    import json
+
+    export_dir = Path(settings.EXPORT_FILES_DIR)
+    if not export_dir.exists():
+        return JSONResponse(content={"runs": []})
+
+    runs = []
+    for run_dir in export_dir.iterdir():
+        if run_dir.is_dir() and run_dir.name.startswith("run_"):
+            run_id = run_dir.name[4:]  # Remove "run_" prefix
+
+            # Check if this run has results
+            references_path = run_dir / "references.csv"
+            extractions_path = run_dir / "extractions.json"
+
+            run_info = {
+                "run_id": run_id,
+                "has_references": references_path.exists(),
+                "has_extractions": extractions_path.exists(),
+                "created_at": None,
+            }
+
+            # Try to get creation time from extractions metadata
+            if extractions_path.exists():
+                try:
+                    with open(extractions_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if (
+                            "run_metadata" in data
+                            and "created_at" in data["run_metadata"]
+                        ):
+                            run_info["created_at"] = data["run_metadata"]["created_at"]
+                except:
+                    pass
+
+            runs.append(run_info)
+
+    # Sort by creation time (newest first)
+    runs.sort(key=lambda x: x["created_at"] or "", reverse=True)
+
+    return JSONResponse(content={"runs": runs})

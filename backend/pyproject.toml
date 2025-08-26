@@ -28,6 +28,12 @@ dependencies = [
     "langchain>=0.1.0",
     "langchain-openai>=0.1.0",
     "langchain-core>=0.1.0",
+    "pymupdf>=1.24.10",
+    "readability-lxml>=0.8.1",
+    "beautifulsoup4>=4.12.3",
+    "tqdm>=4.66.4",
+    "rapidfuzz>=3.9.7",
+    "langgraph>=0.5.4",
 ]
 
 [tool.uv]
@@ -43,4 +49,5 @@ dev = [
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.6.14",
     "mkdocstrings[python]>=0.29.1",
+    "jupyter>=1.1.1",
 ]

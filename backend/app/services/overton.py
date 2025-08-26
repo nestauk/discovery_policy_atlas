@@ -104,6 +104,32 @@ class OvertonService:
                 content_parts.append(doc["llm_document_description"])
             content = " ".join(content_parts)
 
+            # URLs and identifiers
+            overton_url = doc.get("overton_url", "")
+            document_url = doc.get("document_url", "")  # may be a PDF or a landing page
+            pdf_url = doc.get("pdf_url") or (
+                document_url
+                if isinstance(document_url, str)
+                and document_url.lower().endswith(".pdf")
+                else ""
+            )
+            # Prefer document_url as landing page if it's not a direct PDF; otherwise fall back to Overton portal page
+            landing_page_url = (
+                document_url
+                if isinstance(document_url, str)
+                and not document_url.lower().endswith(".pdf")
+                else overton_url
+            )
+
+            # DOI from keyed identifiers when available
+            keyed_ids = doc.get("keyed_other_identifiers", {}) or {}
+            doi_list = keyed_ids.get("doi") or []
+            doi_value = (
+                doi_list[0]
+                if isinstance(doi_list, list) and len(doi_list) > 0
+                else None
+            )
+
             result = {
                 "id": doc.get("policy_document_id", ""),
                 "title": doc.get("title", ""),
@@ -118,13 +144,17 @@ class OvertonService:
                 and doc.get("published_on").split("-")[0].isdigit()
                 else None,
                 "venue": doc.get("source", {}).get("title", ""),
-                "doi": doc.get("document_url", ""),
+                "doi": doi_value or "",
                 "cited_by_count": doc.get("citation_count", 0),
                 "topics": topics_list,
                 "source_country": doc.get("source", {}).get("country", ""),
                 "source_type": doc.get("source", {}).get("type", ""),
                 "published_on": doc.get("published_on", ""),
-                "overton_url": doc.get("overton_url", ""),
+                "overton_url": overton_url,
+                "document_url": document_url,
+                "landing_page_url": landing_page_url,
+                "pdf_url": pdf_url,
+                "is_oa": None,
             }
             results.append(result)
 
@@ -137,6 +167,16 @@ class OvertonService:
         df["authors"] = df["authors"].apply(lambda x: x if isinstance(x, list) else [])
 
         return df
+
+    async def fetch_raw(
+        self,
+        **kwargs,
+    ):
+        """Return raw Overton JSON (first page) for debugging/export."""
+        try:
+            return self.client.search_documents_raw(**kwargs)
+        except Exception:
+            return {}
 
     def format_for_screening(self, df: pd.DataFrame) -> Dict[str, Dict[str, str]]:
         """Format policy documents for LLM screening"""

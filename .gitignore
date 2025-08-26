@@ -69,4 +69,8 @@ __pycache__/
 **/.vercel/
 .vercel/
 
+.cursor/*
 reference/*
+temp/*
+memory-bank/*
+backend/temp/*

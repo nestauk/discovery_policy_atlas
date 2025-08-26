@@ -4,6 +4,10 @@ from functools import lru_cache
 from pydantic import field_validator
 import json
 import logging
+from pathlib import Path
+
+# Get the project root directory (3 levels up from this config file)
+config_dir = Path(__file__).parent.parent.parent
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -115,8 +119,8 @@ class Settings(BaseSettings):
     BATCH_SLEEP_TIME: float = 0.5  # Seconds between API calls
 
     # File Storage
-    TEMP_FILES_DIR: str = "./temp"
-    EXPORT_FILES_DIR: str = "./exports"
+    TEMP_FILES_DIR: str = str(config_dir / "temp")
+    EXPORT_FILES_DIR: str = str(config_dir / "temp")
 
     # Rate Limiting
     OPENALEX_RATE_LIMIT: int = 10  # requests per second
