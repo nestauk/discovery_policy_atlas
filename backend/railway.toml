@@ -1,17 +1,10 @@
 [build]
-builder = "nixpacks"
+builder = "NIXPACKS"
 buildCommand = "uv sync --no-dev --frozen"
 
 [deploy]
 startCommand = "echo 'Using Procfile for start command'"
 healthcheckPath = "/health"
 healthcheckTimeout = 100
-restartPolicyType = "on-failure"
-restartPolicyMaxRetries = 10
-
-[deploy.env]
-PYTHON_VERSION = "3.12"
-NODE_VERSION = "20"
-UV_CACHE_DIR = "/tmp/uv-cache"
-UV_COMPILE_BYTECODE = "1"
-UV_LINK_MODE = "copy" 
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10 
