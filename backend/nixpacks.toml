@@ -1,0 +1,24 @@
+# Nixpacks configuration for Railway
+[variables]
+UV_CACHE_DIR = "/tmp/uv-cache"
+UV_COMPILE_BYTECODE = "1"
+UV_LINK_MODE = "copy"
+NIXPACKS_PYTHON_VERSION = "3.12"
+
+[phases.setup]
+dependsOn = []
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+    "mkdir -p /tmp/uv-cache",
+    "pip install uv==0.4.30",
+    "uv sync --no-dev --frozen"
+]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = []
+
+[start]
+cmd = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"

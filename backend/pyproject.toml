@@ -14,9 +14,7 @@ dependencies = [
     "discovery-utils @ git+https://github.com/nestauk/discovery_utils.git@dev",
     "pydantic-settings>=2.9.1",
     "scrapling>=0.2.99",
-    "mkdocs>=1.6.1",
-    "mkdocs-material>=9.6.14",
-    "mkdocstrings>=0.29.1",
+
     "sqlalchemy>=2.0.41",
     "alembic>=1.16.1",
     "asyncpg>=0.30.0",
@@ -40,6 +38,11 @@ dependencies = [
 override-dependencies = [
     "pyalex>=0.18",  # Force this version despite discovery-utils requirement
 ]
+
+# UV build optimizations
+compile-bytecode = true
+no-cache = false
+link-mode = "copy"
 [dependency-groups]
 dev = [
     "pytest>=8.3.5",
