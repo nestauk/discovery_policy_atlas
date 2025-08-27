@@ -105,6 +105,18 @@ class OvertonClient:
         # For multiple responses, return the list
         return responses
 
+    def search_documents_raw(self, **kwargs):
+        """Return raw Overton JSON using first_page mode (for debugging/export)."""
+        params = {
+            "format": "json",
+            "api_key": self.api_key,
+        }
+        params.update(kwargs)
+        url = f"{self.base_url}?{urlencode(params, safe='|')}"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        return response.json()
+
     # Legacy methods for backward compatibility
     def search_all_documents(self, min_similarity: float = 0.3, **kwargs):
         """
