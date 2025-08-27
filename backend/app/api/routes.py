@@ -302,6 +302,7 @@ async def list_analysis_runs():
             }
 
             # Try to get creation time from extractions metadata
+            # To do: simplify this
             if extractions_path.exists():
                 try:
                     with open(extractions_path, "r", encoding="utf-8") as f:
@@ -311,7 +312,7 @@ async def list_analysis_runs():
                             and "created_at" in data["run_metadata"]
                         ):
                             run_info["created_at"] = data["run_metadata"]["created_at"]
-                except:
+                except Exception:
                     pass
 
             runs.append(run_info)

@@ -76,10 +76,12 @@ export function PapersTable({ papers }: PapersTableProps) {
       width: '25%',
       render: (text, record) => {
         const maxLength = 100 // Truncate after 100 characters for titles
+        // Prioritize landing_page_url, fallback to DOI, then overton_url
+        const linkUrl = record.landing_page_url || (record.doi ? `${record.doi}` : record.overton_url)
         
-        return (
+        return linkUrl ? (
           <a 
-            href={record.doi ? `${record.doi}` : record.overton_url} 
+            href={linkUrl} 
             target="_blank" 
             rel="noopener noreferrer"
             className="text-blue-600 hover:text-blue-800 hover:underline"
@@ -90,6 +92,13 @@ export function PapersTable({ papers }: PapersTableProps) {
               : text
             }
           </a>
+        ) : (
+          <span title={text}>
+            {text.length > maxLength 
+              ? `${text.substring(0, maxLength)}...` 
+              : text
+            }
+          </span>
         )
       },
       sorter: (a, b) => a.title.localeCompare(b.title),
@@ -156,6 +165,55 @@ export function PapersTable({ papers }: PapersTableProps) {
       render: (text, record) => (
         <span>{record.confidence ? (record.confidence * 100).toFixed(1) : 'N/A'}</span>
       ),
+    },
+    {
+      title: 'Full Text',
+      dataIndex: 'full_text_available',
+      key: 'full_text_available',
+      width: '6%',
+      sorter: (a, b) => {
+        const aVal = a.full_text_available === true ? 1 : a.full_text_available === false ? 0 : -1
+        const bVal = b.full_text_available === true ? 1 : b.full_text_available === false ? 0 : -1
+        return aVal - bVal
+      },
+      render: (text, record) => {
+        if (record.full_text_available === true) {
+          return <span className="text-green-600 font-semibold">✓</span>
+        } else if (record.full_text_available === false) {
+          return <span className="text-red-600">✗</span>
+        } else {
+          return <span className="text-gray-400">?</span>
+        }
+      },
+    },
+    {
+      title: 'Status',
+      dataIndex: 'extraction_status',
+      key: 'extraction_status',
+      width: '8%',
+      sorter: (a, b) => (a.extraction_status || 'unknown').localeCompare(b.extraction_status || 'unknown'),
+      render: (text, record) => {
+        const status = record.extraction_status || 'unknown'
+        let color = 'text-gray-500'
+        let bgColor = 'bg-gray-100'
+        
+        if (status === 'success') {
+          color = 'text-green-700'
+          bgColor = 'bg-green-100'
+        } else if (status === 'failed') {
+          color = 'text-red-700'
+          bgColor = 'bg-red-100'
+        } else if (status === 'skipped') {
+          color = 'text-yellow-700'
+          bgColor = 'bg-yellow-100'
+        }
+        
+        return (
+          <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${color} ${bgColor}`}>
+            {status}
+          </span>
+        )
+      },
     },
     // Add extracted fields as additional columns
     ...extractedFields

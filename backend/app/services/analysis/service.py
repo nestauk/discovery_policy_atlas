@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+import shutil
 from pathlib import Path
 from typing import Dict, List
 import pandas as pd
+from datetime import datetime
 
 from .schemas import RunConfig, RunResult
 from .references import ReferencesService
@@ -13,6 +15,7 @@ from .acquire import AcquisitionService
 from .parse import ParsingService
 from .normalize import normalize_text
 from .extractor_langchain import LangChainExtractorService, LangChainExtractionConfig
+from .storage import AnalysisStorageService
 from app.core.config import settings
 
 
@@ -36,8 +39,11 @@ class AnalysisService:
         self.export_dir = Path(export_dir)
         self.export_dir.mkdir(parents=True, exist_ok=True)
 
-    async def run(self, config: RunConfig) -> RunResult:
-        run_id = uuid.uuid4().hex[:12]
+    async def run(self, config: RunConfig, project_id: str = None) -> RunResult:
+        # Generate run ID with timestamp for better identification (max 12 chars for DB compatibility)
+        timestamp = datetime.now().strftime("%m%d%H%M")  # MMDDHHMM = 8 chars
+        uuid_part = uuid.uuid4().hex[:4]  # 4 chars
+        run_id = f"{timestamp}{uuid_part}"  # Total: 12 chars
         logger.info("Starting analysis run %s", run_id)
 
         # Create unique subfolder for this run
@@ -103,9 +109,18 @@ class AnalysisService:
                 relevant_references,
                 total_references,
             )
+
+            # STEPWISE UPLOAD: Store initial documents after screening
+            if project_id:
+                await self._store_initial_documents(project_id, references_csv)
+
         else:
             relevant_references = total_references
             logger.info("Run %s skipping relevance checking (disabled)", run_id)
+
+            # STEPWISE UPLOAD: Store initial documents even without relevance checking
+            if project_id:
+                await self._store_initial_documents(project_id, references_csv)
 
         parsed_dir = run_export_dir / "data" / "normalized"
         parsed_dir.mkdir(parents=True, exist_ok=True)
@@ -165,13 +180,42 @@ class AnalysisService:
         # - references.csv: Single file with all reference data, relevance, acquisition, and extraction status
         # - extractions.json: Single file with all extraction results
 
-        return RunResult(
+        result = RunResult(
             run_id=run_id,
             total_references=total_references,
             relevant_references=relevant_references,
             references_csv_path=str(references_csv),
             extractions_json_path=consolidated_json_path,
         )
+
+        # Store results in Supabase and optionally clean up files
+        try:
+            logger.info("Starting Supabase upload for run %s", run_id)
+            storage_service = AnalysisStorageService()
+            storage_project_id = await storage_service.store_analysis_run(
+                config, result, project_id
+            )
+            logger.info(
+                "Successfully stored analysis run %s to project %s",
+                run_id,
+                storage_project_id or project_id,
+            )
+
+            # Clean up local files unless in debug mode
+            if not settings.DEBUG_ANALYSIS_FILES:
+                logger.info("Cleaning up local files for run %s", run_id)
+                self._cleanup_run_files(run_export_dir)
+            else:
+                logger.info(
+                    "Debug mode enabled - keeping local files for run %s", run_id
+                )
+
+        except Exception as e:
+            logger.error("Failed to store analysis run %s in Supabase: %s", run_id, e)
+            # Don't fail the entire pipeline if Supabase upload fails
+            # Keep the files for manual inspection
+
+        return result
 
     def _update_acquisition_status(
         self, references_csv_path: str, acquisition_results: List[Dict]
@@ -239,3 +283,190 @@ class AnalysisService:
 
         except Exception as e:
             logger.error(f"Failed to update acquisition status: {e}")
+
+    def _cleanup_run_files(self, run_export_dir: Path) -> None:
+        """Clean up local files for a run after successful Supabase upload."""
+        try:
+            if run_export_dir.exists() and run_export_dir.is_dir():
+                shutil.rmtree(run_export_dir)
+                logger.info(f"Cleaned up run directory: {run_export_dir}")
+            else:
+                logger.warning(f"Run directory not found for cleanup: {run_export_dir}")
+        except Exception as e:
+            logger.error(f"Failed to clean up run directory {run_export_dir}: {e}")
+            # Don't raise - cleanup failure shouldn't fail the pipeline
+
+    async def _store_initial_documents(
+        self, project_id: str, references_csv: str
+    ) -> None:
+        """Store initial documents after screening phase."""
+        try:
+            logger.info(f"Storing initial documents for project {project_id}")
+
+            # Load CSV and convert to UnifiedReference objects
+            references = self._load_references_from_csv(references_csv)
+
+            # Store using the enhanced storage service
+            storage_service = AnalysisStorageService()
+            await storage_service.store_initial_documents(project_id, references)
+
+            logger.info(f"Successfully stored {len(references)} initial documents")
+
+        except Exception as e:
+            logger.error(f"Failed to store initial documents: {e}")
+            # Don't raise - this shouldn't stop the analysis pipeline
+
+    def _load_references_from_csv(self, csv_path: str) -> List:
+        """Load references from CSV and convert to UnifiedReference objects."""
+        from .schemas import UnifiedReference
+
+        df = pd.read_csv(csv_path)
+
+        references = []
+
+        logger.info(
+            f"Loading {len(df)} references from CSV with {len(df.columns)} columns"
+        )
+
+        for _, row in df.iterrows():
+            # Map CSV columns to UnifiedReference fields
+            ref_data = {
+                "doc_id": str(row.get("doc_id", "")),
+                "source": str(row.get("source", "")),
+                "source_id": str(row.get("source_id", "")),
+                "title": str(row.get("title", "")),
+                "abstract_or_summary": self._safe_str(row.get("abstract_or_summary")),
+                "year": self._safe_int(row.get("year")),
+                "doi": self._safe_str(row.get("doi")),
+                "authors": self._parse_authors(row.get("authors")),
+                "landing_page_url": self._safe_str(row.get("landing_page_url")),
+                "pdf_url": self._safe_str(row.get("pdf_url")),
+                "is_oa": self._safe_bool(row.get("is_oa")),
+                "type": self._safe_str(row.get("type")),
+                "author_institution_countries": self._parse_list(
+                    row.get("author_institution_countries")
+                ),
+                # Relevance fields
+                "is_relevant": self._safe_bool(row.get("is_relevant")),
+                "relevance_confidence": self._safe_float(
+                    row.get("relevance_confidence")
+                ),
+                "relevance_reason": self._safe_str(row.get("relevance_reason")),
+                "top_line": self._safe_str(row.get("top_line")),
+                "document_type": self._safe_str(row.get("document_type")),
+                "document_type_reason": self._safe_str(row.get("document_type_reason")),
+                # Acquisition fields
+                "acquisition_status": self._safe_str(row.get("acquisition_status")),
+                "acquisition_error": self._safe_str(row.get("acquisition_error")),
+                "full_text_available": self._safe_bool(row.get("full_text_available")),
+                "file_path": self._safe_str(row.get("file_path")),
+                # Extraction fields
+                "extraction_status": self._safe_str(row.get("extraction_status")),
+                "extraction_error": self._safe_str(row.get("extraction_error")),
+                "text_source": self._safe_str(row.get("text_source")),
+            }
+
+            # Create UnifiedReference object
+            try:
+                ref = UnifiedReference(**ref_data)
+                references.append(ref)
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to create UnifiedReference for doc {ref_data.get('doc_id')}: {e}"
+                )
+                logger.warning(f"ref_data was: {ref_data}")
+                continue
+
+        return references
+
+    def _safe_str(self, value) -> str | None:
+        """Safely convert value to string, handling NaN/None."""
+        if pd.isna(value) or value is None or value == "":
+            return None
+        return str(value).strip()
+
+    def _safe_int(self, value) -> int | None:
+        """Safely convert value to int, handling NaN/None."""
+        if pd.isna(value) or value is None:
+            return None
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return None
+
+    def _safe_float(self, value) -> float | None:
+        """Safely convert value to float, handling NaN/None."""
+        if pd.isna(value) or value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    def _safe_bool(self, value) -> bool | None:
+        """Safely convert value to bool, handling NaN/None."""
+        if pd.isna(value) or value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ("true", "1", "yes")
+        try:
+            return bool(int(value))
+        except (ValueError, TypeError):
+            return None
+
+    def _parse_authors(self, value) -> List[str] | None:
+        """Parse authors field which might be a string or list."""
+        if pd.isna(value) or value is None or value == "":
+            return None
+
+        if isinstance(value, list):
+            return [str(author) for author in value]
+
+        # Try JSON parsing for list-like strings first
+        try:
+            import json
+
+            parsed = json.loads(str(value))
+            if isinstance(parsed, list):
+                return [str(author) for author in parsed]
+            elif isinstance(parsed, str):
+                return [parsed]
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Try literal_eval for Python list representations like "['Author Name']"
+        try:
+            import ast
+
+            parsed = ast.literal_eval(str(value))
+            if isinstance(parsed, list):
+                return [str(author) for author in parsed]
+            elif isinstance(parsed, str):
+                return [parsed]
+        except (ValueError, SyntaxError):
+            pass
+
+        # Fallback to comma separation
+        return [author.strip() for author in str(value).split(",") if author.strip()]
+
+    def _parse_list(self, value) -> List[str] | None:
+        """Parse a generic list field."""
+        if pd.isna(value) or value is None or value == "":
+            return None
+
+        if isinstance(value, list):
+            return [str(item) for item in value]
+
+        try:
+            import json
+
+            parsed = json.loads(str(value))
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed]
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        return [item.strip() for item in str(value).split(",") if item.strip()]

@@ -1,5 +1,6 @@
 import { useAuth } from "@clerk/nextjs";
 import { Project } from "./projectStore";
+import { AnalysisProject } from "./analysisProjectStore";
 
 export function useAPI() {
   const { getToken } = useAuth();
@@ -87,6 +88,46 @@ export function useAPI() {
   const checkEvidenceStatus = async (projectId: string) => {
     return fetchWithAuth(`api/agent/evidence-status/${projectId}`);
   };
+
+  // Analysis Project API functions
+  const getAnalysisProjects = async (): Promise<{ projects: AnalysisProject[], total: number }> => {
+    return fetchWithAuth('api/analysis-projects');
+  };
+
+  const createAnalysisProject = async (project: { title: string; description?: string; query?: string }) => {
+    return fetchWithAuth('api/analysis-projects', {
+      method: 'POST',
+      body: JSON.stringify(project),
+    });
+  };
+
+  const getAnalysisProject = async (projectId: string) => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}`);
+  };
+
+  const updateAnalysisProject = async (projectId: string, updates: Partial<AnalysisProject>) => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  };
+
+  const deleteAnalysisProject = async (projectId: string): Promise<void> => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}`, {
+      method: 'DELETE',
+    });
+  };
+
+  const runAnalysisForProject = async (projectId: string, config: Record<string, unknown>) => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}/run-analysis`, {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  };
+
+  const getDocumentExtraction = async (projectId: string, documentId: string) => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}/documents/${documentId}/extraction`);
+  };
   
   return { 
     fetchWithAuth, 
@@ -97,6 +138,14 @@ export function useAPI() {
     getProject, 
     getProjectDocuments,
     updateProjectStats,
-    checkEvidenceStatus
+    checkEvidenceStatus,
+    // Analysis projects
+    getAnalysisProjects,
+    createAnalysisProject,
+    getAnalysisProject,
+    updateAnalysisProject,
+    deleteAnalysisProject,
+    runAnalysisForProject,
+    getDocumentExtraction
   };
 } 

@@ -106,6 +106,7 @@ class Settings(BaseSettings):
 
     # Development/Testing
     MOCK_OPENAI: bool = False
+    DEBUG_ANALYSIS_FILES: bool = False  # Keep local analysis files for debugging
 
     # LLM Model Settings
     LLM_PROVIDER: str = "openai"  # "openai" or "anthropic"
@@ -115,7 +116,7 @@ class Settings(BaseSettings):
 
     # Batch Processing Settings
     BATCH_SIZE_SCREENING: int = 5
-    BATCH_SIZE_EXTRACTION: int = 3
+    BATCH_SIZE_EXTRACTION: int = 5
     BATCH_SLEEP_TIME: float = 0.5  # Seconds between API calls
 
     # File Storage

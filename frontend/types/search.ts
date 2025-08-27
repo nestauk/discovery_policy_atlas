@@ -35,6 +35,11 @@ export interface SearchParams {
     overton_url?: string
     // AI-generated summary
     top_line?: string
+    // URL fields
+    landing_page_url?: string
+    // Processing status fields
+    full_text_available?: boolean
+    extraction_status?: string
     // Extracted fields (dynamically added based on extraction_fields parameter)
     [key: string]: string | number | boolean | string[] | undefined
   }
