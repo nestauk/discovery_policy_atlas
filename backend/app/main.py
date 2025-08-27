@@ -75,7 +75,6 @@ app.include_router(router)
 app.include_router(projects_router)
 app.include_router(projects_v2_router)
 app.include_router(agent_router)
-#
 
 
 # Health check endpoint at root
