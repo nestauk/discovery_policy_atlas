@@ -1,0 +1,14 @@
+[build]
+builder = "nixpacks"
+buildCommand = "echo 'Using nixpacks for build'"
+
+[deploy]
+startCommand = "echo 'Using Procfile for start command'"
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "on-failure"
+restartPolicyMaxRetries = 10
+
+[deploy.env]
+PYTHON_VERSION = "3.11"
+NODE_VERSION = "20" 
