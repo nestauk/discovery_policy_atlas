@@ -59,7 +59,12 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI app
-app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    lifespan=lifespan,
+    redirect_slashes=False,  # Disable automatic slash redirects
+)
 
 # Configure CORS
 app.add_middleware(
