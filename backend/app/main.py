@@ -66,7 +66,7 @@ app = FastAPI(
     redirect_slashes=False,  # Disable automatic slash redirects
 )
 
-# Configure CORS
+## Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,

@@ -1,0 +1,15 @@
+[variables]
+PYTHON_VERSION = "3.12"
+NODE_VERSION = "20"
+UV_CACHE_DIR = "/tmp/uv-cache"
+UV_COMPILE_BYTECODE = "1"
+UV_LINK_MODE = "copy"
+
+[phases.setup]
+nixPkgs = ["python312", "uv"]
+
+[phases.build]
+cmds = ["uv sync --no-dev --frozen"]
+
+[phases.start]
+cmd = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
