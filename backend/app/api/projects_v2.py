@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 
 
+@router.get("")
 @router.get("/")
 async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_user)):
     """Get all analysis projects"""
@@ -46,6 +47,7 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
         raise HTTPException(status_code=500, detail="Failed to fetch analysis projects")
 
 
+@router.post("")
 @router.post("/")
 async def create_analysis_project(
     request: dict, current_user: CurrentUser = Depends(get_current_user)
