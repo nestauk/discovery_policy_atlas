@@ -63,7 +63,7 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     lifespan=lifespan,
-    redirect_slashes=False,  # Disable automatic slash redirects
+    # redirect_slashes=False,  # Disable automatic slash redirects
 )
 
 ## Configure CORS
