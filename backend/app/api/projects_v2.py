@@ -136,6 +136,15 @@ async def get_analysis_project(
             .execute()
         )
 
+        # Map database field names to frontend expectations for documents
+        documents = []
+        for doc in docs_result.data:
+            doc_copy = doc.copy()
+            # Map citation_count (database) to cited_by_count (frontend)
+            if "citation_count" in doc_copy:
+                doc_copy["cited_by_count"] = doc_copy["citation_count"]
+            documents.append(doc_copy)
+
         return {
             "project": {
                 "id": str(project["id"]),
@@ -148,9 +157,9 @@ async def get_analysis_project(
                 "status": project.get("status", "unknown"),
                 "created_at": project["created_at"],
             },
-            "documents": docs_result.data,
+            "documents": documents,
             "extractions": extractions_result.data,
-            "document_count": len(docs_result.data),
+            "document_count": len(documents),
             "extraction_count": len(extractions_result.data),
         }
 
@@ -348,7 +357,16 @@ async def get_project_documents(
             .eq("analysis_project_id", project_id)
             .execute()
         )
-        return {"documents": docs_result.data, "total": len(docs_result.data)}
+        # Map database field names to frontend expectations
+        documents = []
+        for doc in docs_result.data:
+            doc_copy = doc.copy()
+            # Map citation_count (database) to cited_by_count (frontend)
+            if "citation_count" in doc_copy:
+                doc_copy["cited_by_count"] = doc_copy["citation_count"]
+            documents.append(doc_copy)
+
+        return {"documents": documents, "total": len(documents)}
 
     except Exception as e:
         logger.error(f"Error fetching documents for project {project_id}: {e}")
@@ -382,6 +400,243 @@ async def get_project_extractions(
         logger.error(f"Error fetching extractions for project {project_id}: {e}")
         raise HTTPException(
             status_code=500, detail="Failed to fetch project extractions"
+        )
+
+
+@router.get("/{project_id}/interventions")
+async def get_project_interventions(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get aggregated interventions data for an analysis project"""
+    try:
+        # Get all documents for this project that have extraction results
+        docs_result = (
+            vectorization_service.supabase.table("analysis_documents")
+            .select("*")
+            .eq("analysis_project_id", project_id)
+            .not_.is_("extraction_results", "null")
+            .execute()
+        )
+
+        if not docs_result.data:
+            return {"interventions": [], "total": 0}
+
+        # Process interventions from all documents
+        aggregated_interventions = {}
+
+        def get_study_type_rank(study_type):
+            """Convert study type letter to numeric rank for sorting (lower = better)
+            g (RCT) is highest quality, empty is lowest quality"""
+            if not study_type:
+                return 999  # Empty types go to the end (lowest quality)
+
+            # Study type is already a letter (a-j) from Maryland Scientific Methods Scale
+            study_type_clean = study_type.strip().lower()
+
+            # Reverse ranking so 'g' (RCT) gets rank 1 (highest), 'a' gets rank 8
+            if study_type_clean == "g":  # Randomised controlled trial - highest quality
+                return 1
+            elif study_type_clean == "h":  # Meta-analysis
+                return 2
+            elif study_type_clean == "f":  # Quasi-experimental study
+                return 3
+            elif study_type_clean == "e":  # Comparison of outcomes in treated group
+                return 4
+            elif study_type_clean == "d":  # Study measures outcome pre and post
+                return 5
+            elif study_type_clean == "c":  # Cross-sectional with control variables
+                return 6
+            elif study_type_clean == "b":  # Study measures outcome pre and post
+                return 7
+            elif study_type_clean == "a":  # Purely cross-sectional study
+                return 8
+            elif study_type_clean == "i":  # Policy recommendation/theoretical modelling
+                return 9
+            elif (
+                study_type_clean == "j"
+            ):  # News article/opinion piece/government announcement
+                return 10
+            else:
+                return 999  # Unknown types go to the end
+
+        for document in docs_result.data:
+            extraction_results = document.get("extraction_results", {})
+            interventions = extraction_results.get("interventions", [])
+            results = extraction_results.get("results", [])
+
+            # Group results by intervention
+            results_by_intervention = {}
+            for result in results:
+                intervention_idx = result.get("intervention_idx")
+                if intervention_idx is not None:
+                    if intervention_idx not in results_by_intervention:
+                        results_by_intervention[intervention_idx] = []
+                    results_by_intervention[intervention_idx].append(result)
+
+            # Process each intervention
+            for intervention in interventions:
+                intervention_name = intervention.get("name", "Unknown Intervention")
+                intervention_idx = intervention.get("idx")
+
+                # Create a unique key for this intervention (could be improved with better deduplication)
+                intervention_key = f"{intervention_name}_{intervention.get('type', '')}_{intervention.get('country', '')}"
+
+                if intervention_key not in aggregated_interventions:
+                    # Initialize intervention data
+                    aggregated_interventions[intervention_key] = {
+                        "name": intervention_name,
+                        "type": intervention.get("type", "Unknown"),
+                        "country": intervention.get("country", "Unknown"),
+                        "description": intervention.get("description", ""),
+                        "study_types": [],
+                        "sample_sizes": [],
+                        "result_count": 0,
+                        "results_summary": [],
+                        "highest_study_type": None,
+                        "highest_study_type_rank": 999,
+                        "documents": [],
+                    }
+
+                # Add document info
+                aggregated_interventions[intervention_key]["documents"].append(
+                    {
+                        "doc_id": document.get("doc_id"),
+                        "title": document.get("title"),
+                        "source": document.get("source"),
+                        "landing_page_url": document.get("landing_page_url"),
+                    }
+                )
+
+                # Add study type if available
+                study_type = intervention.get("study_type")
+                if study_type:
+                    aggregated_interventions[intervention_key]["study_types"].append(
+                        study_type
+                    )
+
+                    # Update highest study type (lowest rank number = highest quality)
+                    study_rank = get_study_type_rank(study_type)
+                    if (
+                        study_rank
+                        < aggregated_interventions[intervention_key][
+                            "highest_study_type_rank"
+                        ]
+                    ):
+                        aggregated_interventions[intervention_key][
+                            "highest_study_type"
+                        ] = study_type
+                        aggregated_interventions[intervention_key][
+                            "highest_study_type_rank"
+                        ] = study_rank
+
+                # Add sample size if available
+                sample_size = intervention.get("sample_size")
+                if sample_size:
+                    try:
+                        aggregated_interventions[intervention_key][
+                            "sample_sizes"
+                        ].append(int(sample_size))
+                    except (ValueError, TypeError):
+                        pass  # Skip non-numeric sample sizes
+
+                # Add result count and summaries for this intervention
+                intervention_results = results_by_intervention.get(intervention_idx, [])
+                aggregated_interventions[intervention_key]["result_count"] += len(
+                    intervention_results
+                )
+
+                # Add results summaries with detailed information
+                for result in intervention_results:
+                    outcome = result.get("outcome_variable", "Unknown outcome")
+                    direction = result.get("effect_direction", "unknown")
+                    if outcome and outcome != "Unknown outcome":
+                        result_detail = {
+                            "outcome": outcome,
+                            "direction": direction,
+                            "effect_size": result.get("effect_size"),
+                            "effect_size_type": result.get("effect_size_type"),
+                            "p_value": result.get("p_value"),
+                            "uncertainty": result.get("uncertainty"),
+                            "result_text": result.get("result_text"),
+                            "supporting_quote": result.get("supporting_quote"),
+                            "population_measured": result.get("population_measured"),
+                            "subgroup_or_dose": result.get("subgroup_or_dose"),
+                        }
+                        aggregated_interventions[intervention_key][
+                            "results_summary"
+                        ].append(result_detail)
+
+        # Convert to list and add computed fields
+        interventions_list = []
+        for key, intervention_data in aggregated_interventions.items():
+            # Calculate aggregate sample size
+            sample_sizes = intervention_data["sample_sizes"]
+            if sample_sizes:
+                intervention_data["total_sample_size"] = sum(sample_sizes)
+                intervention_data["avg_sample_size"] = sum(sample_sizes) / len(
+                    sample_sizes
+                )
+            else:
+                intervention_data["total_sample_size"] = None
+                intervention_data["avg_sample_size"] = None
+
+            # Deduplicate results summaries (keep the one with most details)
+            unique_results = []
+            seen_combinations = set()
+            for result in intervention_data["results_summary"]:
+                combo = (result["outcome"], result["direction"])
+                if combo not in seen_combinations:
+                    unique_results.append(result)
+                    seen_combinations.add(combo)
+                else:
+                    # If we've seen this combination, keep the one with more details
+                    existing_idx = next(
+                        i
+                        for i, r in enumerate(unique_results)
+                        if (r["outcome"], r["direction"]) == combo
+                    )
+                    existing = unique_results[existing_idx]
+                    # Count non-null values to determine which has more details
+                    existing_details = sum(
+                        1
+                        for v in [
+                            existing.get("effect_size"),
+                            existing.get("p_value"),
+                            existing.get("uncertainty"),
+                        ]
+                        if v
+                    )
+                    new_details = sum(
+                        1
+                        for v in [
+                            result.get("effect_size"),
+                            result.get("p_value"),
+                            result.get("uncertainty"),
+                        ]
+                        if v
+                    )
+                    if new_details > existing_details:
+                        unique_results[existing_idx] = result
+
+            intervention_data["results_summary"] = unique_results
+
+            # Clean up temporary fields
+            del intervention_data["sample_sizes"]
+            del intervention_data["study_types"]
+
+            interventions_list.append(intervention_data)
+
+        # Sort by highest study type rank (best first), then by result count
+        interventions_list.sort(
+            key=lambda x: (x["highest_study_type_rank"], -x["result_count"])
+        )
+
+        return {"interventions": interventions_list, "total": len(interventions_list)}
+
+    except Exception as e:
+        logger.error(f"Error fetching interventions for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to fetch project interventions"
         )
 
 
@@ -422,6 +677,8 @@ async def get_document_extraction(
                     "year": document.get("year"),
                     "abstract_or_summary": document.get("abstract_or_summary"),
                     "is_relevant": document.get("is_relevant"),
+                    # Map citation_count (database) to cited_by_count (frontend)
+                    "cited_by_count": document.get("citation_count"),
                 },
                 "extraction": None,
                 "message": "No extraction results available for this document",
@@ -473,6 +730,8 @@ async def get_document_extraction(
                 "abstract_or_summary": document.get("abstract_or_summary"),
                 "is_relevant": document.get("is_relevant"),
                 "extraction_status": document.get("extraction_status"),
+                # Map citation_count (database) to cited_by_count (frontend)
+                "cited_by_count": document.get("citation_count"),
             },
             "extraction": {
                 "issues": issues,

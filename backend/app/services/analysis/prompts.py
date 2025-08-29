@@ -105,17 +105,19 @@ INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
         ("system", EXTRACTION_SYSTEM_PROMPT),
         (
             "human",
-            """Task: Extract 2–6 ACTIVE INTERVENTIONS/PROGRAMS evaluated or proposed.
+            """Task: Extract 2–6 ACTIVE INTERVENTIONS/PROGRAMS evaluated or proposed, that are the main focus of the study.
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","study_type":"...","country":"...|null","population_intervened":"...|null","population_demographics":"...|null","sample_size":"...|null","supporting_quote":"..."}}], "coverage_note":"string|null"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","study_type":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
 
 Rules:
-- MECE: no overlapping entries; merge variants.
+- MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
 - Focus on ACTIVE INTERVENTIONS only (treatments, programs, policies being tested).
 - DO NOT include control groups, placebo groups, or "no intervention" conditions as interventions.
 - Include attention control arms only if they involve active components (e.g., alternative treatments).
 - description must paraphrase only what is contained in the quote.
+- DO NOT include interventions that were not studied in the document, are not the main focus and just mentioned in passing.
+- If information is missing for a field, return "null" for the field.
 
 Study Type (Maryland Scientific Methods Scale - indicate only the letter):
    a) purely cross-sectional study
@@ -126,6 +128,8 @@ Study Type (Maryland Scientific Methods Scale - indicate only the letter):
    f) Quasi-experimental study
    g) Randomised controlled trial
    h) Meta-analysis
+   i) Not a trial, but rather a policy recommendation paper or a theoretical modelling study
+   j) Not a scientific study, but a news article, opinion piece or government announcement
 
 Population Fields:
 - population_intervened: Who received the intervention (e.g., "college students", "adults with depression")
@@ -177,7 +181,7 @@ Schema:
 {{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"..."}}]}}
 
 Rules:
-- MECE: avoid duplicate/overlapping outcomes; merge redundant wordings.
+- MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
 - Focus on PRIMARY RESULTS for this intervention (effects compared to control/baseline).
 - DO NOT extract control group results or "no change" findings unless they are the main finding.
 - Prefer explicit statistics (e.g., t, β, OR, CI, effect sizes). If absent, keep qualitative result with quote.

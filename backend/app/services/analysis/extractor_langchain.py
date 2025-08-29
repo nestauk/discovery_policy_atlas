@@ -49,6 +49,18 @@ class LangChainExtractorService:
         """Extract structured data from all documents and create consolidated JSON."""
         df = pd.read_csv(references_csv)
 
+        # Filter to only relevant documents if relevance checking was performed
+        if "is_relevant" in df.columns:
+            relevant_df = df[df["is_relevant"]].copy()
+            skipped_count = len(df) - len(relevant_df)
+            logger.info(
+                f"Extraction filtering: processing {len(relevant_df)} relevant documents, "
+                f"skipping {skipped_count} irrelevant documents"
+            )
+            df = relevant_df
+        else:
+            logger.info("No relevance filtering available - processing all documents")
+
         warnings: List[Dict[str, Any]] = []
         all_extractions: List[Dict[str, Any]] = []
 

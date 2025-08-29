@@ -275,6 +275,9 @@ class AnalysisStorageService:
                     "document_type_reason": self._safe_str(
                         row.get("document_type_reason")
                     ),
+                    # Essential fields: citation count and source country
+                    "cited_by_count": self._safe_int(row.get("cited_by_count")),
+                    "source_country": self._safe_str(row.get("source_country")),
                     # Acquisition fields
                     "acquisition_status": self._safe_str(row.get("acquisition_status")),
                     "acquisition_error": self._safe_str(row.get("acquisition_error")),
@@ -528,14 +531,9 @@ class AnalysisStorageService:
             # Extraction fields
             "extraction_error": ref.extraction_error,
             "text_source": ref.text_source,
-            # Additional fields for frontend compatibility
-            "citation_count": getattr(ref, "citation_count", None),
-            "venue": getattr(ref, "venue", None),
-            "topics": getattr(ref, "topics", None),
-            "source_country": getattr(ref, "source_country", None),
-            "source_type": getattr(ref, "source_type", None),
-            "published_on": getattr(ref, "published_on", None),
-            "overton_url": getattr(ref, "overton_url", None),
+            # Essential fields for frontend compatibility (map to correct database column names)
+            "citation_count": ref.cited_by_count,  # Database column is citation_count, not cited_by_count
+            "source_country": ref.source_country,
             # Step tracking
             "upload_step": upload_step,
         }
