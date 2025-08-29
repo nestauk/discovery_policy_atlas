@@ -128,6 +128,10 @@ export function useAPI() {
   const getDocumentExtraction = async (projectId: string, documentId: string) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}/documents/${documentId}/extraction`);
   };
+
+  const getProjectInterventions = async (projectId: string) => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}/interventions`);
+  };
   
   return { 
     fetchWithAuth, 
@@ -146,6 +150,7 @@ export function useAPI() {
     updateAnalysisProject,
     deleteAnalysisProject,
     runAnalysisForProject,
-    getDocumentExtraction
+    getDocumentExtraction,
+    getProjectInterventions
   };
 } 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -39,9 +39,9 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     loadProjects()
-  }, [])
+  }, [loadProjects])
 
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     try {
       setLoading(true)
       const response = await getProjects()
@@ -51,7 +51,7 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [getProjects, setProjects, setLoading, setError])
 
   const handleCreateProject = async () => {
     if (!projectForm.name.trim()) return

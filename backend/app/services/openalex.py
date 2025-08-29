@@ -99,6 +99,10 @@ Return ONLY the boolean query string, nothing else."""
         ):
             results.extend(page)
 
+        # Apply pyalex trick to reinvert abstracts
+        for page in results:
+            page["abstract"] = page["abstract"]
+
         # Process results to extract all available metadata
         processed_results = []
         for i, page in enumerate(results):
@@ -286,6 +290,10 @@ Return ONLY the boolean query string, nothing else."""
                 logger.warning("No results found for OpenAlex search")
                 return pd.DataFrame()
 
+            # Apply pyalex trick to reinvert abstracts
+            for page in results:
+                page["abstract"] = page["abstract"]
+
             logger.info(f"Retrieved {len(results)} results from OpenAlex")
 
             # Process results similar to the original search method
@@ -419,6 +427,11 @@ Return ONLY the boolean query string, nothing else."""
                 per_page=min(25, max_results), n_max=max_results
             ):
                 results.extend(page)
+
+            # Apply pyalex trick to reinvert abstracts
+            for page in results:
+                page["abstract"] = page["abstract"]
+
             return results
         except Exception as e:
             logger.error("OpenAlex raw fetch failed: %s", e)

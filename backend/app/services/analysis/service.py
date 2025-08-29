@@ -355,6 +355,9 @@ class AnalysisService:
                 "top_line": self._safe_str(row.get("top_line")),
                 "document_type": self._safe_str(row.get("document_type")),
                 "document_type_reason": self._safe_str(row.get("document_type_reason")),
+                # Essential fields: citation count and source country
+                "cited_by_count": self._safe_int(row.get("cited_by_count")),
+                "source_country": self._safe_str(row.get("source_country")),
                 # Acquisition fields
                 "acquisition_status": self._safe_str(row.get("acquisition_status")),
                 "acquisition_error": self._safe_str(row.get("acquisition_error")),
