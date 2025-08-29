@@ -3,7 +3,7 @@ from typing import Dict
 import os
 import asyncio
 from datetime import datetime
-from discovery_utils.utils.llm import batch_check
+from app.utils.llm import batch_check
 import logging
 
 logger = logging.getLogger(__name__)
