@@ -37,10 +37,6 @@ export default function ProjectsPage() {
   const [editProjectDialog, setEditProjectDialog] = useState<Project | null>(null)
   const [projectForm, setProjectForm] = useState({ name: '', description: '' })
 
-  useEffect(() => {
-    loadProjects()
-  }, [loadProjects])
-
   const loadProjects = useCallback(async () => {
     try {
       setLoading(true)
@@ -52,6 +48,10 @@ export default function ProjectsPage() {
       setLoading(false)
     }
   }, [getProjects, setProjects, setLoading, setError])
+
+  useEffect(() => {
+    loadProjects()
+  }, [loadProjects])
 
   const handleCreateProject = async () => {
     if (!projectForm.name.trim()) return
