@@ -163,6 +163,7 @@ class AnalysisService:
                 model=settings.LLM_MODEL,
                 temperature=0.0,
                 concurrency=settings.BATCH_SIZE_EXTRACTION,
+                project_id=project_id,
             )
         )
 

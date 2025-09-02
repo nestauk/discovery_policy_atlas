@@ -182,7 +182,9 @@ async def get_summary(
 
 
 @router.post("/api/analysis/run")
-async def run_analysis(request: Request):
+async def run_analysis(
+    request: Request, current_user: CurrentUser = Depends(get_current_user)
+):
     """Trigger the deterministic analysis pipeline with switches for screening/extraction/RAG."""
     body = await request.json()
     config = RunConfig(
@@ -212,7 +214,9 @@ async def run_analysis(request: Request):
 
 
 @router.get("/api/analysis/{run_id}/references")
-async def get_analysis_references(run_id: str):
+async def get_analysis_references(
+    run_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
     """Get the references CSV for a specific analysis run"""
 
     # Construct the path to the references CSV
@@ -247,7 +251,9 @@ async def get_analysis_references(run_id: str):
 
 
 @router.get("/api/analysis/{run_id}/extractions")
-async def get_analysis_extractions(run_id: str):
+async def get_analysis_extractions(
+    run_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
     """Get the extractions JSON for a specific analysis run"""
     import json
     from pathlib import Path
@@ -277,7 +283,7 @@ async def get_analysis_extractions(run_id: str):
 
 
 @router.get("/api/analysis/runs")
-async def list_analysis_runs():
+async def list_analysis_runs(current_user: CurrentUser = Depends(get_current_user)):
     """List all available analysis runs"""
     import json
 

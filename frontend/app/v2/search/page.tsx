@@ -175,8 +175,13 @@ export default function AgentSearchPage() {
                   <Input
                     id="limit"
                     type="number"
-                    value={limit}
-                    onChange={(e) => setLimit(parseInt(e.target.value) || 5)}
+                    defaultValue={limit}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value)
+                      if (!isNaN(value)) {
+                        setLimit(value)
+                      }
+                    }}
                     min="1"
                     max="100"
                     className="mt-2"
