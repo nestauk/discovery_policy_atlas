@@ -59,6 +59,7 @@ class RunConfig(BaseModel):
     retrieval_mode: str = "semantic"  # "semantic" | "boolean"
     boolean_query: Optional[str] = None
     use_abstracts_only: bool = False
+    use_interim_storage: bool = True
 
 
 class RunResult(BaseModel):
