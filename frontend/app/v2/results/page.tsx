@@ -102,7 +102,6 @@ interface DocumentDetailResult {
 
 // Document Detail View Component
 function DocumentDetailView({ extraction }: { 
-  document: DocumentDetailResult['document']
   extraction: DocumentDetailResult['extraction']
 }) {
   const [openSections, setOpenSections] = useState({
@@ -989,7 +988,7 @@ export default function AnalysisResultsPage() {
                                         <p className="text-red-600 text-sm">{documentDetailError}</p>
                                       </div>
                                     ) : documentDetail && documentDetail.extraction ? (
-                                      <DocumentDetailView document={documentDetail.document} extraction={documentDetail.extraction} />
+                                      <DocumentDetailView extraction={documentDetail.extraction} />
                                     ) : documentDetail ? (
                                       <div className="text-center py-4">
                                         <FileText className="h-8 w-8 text-gray-400 mx-auto mb-2" />
