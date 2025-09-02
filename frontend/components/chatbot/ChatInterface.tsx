@@ -168,7 +168,7 @@ export function ChatInterface({
       
       setTimeout(() => { autoSendQuery() }, 100)
     }
-  }, [autoStartQuery, conversationId, conversationState, searchQuery, addMessage, setConversationId, setConversationState, setSearchQuery, setEvidenceSearchReady, setOutcomesDefined, setScopeDefined, fetchWithAuth, onAutoStartComplete])
+  }, [autoStartQuery, conversationId, conversationState, searchQuery, addMessage, setConversationId, setConversationState, setSearchQuery, setEvidenceSearchReady, setOutcomesDefined, setScopeDefined, fetchWithAuth, onAutoStartComplete, activeProject?.id])
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return

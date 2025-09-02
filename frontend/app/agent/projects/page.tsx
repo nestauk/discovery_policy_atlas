@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -37,11 +37,7 @@ export default function ProjectsPage() {
   const [editProjectDialog, setEditProjectDialog] = useState<Project | null>(null)
   const [projectForm, setProjectForm] = useState({ name: '', description: '' })
 
-  useEffect(() => {
-    loadProjects()
-  }, [])
-
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     try {
       setLoading(true)
       const response = await getProjects()
@@ -51,7 +47,13 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [getProjects, setLoading, setProjects, setError])
+
+  useEffect(() => {
+    loadProjects()
+  }, [loadProjects])
+
+  // loadProjects defined via useCallback above
 
   const handleCreateProject = async () => {
     if (!projectForm.name.trim()) return

@@ -1,15 +1,55 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 import logging
 from datetime import datetime
 import uuid
-from typing import Optional
+from typing import Optional, List
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.vectorization import vectorization_service
+from app.services.synthesis.schemas import (
+    SynthesisSummary,
+    Finding,
+)
+from app.services.synthesis.service import SynthesisService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
+
+
+# END-I - INFO REGION END
+
+
+# END-I - INFO REGION END
+
+
+# Ψ INFO - CONTEXT NOTE
+# Schemas are provided by app.services.synthesis.schemas (imported above).
+# END-I - INFO REGION END
+
+
+# Ψ INFO - CONTEXT NOTE
+# Finding model is provided by app.services.synthesis.schemas (imported above).
+# END-I - INFO REGION END
+
+
+@router.get(
+    "/{project_id}/summary",
+    response_model=SynthesisSummary,
+    summary="Get Synthesized Summary",
+)
+async def get_synthesis_summary(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get synthesised summary using the synthesis service."""
+    try:
+        service = SynthesisService()
+        return await service.summarise(project_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Project not found")
+    except Exception as e:
+        logger.error(f"Error synthesizing summary for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to build synthesis summary")
 
 
 @router.get("")
@@ -492,3 +532,29 @@ async def get_document_extraction(
         raise HTTPException(
             status_code=500, detail="Failed to fetch document extraction"
         )
+
+
+@router.get(
+    "/{project_id}/findings",
+    response_model=List[Finding],
+    summary="Get Detailed Findings for a Specific Intervention or Issue",
+)
+async def get_detailed_findings(
+    project_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    intervention_name: Optional[str] = Query(
+        None, description="Filter by intervention name"
+    ),
+    issue_theme: Optional[str] = Query(None, description="Filter by issue label/theme"),
+):
+    """Get flattened findings via service layer."""
+    try:
+        service = SynthesisService()
+        return await service.get_findings(
+            project_id,
+            intervention_name=intervention_name,
+            issue_theme=issue_theme,
+        )
+    except Exception as e:
+        logger.error(f"Error fetching findings for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch findings")
