@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Search, FileText, FolderOpen, Folder, MessageSquare, Zap, ChevronRight, ChevronDown } from 'lucide-react'
+import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, MessageSquare } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 
 const sidebarItems = [

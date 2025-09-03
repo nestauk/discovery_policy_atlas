@@ -166,6 +166,7 @@ export function useAPI() {
     const url = `api/analysis-projects/${projectId}/findings${qs.toString() ? `?${qs.toString()}` : ''}`;
     return fetchWithAuth(url);
   };
+
   
   return { 
     fetchWithAuth, 
