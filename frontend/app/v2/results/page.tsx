@@ -19,6 +19,7 @@ import {
   BookOpen,
   Target,
   Bot,
+  Filter,
   Brain,
   BarChart3
 } from 'lucide-react'
@@ -78,6 +79,7 @@ export default function AnalysisResultsPage() {
   
   // Relevance filtering state
   const [showRelevantOnly, setShowRelevantOnly] = useState(true)
+  const [insightsSubTab, setInsightsSubTab] = useState('network')
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
@@ -614,6 +616,10 @@ export default function AnalysisResultsPage() {
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
               <TabsList className="grid w-full grid-cols-5">
+                <TabsTrigger value="summary" className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Extraction
+                </TabsTrigger>
                 <TabsTrigger value="evidence" className="flex items-center gap-2">
                   <BookOpen className="h-4 w-4" />
                   Evidence
