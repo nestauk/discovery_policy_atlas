@@ -21,11 +21,14 @@ import {
   ChevronDown,
   Target,
   TrendingUp,
+  Bot,
   Brain,
   BarChart3
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
+import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
+import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
 import NetworkVisualizer from '@/components/network/NetworkVisualizer'
 
 interface AnalysisDocument {
@@ -102,7 +105,6 @@ interface DocumentDetailResult {
 
 // Document Detail View Component
 function DocumentDetailView({ extraction }: { 
-  document: DocumentDetailResult['document']
   extraction: DocumentDetailResult['extraction']
 }) {
   const [openSections, setOpenSections] = useState({
@@ -844,6 +846,10 @@ export default function AnalysisResultsPage() {
                   <BookOpen className="h-4 w-4" />
                   Evidence
                 </TabsTrigger>
+                <TabsTrigger value="assistant" className="flex items-center gap-2">
+                  <Bot className="h-4 w-4" />
+                  Assistant
+                </TabsTrigger>
                 <TabsTrigger value="insights" className="flex items-center gap-2">
                   <Brain className="h-4 w-4" />
                   Insights
@@ -990,7 +996,7 @@ export default function AnalysisResultsPage() {
                                         <p className="text-red-600 text-sm">{documentDetailError}</p>
                                       </div>
                                     ) : documentDetail && documentDetail.extraction ? (
-                                      <DocumentDetailView document={documentDetail.document} extraction={documentDetail.extraction} />
+                                      <DocumentDetailView extraction={documentDetail.extraction} />
                                     ) : documentDetail ? (
                                       <div className="text-center py-4">
                                         <FileText className="h-8 w-8 text-gray-400 mx-auto mb-2" />
@@ -1081,6 +1087,14 @@ export default function AnalysisResultsPage() {
                 </div>
               </TabsContent>
 
+              <TabsContent value="assistant" className="m-0 h-[600px]">
+                <V2ChatInterface 
+                  autoFocus={activeTab === 'assistant'}
+                  placeholder="Ask about the evidence in this project..."
+                  className="h-full"
+                />
+              </TabsContent>
+
               <TabsContent value="insights" className="p-6 m-0">
                 <div className="max-w-6xl mx-auto">
                   {/* Insights Sub-tabs as smaller buttons */}
@@ -1127,6 +1141,9 @@ export default function AnalysisResultsPage() {
           </Tabs>
         )}
       </div>
+
+      {/* Floating Chatbot Widget */}
+      <V2ChatbotWidget />
     </div>
   )
 }

@@ -6,6 +6,8 @@ from typing import Optional
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.vectorization import vectorization_service
+from app.services.chatbot import ChatRequest, ChatResponse
+from app.services.chatbot.chat_service import chatbot_service
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +247,27 @@ async def delete_analysis_project(
 
         if not project_result.data:
             raise HTTPException(status_code=404, detail="Project not found")
+
+        # Clean up chunks from vectorization system first
+        try:
+            # Delete chunks associated with this project from the old system
+            vectorization_service.supabase.table("chunks").delete().eq(
+                "project_id", project_id
+            ).execute()
+
+            # Delete documents from vectorization system
+            vectorization_service.supabase.table("documents").delete().eq(
+                "project_id", project_id
+            ).execute()
+
+            logger.info(
+                f"Cleaned up vectorization system data for project {project_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to clean up vectorization data for project {project_id}: {e}"
+            )
+            # Don't fail the deletion if vectorization cleanup fails
 
         # Delete project (cascading delete will handle documents and extractions)
         vectorization_service.supabase.table("analysis_projects").delete().eq(
@@ -751,3 +774,34 @@ async def get_document_extraction(
         raise HTTPException(
             status_code=500, detail="Failed to fetch document extraction"
         )
+
+
+@router.post("/{project_id}/chat")
+async def chat_with_project(
+    project_id: str,
+    request: ChatRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ChatResponse:
+    """Chat with the analysis project using RAG over collected evidence."""
+    try:
+        # Verify project exists and user has access
+        project_result = (
+            vectorization_service.supabase.table("analysis_projects")
+            .select("id")
+            .eq("id", project_id)
+            .single()
+            .execute()
+        )
+
+        if not project_result.data:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Generate chat response using the chatbot service
+        response = await chatbot_service.chat(project_id, request)
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in chat for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process chat message")
