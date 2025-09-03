@@ -34,6 +34,7 @@ dependencies = [
     "tqdm>=4.66.4",
     "rapidfuzz>=3.9.7",
     "langgraph>=0.5.4",
+    "hdbscan>=0.8.40",
 ]
 
 [tool.uv]

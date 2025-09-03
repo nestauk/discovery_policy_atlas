@@ -11,6 +11,8 @@ from app.services.synthesis.schemas import (
     Finding,
 )
 from app.services.synthesis.service import SynthesisService
+from app.services.synthesis.agent import SynthesisAgent, SynthesisState
+from app.services.synthesis.logbook import read_cached_summary, write_run_from_state
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +38,36 @@ router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 @router.get(
     "/{project_id}/summary",
     response_model=SynthesisSummary,
-    summary="Get Synthesized Summary",
+    summary="Get Synthesized Summary (Agentic)",
 )
 async def get_synthesis_summary(
-    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+    project_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Get synthesised summary using the synthesis service."""
+    """Invoke the synthesis agent to get executive briefing and aggregated tables."""
     try:
-        service = SynthesisService()
-        return await service.summarise(project_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Project not found")
+        # Cache read via Supabase
+        cached = await read_cached_summary(project_id)
+        if cached:
+            return cached
+
+        # Cache miss: run agent
+        synthesis_agent = SynthesisAgent()
+        final_state: SynthesisState = await synthesis_agent.run(project_id)
+
+        # Cache write via Supabase
+        await write_run_from_state(project_id, final_state)
+
+        # Return fresh results
+        return SynthesisSummary(
+            executive_briefing=final_state.get(
+                "executive_briefing", "Failed to generate briefing."
+            ),
+            key_issues=final_state.get("aggregated_issues", []),
+            interventions=final_state.get("aggregated_interventions", []),
+        )
     except Exception as e:
-        logger.error(f"Error synthesizing summary for project {project_id}: {e}")
+        logger.error(f"Error running synthesis agent for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to build synthesis summary")
 
 

@@ -26,6 +26,9 @@ class KeyIssue(BaseModel):
     source_doc_ids: List[str] = Field(
         ..., description="A list of document IDs where this issue is discussed."
     )
+    justification: str = Field(
+        ..., description="An explanation of why this theme was created."
+    )
 
 
 class PolicyIntervention(BaseModel):
@@ -35,6 +38,7 @@ class PolicyIntervention(BaseModel):
         intervention_name: Standardised name for the intervention.
         brief_description: One-sentence summary of the intervention.
         impact_summary: Synthesised summary of the reported effects.
+        frequency: Number of documents that mention this intervention.
         supporting_doc_ids: IDs of documents supporting this intervention.
     """
 
@@ -47,8 +51,14 @@ class PolicyIntervention(BaseModel):
     impact_summary: str = Field(
         ..., description="A synthesised summary of the reported effects."
     )
+    frequency: int = Field(
+        ..., description="The number of documents that mention this intervention."
+    )
     supporting_doc_ids: List[str] = Field(
         ..., description="List of document IDs that discuss this intervention."
+    )
+    justification: str = Field(
+        ..., description="An explanation of why this theme was created."
     )
 
 
