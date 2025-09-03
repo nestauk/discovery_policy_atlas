@@ -17,10 +17,13 @@ import {
   Bot,
   Filter,
   Target,
-  AlertTriangle
+  AlertTriangle,
+  Brain,
+  BarChart3
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
+import NetworkVisualizer from '@/components/network/NetworkVisualizer'
 import { SynthesisSummary } from '@/types/search'
 import { KeyIssuesTable } from './KeyIssuesTable'
 import { InterventionsTable } from './InterventionsTable'
@@ -100,6 +103,7 @@ export default function AnalysisResultsPage() {
   
   // Column visibility state - controls Study Type, Sample Size, Source, Status
   const [showAdditionalColumns, setShowAdditionalColumns] = useState(false)
+  const [insightsSubTab, setInsightsSubTab] = useState('network')
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
@@ -648,9 +652,17 @@ export default function AnalysisResultsPage() {
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
               <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="summary" className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Extraction
+                </TabsTrigger>
                 <TabsTrigger value="evidence" className="flex items-center gap-2">
                   <BookOpen className="h-4 w-4" />
                   Evidence
+                </TabsTrigger>
+                <TabsTrigger value="insights" className="flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  Insights
                 </TabsTrigger>
                 <TabsTrigger value="summary" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
@@ -806,6 +818,49 @@ export default function AnalysisResultsPage() {
                   {evidenceSubTab === 'issues' && (
                     <div>
                       <EvidenceThematicView projectId={effectiveProjectId} themeType="issue" />
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="insights" className="p-6 m-0">
+                <div className="max-w-6xl mx-auto">
+                  {/* Insights Sub-tabs as smaller buttons */}
+                  <div className="mb-6">
+                    <div className="flex gap-2">
+                      <Button
+                        variant={insightsSubTab === 'network' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setInsightsSubTab('network')}
+                        className="flex items-center gap-2"
+                      >
+                        <Brain className="h-3 w-3" />
+                        Network
+                      </Button>
+                      <Button
+                        variant={insightsSubTab === 'charts' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setInsightsSubTab('charts')}
+                        className="flex items-center gap-2"
+                      >
+                        <BarChart3 className="h-3 w-3" />
+                        Charts
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Content based on active sub-tab */}
+                  {insightsSubTab === 'network' && (
+                    <div>
+                      <NetworkVisualizer />
+                    </div>
+                  )}
+
+                  {insightsSubTab === 'charts' && (
+                    <div className="text-center py-12">
+                      <BarChart3 className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-slate-900 mb-2">Charts Coming Soon</h3>
+                      <p className="text-slate-600">Interactive charts and analytics will be available here.</p>
                     </div>
                   )}
                 </div>
