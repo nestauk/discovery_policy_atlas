@@ -34,12 +34,20 @@ export default function V2HomePage() {
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
             Create a new analysis project to search, screen, and explore policy and research documents
           </p>
-          <Link href="/v2/projects">
-            <Button size="lg" className="flex items-center gap-2">
-              Start a New Project
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Link href="/v2/search/chat">
+              <Button size="lg" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700">
+                Chat Search (New)
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+            <Link href="/v2/projects">
+              <Button size="lg" variant="outline" className="flex items-center gap-2">
+                Browse Projects
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
         </div>
       </section>
     </div>

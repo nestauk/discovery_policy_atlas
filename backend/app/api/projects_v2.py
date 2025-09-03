@@ -290,17 +290,34 @@ async def run_analysis_for_project(
                 status_code=400, detail="Query is required for analysis"
             )
 
+        # Map access_types to appropriate sources
+        access_types = request.get("access_types", [])
+        sources = []
+        if "academic" in access_types:
+            sources.append("openalex")
+        if "policy" in access_types:
+            sources.append("overton")
+
+        # Fallback to default sources if none specified
+        if not sources:
+            sources = request.get("sources", ["openalex", "overton"])
+
         config = RunConfig(
             query=query,
-            sources=request.get("sources", ["openalex", "overton"]),
-            date_from=request.get("since"),
-            date_to=request.get("until"),
+            sources=sources,
+            date_from=request.get("date_from")
+            or request.get("since"),  # Support both chat and legacy formats
+            date_to=request.get("date_to") or request.get("until"),
             limit=int(request.get("limit", 200)),
             screening_enabled=bool(request.get("screening", False)),
             relevance_enabled=bool(request.get("relevance_enabled", True)),
             retrieval_mode=request.get("mode", "semantic"),
             boolean_query=request.get("boolean_query"),
             use_abstracts_only=bool(request.get("use_abstracts_only", False)),
+            # Chat interface parameters
+            geography_filter=request.get("geography_filter"),
+            access_types=access_types,
+            sub_questions=request.get("sub_questions"),
         )
 
         # Update project status to running

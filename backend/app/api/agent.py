@@ -13,6 +13,7 @@ from datetime import datetime
 from openai import AsyncOpenAI
 from app.core.config import settings
 from app.core.auth import get_current_user, CurrentUser
+from app.utils.geography import get_country_code_from_geography_filter
 from app.services.logging import logging_service
 from app.services.openalex import OpenAlexService
 from app.services.overton import OvertonService
@@ -39,6 +40,16 @@ class QueryRefinementSuggestion(BaseModel):
 class QueryRefinementResponse(BaseModel):
     original_query: str
     suggestions: List[QueryRefinementSuggestion]
+
+
+class SubQuestionGenerationRequest(BaseModel):
+    research_question: str
+    max_questions: int = 3
+
+
+class SubQuestionGenerationResponse(BaseModel):
+    research_question: str
+    sub_questions: List[str]
 
 
 class LogSearchRequest(BaseModel):
@@ -381,6 +392,73 @@ Example format:
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post(
+    "/api/agent/generate-sub-questions", response_model=SubQuestionGenerationResponse
+)
+async def generate_sub_questions(
+    request: SubQuestionGenerationRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate related sub-questions for a research question using AI"""
+    if not settings.OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OpenAI API key not configured")
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+    system_prompt = """You are a research assistant that helps generate focused sub-questions for policy research.
+
+Given a main research question, generate 2-3 specific, actionable sub-questions that would help researchers explore different important aspects of the topic. Each sub-question should:
+
+1. Focus on a specific aspect (e.g., effectiveness, costs, implementation, demographics, outcomes)
+2. Be concrete and researchable 
+3. Complement the main question without being too broad or too narrow
+4. Be relevant for policy research and evidence gathering
+
+Return ONLY a JSON array of strings, nothing else. Example format:
+["What are the cost-effectiveness metrics for this intervention?", "Which population groups benefit most from this policy?", "What are the main implementation challenges?"]"""
+
+    try:
+        response = await client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            temperature=0.3,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": f"Main research question: {request.research_question}",
+                },
+            ],
+            max_tokens=500,
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            raise HTTPException(status_code=500, detail="No response from AI")
+
+        # Parse the JSON array of sub-questions
+        try:
+            sub_questions = json.loads(content.strip())
+            if not isinstance(sub_questions, list):
+                raise ValueError("Expected JSON array")
+
+            # Limit to requested number and ensure they're strings
+            sub_questions = [
+                str(q).strip() for q in sub_questions[: request.max_questions] if q
+            ]
+
+            return SubQuestionGenerationResponse(
+                research_question=request.research_question, sub_questions=sub_questions
+            )
+
+        except (json.JSONDecodeError, ValueError):
+            logger.error(f"Failed to parse AI response as JSON: {content}")
+            raise HTTPException(status_code=500, detail="Failed to parse AI response")
+
+    except Exception as e:
+        logger.error(f"Error generating sub-questions: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate sub-questions")
 
 
 def get_or_create_conversation(
@@ -890,12 +968,17 @@ async def search_papers(
     project_id = request.get(
         "project_id", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
     )  # Default to test project UUID for backward compatibility
+    geography_filter = request.get("geography_filter", [])
+
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")
 
+    # Convert geography filter to country code for Overton
+    source_country = get_country_code_from_geography_filter(geography_filter)
+
     session_id = str(uuid.uuid4())[:8]
     logger.info(
-        f"Starting agent search for query: {query} | session: {session_id} | project: {project_id} | conversation: {conversation_id}"
+        f"Starting agent search for query: {query} | geography: {geography_filter} -> {source_country} | session: {session_id} | project: {project_id} | conversation: {conversation_id}"
     )
 
     try:
@@ -905,7 +988,10 @@ async def search_papers(
 
         # Execute searches concurrently
         overton_task = overton_service.search(
-            query=query, max_results=20, semantic_search=True
+            query=query,
+            max_results=20,
+            semantic_search=True,
+            source_country=source_country,
         )
         openalex_task = openalex_service.search_for_agent(
             query=query, max_results=20, focus_on_reviews=True

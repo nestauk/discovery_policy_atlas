@@ -19,25 +19,36 @@ export function useAPI() {
     const cleanUrl = url.replace(/^\//, '');
     const fullUrl = `${cleanBaseUrl}/${cleanUrl}`;
     
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`API call: ${options.method || 'GET'} ${fullUrl}`);
+    console.log(`API call: ${options.method || 'GET'} ${fullUrl}`);
+    console.log(`Token length: ${token.length}`);
+    console.log(`Request headers:`, options.headers);
+    
+    let response;
+    try {
+      response = await fetch(fullUrl, {
+        ...options,
+        headers: {
+          ...options.headers,
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch (fetchError) {
+      console.error('Network fetch error:', fetchError);
+      throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown network error'}`);
     }
     
-    const response = await fetch(fullUrl, {
-      ...options,
-      headers: {
-        ...options.headers,
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    console.log(`Response status: ${response.status}`);
+    console.log(`Response headers:`, [...response.headers.entries()]);
     
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Response error body:`, errorText);
       if (response.status === 401) {
         console.error("Authentication failed - token may be expired");
         throw new Error("Authentication failed - please refresh the page and sign in again");
       }
-      throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+      throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
     
     // For streaming responses, return the raw response
@@ -132,6 +143,14 @@ export function useAPI() {
   const getProjectInterventions = async (projectId: string) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}/interventions`);
   };
+
+  const generateSubQuestions = async (researchQuestion: string): Promise<{ research_question: string; sub_questions: string[] }> => {
+    return fetchWithAuth('api/agent/generate-sub-questions', {
+      method: 'POST',
+      body: JSON.stringify({ research_question: researchQuestion, max_questions: 3 }),
+    });
+  };
+
   
   return { 
     fetchWithAuth, 
@@ -151,6 +170,8 @@ export function useAPI() {
     deleteAnalysisProject,
     runAnalysisForProject,
     getDocumentExtraction,
-    getProjectInterventions
+    getProjectInterventions,
+    // Agent features
+    generateSubQuestions
   };
 } 
