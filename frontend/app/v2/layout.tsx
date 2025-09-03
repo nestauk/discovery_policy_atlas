@@ -6,11 +6,12 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown } from 'lucide-react'
+import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, MessageSquare } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 
 const sidebarItems = [
   { name: 'Projects', href: '/v2/projects', icon: FolderOpen },
+  { name: 'Chat Search', href: '/v2/search/chat', icon: MessageSquare },
   { name: 'Search', href: '/v2/search', icon: Search },  
   { name: 'Results', href: '/v2/results', icon: FileText },
   // { name: 'Search History', href: '/agent/history', icon: History },

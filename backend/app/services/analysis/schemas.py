@@ -59,6 +59,12 @@ class RunConfig(BaseModel):
     retrieval_mode: str = "semantic"  # "semantic" | "boolean"
     boolean_query: Optional[str] = None
     use_abstracts_only: bool = False
+    # Chat interface specific parameters
+    geography_filter: Optional[List[str]] = None  # Countries/regions to filter by
+    access_types: Optional[List[str]] = None  # ["academic", "thinkTank", "government"]
+    sub_questions: Optional[
+        List[str]
+    ] = None  # Additional questions to include in screening
     use_interim_storage: bool = True
 
 
