@@ -2,11 +2,11 @@
 
 import { useUser, UserButton } from '@clerk/nextjs'
 import { useRouter, usePathname } from 'next/navigation'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Search, FileText, FolderOpen, Folder, MessageSquare } from 'lucide-react'
+import { Search, FileText, FolderOpen, Folder, MessageSquare, Zap, ChevronRight, ChevronDown } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 
 const sidebarItems = [
@@ -15,6 +15,10 @@ const sidebarItems = [
   { name: 'Search', href: '/v2/search', icon: Search },  
   { name: 'Results', href: '/v2/results', icon: FileText },
   // { name: 'Search History', href: '/agent/history', icon: History },
+]
+
+const testItems = [
+  { name: 'Extraction', href: '/v2/test_extraction', icon: Zap },
 ]
 
 // const quickStats = [
@@ -32,11 +36,20 @@ export default function AgentLayout({
   const router = useRouter()
   const pathname = usePathname()
   const { activeProject } = useAnalysisProjectStore()
+  const [testSectionOpen, setTestSectionOpen] = useState(false)
 
   useEffect(() => {
     if (!isLoaded) return
     if (!isSignedIn) router.push('/login')
   }, [isSignedIn, isLoaded, router])
+
+  // Auto-expand test section if user is on a test page
+  useEffect(() => {
+    const isOnTestPage = testItems.some(item => pathname === item.href)
+    if (isOnTestPage) {
+      setTestSectionOpen(true)
+    }
+  }, [pathname])
 
   if (!isLoaded) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>
@@ -106,6 +119,41 @@ export default function AgentLayout({
               </Link>
             ))}
           </nav>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-slate-200"></div>
+
+          {/* Test Section */}
+          <div className="space-y-1">
+            <Button
+              variant="ghost"
+              onClick={() => setTestSectionOpen(!testSectionOpen)}
+              className="w-full justify-start h-auto p-3 text-left"
+            >
+              {testSectionOpen ? (
+                <ChevronDown className="mr-3 h-4 w-4 text-slate-500" />
+              ) : (
+                <ChevronRight className="mr-3 h-4 w-4 text-slate-500" />
+              )}
+              <div className="font-medium text-sm">Test</div>
+            </Button>
+            
+            {testSectionOpen && (
+              <div className="ml-4 space-y-1">
+                {testItems.map((item) => (
+                  <Link key={item.name} href={item.href}>
+                    <Button
+                      variant={pathname === item.href ? "secondary" : "ghost"}
+                      className="w-full justify-start h-auto p-2 text-left"
+                    >
+                      <item.icon className="mr-3 h-4 w-4 text-slate-500" />
+                      <div className="font-medium text-sm">{item.name}</div>
+                    </Button>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Spacer to push user section to bottom */}

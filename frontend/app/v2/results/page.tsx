@@ -20,10 +20,13 @@ import {
   ChevronRight,
   ChevronDown,
   Target,
-  TrendingUp
+  TrendingUp,
+  Bot
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
+import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
+import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
 
 interface AnalysisDocument {
   id: string
@@ -99,7 +102,6 @@ interface DocumentDetailResult {
 
 // Document Detail View Component
 function DocumentDetailView({ extraction }: { 
-  document: DocumentDetailResult['document']
   extraction: DocumentDetailResult['extraction']
 }) {
   const [openSections, setOpenSections] = useState({
@@ -831,7 +833,7 @@ export default function AnalysisResultsPage() {
         {effectiveProjectId && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="summary" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   Extraction
@@ -839,6 +841,10 @@ export default function AnalysisResultsPage() {
                 <TabsTrigger value="evidence" className="flex items-center gap-2">
                   <BookOpen className="h-4 w-4" />
                   Evidence
+                </TabsTrigger>
+                <TabsTrigger value="assistant" className="flex items-center gap-2">
+                  <Bot className="h-4 w-4" />
+                  Assistant
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -982,7 +988,7 @@ export default function AnalysisResultsPage() {
                                         <p className="text-red-600 text-sm">{documentDetailError}</p>
                                       </div>
                                     ) : documentDetail && documentDetail.extraction ? (
-                                      <DocumentDetailView document={documentDetail.document} extraction={documentDetail.extraction} />
+                                      <DocumentDetailView extraction={documentDetail.extraction} />
                                     ) : documentDetail ? (
                                       <div className="text-center py-4">
                                         <FileText className="h-8 w-8 text-gray-400 mx-auto mb-2" />
@@ -1072,10 +1078,21 @@ export default function AnalysisResultsPage() {
                   )}
                 </div>
               </TabsContent>
+
+              <TabsContent value="assistant" className="m-0 h-[600px]">
+                <V2ChatInterface 
+                  autoFocus={activeTab === 'assistant'}
+                  placeholder="Ask about the evidence in this project..."
+                  className="h-full"
+                />
+              </TabsContent>
             </div>
           </Tabs>
         )}
       </div>
+
+      {/* Floating Chatbot Widget */}
+      <V2ChatbotWidget />
     </div>
   )
 }

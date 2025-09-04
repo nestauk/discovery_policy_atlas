@@ -13,7 +13,7 @@ try:
     from scrapling.fetchers import Fetcher
 except ImportError:
     Fetcher = None
-from discovery_utils.utils.llm.llm_utils import get_llm
+from app.utils.llm.llm_utils import get_llm
 
 UK_COLLECTION_NAME = "United Kingdom - National"
 
