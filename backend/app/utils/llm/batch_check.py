@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import create_model
 
-from app.utils.llm.llm_utils import get_langfuse_handler
+# from app.utils.llm.llm_utils import get_langfuse_handler
 from app.utils.llm.llm_utils import get_llm
 
 
@@ -56,9 +56,9 @@ class LLMProcessor:
         else:
             session_name = f"{session_name}_"
 
-        self.langfuse_handler = get_langfuse_handler(
-            session_id=f"{session_name}{datetime.today().isoformat()}"
-        )
+        # self.langfuse_handler = get_langfuse_handler(
+        #     session_id=f"{session_name}{datetime.today().isoformat()}"
+        # )
         self.output_path = Path(output_path)
         self.model_name = model_name
         self.temperature = temperature
@@ -116,7 +116,8 @@ class LLMProcessor:
         start_time = datetime.now(tz=timezone.utc).isoformat()
         structured_llm = self.llm.with_structured_output(self.schema)
         response = await structured_llm.ainvoke(
-            input_text, config={"callbacks": [self.langfuse_handler]}
+            input_text,
+            # config={"callbacks": [self.langfuse_handler]}
         )
         response = response.dict()
         response["id"] = _id
