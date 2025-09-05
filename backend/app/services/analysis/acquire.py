@@ -46,7 +46,19 @@ class AcquisitionService:
         self, references_csv: str, concurrency: int = 5
     ) -> List[Dict[str, str]]:
         df = pd.read_csv(references_csv)
-        records = df.to_dict("records")
+
+        # Filter to only relevant documents if relevance checking was performed
+        if "is_relevant" in df.columns:
+            relevant_df = df[df["is_relevant"]].copy()
+            skipped_count = len(df) - len(relevant_df)
+            logger.info(
+                f"Acquisition filtering: processing {len(relevant_df)} relevant documents, "
+                f"skipping {skipped_count} irrelevant documents"
+            )
+            records = relevant_df.to_dict("records")
+        else:
+            logger.info("No relevance filtering available - processing all documents")
+            records = df.to_dict("records")
 
         sem = asyncio.Semaphore(concurrency)
         results: List[Dict[str, str]] = []

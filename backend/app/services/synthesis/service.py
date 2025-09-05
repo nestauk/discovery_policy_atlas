@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from app.core.config import settings
 from app.services.vectorization import vectorization_service
-from discovery_utils.utils.llm.llm_utils import get_llm
+from app.utils.llm.llm_utils import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 
 from .schemas import (

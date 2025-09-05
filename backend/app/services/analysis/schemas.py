@@ -18,6 +18,12 @@ class UnifiedReference(BaseModel):
     is_oa: bool | None = None
     type: str | None = None
     author_institution_countries: List[str] | None = None
+    cited_by_count: Optional[int] = None  # Number of citations
+    source_country: Optional[
+        str
+    ] = (
+        None
+    )  # Country of the source/institution (converted from codes to names for OpenAlex)
     # Relevance fields
     is_relevant: Optional[bool] = None
     relevance_confidence: Optional[float] = None
@@ -53,6 +59,7 @@ class RunConfig(BaseModel):
     retrieval_mode: str = "semantic"  # "semantic" | "boolean"
     boolean_query: Optional[str] = None
     use_abstracts_only: bool = False
+    use_interim_storage: bool = True
 
 
 class RunResult(BaseModel):

@@ -15,6 +15,7 @@ import pandas as pd
 
 from app.core.config import settings
 from .workflow_langchain import ExtractionWorkflow
+from .storage import AnalysisStorageService
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class LangChainExtractionConfig:
     model: str = settings.LLM_MODEL
     temperature: float = 0.0
     concurrency: int = 3
+    project_id: Optional[str] = None  # For interim storage
 
 
 class LangChainExtractorService:
@@ -41,6 +43,8 @@ class LangChainExtractorService:
             model=config.model,
             temperature=config.temperature,
         )
+        # Initialize storage service for interim storage
+        self.storage_service = AnalysisStorageService() if config.project_id else None
         # No need to create extractions directory - we'll create consolidated JSON directly
 
     async def extract_for_documents(
@@ -48,6 +52,42 @@ class LangChainExtractorService:
     ) -> str:
         """Extract structured data from all documents and create consolidated JSON."""
         df = pd.read_csv(references_csv)
+
+        # Filter to only relevant documents if relevance checking was performed
+        if "is_relevant" in df.columns:
+            relevant_df = df[df["is_relevant"]].copy()
+            skipped_count = len(df) - len(relevant_df)
+            logger.info(
+                f"Extraction filtering: processing {len(relevant_df)} relevant documents, "
+                f"skipping {skipped_count} irrelevant documents"
+            )
+            df = relevant_df
+        else:
+            logger.info("No relevance filtering available - processing all documents")
+
+        # Check for existing extractions if we have a project_id
+        existing_extractions = {}
+        if self.config.project_id and self.storage_service:
+            existing_extractions = (
+                await self.storage_service.check_existing_extractions(
+                    self.config.project_id
+                )
+            )
+
+            # Filter out documents that already have extractions
+            if existing_extractions:
+                df_before = len(df)
+                df = df[~df["doc_id"].isin(existing_extractions.keys())].copy()
+                df_after = len(df)
+                skipped_existing = df_before - df_after
+                logger.info(
+                    f"Resumption filtering: skipping {skipped_existing} documents with existing extractions, "
+                    f"processing {df_after} remaining documents"
+                )
+            else:
+                logger.info(
+                    "No existing extractions found - processing all relevant documents"
+                )
 
         warnings: List[Dict[str, Any]] = []
         all_extractions: List[Dict[str, Any]] = []
@@ -103,8 +143,7 @@ class LangChainExtractorService:
                 print(f"  • Results: {len(extraction.results)}")
                 print(f"  • Conclusion: {'1' if extraction.conclusion else '0'}")
 
-                # Add extraction to our list (no individual files)
-                # Add metadata and add to extractions list
+                # Add metadata and prepare extraction data
                 extraction_data = extraction.model_dump()
                 extraction_data["extraction_metadata"] = {
                     "text_length": len(doc_text),
@@ -112,6 +151,48 @@ class LangChainExtractorService:
                     "processed_at": datetime.now().isoformat(),
                     "file_size_bytes": len(json.dumps(extraction_data).encode("utf-8")),
                 }
+
+                # Store immediately if we have interim storage enabled
+                if self.config.project_id and self.storage_service:
+                    success = await self.storage_service.store_single_extraction(
+                        self.config.project_id, doc_id, extraction_data
+                    )
+                    if success:
+                        print(f"💾 Stored extraction to database for {doc_id}")
+
+                        # Also create chunks for RAG system
+                        try:
+                            chunks_success = (
+                                await self.storage_service.store_document_chunks(
+                                    project_id=self.config.project_id,
+                                    doc_id=doc_id,
+                                    document_data=dict(row),  # Pass the entire row
+                                    full_text=doc_text if not short_text_only else None,
+                                    use_abstracts_only=self.config.use_abstracts_only,
+                                )
+                            )
+
+                            if chunks_success:
+                                print(f"🔍 Created chunks for RAG system for {doc_id}")
+                            else:
+                                print(f"⚠️  Failed to create chunks for {doc_id}")
+
+                        except Exception as chunk_error:
+                            logger.warning(
+                                f"Failed to create chunks for {doc_id}: {chunk_error}"
+                            )
+                            print(f"⚠️  Chunking failed for {doc_id}: {chunk_error}")
+
+                    else:
+                        print(f"⚠️  Failed to store extraction to database for {doc_id}")
+                        warnings.append(
+                            {
+                                "doc_id": doc_id,
+                                "reason": "database_storage_failed",
+                            }
+                        )
+
+                # Still add to local list for consolidated JSON creation
                 all_extractions.append(extraction_data)
 
                 # Show final result status
@@ -171,6 +252,12 @@ class LangChainExtractorService:
         print(f"  • Total documents: {len(df)}")
         print(f"  • Successful extractions: {len(all_extractions)}")
         print(f"  • Failed/skipped: {len(df) - len(all_extractions)}")
+        if existing_extractions:
+            print(f"  • Previously completed: {len(existing_extractions)}")
+        if self.config.project_id:
+            print("  • Interim storage: ✅ Enabled")
+        else:
+            print("  • Interim storage: ❌ Disabled (no project_id)")
 
         # Write warnings CSV
         if warnings:

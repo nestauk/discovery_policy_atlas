@@ -23,13 +23,18 @@ export function useAPI() {
       console.log(`API call: ${options.method || 'GET'} ${fullUrl}`);
     }
     
+    // Don't set Content-Type for FormData - let browser set it with boundary
+    const headers: HeadersInit = new Headers(options.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    
+    // Only set Content-Type to application/json if we're not sending FormData
+    if (!(options.body instanceof FormData)) {
+      headers.set('Content-Type', 'application/json');
+    }
+    
     const response = await fetch(fullUrl, {
       ...options,
-      headers: {
-        ...options.headers,
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
     });
     
     if (!response.ok) {
@@ -129,6 +134,10 @@ export function useAPI() {
     return fetchWithAuth(`api/analysis-projects/${projectId}/documents/${documentId}/extraction`);
   };
 
+  const getProjectInterventions = async (projectId: string) => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}/interventions`);
+  };
+
   const getAnalysisFindings = async (
     projectId: string,
     params: { intervention_name?: string; issue_theme?: string }
@@ -158,6 +167,7 @@ export function useAPI() {
     deleteAnalysisProject,
     runAnalysisForProject,
     getDocumentExtraction,
+    getProjectInterventions,
     getAnalysisFindings
   };
 } 

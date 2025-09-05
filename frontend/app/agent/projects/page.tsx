@@ -47,13 +47,11 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false)
     }
-  }, [getProjects, setLoading, setProjects, setError])
+  }, [getProjects, setProjects, setLoading, setError])
 
   useEffect(() => {
     loadProjects()
   }, [loadProjects])
-
-  // loadProjects defined via useCallback above
 
   const handleCreateProject = async () => {
     if (!projectForm.name.trim()) return

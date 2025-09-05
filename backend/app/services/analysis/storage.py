@@ -8,12 +8,15 @@ from __future__ import annotations
 import json
 import logging
 import pandas as pd
+import math
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from supabase import create_client
 from app.core.config import settings
 from .schemas import RunConfig, RunResult, UnifiedReference
 from .schemas_langchain import DocumentExtractionBundle
+from .chunking import chunk_document_text
+from ..vectorization import VectorizationService
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,7 @@ class AnalysisStorageService:
 
     def __init__(self):
         self._supabase = None
+        self._vectorization_service = None
 
     @property
     def supabase(self):
@@ -39,6 +43,25 @@ class AnalysisStorageService:
 
             self._supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
         return self._supabase
+
+    @property
+    def vectorization_service(self):
+        """Lazy initialization of Vectorization service."""
+        if self._vectorization_service is None:
+            self._vectorization_service = VectorizationService()
+        return self._vectorization_service
+
+    def _clean_data_for_json(self, data: Any) -> Any:
+        """Clean data to prevent JSON serialization issues (NaN, None, etc.)."""
+        if pd.isna(data):
+            return None
+        if isinstance(data, float) and math.isnan(data):
+            return None
+        if isinstance(data, (list, tuple)):
+            return [self._clean_data_for_json(item) for item in data]
+        if isinstance(data, dict):
+            return {k: self._clean_data_for_json(v) for k, v in data.items()}
+        return data
 
     async def store_initial_documents(
         self, project_id: str, references: List[UnifiedReference]
@@ -67,6 +90,261 @@ class AnalysisStorageService:
         if documents_data:
             await self._upsert_documents(documents_data)
             logger.info(f"Successfully stored {len(documents_data)} initial documents")
+
+    async def check_existing_extractions(self, project_id: str) -> Dict[str, bool]:
+        """
+        Check which documents already have extractions in the database.
+
+        Args:
+            project_id: The analysis project ID
+
+        Returns:
+            Dict mapping doc_id to boolean indicating if extraction exists
+        """
+        logger.info(f"Checking existing extractions for project {project_id}")
+
+        try:
+            # Query documents that have extraction_status = 'completed' or 'success'
+            response = (
+                self.supabase.table("analysis_documents")
+                .select("doc_id,extraction_status")
+                .eq("analysis_project_id", project_id)
+                .in_("extraction_status", ["completed", "success"])
+                .execute()
+            )
+
+            existing_extractions = {doc["doc_id"]: True for doc in response.data}
+
+            logger.info(
+                f"Found {len(existing_extractions)} documents with existing extractions"
+            )
+            return existing_extractions
+
+        except Exception as e:
+            logger.error(f"Failed to check existing extractions: {e}")
+            return {}
+
+    async def store_single_extraction(
+        self, project_id: str, doc_id: str, extraction_data: Dict[str, Any]
+    ) -> bool:
+        """
+        Store extraction results for a single document immediately.
+        Updates both documents and extractions tables.
+
+        Args:
+            project_id: The analysis project ID
+            doc_id: The document ID
+            extraction_data: The extraction results
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.debug(
+                f"Storing extraction for document {doc_id} in project {project_id}"
+            )
+
+            # 1. Update the document with extraction results
+            doc_update = {
+                "extraction_results": extraction_data,
+                "extraction_status": "completed",
+                "upload_step": "extracted",
+            }
+
+            doc_response = (
+                self.supabase.table("analysis_documents")
+                .update(doc_update)
+                .eq("analysis_project_id", project_id)
+                .eq("doc_id", doc_id)
+                .execute()
+            )
+
+            if not doc_response.data:
+                logger.warning(
+                    f"Failed to update document {doc_id} - not found in project {project_id}"
+                )
+                return False
+
+            # 2. Get the document database ID for extractions table
+            document_db_id = doc_response.data[0]["id"]
+
+            # 3. Create extraction bundle and store individual items
+            from .schemas_langchain import DocumentExtractionBundle
+
+            bundle = DocumentExtractionBundle(**extraction_data)
+
+            base_data = {
+                "analysis_project_id": project_id,
+                "analysis_document_id": document_db_id,
+            }
+
+            extraction_items = self._create_extraction_items(bundle, base_data)
+
+            # 4. Insert extraction items (delete existing ones first to handle re-runs)
+            if extraction_items:
+                # Delete existing extractions for this document
+                self.supabase.table("analysis_extractions").delete().eq(
+                    "analysis_document_id", document_db_id
+                ).execute()
+
+                # Insert new extractions
+                self.supabase.table("analysis_extractions").insert(
+                    extraction_items
+                ).execute()
+
+            logger.debug(
+                f"Successfully stored extraction for {doc_id} ({len(extraction_items)} items)"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to store extraction for document {doc_id}: {e}")
+            return False
+
+    async def store_document_chunks(
+        self,
+        project_id: str,
+        doc_id: str,
+        document_data: Dict[str, Any],
+        full_text: str = None,
+        use_abstracts_only: bool = False,
+    ) -> bool:
+        """
+        Store document chunks for RAG. Creates summary, abstract, and content chunks.
+
+        Args:
+            project_id: The analysis project ID
+            doc_id: The document ID
+            document_data: Document metadata
+            full_text: Full document text (if available)
+            use_abstracts_only: Force abstract-only mode
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.debug(
+                f"Creating chunks for document {doc_id} in project {project_id}"
+            )
+
+            # Generate chunks
+            chunks = chunk_document_text(
+                full_text=full_text,
+                title=document_data.get("title", ""),
+                abstract=document_data.get("abstract_or_summary", ""),
+                top_line=document_data.get("top_line", ""),
+                relevance_reason=document_data.get("relevance_reason", ""),
+                use_abstracts_only=use_abstracts_only,
+            )
+
+            if not chunks:
+                logger.warning(f"No chunks generated for document {doc_id}")
+                return False
+
+            # Create document in vectorization system with proper data cleaning
+            year = document_data.get("year")
+            published_date = None
+            if year and str(year).isdigit():
+                # Convert year to proper date format (January 1st of that year)
+                published_date = f"{year}-01-01"
+
+            # Clean up authors field
+            authors = document_data.get("authors", [])
+            if not isinstance(authors, list):
+                authors = [str(authors)] if authors else []
+
+            # Clean numeric fields to avoid NaN issues
+            cited_by_count = document_data.get("citation_count", 0)
+            try:
+                cited_by_count = (
+                    int(cited_by_count) if cited_by_count is not None else 0
+                )
+                if pd.isna(cited_by_count) or math.isnan(cited_by_count):
+                    cited_by_count = 0
+            except (ValueError, TypeError):
+                cited_by_count = 0
+
+            confidence = 1.0
+
+            paper_data = {
+                "id": doc_id,
+                "title": document_data.get("title", ""),
+                "abstract": document_data.get("abstract_or_summary", ""),
+                "content": full_text or document_data.get("abstract_or_summary", ""),
+                "doi": document_data.get("doi"),
+                "source_country": document_data.get("source_country"),
+                "source_type": document_data.get("source", "analysis"),
+                "published_date": published_date,  # Proper date format
+                "publication_year": year,  # Keep year in metadata
+                "overton_url": document_data.get("landing_page_url"),
+                "confidence": confidence,
+                "relevance_reason": document_data.get("relevance_reason", ""),
+                "top_line": document_data.get("top_line", ""),
+                "is_relevant": document_data.get("is_relevant", True),
+                "cited_by_count": cited_by_count,
+                "authors": authors,
+            }
+
+            try:
+                # Clean data to prevent JSON serialization issues
+                clean_paper_data = self._clean_data_for_json(paper_data)
+
+                vector_doc_id = await self.vectorization_service.store_document(
+                    clean_paper_data, project_id
+                )
+                if not vector_doc_id:
+                    logger.error(
+                        f"Failed to store document {doc_id} in vectorization system"
+                    )
+                    return False
+            except Exception as e:
+                logger.error(
+                    f"Error storing document {doc_id} in vectorization system: {e}"
+                )
+                logger.debug(f"Document data that failed: {paper_data}")
+                return False
+
+            # Clean up existing chunks
+            self.vectorization_service.supabase.table("chunks").delete().eq(
+                "document_id", vector_doc_id
+            ).execute()
+
+            # Store chunks with embeddings
+            chunk_count = 0
+            for chunk in chunks:
+                try:
+                    embedding = await self.vectorization_service.generate_embedding(
+                        chunk.content
+                    )
+
+                    self.vectorization_service.supabase.table("chunks").insert(
+                        {
+                            "document_id": vector_doc_id,
+                            "project_id": project_id,
+                            "content": chunk.content,
+                            "chunk_type": chunk.chunk_type,
+                            "chunk_index": chunk.chunk_index,
+                            "embedding": embedding,
+                            "token_count": chunk.token_count,
+                        }
+                    ).execute()
+
+                    chunk_count += 1
+
+                except Exception as e:
+                    logger.error(
+                        f"Failed to store chunk {chunk.chunk_index} for {doc_id}: {e}"
+                    )
+                    continue
+
+            logger.info(
+                f"Successfully stored {chunk_count}/{len(chunks)} chunks ({[c.chunk_type for c in chunks]}) for document {doc_id}"
+            )
+            return chunk_count > 0
+
+        except Exception as e:
+            logger.error(f"Failed to store chunks for document {doc_id}: {e}")
+            return False
 
     async def update_documents_with_extractions(
         self, project_id: str, extractions_json_path: str
@@ -140,8 +418,8 @@ class AnalysisStorageService:
                 result.extractions_json_path,
             )
 
-            # 3. Upload extractions from JSON
-            if result.extractions_json_path:
+            # 3. Upload extractions from JSON (skip if interim storage was used)
+            if result.extractions_json_path and not config.use_interim_storage:
                 await self._upload_extractions(
                     storage_project_id, result.extractions_json_path
                 )
@@ -275,6 +553,9 @@ class AnalysisStorageService:
                     "document_type_reason": self._safe_str(
                         row.get("document_type_reason")
                     ),
+                    # Essential fields: citation count and source country
+                    "cited_by_count": self._safe_int(row.get("cited_by_count")),
+                    "source_country": self._safe_str(row.get("source_country")),
                     # Acquisition fields
                     "acquisition_status": self._safe_str(row.get("acquisition_status")),
                     "acquisition_error": self._safe_str(row.get("acquisition_error")),
@@ -528,14 +809,9 @@ class AnalysisStorageService:
             # Extraction fields
             "extraction_error": ref.extraction_error,
             "text_source": ref.text_source,
-            # Additional fields for frontend compatibility
-            "citation_count": getattr(ref, "citation_count", None),
-            "venue": getattr(ref, "venue", None),
-            "topics": getattr(ref, "topics", None),
-            "source_country": getattr(ref, "source_country", None),
-            "source_type": getattr(ref, "source_type", None),
-            "published_on": getattr(ref, "published_on", None),
-            "overton_url": getattr(ref, "overton_url", None),
+            # Essential fields for frontend compatibility (map to correct database column names)
+            "citation_count": ref.cited_by_count,  # Database column is citation_count, not cited_by_count
+            "source_country": ref.source_country,
             # Step tracking
             "upload_step": upload_step,
         }

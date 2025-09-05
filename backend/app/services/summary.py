@@ -1,4 +1,4 @@
-from discovery_utils.utils.llm.llm_utils import get_llm
+from app.utils.llm.llm_utils import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 
 

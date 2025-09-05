@@ -11,7 +11,6 @@ dependencies = [
     "pyalex>=0.18",
     "python-dotenv>=1.1.0",
     "uvicorn>=0.34.2",
-    "discovery-utils @ git+https://github.com/nestauk/discovery_utils.git@dev",
     "pydantic-settings>=2.9.1",
     "scrapling>=0.2.99",
     "mkdocs>=1.6.1",
@@ -35,6 +34,9 @@ dependencies = [
     "rapidfuzz>=3.9.7",
     "langgraph>=0.5.4",
     "hdbscan>=0.8.40",
+    "langfuse>=2.60.7",
+    "tiktoken>=0.9.0",
+    "python-multipart>=0.0.5",
 ]
 
 [tool.uv]

@@ -5,11 +5,11 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { ViewToggle } from '@/components/search/view-toggle'
 import { PapersTable } from '@/components/search/papers-table'
+import { InterventionsTable as InterventionsEvidenceTable, InterventionData } from '@/components/search/interventions-table'
 import { Paper } from '@/types/search'
 import { 
   FileText, 
@@ -20,7 +20,8 @@ import {
   ChevronRight,
   ChevronDown,
   Target,
-  TrendingUp
+  TrendingUp,
+  Bot
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
@@ -28,6 +29,8 @@ import { SynthesisSummary } from '@/types/search'
 import { KeyIssuesTable } from './KeyIssuesTable'
 import { InterventionsTable } from './InterventionsTable'
 import { ExecutiveBriefing } from './ExecutiveBriefing'
+import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
+import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
 
 interface AnalysisDocument {
   id: string
@@ -48,6 +51,7 @@ interface AnalysisDocument {
   landing_page_url?: string
   full_text_available?: boolean
   extraction_status?: string
+  cited_by_count?: number  // Citation count from API
 }
 
 interface DocumentDetailResult {
@@ -101,8 +105,7 @@ interface DocumentDetailResult {
 }
 
 // Document Detail View Component
-function DocumentDetailView({ document, extraction }: { 
-  document: DocumentDetailResult['document']
+function DocumentDetailView({ extraction }: { 
   extraction: DocumentDetailResult['extraction']
 }) {
   const [openSections, setOpenSections] = useState({
@@ -123,14 +126,7 @@ function DocumentDetailView({ document, extraction }: {
   return (
     <div className="space-y-4">
       {/* Document Header */}
-      <div className="border-b border-blue-200 pb-4">
-        <h3 className="text-lg font-semibold text-blue-900 mb-2">{document.title}</h3>
-        <div className="flex items-center gap-2 text-sm text-blue-700">
-          <span>Source: {document.source}</span>
-          {document.year && <span>• {document.year}</span>}
-          <span>• ID: {document.doc_id}</span>
-        </div>
-      </div>
+
 
       {/* Issues Section */}
       <Collapsible open={openSections.issues} onOpenChange={() => toggleSection('issues')}>
@@ -377,13 +373,15 @@ export default function AnalysisResultsPage() {
   const hasStartedPollingRef = useRef<string | null>(null) // Track which project we're polling
   const lastRefreshTimeRef = useRef<number>(0) // Throttle refreshes
   const [activeTab, setActiveTab] = useState('evidence')
-  const [evidenceViewMode, setEvidenceViewMode] = useState<'cards' | 'table'>('table')
   const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
+  // const [activeTab, setActiveTab] = useState('summary')
+  const [evidenceSubTab, setEvidenceSubTab] = useState('interventions')
+
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
-  // const [extractions, setExtractions] = useState<AnalysisExtraction[]>([])
+  const [interventions, setInterventions] = useState<InterventionData[]>([])
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState<string | null>(null)
   
@@ -394,7 +392,7 @@ export default function AnalysisResultsPage() {
   const [documentDetailError, setDocumentDetailError] = useState<string | null>(null)
 
   const { activeProject } = useAnalysisProjectStore()
-  const { fetchWithAuth, getDocumentExtraction, getAnalysisProject } = useAPI()
+  const { fetchWithAuth, getDocumentExtraction, getAnalysisProject, getProjectInterventions } = useAPI()
 
   // Get search parameters (memoized to prevent re-runs)
   const searchConfig = useMemo(() => ({
@@ -430,9 +428,17 @@ export default function AnalysisResultsPage() {
     setDataError(null)
 
     try {
-      // Load documents
-      const docsResponse = await fetchWithAuth(`/api/analysis-projects/${currentProjectId}/documents`)
+      // Load documents and interventions in parallel
+      const [docsResponse, interventionsResponse] = await Promise.all([
+        fetchWithAuth(`/api/analysis-projects/${currentProjectId}/documents`),
+        getProjectInterventions(currentProjectId).catch(error => {
+          console.warn('Failed to load interventions:', error)
+          return { interventions: [] }
+        })
+      ])
+      
       setDocuments(docsResponse.documents || [])
+      setInterventions(interventionsResponse.interventions || [])
     } catch (error) {
       console.error('Failed to load project data:', error)
       setDataError(error instanceof Error ? error.message : 'Failed to load data')
@@ -440,7 +446,7 @@ export default function AnalysisResultsPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [hasLoadedData, loadingData, fetchWithAuth])
+  }, [hasLoadedData, loadingData, fetchWithAuth, getProjectInterventions])
 
   const refreshData = useCallback(async () => {
     // Throttle refreshes to prevent infinite loops (minimum 5 seconds between calls)
@@ -465,9 +471,17 @@ export default function AnalysisResultsPage() {
     setDataError(null)
 
     try {
-      // Load documents
-      const docsResponse = await fetchWithAuth(`/api/analysis-projects/${currentProjectId}/documents`)
+      // Load documents and interventions in parallel
+      const [docsResponse, interventionsResponse] = await Promise.all([
+        fetchWithAuth(`/api/analysis-projects/${currentProjectId}/documents`),
+        getProjectInterventions(currentProjectId).catch(error => {
+          console.warn('Failed to refresh interventions:', error)
+          return { interventions: [] }
+        })
+      ])
+      
       setDocuments(docsResponse.documents || [])
+      setInterventions(interventionsResponse.interventions || [])
       // Mark as loaded if it wasn't already
       if (!hasLoadedData) {
         setHasLoadedData(true)
@@ -478,7 +492,7 @@ export default function AnalysisResultsPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [fetchWithAuth]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchWithAuth, getProjectInterventions]) // eslint-disable-line react-hooks/exhaustive-deps
   
   // Handle case where URL has project ID but no active project is set
   useEffect(() => {
@@ -496,6 +510,7 @@ export default function AnalysisResultsPage() {
     setAnalysisComplete(false)
     setError(null)
     setDocuments([])
+    setInterventions([])
     // Also reset polling refs
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current)
@@ -746,7 +761,7 @@ export default function AnalysisResultsPage() {
     title: String(doc.title || 'Untitled'),
     doi: String(doc.doi || ''),
     publication_year: Number(doc.year || 0),
-    cited_by_count: 0, // Not available in analysis documents
+    cited_by_count: Number(doc.cited_by_count || 0),
     authors: Array.isArray(doc.authors) ? doc.authors : ['Unknown'],
     is_relevant: Boolean(doc.is_relevant !== false),
     abstract: doc.abstract_or_summary,
@@ -759,7 +774,7 @@ export default function AnalysisResultsPage() {
     landing_page_url: doc.landing_page_url,
     full_text_available: doc.full_text_available,
     extraction_status: doc.extraction_status
-  }))
+  }));
 
   return (
     <div className="flex-1 flex flex-col">
@@ -854,7 +869,7 @@ export default function AnalysisResultsPage() {
         {effectiveProjectId && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="evidence" className="flex items-center gap-2">
                   <BookOpen className="h-4 w-4" />
                   Evidence
@@ -866,6 +881,10 @@ export default function AnalysisResultsPage() {
                 <TabsTrigger value="extraction" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   Extraction
+                </TabsTrigger>
+                <TabsTrigger value="assistant" className="flex items-center gap-2">
+                  <Bot className="h-4 w-4" />
+                  Assistant
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -974,7 +993,7 @@ export default function AnalysisResultsPage() {
                                           {doc.extraction_status === 'success' ? '✓ Extracted' :
                                            doc.extraction_status === 'failed' ? '✗ Failed' :
                                            doc.extraction_status === 'skipped' ? '⊘ Skipped' :
-                                           `⚪ ${doc.extraction_status}`}
+                                           `✓ ${doc.extraction_status}`}
                                         </Badge>
                                       )}
                                     </div>
@@ -1009,7 +1028,7 @@ export default function AnalysisResultsPage() {
                                         <p className="text-red-600 text-sm">{documentDetailError}</p>
                                       </div>
                                     ) : documentDetail && documentDetail.extraction ? (
-                                      <DocumentDetailView document={documentDetail.document} extraction={documentDetail.extraction} />
+                                      <DocumentDetailView extraction={documentDetail.extraction} />
                                     ) : documentDetail ? (
                                       <div className="text-center py-4">
                                         <FileText className="h-8 w-8 text-gray-400 mx-auto mb-2" />
@@ -1063,126 +1082,84 @@ export default function AnalysisResultsPage() {
 
               <TabsContent value="evidence" className="p-6 m-0">
                 <div className="max-w-6xl mx-auto">
-                  {loadingData ? (
-                    <div className="flex items-center justify-center py-12">
-                      <div className="text-center">
-                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-                        <p className="text-slate-600">Loading documents...</p>
-                      </div>
-                    </div>
-                  ) : dataError ? (
-                    <div className="text-center py-12">
-                      <AlertCircle className="h-12 w-12 text-red-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-slate-900 mb-2">Error Loading Data</h3>
-                      <p className="text-slate-600">{dataError}</p>
-                    </div>
-                  ) : documents.length > 0 ? (
-                    <div className="space-y-6">
-                      {/* View Toggle Header */}
-                      <div className="flex justify-between items-center">
-                        <h2 className="text-2xl font-bold text-slate-900">
-                          Evidence ({documents.length} documents)
-                        </h2>
-                        <ViewToggle currentView={evidenceViewMode} onViewChange={setEvidenceViewMode} />
-                      </div>
+                  {/* Evidence Sub-tabs as smaller buttons */}
+                  <div className="mb-6">
+                    <div className="flex gap-2">
+                    <Button
+                        variant={evidenceSubTab === 'interventions' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setEvidenceSubTab('interventions')}
+                        className="flex items-center gap-2"
+                      >
+                        <Target className="h-3 w-3" />
+                        Interventions ({interventions.length})
+                      </Button>                      
+                      <Button
+                        variant={evidenceSubTab === 'documents' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setEvidenceSubTab('documents')}
+                        className="flex items-center gap-2"
+                      >
+                        <FileText className="h-3 w-3" />
+                        Documents ({documents.length})
+                      </Button>
 
-                      {/* Table View */}
-                      {evidenceViewMode === 'table' && (
+                    </div>
+                  </div>
+
+                  {/* Content based on active sub-tab */}
+                  {evidenceSubTab === 'documents' && (
+                    <div>
+                      {loadingData ? (
+                        <div className="flex items-center justify-center py-12">
+                          <div className="text-center">
+                            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                            <p className="text-slate-600">Loading documents...</p>
+                          </div>
+                        </div>
+                      ) : dataError ? (
+                        <div className="text-center py-12">
+                          <AlertCircle className="h-12 w-12 text-red-400 mx-auto mb-4" />
+                          <h3 className="text-lg font-medium text-slate-900 mb-2">Error Loading Data</h3>
+                          <p className="text-slate-600">{dataError}</p>
+                        </div>
+                      ) : documents.length > 0 ? (
                         <PapersTable papers={transformedPapers} />
-                      )}
-
-                      {/* Cards View */}
-                      {evidenceViewMode === 'cards' && (
-                        <div className="space-y-4">
-                          {transformedPapers.map((paper: Paper, index: number) => (
-                            <Card key={paper.id || index} className="border-slate-200">
-                              <CardContent className="p-6">
-                                <div className="flex justify-between items-start mb-4">
-                                  <div className="flex-1">
-                                    <h3 className="font-semibold text-lg text-slate-900 mb-2">
-                                      {paper.landing_page_url ? (
-                                        <a 
-                                          href={paper.landing_page_url} 
-                                          target="_blank" 
-                                          rel="noopener noreferrer"
-                                          className="text-blue-600 hover:text-blue-800 hover:underline"
-                                        >
-                                          {paper.title || 'Untitled'}
-                                        </a>
-                                      ) : (
-                                        paper.title || 'Untitled'
-                                      )}
-                                    </h3>
-                                    <p className="text-slate-600 text-sm mb-2">
-                                      {Array.isArray(paper.authors) ? paper.authors.join(', ') : 'Unknown authors'} 
-                                      {paper.publication_year && ` • ${paper.publication_year}`}
-                                    </p>
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <Badge variant="outline" className="text-xs">
-                                        {paper.source_type || 'Document'}
-                                      </Badge>
-                                      {paper.source_country && (
-                                        <Badge variant="outline" className="text-xs">
-                                          {paper.source_country}
-                                        </Badge>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {paper.confidence && (
-                                    <div className="text-right">
-                                      <div className="text-sm font-medium text-slate-900">
-                                        {Math.round(paper.confidence * 100)}% Confidence
-                                      </div>
-                                      <Progress value={paper.confidence * 100} className="w-20 mt-1" />
-                                    </div>
-                                  )}
-                                </div>
-                                
-                                {paper.top_line && (
-                                  <div className="bg-slate-50 rounded-lg p-4 mb-4">
-                                    <h4 className="font-medium text-slate-900 mb-2">Key Finding</h4>
-                                    <p className="text-slate-700 text-sm leading-relaxed">
-                                      {paper.top_line}
-                                    </p>
-                                  </div>
-                                )}
-
-                                {paper.relevance_reason && (
-                                  <div className="mb-4">
-                                    <h4 className="font-medium text-slate-900 mb-2">Relevance</h4>
-                                    <p className="text-slate-600 text-sm">
-                                      {paper.relevance_reason}
-                                    </p>
-                                  </div>
-                                )}
-
-                                {paper.abstract && (
-                                  <div className="mb-4">
-                                    <h4 className="font-medium text-slate-900 mb-2">Abstract</h4>
-                                    <p className="text-slate-600 text-sm line-clamp-3">
-                                      {paper.abstract}
-                                    </p>
-                                  </div>
-                                )}
-                              </CardContent>
-                            </Card>
-                          ))}
+                      ) : (
+                        <div className="text-center py-12">
+                          <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                          <h3 className="text-lg font-medium text-slate-900 mb-2">No Documents Available</h3>
+                          <p className="text-slate-600">Documents will appear here once the analysis is processed.</p>
                         </div>
                       )}
                     </div>
-                  ) : (
-                    <div className="text-center py-12">
-                      <BookOpen className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-slate-900 mb-2">No Documents Available</h3>
-                      <p className="text-slate-600">Documents will appear here once the analysis is processed.</p>
+                  )}
+
+                  {evidenceSubTab === 'interventions' && (
+                    <div>
+                      <InterventionsEvidenceTable 
+                        interventions={interventions} 
+                        loading={loadingData}
+                      />
                     </div>
                   )}
                 </div>
+              </TabsContent>
+
+              <TabsContent value="assistant" className="m-0 h-[600px]">
+                <V2ChatInterface 
+                  autoFocus={activeTab === 'assistant'}
+                  placeholder="Ask about the evidence in this project..."
+                  className="h-full"
+                />
               </TabsContent>
             </div>
           </Tabs>
         )}
       </div>
+
+      {/* Floating Chatbot Widget */}
+      <V2ChatbotWidget />
     </div>
   )
 }

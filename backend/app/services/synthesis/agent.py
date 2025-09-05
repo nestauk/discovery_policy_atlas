@@ -11,7 +11,7 @@ import json
 
 # numpy import removed - no longer needed for LLM-based clustering
 from langchain_core.prompts import ChatPromptTemplate
-from discovery_utils.utils.llm.llm_utils import get_llm
+from app.utils.llm.llm_utils import get_llm
 from app.core.config import settings
 
 
@@ -721,7 +721,7 @@ Guidelines:
 
 async def _generate_theme_name_for_cluster(concept_texts: List[str]) -> str:
     """Generate a concise theme name for a cluster of related concepts using LLM."""
-    from discovery_utils.utils.llm.llm_utils import get_llm
+    from app.utils.llm.llm_utils import get_llm
     from app.core.config import settings
 
     concepts_str = "\n".join(f"- {text}" for text in concept_texts)
@@ -747,7 +747,7 @@ Return ONLY the theme name, starting with "Theme: ". Be specific and descriptive
 
 async def _generate_theme_summary(theme_name: str, concept_texts: List[str]) -> str:
     """Generate a descriptive summary for a theme based on its concepts."""
-    from discovery_utils.utils.llm.llm_utils import get_llm
+    from app.utils.llm.llm_utils import get_llm
     from app.core.config import settings
 
     concepts_str = "\n".join(f"- {text}" for text in concept_texts)
@@ -770,7 +770,7 @@ async def _generate_intervention_brief(
     theme_name: str, concept_texts: List[str]
 ) -> str:
     """Generate a brief description for an intervention theme."""
-    from discovery_utils.utils.llm.llm_utils import get_llm
+    from app.utils.llm.llm_utils import get_llm
     from app.core.config import settings
 
     concepts_str = "\n".join(f"- {text}" for text in concept_texts)
@@ -795,7 +795,7 @@ async def _generate_intervention_impact(
     theme_name: str, concept_texts: List[str]
 ) -> str:
     """Generate an impact summary for an intervention theme."""
-    from discovery_utils.utils.llm.llm_utils import get_llm
+    from app.utils.llm.llm_utils import get_llm
     from app.core.config import settings
 
     concepts_str = "\n".join(f"- {text}" for text in concept_texts)
