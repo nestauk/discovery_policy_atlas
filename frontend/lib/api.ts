@@ -156,6 +156,16 @@ export function useAPI() {
     });
   };
 
+  const getAnalysisFindings = async (
+    projectId: string,
+    params: { intervention_name?: string; issue_theme?: string }
+  ) => {
+    const qs = new URLSearchParams();
+    if (params.intervention_name) qs.set('intervention_name', params.intervention_name);
+    if (params.issue_theme) qs.set('issue_theme', params.issue_theme);
+    const url = `api/analysis-projects/${projectId}/findings${qs.toString() ? `?${qs.toString()}` : ''}`;
+    return fetchWithAuth(url);
+  };
   
   return { 
     fetchWithAuth, 
@@ -177,6 +187,7 @@ export function useAPI() {
     getDocumentExtraction,
     getProjectInterventions,
     // Agent features
-    generateSubQuestions
+    generateSubQuestions,
+    getAnalysisFindings
   };
 } 

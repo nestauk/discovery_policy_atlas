@@ -1,13 +1,13 @@
 import os
 
-from datetime import datetime
 
 import tiktoken
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import AzureChatOpenAI
 from langchain_openai import ChatOpenAI
-from langfuse.callback import CallbackHandler
+
+# from langfuse.langchain import CallbackHandler
 from pydantic import BaseModel
 
 import logging
@@ -19,18 +19,18 @@ except KeyError:
     LLM_SERVICE = "OpenAI"
 
 
-def get_langfuse_handler(session_id: str = None) -> CallbackHandler:
-    """Initialise a Langfuse callback handler"""
-    if session_id is None:
-        session_id = f"{datetime.today().isoformat()}"
+# def get_langfuse_handler(session_id: str = None) -> CallbackHandler:
+#     """Initialise a Langfuse callback handler"""
+#     if session_id is None:
+#         session_id = f"{datetime.today().isoformat()}"
 
-    return CallbackHandler(
-        user_id=os.environ.get("USER_EMAIL"),
-        session_id=session_id,
-        secret_key=os.environ.get("LANGFUSE_SECRET_KEY"),
-        public_key=os.environ.get("LANGFUSE_PUBLIC_KEY"),
-        host=os.environ.get("LANGFUSE_HOST"),
-    )
+#     return CallbackHandler(
+#         user_id=os.environ.get("USER_EMAIL"),
+#         session_id=session_id,
+#         secret_key=os.environ.get("LANGFUSE_SECRET_KEY"),
+#         public_key=os.environ.get("LANGFUSE_PUBLIC_KEY"),
+#         host=os.environ.get("LANGFUSE_HOST"),
+#     )
 
 
 def get_llm(model_name: str = None, temperature: float = None) -> ChatOpenAI:
@@ -115,7 +115,7 @@ class StructuredOutputGenerator:
         self.model_name = model_dict["model_name"]
         self.temperature = model_dict["temperature"]
         self.max_tokens = model_dict["max_tokens"]
-        self.langfuse_handler = get_langfuse_handler()
+        # self.langfuse_handler = get_langfuse_handler()
         self.output_class = output_class
         self.prompts = prompts
         self.check_token_length = check_token_length
@@ -146,5 +146,6 @@ class StructuredOutputGenerator:
         structured_prompt = structured_prompt.format(**_input_dict)
         # Get response from LLM
         return structured_llm.invoke(
-            structured_prompt, config={"callbacks": [self.langfuse_handler]}
+            structured_prompt,
+            # config={"callbacks": [self.langfuse_handler]}
         )
