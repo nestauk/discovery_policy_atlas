@@ -43,6 +43,7 @@ async def get_current_user(
             algorithms=["RS256"],
             issuer=CLERK_JWT_ISSUER,
             options={"verify_exp": True},
+            leeway=30,  # Allow 30 seconds of clock skew
         )
 
         # Extract user info

@@ -12,17 +12,30 @@ from langchain_core.prompts import ChatPromptTemplate
 
 BOOLEAN_QUERY_SYSTEM_PROMPT = """You are an expert at creating boolean search queries for academic literature databases like OpenAlex and Overton.
 
-Given a research question, create an optimized boolean search query that will find the most relevant academic papers. Follow these guidelines:
+Given a research question, extract the key concepts and create a targeted boolean search query. DO NOT use the entire research question as a search term.
 
-1. Use AND, OR, NOT operators appropriately
-2. Group related terms with parentheses
-3. Include synonyms and related terms with OR
-4. Use quotes for exact phrases when appropriate
-5. Consider academic terminology and jargon
-6. Focus on terms that would appear in titles and abstracts
-7. Keep the query concise while reasonably comprehensive; don't make it too complicated or too long
-8. Consider policy-relevant terms and intervention types
-9. Include both technical and common language terms
+IMPORTANT: Break down the research question into its core components and search terms. For example:
+- Research question: "What is the biggest interventions for decarbonising home heating?"
+- Key concepts: decarbonisation, home heating, interventions, residential heating, carbon reduction
+- Boolean query: (decarbonis OR "carbon reduction" OR "emissions reduction") AND ("home heating" OR "residential heating" OR "domestic heating") AND (intervention* OR program* OR policy OR measure*)
+
+For policy-specific queries, focus on the underlying research topics rather than specific policy names:
+- Research question: "Which UK home-heating incentives have reduced gas?"
+- Key concepts: heating policy evaluation, residential gas consumption, energy efficiency programs
+- Boolean query: ("residential heating" OR "home heating" OR "domestic heating") AND ("gas consumption" OR "natural gas" OR "gas demand") AND (policy OR program* OR incentive* OR intervention*) AND (reduc* OR efficiency OR savings)
+
+Guidelines:
+1. Extract 2-4 main concepts from the research question
+2. Use AND to connect different concepts
+3. Use OR to include synonyms and related terms within each concept
+4. Use wildcards (*) for word variations (e.g., intervention*)
+5. Use quotes for exact phrases when beneficial
+6. Include both technical and common language terms
+7. Focus on terms that would realistically appear in academic paper titles and abstracts
+8. For policy queries, focus on research about the underlying phenomena rather than specific policy names
+9. Consider broader academic terminology (evaluation, effectiveness, impact, outcomes)
+10. Prioritize nouns and key descriptive terms over question words (what, how, why)
+11. Include related research terms like "evaluation", "impact", "effectiveness" for policy questions
 
 Return ONLY the boolean query string, nothing else."""
 
