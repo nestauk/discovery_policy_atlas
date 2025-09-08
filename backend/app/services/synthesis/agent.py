@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import List, TypedDict, Dict, Tuple, Optional
+
+import asyncio
+from typing import List, TypedDict, Dict, Tuple, Optional, Any
 
 from langgraph.graph import StateGraph, END
 
@@ -13,6 +15,112 @@ import json
 from langchain_core.prompts import ChatPromptTemplate
 from app.utils.llm.llm_utils import get_llm
 from app.core.config import settings
+import numpy as np
+from pydantic import BaseModel, Field
+
+try:
+    from hdbscan import HDBSCAN as HDBSCANLib  # type: ignore
+except Exception:
+    HDBSCANLib = None
+
+
+async def postprocess_labels(state: SynthesisState) -> SynthesisState:
+    """Post-process theme names and collapse near-duplicates by semantic similarity.
+
+    - Normalises names (already applied in label step, kept idempotent).
+    - Collapses near-duplicate labels if cosine similarity between embeddings >= 0.90.
+    """
+    print("---POSTPROCESSING LABELS---")
+    issue_names = dict(state.get("issue_theme_names", {}) or {})
+    intr_names = dict(state.get("intervention_theme_names", {}) or {})
+    issue_clusters = dict(state.get("issue_clusters", {}) or {})
+    intr_clusters = dict(state.get("intervention_clusters", {}) or {})
+
+    async def _embed(text: str) -> List[float]:
+        try:
+            return await vectorization_service.generate_embedding(text)
+        except Exception:
+            return []
+
+    async def _collapse(
+        names: Dict[int, str], clusters: Dict[int, List[str]]
+    ) -> Tuple[Dict[int, str], Dict[int, List[str]]]:
+        if not names:
+            return names, clusters
+        ids = list(names.keys())
+        texts = [names[i] for i in ids]
+        embs = await asyncio.gather(*[_embed(t) for t in texts])
+
+        # Cosine similarity matrix (sparse logic by threshold)
+        def cos(a: List[float], b: List[float]) -> float:
+            va = np.array(a)
+            vb = np.array(b)
+            na = np.linalg.norm(va) or 1.0
+            nb = np.linalg.norm(vb) or 1.0
+            return float(np.dot(va, vb) / (na * nb))
+
+        threshold = 0.93
+        parent: Dict[int, int] = {}
+        for i in range(len(ids)):
+            pi = ids[i]
+            parent[pi] = pi
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                if embs[i] and embs[j] and cos(embs[i], embs[j]) >= threshold:
+                    union(ids[i], ids[j])
+        # Rebuild clusters and names
+        rep_map: Dict[int, int] = {}
+        for cid in ids:
+            rep_map[cid] = find(cid)
+        new_clusters: Dict[int, List[str]] = {}
+        new_names: Dict[int, str] = {}
+        for cid in ids:
+            rep = rep_map[cid]
+            new_clusters.setdefault(rep, [])
+            new_clusters[rep].extend(clusters.get(cid, []))
+            if rep not in new_names:
+                new_names[rep] = names.get(rep, names.get(cid, ""))
+        # De-duplicate concepts per merged cluster
+        for k, v in list(new_clusters.items()):
+            seen = set()
+            uniq = []
+            for s in v:
+                if s not in seen:
+                    seen.add(s)
+                    uniq.append(s)
+            new_clusters[k] = uniq
+        return new_names, new_clusters
+
+    issue_names, issue_clusters = await _collapse(issue_names, issue_clusters)
+    intr_names, intr_clusters = await _collapse(intr_names, intr_clusters)
+
+    return {
+        "issue_theme_names": issue_names,
+        "intervention_theme_names": intr_names,
+        "issue_clusters": issue_clusters,
+        "intervention_clusters": intr_clusters,
+    }
+
+
+class Concept(BaseModel):
+    """Represents a concept with a canonical description and embedding."""
+
+    id: str
+    canonical_description: str
+    kind: str = Field(description="'issue' or 'intervention'")
+    embedding: List[float] = Field(default_factory=list)
 
 
 class SynthesisState(TypedDict, total=False):
@@ -28,6 +136,9 @@ class SynthesisState(TypedDict, total=False):
     aggregated_summary: Dict[str, List]
     executive_briefing: str
     # New fields for the extended workflow
+    raw_extractions: List[Dict[str, Any]]
+    concepts: List[Concept]
+    outlier_concept_ids: List[str]
     issue_clusters: Dict[int, List[str]]
     intervention_clusters: Dict[int, List[str]]
     issue_theme_names: Dict[int, str]
@@ -74,7 +185,132 @@ async def fetch_project_data(state: SynthesisState) -> SynthesisState:
 
     findings: List[Finding] = _flatten_all_findings(documents)
 
-    return {**state, "research_question": research_question, "raw_findings": findings}
+    return {"research_question": research_question, "raw_findings": findings}
+
+
+async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
+    """Load raw extractions for issues and interventions for a project."""
+    print("---LOADING RAW EXTRACTIONS---")
+    project_id = state.get("project_id", "")
+    if not project_id:
+        return {"raw_extractions": []}
+
+    supabase = vectorization_service.supabase
+    res = (
+        supabase.table("analysis_extractions")
+        .select(
+            "id, analysis_document_id, extraction_type, label, description, raw_data"
+        )
+        .eq("analysis_project_id", project_id)
+        .execute()
+    )
+    rows: List[Dict[str, Any]] = res.data or []
+
+    def to_uniform(row: Dict[str, Any]) -> Dict[str, Any]:
+        et = str(row.get("extraction_type") or "")
+        raw = row.get("raw_data") or {}
+        if et == "intervention":
+            return {
+                "id": str(row.get("id")),
+                "type": "intervention",
+                "intervention_name": str(row.get("label") or raw.get("name") or ""),
+                "intervention_type": str(
+                    raw.get("study_type") or raw.get("type") or ""
+                ),
+                "description": str(
+                    row.get("description") or raw.get("description") or ""
+                ),
+            }
+        elif et == "issue":
+            return {
+                "id": str(row.get("id")),
+                "type": "issue",
+                "issue_label": str(row.get("label") or raw.get("label") or ""),
+                "explanation": str(
+                    raw.get("explanation") or row.get("description") or ""
+                ),
+            }
+        return {"id": str(row.get("id")), "type": et}
+
+    uniform = [to_uniform(r) for r in rows]
+    print(f"Loaded {len(uniform)} extractions")
+    return {"raw_extractions": uniform}
+
+
+async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
+    """Generate canonical descriptions and embeddings from raw extractions."""
+    print("---CREATING CANONICAL CONCEPTS AND EMBEDDINGS---")
+    raw: List[Dict[str, Any]] = state.get("raw_extractions", []) or []
+    if not raw:
+        return {"concepts": []}
+
+    def generate_description(ext: Dict[str, Any]) -> Tuple[str, str]:
+        if ext.get("type") == "intervention":
+            desc = (
+                f"Intervention: {ext.get('intervention_name', '').strip()}. "
+                f"Type: {ext.get('intervention_type', '').strip()}. "
+                f"Description: {ext.get('description', '').strip()}"
+            ).strip()
+            return "intervention", desc
+        if ext.get("type") == "issue":
+            desc = (
+                f"Issue: {ext.get('issue_label', '').strip()}. "
+                f"Explanation: {ext.get('explanation', '').strip()}"
+            ).strip()
+            return "issue", desc
+        return "", ""
+
+    items: List[Tuple[str, str, str]] = []  # (id, kind, description)
+    for r in raw:
+        kind, desc = generate_description(r)
+        if desc:
+            items.append((str(r.get("id")), kind, desc))
+
+    async def _embed_one(text: str) -> List[float]:
+        try:
+            return await vectorization_service.generate_embedding(text)
+        except Exception:
+            return []
+
+    # Deduplicate descriptions to reduce redundant embeddings while preserving ID mappings
+    description_to_ids: Dict[str, List[str]] = {}
+    description_to_kind: Dict[str, str] = {}
+    for cid, kind, desc in items:
+        description_to_ids.setdefault(desc, []).append(cid)
+        if desc not in description_to_kind:
+            description_to_kind[desc] = kind
+
+    unique_descriptions = list(description_to_ids.keys())
+    embeddings: List[List[float]] = await asyncio.gather(
+        *[_embed_one(desc) for desc in unique_descriptions]
+    )
+
+    # Build concept list using a representative id for each unique description
+    concepts: List[Concept] = []
+    for desc, emb in zip(unique_descriptions, embeddings):
+        rep_id = description_to_ids.get(desc, [desc])[0]
+        kind = description_to_kind.get(desc, "")
+        concepts.append(
+            Concept(
+                id=rep_id,
+                kind=kind or "",
+                canonical_description=desc,
+                embedding=emb or [],
+            )
+        )
+
+    extraction_text_by_id = {}
+    for desc, ids in description_to_ids.items():
+        for eid in ids:
+            extraction_text_by_id[eid] = desc
+
+    print(f"Created {len(concepts)} unique concepts (from {len(items)} extractions)")
+    return {
+        **state,
+        "concepts": concepts,
+        "extraction_text_by_id": extraction_text_by_id,
+        "description_to_ids": description_to_ids,
+    }
 
 
 def _flatten_all_findings(documents: List[dict]) -> List[Finding]:
@@ -153,26 +389,21 @@ def create_synthesis_workflow():
 
     # Nodes
     workflow.add_node("fetch_project_data", fetch_project_data)
-    workflow.add_node("generate_and_assign_themes", generate_and_assign_themes)
-    workflow.add_node("critique_generated_themes", critique_generated_themes)
-    workflow.add_node("apply_critique_suggestions", apply_critique_suggestions)
+    workflow.add_node("load_raw_extractions", load_raw_extractions)
+    workflow.add_node("create_canonical_concepts", create_canonical_concepts)
+    workflow.add_node("fine_grained_vector_clustering", fine_grained_vector_clustering)
+    workflow.add_node("label_clusters_for_themes", label_clusters_for_themes)
     workflow.add_node("build_aggregated_tables", build_aggregated_tables)
     workflow.add_node("synthesize_policy_briefing", synthesize_policy_briefing)
 
     # Linear flow for now
     workflow.set_entry_point("fetch_project_data")
-    workflow.add_edge("fetch_project_data", "generate_and_assign_themes")
-    workflow.add_edge("generate_and_assign_themes", "critique_generated_themes")
-    workflow.add_conditional_edges(
-        "critique_generated_themes",
-        check_critique,
-        {
-            "apply_critique_suggestions": "apply_critique_suggestions",
-            "build_aggregated_tables": "build_aggregated_tables",
-        },
-    )
-    workflow.add_edge("apply_critique_suggestions", "generate_and_assign_themes")
-    # After tables, synthesize the final policy briefing and end
+    workflow.add_edge("fetch_project_data", "load_raw_extractions")
+    workflow.add_edge("load_raw_extractions", "create_canonical_concepts")
+    workflow.add_edge("create_canonical_concepts", "fine_grained_vector_clustering")
+    workflow.add_edge("fine_grained_vector_clustering", "label_clusters_for_themes")
+    # After labels, build tables then synthesize briefing
+    workflow.add_edge("label_clusters_for_themes", "build_aggregated_tables")
     workflow.add_edge("build_aggregated_tables", "synthesize_policy_briefing")
     workflow.add_edge("synthesize_policy_briefing", END)
 
@@ -186,7 +417,225 @@ async def cluster_evidence(state: SynthesisState) -> SynthesisState:
     iterations will implement MECE clustering using LLM or algorithmic approaches.
     """
     print("---CLUSTERING EVIDENCE (placeholder)---")
-    return {**state, "aggregated_summary": {"issues": [], "interventions": []}}
+    return {"aggregated_summary": {"issues": [], "interventions": []}}
+
+
+def _cluster_labels_for_embeddings(embeddings: np.ndarray) -> np.ndarray:
+    """Return cluster labels using HDBSCAN (only)."""
+    if embeddings.size == 0:
+        return np.array([])
+    if HDBSCANLib is None:
+        return np.zeros(embeddings.shape[0], dtype=int)
+    try:
+        # Normalise to unit length so Euclidean approximates cosine
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        unit = embeddings / norms
+        n = unit.shape[0]
+        # Adaptive min_cluster_size ~1% of corpus (at least 2) for finer granularity
+        min_cs = max(2, int(round(0.01 * n)))
+        cl = HDBSCANLib(
+            min_cluster_size=min_cs,
+            min_samples=1,
+            metric="euclidean",
+            cluster_selection_method="leaf",
+        )
+        return cl.fit_predict(unit)
+    except Exception:
+        return np.zeros(embeddings.shape[0], dtype=int)
+
+
+def _assign_outliers_to_nearest(
+    embeddings: np.ndarray, labels: np.ndarray, threshold: float = 0.9
+) -> np.ndarray:
+    """Assign -1 labels to nearest cluster centroid if similarity above threshold."""
+    if embeddings.size == 0:
+        return labels
+    mask_noise = labels == -1
+    if not np.any(mask_noise):
+        return labels
+    clusters = [lab for lab in np.unique(labels) if lab != -1]
+    if not clusters:
+        return labels
+    centroids = []
+    for lab in clusters:
+        centroids.append(embeddings[labels == lab].mean(axis=0))
+    centroids_arr = np.vstack(centroids)
+
+    def _cos_sim(a: np.ndarray, b: np.ndarray) -> float:
+        na = np.linalg.norm(a) or 1.0
+        nb = np.linalg.norm(b) or 1.0
+        return float(np.dot(a, b) / (na * nb))
+
+    for idx in np.where(mask_noise)[0]:
+        vec = embeddings[idx]
+        sims = [_cos_sim(vec, c) for c in centroids_arr]
+        best_i = int(np.argmax(sims))
+        if sims[best_i] >= threshold:
+            labels[idx] = clusters[best_i]
+    return labels
+
+
+async def fine_grained_vector_clustering(state: SynthesisState) -> SynthesisState:
+    """Cluster concepts separately for issues and interventions."""
+    print("---FINE-GRAINED VECTOR CLUSTERING---")
+    concepts: List[Concept] = state.get("concepts", []) or []
+    if not concepts:
+        return {
+            "issue_clusters": {},
+            "intervention_clusters": {},
+            "outlier_concept_ids": [],
+        }
+
+    issue_cs = [c for c in concepts if c.kind == "issue"]
+    intr_cs = [c for c in concepts if c.kind == "intervention"]
+
+    description_to_ids: Dict[str, List[str]] = state.get("description_to_ids", {}) or {}
+
+    def _cluster(
+        sub: List[Concept]
+    ) -> Tuple[Dict[int, List[str]], Dict[int, List[str]], List[str]]:
+        if not sub:
+            return {}, {}, []
+        embs = np.array([c.embedding for c in sub if c.embedding])
+        if embs.size == 0:
+            ids = [c.id for c in sub]
+            texts = [c.canonical_description for c in sub]
+            # Expand ids per description
+            id_clusters = {}
+            for i, desc in enumerate(texts):
+                id_clusters[i] = description_to_ids.get(desc, [ids[i]])
+            return id_clusters, {i: [texts[i]] for i in range(len(texts))}, []
+        labels = _cluster_labels_for_embeddings(embs)
+        labels = _assign_outliers_to_nearest(embs, labels)
+        id_clusters: Dict[int, List[str]] = {}
+        text_clusters: Dict[int, List[str]] = {}
+        outliers: List[str] = []
+        pos = 0
+        for c in sub:
+            lbl = int(labels[pos]) if pos < len(labels) else -1
+            pos += 1
+            if lbl == -1:
+                outliers.append(c.id)
+                continue
+            # Expand to all extraction IDs sharing this description
+            id_clusters.setdefault(lbl, []).extend(
+                description_to_ids.get(c.canonical_description, [c.id])
+            )
+            text_clusters.setdefault(lbl, []).append(c.canonical_description)
+        # De-duplicate ids within each cluster
+        for k, v in list(id_clusters.items()):
+            seen = set()
+            uniq = []
+            for eid in v:
+                if eid not in seen:
+                    seen.add(eid)
+                    uniq.append(eid)
+            id_clusters[k] = uniq
+        return id_clusters, text_clusters, outliers
+
+    issue_id_clusters, issue_text_clusters, issue_outliers = _cluster(issue_cs)
+    intr_id_clusters, intr_text_clusters, intr_outliers = _cluster(intr_cs)
+    outliers_all = issue_outliers + intr_outliers
+
+    return {
+        "issue_clusters": issue_text_clusters,
+        "intervention_clusters": intr_text_clusters,
+        "_issue_id_clusters": issue_id_clusters,
+        "_intervention_id_clusters": intr_id_clusters,
+        "outlier_concept_ids": outliers_all,
+    }
+
+
+async def label_clusters_for_themes(state: SynthesisState) -> SynthesisState:
+    """Assign human-readable theme names and map extraction IDs to themes."""
+    print("---LABELING CLUSTERS FOR THEMES---")
+    issue_clusters = dict(state.get("issue_clusters", {}) or {})
+    intr_clusters = dict(state.get("intervention_clusters", {}) or {})
+
+    issue_theme_names: Dict[int, str] = {}
+    intr_theme_names: Dict[int, str] = {}
+
+    # Parallelise with bounded concurrency
+    sem = asyncio.Semaphore(8)
+
+    async def name_issue(cid: int, texts: List[str]) -> Tuple[int, str]:
+        async with sem:
+            try:
+                tn = await _generate_theme_name_for_cluster(texts)
+            except Exception:
+                tn = f"Theme: Issue Cluster {cid}"
+            return cid, tn
+
+    async def name_intr(cid: int, texts: List[str]) -> Tuple[int, str]:
+        async with sem:
+            try:
+                tn = await _generate_theme_name_for_cluster(texts)
+            except Exception:
+                tn = f"Theme: Intervention Cluster {cid}"
+            return cid, tn
+
+    issue_tasks = [name_issue(cid, texts) for cid, texts in issue_clusters.items()]
+    intr_tasks = [name_intr(cid, texts) for cid, texts in intr_clusters.items()]
+    for cid, tn in await asyncio.gather(*issue_tasks):
+        issue_theme_names[cid] = tn
+    for cid, tn in await asyncio.gather(*intr_tasks):
+        intr_theme_names[cid] = tn
+
+    # Post-process names: strip "Theme:" prefix, encourage specificity, Title Case, cap length
+    def _clean(name: str) -> str:
+        t = (name or "").strip()
+        if t.lower().startswith("theme:"):
+            t = t.split(":", 1)[1].strip()
+        # Trim generic umbrella starters
+        generic_prefixes = [
+            "Obesity Management",
+            "Weight Management",
+            "Cardiovascular Health",
+            "Public Health",
+            "Healthcare Policy",
+        ]
+        for gp in generic_prefixes:
+            if t.lower().startswith(gp.lower()):
+                # Keep the rest if present; otherwise leave as-is
+                parts = t.split("-", 1)
+                if len(parts) == 2 and parts[1].strip():
+                    t = parts[1].strip()
+                break
+        # Title Case while preserving acronyms
+        t = " ".join(
+            [w if w.isupper() and len(w) <= 5 else w.capitalize() for w in t.split()]
+        )
+        if len(t) > 72:
+            t = t[:72].rstrip()
+        return t
+
+    issue_theme_names = {cid: _clean(n) for cid, n in issue_theme_names.items()}
+    intr_theme_names = {cid: _clean(n) for cid, n in intr_theme_names.items()}
+
+    issue_id_clusters: Dict[int, List[str]] = state.get("_issue_id_clusters", {}) or {}
+    intr_id_clusters: Dict[int, List[str]] = (
+        state.get("_intervention_id_clusters", {}) or {}
+    )
+    finding_to_theme_map: Dict[str, Dict[str, str]] = {}
+
+    for cid, ids in issue_id_clusters.items():
+        tname = issue_theme_names.get(cid, "")
+        for ext_id in ids:
+            finding_to_theme_map.setdefault(ext_id, {}).update({"issue_theme": tname})
+
+    for cid, ids in intr_id_clusters.items():
+        tname = intr_theme_names.get(cid, "")
+        for ext_id in ids:
+            finding_to_theme_map.setdefault(ext_id, {}).update(
+                {"intervention_theme": tname}
+            )
+
+    return {
+        "issue_theme_names": issue_theme_names,
+        "intervention_theme_names": intr_theme_names,
+        "finding_to_theme_map": finding_to_theme_map,
+    }
 
 
 async def critique_clusters(state: SynthesisState) -> SynthesisState:
@@ -195,7 +644,7 @@ async def critique_clusters(state: SynthesisState) -> SynthesisState:
     Adds placeholder critique notes to support later self-correction.
     """
     print("---CRITIQUE CLUSTERS (placeholder)---")
-    return {**state, "critique_notes": "No critique yet (placeholder)."}
+    return {"critique_notes": "No critique yet (placeholder)."}
 
 
 async def build_justifications(state: SynthesisState) -> SynthesisState:
@@ -204,7 +653,7 @@ async def build_justifications(state: SynthesisState) -> SynthesisState:
     Produces placeholder provenance/justifications for transparency.
     """
     print("---BUILD JUSTIFICATIONS (placeholder)---")
-    return {**state, "justifications": {"issues": [], "interventions": []}}
+    return {"justifications": {"issues": [], "interventions": []}}
 
 
 async def generate_briefing(state: SynthesisState) -> SynthesisState:
@@ -218,23 +667,17 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         "Executive briefing is being generated by the new agent. "
         f"Research question: {rq}"
     )
-    return {**state, "executive_briefing": briefing}
+    return {"executive_briefing": briefing}
 
 
 async def synthesize_policy_briefing(state: SynthesisState) -> SynthesisState:
     """Generate policy-grade executive briefing from aggregated tables."""
     print("---SYNTHESIZING POLICY BRIEFING---")
     research_question = state.get("research_question", "")
-    top_issues = sorted(
-        state.get("aggregated_issues", []) or [],
-        key=lambda x: x.frequency,
-        reverse=True,
-    )[:3]
-    top_interventions = sorted(
-        state.get("aggregated_interventions", []) or [],
-        key=lambda x: x.frequency,
-        reverse=True,
-    )[:3]
+    ag_issues = state.get("aggregated_issues", []) or []
+    ag_intrs = state.get("aggregated_interventions", []) or []
+    top_issues = sorted(ag_issues, key=lambda x: x.frequency, reverse=True)[:3]
+    top_interventions = sorted(ag_intrs, key=lambda x: x.frequency, reverse=True)[:3]
 
     structured_data_for_prompt = {
         "top_issues": [i.dict() for i in top_issues],
@@ -248,23 +691,30 @@ async def synthesize_policy_briefing(state: SynthesisState) -> SynthesisState:
         f'Research question: "{research_question}"\n\n'
         f"Structured Evidence Data: {_escape_braces(json.dumps(structured_data_for_prompt)[:15000])}"
     )
-    prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
-    try:
-        llm = get_llm(settings.LLM_MODEL, temperature=0.2)
-        resp = llm.invoke(prompt.format())
-        briefing = (resp.content if hasattr(resp, "content") else str(resp)).strip()
-        if briefing.startswith("```"):
-            briefing = briefing.strip("`")
-            if briefing.startswith("text\n"):
-                briefing = briefing[len("text\n") :]
-    except Exception:
+    # Defensive fallback if no clusters available
+    if not top_issues and not top_interventions:
         briefing = (
-            f"In response to the query on '{research_question}', the evidence points to key challenges. "
-            "The recommended interventions derive from the most frequent clustered themes. "
-            "The evidence base spans multiple sources."
+            f"For the question '{research_question}', no robust clustered themes were identified from the available extractions. "
+            "The evidence base appears sparse or heterogeneous across documents. Consider re-running analysis with broader sources or adjusted filters."
         )
+    else:
+        prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+        try:
+            llm = get_llm(settings.LLM_MODEL, temperature=0.2)
+            resp = llm.invoke(prompt.format())
+            briefing = (resp.content if hasattr(resp, "content") else str(resp)).strip()
+            if briefing.startswith("```"):
+                briefing = briefing.strip("`")
+                if briefing.startswith("text\n"):
+                    briefing = briefing[len("text\n") :]
+        except Exception:
+            briefing = (
+                f"In response to the query on '{research_question}', the evidence points to key challenges. "
+                "The recommended interventions derive from the most frequent clustered themes. "
+                "The evidence base spans multiple sources."
+            )
 
-    return {**state, "executive_briefing": briefing}
+    return {"executive_briefing": briefing}
 
 
 async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
@@ -286,20 +736,47 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     )
     documents = docs_res.data or []
 
-    # Build reverse indices: issue_label -> {doc_ids}, intr_name -> {doc_ids}
-    issue_to_doc_ids: Dict[str, set] = {}
-    intr_to_doc_ids: Dict[str, set] = {}
-    for doc in documents:
-        doc_id = str(doc.get("doc_id") or doc.get("id") or "")
-        extraction_results = doc.get("extraction_results") or {}
-        for iss in extraction_results.get("issues") or []:
-            label = str(iss.get("label") or "").strip()
-            if label:
-                issue_to_doc_ids.setdefault(label, set()).add(doc_id)
-        for intr in extraction_results.get("interventions") or []:
-            name = str(intr.get("name") or "").strip()
-            if name:
-                intr_to_doc_ids.setdefault(name, set()).add(doc_id)
+    # Robust mapping: use finding_to_theme_map (extraction_id -> theme names) to compute doc_id sets per theme
+    finding_to_theme_map: Dict[str, Dict[str, str]] = (
+        state.get("finding_to_theme_map", {}) or {}
+    )
+    # Fetch extraction rows to map extraction_id -> analysis_document_id -> doc_id
+    ex_ids = list(finding_to_theme_map.keys())
+    extraction_to_doc_id: Dict[str, str] = {}
+    if ex_ids:
+        # Supabase doesn't support IN with huge lists in a single call in all clients; chunk if needed
+        CHUNK = 1000
+        for i in range(0, len(ex_ids), CHUNK):
+            chunk = ex_ids[i : i + CHUNK]
+            exts_res = (
+                supabase.table("analysis_extractions")
+                .select("id, analysis_document_id")
+                .in_("id", chunk)
+                .execute()
+            )
+            rows = exts_res.data or []
+            # Map analysis_document_id -> doc_id from previously fetched documents
+            doc_uuid_to_doc_id = {
+                str(d.get("id")): str(d.get("doc_id") or "") for d in documents
+            }
+            for r in rows:
+                rid = str(r.get("id"))
+                doc_uuid = str(r.get("analysis_document_id") or "")
+                extraction_to_doc_id[rid] = doc_uuid_to_doc_id.get(doc_uuid, "")
+
+    # Aggregate doc_ids per theme using assignments
+    issue_theme_to_doc_ids: Dict[str, set] = {}
+    intr_theme_to_doc_ids: Dict[str, set] = {}
+    for ex_id, mapping in finding_to_theme_map.items():
+        did = extraction_to_doc_id.get(ex_id, "")
+        if not did:
+            continue
+        it = mapping.get("issue_theme")
+        kt = mapping.get("intervention_theme")
+        if it:
+            issue_theme_to_doc_ids.setdefault(it, set()).add(did)
+        if kt:
+            intr_theme_to_doc_ids.setdefault(kt, set()).add(did)
 
     aggregated_issues: List[KeyIssue] = []
     aggregated_interventions: List[PolicyIntervention] = []
@@ -307,70 +784,91 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     # Summarise issues
     issue_clusters = state.get("issue_clusters", {}) or {}
     issue_theme_names = state.get("issue_theme_names", {}) or {}
-    for cid, concept_texts in issue_clusters.items():
-        theme_name = issue_theme_names.get(cid) or "Issue Theme"
-        # Use concept count as frequency for now (until proper doc mapping is fixed)
-        frequency = len(concept_texts)
-        # TODO: Fix proper document mapping
-        doc_ids = []  # Placeholder until mapping is fixed
 
-        # Generate better descriptions using LLM for larger themes
-        if frequency >= 3:
+    # Parallelise summaries for issues (only for larger themes)
+    async def summarise_issue(
+        cid: int, theme_name: str, concept_texts: List[str], doc_ids: List[str]
+    ) -> KeyIssue:
+        frequency = len(doc_ids) or len(concept_texts)
+        try:
             summary = await _generate_theme_summary(theme_name, concept_texts)
-        else:
+        except Exception:
             summary = (
                 f"Summary for {theme_name} based on {len(concept_texts)} concept(s)."
             )
 
         justification = f"Grouped {len(concept_texts)} related concept(s) under a standardised theme."
-        aggregated_issues.append(
-            KeyIssue(
-                issue_theme=theme_name,
-                summary_description=summary,
-                frequency=frequency,
-                source_doc_ids=doc_ids,
-                justification=justification,
-            )
+        return KeyIssue(
+            issue_theme=theme_name,
+            summary_description=summary,
+            frequency=frequency,
+            source_doc_ids=doc_ids,
+            justification=justification,
         )
 
     # Summarise interventions
     intr_clusters = state.get("intervention_clusters", {}) or {}
     intr_theme_names = state.get("intervention_theme_names", {}) or {}
-    for cid, concept_texts in intr_clusters.items():
-        theme_name = intr_theme_names.get(cid) or "Intervention Theme"
-        # Use concept count as frequency for now (until proper doc mapping is fixed)
-        frequency = len(concept_texts)
-        doc_ids = []  # Placeholder until mapping is fixed
 
-        # Generate better descriptions using LLM for larger themes
-        if frequency >= 3:
+    async def summarise_intervention(
+        cid: int, theme_name: str, concept_texts: List[str], doc_ids: List[str]
+    ) -> PolicyIntervention:
+        frequency = len(doc_ids) or len(concept_texts)
+        try:
             brief_description = await _generate_intervention_brief(
                 theme_name, concept_texts
             )
-            impact_summary = await _generate_intervention_impact(
-                theme_name, concept_texts
-            )
-        else:
+        except Exception:
             brief_description = (
                 f"Brief description for {theme_name} derived from clustered concepts."
             )
+        try:
+            impact_summary = await _generate_intervention_impact(
+                theme_name, concept_texts
+            )
+        except Exception:
             impact_summary = (
                 "Synthesised impact across documents based on the clustered concepts."
             )
         justification = f"Grouped {len(concept_texts)} related concept(s) under a standardised theme."
-        aggregated_interventions.append(
-            PolicyIntervention(
-                intervention_name=theme_name,
-                brief_description=brief_description,
-                impact_summary=impact_summary,
-                frequency=frequency,
-                supporting_doc_ids=doc_ids,
-                justification=justification,
-            )
+        return PolicyIntervention(
+            intervention_name=theme_name,
+            brief_description=brief_description,
+            impact_summary=impact_summary,
+            frequency=frequency,
+            supporting_doc_ids=doc_ids,
+            justification=justification,
         )
 
+    # Build task lists
+    issue_tasks = []
+    for cid, concept_texts in issue_clusters.items():
+        theme_name = issue_theme_names.get(cid) or "Issue Theme"
+        doc_ids = sorted(list(issue_theme_to_doc_ids.get(theme_name, set())))
+        issue_tasks.append(summarise_issue(cid, theme_name, concept_texts, doc_ids))
+    intr_tasks = []
+    for cid, concept_texts in intr_clusters.items():
+        theme_name = intr_theme_names.get(cid) or "Intervention Theme"
+        doc_ids = sorted(list(intr_theme_to_doc_ids.get(theme_name, set())))
+        intr_tasks.append(
+            summarise_intervention(cid, theme_name, concept_texts, doc_ids)
+        )
+
+    # Run in parallel with bounded semaphore
+    sem = asyncio.Semaphore(8)
+
+    async def _guard(coro):
+        async with sem:
+            return await coro
+
+    aggregated_issues = (
+        await asyncio.gather(*[_guard(t) for t in issue_tasks]) if issue_tasks else []
+    )
+    aggregated_interventions = (
+        await asyncio.gather(*[_guard(t) for t in intr_tasks]) if intr_tasks else []
+    )
+
     return {
-        **state,
         "aggregated_issues": aggregated_issues,
         "aggregated_interventions": aggregated_interventions,
     }
@@ -426,47 +924,62 @@ def _apply_theme_suggestions(state: SynthesisState, suggestions: Dict) -> None:
 
     # Apply merges
     for m in suggestions.get("merges", []) or []:
-        is_issue = (m.get("type") or "").lower().startswith("issue")
+        declared_issue = (m.get("type") or "").lower().startswith("issue")
 
-        # Handle LLM format: {"from": source_theme_name, "to": target_theme_name}
         from_val = m.get("from")
         to_val = m.get("to")
-        to_name = m.get("to_name")
+        to_name = m.get("to_name") or m.get("new_name")
 
         if from_val is not None and to_val is not None:
-            clusters = issue_clusters if is_issue else intr_clusters
-            names = issue_names if is_issue else intr_names
-
-            # Try to parse as integers first (cluster IDs)
+            # Try integer IDs first
+            handled = False
             try:
                 from_id, to_id = int(from_val), int(to_val)
-                # Handle as cluster IDs
-                if from_id in clusters and to_id in clusters:
-                    source_concepts = clusters[from_id]
-                    target_concepts = clusters[to_id]
+                # If type declared, act on that set. Otherwise infer based on id presence.
+                candidate_sets = []
+                if declared_issue:
+                    candidate_sets = [(issue_clusters, issue_names)]
+                elif (from_id in issue_clusters or to_id in issue_clusters) and (
+                    from_id not in intr_clusters and to_id not in intr_clusters
+                ):
+                    candidate_sets = [(issue_clusters, issue_names)]
+                elif (from_id in intr_clusters or to_id in intr_clusters) and (
+                    from_id not in issue_clusters and to_id not in issue_clusters
+                ):
+                    candidate_sets = [(intr_clusters, intr_names)]
+                else:
+                    candidate_sets = [
+                        (issue_clusters, issue_names),
+                        (intr_clusters, intr_names),
+                    ]
 
-                    # Merge concepts (de-duplicate)
+                for clusters, names in candidate_sets:
+                    if from_id in clusters and to_id in clusters:
+                        source_concepts = clusters[from_id]
+                        target_concepts = clusters[to_id]
                     merged_concepts = target_concepts[:]
                     for concept in source_concepts:
                         if concept not in merged_concepts:
                             merged_concepts.append(concept)
-
-                    clusters[to_id] = merged_concepts
-
-                    # Remove source cluster
-                    del clusters[from_id]
-                    if from_id in names:
-                        del names[from_id]
-
-                    # Update target name if provided
-                    if to_name:
-                        names[to_id] = str(to_name).strip()
+                        clusters[to_id] = merged_concepts
+                        del clusters[from_id]
+                        if from_id in names:
+                            del names[from_id]
+                        if to_name:
+                            names[to_id] = str(to_name).strip()
+                            handled = True
+                if handled:
+                    continue
             except ValueError:
-                # Handle as theme names
-                from_theme = str(from_val).strip()
-                to_theme = str(to_val).strip()
+                pass
 
-                # Find cluster IDs by theme names
+            # Fallback: handle as theme names across both sets
+            from_theme = str(from_val).strip()
+            to_theme = str(to_val).strip()
+            for clusters, names in (
+                (issue_clusters, issue_names),
+                (intr_clusters, intr_names),
+            ):
                 from_id = None
                 to_id = None
                 for cid, theme_name in names.items():
@@ -474,81 +987,108 @@ def _apply_theme_suggestions(state: SynthesisState, suggestions: Dict) -> None:
                         from_id = cid
                     elif theme_name == to_theme:
                         to_id = cid
-
-                # Merge if both found
                 if from_id is not None and to_id is not None:
                     source_concepts = clusters.get(from_id, [])
                     target_concepts = clusters.get(to_id, [])
-
-                    # Merge concepts (de-duplicate)
                     merged_concepts = target_concepts[:]
                     for concept in source_concepts:
                         if concept not in merged_concepts:
                             merged_concepts.append(concept)
-
                     clusters[to_id] = merged_concepts
-
-                    # Remove source cluster
                     if from_id in clusters:
                         del clusters[from_id]
                     if from_id in names:
                         del names[from_id]
+                    if to_name:
+                        names[to_id] = str(to_name).strip()
 
         # Fallback: handle legacy format with "from" as array and "to_name"
         elif m.get("from") and m.get("to_name"):
             from_val = m.get("from")
             if isinstance(from_val, list):
-                ids = [int(x) for x in from_val]
+                ids = []
+                for x in from_val:
+                    try:
+                        ids.append(int(str(x).split(".")[-1]))
+                    except Exception:
+                        continue
             elif from_val is not None:
-                ids = [int(from_val)]
+                try:
+                    ids = [int(str(from_val).split(".")[-1])]
+                except Exception:
+                    ids = []
             else:
                 ids = []
 
             to_name = str(m.get("to_name") or "Merged Theme").strip()
             if ids:
-                _merge(ids, to_name, is_issue)
+                # Attempt merge in both spaces if type not explicit
+                if declared_issue:
+                    _merge(ids, to_name, True)
+                else:
+                    try:
+                        _merge(ids, to_name, True)
+                    except Exception:
+                        pass
+                    try:
+                        _merge(ids, to_name, False)
+                    except Exception:
+                        pass
 
     # Apply renames
     for r in suggestions.get("renames", []) or []:
-        is_issue = (r.get("type") or "").lower().startswith("issue")
+        declared_issue = (r.get("type") or "").lower().startswith("issue")
 
-        # Handle multiple field name formats
         old_name = r.get("old")
         new_name = r.get("new") or r.get("new_name") or r.get("to_name")
         cid = r.get("id") or r.get("index")
 
         if old_name and new_name:
-            # Handle theme name-based rename
-            clusters = issue_clusters if is_issue else intr_clusters
-            names = issue_names if is_issue else intr_names
-
-            # Find cluster ID by old theme name
-            target_cid = None
-            for cluster_id, theme_name in names.items():
-                if theme_name == str(old_name).strip():
-                    target_cid = cluster_id
-                    break
-
-            if target_cid is not None:
-                names[target_cid] = str(new_name).strip()
-
+            targets = []
+            if declared_issue:
+                targets = [(issue_clusters, issue_names)]
+            else:
+                targets = [
+                    (issue_clusters, issue_names),
+                    (intr_clusters, intr_names),
+                ]
+            for _, names in targets:
+                target_cid = None
+                for cluster_id, theme_name in names.items():
+                    if theme_name == str(old_name).strip():
+                        target_cid = cluster_id
+                        break
+                if target_cid is not None:
+                    names[target_cid] = str(new_name).strip()
         elif cid is not None:
-            # Handle cluster ID-based rename
             try:
-                cid = int(cid)
-                to_name = str(new_name or "Theme").strip()
-                _rename(cid, to_name, is_issue)
+                cid_int = int(cid)
             except ValueError:
-                pass
+                cid_int = None
+            if cid_int is not None:
+                to_name = str(new_name or "Theme").strip()
+                if declared_issue or cid_int in issue_names:
+                    _rename(cid_int, to_name, True)
+                if (not declared_issue) or cid_int in intr_names:
+                    _rename(cid_int, to_name, False)
 
     # Apply moves
     for mv in suggestions.get("moves", []) or []:
-        is_issue = (mv.get("type") or "").lower().startswith("issue")
         concept = str(mv.get("concept") or "").strip()
-        src = int(mv.get("from")) if mv.get("from") is not None else None
-        dst = int(mv.get("to")) if mv.get("to") is not None else None
+        src_raw = mv.get("from")
+        dst_raw = mv.get("to")
+        try:
+            src = int(src_raw) if src_raw is not None else None
+            dst = int(dst_raw) if dst_raw is not None else None
+        except ValueError:
+            src, dst = None, None
         if concept and src is not None and dst is not None:
-            _move(concept, src, dst, is_issue)
+            # Try both sets if type not specified
+            tflag = (mv.get("type") or "").lower().startswith("issue")
+            if tflag or (src in issue_clusters or dst in issue_clusters):
+                _move(concept, src, dst, True)
+            if (not tflag) or (src in intr_clusters or dst in intr_clusters):
+                _move(concept, src, dst, False)
 
     # Write back
     state["issue_clusters"] = issue_clusters
@@ -712,11 +1252,11 @@ Guidelines:
         import traceback
 
         print(f"LLM clustering traceback: {traceback.format_exc()}")
-        # Fallback: each concept gets its own cluster
-        clusters = {i: [text] for i, text in enumerate(concept_texts)}
-        concept_to_theme_name = {text: f"Theme: {text}" for text in concept_texts}
-        print(f"Falling back to {len(clusters)} individual clusters")
-        return clusters, concept_to_theme_name
+    # Fallback: each concept gets its own cluster
+    clusters = {i: [text] for i, text in enumerate(concept_texts)}
+    concept_to_theme_name = {text: f"Theme: {text}" for text in concept_texts}
+    print(f"Falling back to {len(clusters)} individual clusters")
+    return clusters, concept_to_theme_name
 
 
 async def _generate_theme_name_for_cluster(concept_texts: List[str]) -> str:
@@ -724,18 +1264,19 @@ async def _generate_theme_name_for_cluster(concept_texts: List[str]) -> str:
     from app.utils.llm.llm_utils import get_llm
     from app.core.config import settings
 
-    concepts_str = "\n".join(f"- {text}" for text in concept_texts)
+    # Nudge towards specificity by showing a few most distinctive tokens first
+    concepts_str = "\n".join(f"- {text}" for text in concept_texts[:10])
 
-    system = "You generate concise, descriptive theme names for clusters of related concepts."
-    user = f"""Create a short theme name (3-8 words) that captures the essence of these related concepts:
+    system = "You generate concise, specific theme names for clusters of related concepts. Avoid broad umbrella categories. Do NOT use words like Obesity, Management, Comprehensive, Strategy/Strategies."
+    user = f"""Create a short, specific theme name (3–6 words) capturing the most distinctive commonality across these concepts. Avoid umbrellas (e.g., 'Obesity Management'); name the precise issue or lever (e.g., prior authorisation, school breakfast, sugar tax, GLP‑1 eligibility).
 
 {concepts_str}
 
-Return ONLY the theme name, starting with "Theme: ". Be specific and descriptive."""
+Return ONLY the theme name, starting with "Theme: "."""
 
     prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
     llm = get_llm(settings.LLM_MODEL, temperature=0.0)
-    resp = llm.invoke(prompt.format())
+    resp = await llm.ainvoke(prompt.format())
     theme_name = (resp.content if hasattr(resp, "content") else str(resp)).strip()
 
     # Ensure it starts with "Theme: "
@@ -750,19 +1291,19 @@ async def _generate_theme_summary(theme_name: str, concept_texts: List[str]) -> 
     from app.utils.llm.llm_utils import get_llm
     from app.core.config import settings
 
-    concepts_str = "\n".join(f"- {text}" for text in concept_texts)
+    concepts_str = "\n".join(f"- {text}" for text in concept_texts[:10])
 
-    system = "You are a policy researcher writing concise summaries for government briefings."
-    user = f"""Write a 1-2 sentence summary for this theme:
+    system = "You are a policy researcher writing succinct, neutral UK policy brief lines. Be specific; do NOT write umbrellas (avoid: Obesity, Management, Comprehensive, Strategy)."
+    user = f"""Write a 35–45 word, 1–2 sentence summary for this precise theme; end with one policy action.
 
 Theme: {theme_name}
 Related concepts: {concepts_str}
 
-Explain what this theme represents and why it's important for policy makers. Be specific and actionable."""
+Requirements: British English; no markdown; avoid filler; avoid hedging; be specific and actionable."""
 
     prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
     llm = get_llm(settings.LLM_MODEL, temperature=0.1)
-    resp = llm.invoke(prompt.format())
+    resp = await llm.ainvoke(prompt.format())
     return (resp.content if hasattr(resp, "content") else str(resp)).strip()
 
 
@@ -773,21 +1314,19 @@ async def _generate_intervention_brief(
     from app.utils.llm.llm_utils import get_llm
     from app.core.config import settings
 
-    concepts_str = "\n".join(f"- {text}" for text in concept_texts)
+    concepts_str = "\n".join(f"- {text}" for text in concept_texts[:10])
 
-    system = (
-        "You are a policy researcher writing brief descriptions of intervention themes."
-    )
-    user = f"""Write 1-2 sentences describing this intervention theme:
+    system = "You write succinct, neutral UK policy brief lines. Describe the concrete lever; avoid umbrellas (avoid: Obesity, Management, Comprehensive, Strategy)."
+    user = f"""Write a 35–45 word, 1–2 sentence brief; end with one policy action. Be specific to this lever.
 
 Theme: {theme_name}
 Related interventions: {concepts_str}
 
-Describe what these interventions do and their common approach. Be clear and specific."""
+State what they do and the common approach; British English; no markdown."""
 
     prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
     llm = get_llm(settings.LLM_MODEL, temperature=0.1)
-    resp = llm.invoke(prompt.format())
+    resp = await llm.ainvoke(prompt.format())
     return (resp.content if hasattr(resp, "content") else str(resp)).strip()
 
 
@@ -800,17 +1339,17 @@ async def _generate_intervention_impact(
 
     concepts_str = "\n".join(f"- {text}" for text in concept_texts)
 
-    system = "You are a policy researcher summarizing intervention impacts and effectiveness."
-    user = f"""Write 1-2 sentences about the impact of this intervention theme:
+    system = "You write succinct, neutral UK policy impact lines."
+    user = f"""Write a 35–45 word, 1–2 sentence impact summary; end with one policy action.
 
 Theme: {theme_name}
 Related interventions: {concepts_str}
 
-Describe the expected impact and effectiveness of these types of interventions. Focus on outcomes and benefits."""
+Describe expected impacts and effectiveness; British English; focus on outcomes; no markdown."""
 
     prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
     llm = get_llm(settings.LLM_MODEL, temperature=0.1)
-    resp = llm.invoke(prompt.format())
+    resp = await llm.ainvoke(prompt.format())
     return (resp.content if hasattr(resp, "content") else str(resp)).strip()
 
 
@@ -1046,17 +1585,37 @@ async def critique_generated_themes(state: SynthesisState) -> SynthesisState:
         print(f"JSON parse error: {e}, text was: {text}")  # Debug logging
         parsed = {"merges": [], "renames": [], "moves": []}
 
-    # Empty suggestions means MECE accepted
-    if not any(parsed.get(k) for k in ("merges", "renames", "moves")):
-        return {**state, "theme_critique": None}
+    # Normalise out no-op actions: remove merges where from == to
+    merges = []
+    for m in parsed.get("merges", []) or []:
+        fv = str(m.get("from") or "").strip()
+        tv = str(m.get("to") or "").strip()
+        if not fv or not tv:
+            continue
+        # Accept prefixes like issues.12 or interventions.5
+        fv_norm = fv.split(".")[-1]
+        tv_norm = tv.split(".")[-1]
+        if fv_norm == tv_norm:
+            continue
+        merges.append(m)
+    renames = parsed.get("renames", []) or []
+    moves = parsed.get("moves", []) or []
 
-    return {**state, "theme_critique": json.dumps(parsed)}
+    if not (merges or renames or moves):
+        return {"theme_critique": None}
+
+    cleaned = {"merges": merges, "renames": renames, "moves": moves}
+    return {"theme_critique": json.dumps(cleaned)}
+
+    return {"theme_critique": json.dumps(parsed)}
 
 
 async def apply_critique_suggestions(state: SynthesisState) -> SynthesisState:
     """Apply critique suggestions and increment iteration counter."""
     print("---APPLYING CRITIQUE SUGGESTIONS---")
     critique_content = state.get("theme_critique")
+
+    delta: SynthesisState = {}
 
     if critique_content:
         try:
@@ -1065,13 +1624,32 @@ async def apply_critique_suggestions(state: SynthesisState) -> SynthesisState:
             print(f"Debug - JSON parse error: {e}")
             suggestions = {"merges": [], "renames": [], "moves": []}
 
+        # Snapshot before
+        before_issues = json.dumps(state.get("issue_clusters", {}), sort_keys=True)
+        before_intrs = json.dumps(
+            state.get("intervention_clusters", {}), sort_keys=True
+        )
+
         _apply_theme_suggestions(state, suggestions)
+
+        # Snapshot after
+        after_issues = json.dumps(state.get("issue_clusters", {}), sort_keys=True)
+        after_intrs = json.dumps(state.get("intervention_clusters", {}), sort_keys=True)
+
         current_iter = int(state.get("theme_iteration") or 0)
         next_iter = current_iter + 1
-        state["theme_iteration"] = next_iter
+        delta["theme_iteration"] = next_iter
+        # Ensure mutated cluster keys are emitted as deltas
+        delta["issue_clusters"] = state.get("issue_clusters", {})
+        delta["intervention_clusters"] = state.get("intervention_clusters", {})
+
+        # Convergence detection: if no change, clear critique to break loop
+        if before_issues == after_issues and before_intrs == after_intrs:
+            print("No-op critique detected; clearing critique to proceed.")
+            delta["theme_critique"] = None
         print(f"Applied suggestions. Next iteration: {next_iter}")
 
-    return state
+    return delta
 
 
 def check_critique(state: SynthesisState) -> str:
