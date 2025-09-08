@@ -24,14 +24,13 @@ export function useAPI() {
     console.log(`Request headers:`, options.headers);
     
     // Don't set Content-Type for FormData - let browser set it with boundary
-    const headers: HeadersInit = new Headers(options.headers);
+    const headers = new Headers(options.headers as HeadersInit);
     headers.set('Authorization', `Bearer ${token}`);
-    
-    // Only set Content-Type to application/json if we're not sending FormData
     if (!(options.body instanceof FormData)) {
+      // Set JSON content type only when not sending FormData
       headers.set('Content-Type', 'application/json');
     }
-    
+
     let response;
     try {
       response = await fetch(fullUrl, {
