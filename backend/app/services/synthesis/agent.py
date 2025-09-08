@@ -346,7 +346,10 @@ async def map_intervention_concepts_to_final_themes(
 
 
 async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
-    """Derive KeyIssue and PolicyIntervention tables from separate final theme sets."""
+    """Derive KeyIssue and PolicyIntervention tables from separate final theme sets.
+
+    Frequency is computed as unique document coverage per theme using Supabase lookups.
+    """
     print("--- Building Aggregated Tables from Final Themes ---")
     final_issue_themes: List[FinalTheme] = state.get("final_issue_themes", []) or []
     final_intervention_themes: List[FinalTheme] = (
@@ -355,25 +358,122 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     issues: List[KeyIssue] = []
     interventions: List[PolicyIntervention] = []
 
+    # Build mapping from extraction_id to analysis_document_id -> doc_id
+    project_id = state.get("project_id", "")
+    supabase = vectorization_service.supabase
+
+    # Gather all concept extraction IDs per theme
+    def concept_ids_for_theme(t: FinalTheme) -> List[str]:
+        # Concepts were created from extractions; use concept.id
+        return [c.id for c in t.concepts]
+
+    all_issue_ex_ids: List[str] = []
     for t in final_issue_themes:
+        all_issue_ex_ids.extend(concept_ids_for_theme(t))
+    all_intr_ex_ids: List[str] = []
+    for t in final_intervention_themes:
+        all_intr_ex_ids.extend(concept_ids_for_theme(t))
+
+    def fetch_doc_ids_for_extractions(ex_ids: List[str]) -> Dict[str, str]:
+        mapping: Dict[str, str] = {}
+        if not ex_ids:
+            return mapping
+        CHUNK = 1000
+        # Preload analysis_documents for this project to map analysis_document_id -> doc_id
+        docs_res = (
+            supabase.table("analysis_documents")
+            .select("id, doc_id")
+            .eq("analysis_project_id", project_id)
+            .execute()
+        )
+        doc_uuid_to_doc_id = {
+            str(d.get("id")): str(d.get("doc_id") or "") for d in (docs_res.data or [])
+        }
+        for i in range(0, len(ex_ids), CHUNK):
+            chunk = ex_ids[i : i + CHUNK]
+            exts_res = (
+                supabase.table("analysis_extractions")
+                .select("id, analysis_document_id")
+                .in_("id", chunk)
+                .execute()
+            )
+            for r in exts_res.data or []:
+                rid = str(r.get("id"))
+                doc_uuid = str(r.get("analysis_document_id") or "")
+                mapping[rid] = doc_uuid_to_doc_id.get(doc_uuid, "")
+        return mapping
+
+    issue_ex_id_to_doc_id = fetch_doc_ids_for_extractions(all_issue_ex_ids)
+    intr_ex_id_to_doc_id = fetch_doc_ids_for_extractions(all_intr_ex_ids)
+
+    # Helper to generate a short impact summary via LLM (fast model)
+    async def _impact_for_theme(name: str, concept_texts: List[str]) -> str:
+        try:
+            llm = get_llm(CLASSIFICATION_MODEL, temperature=0.1)
+            sample = "\n".join([f"- {s}" for s in concept_texts[:8]])
+            prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", "Write a 35–45 word impact summary, plain text."),
+                    (
+                        "user",
+                        f"Theme: {name}\nRepresentative concepts:\n{_escape_braces(sample)}\nSummarise expected impacts and effectiveness; British English.",
+                    ),
+                ]
+            )
+            resp = await llm.ainvoke(prompt.format())
+            return (resp.content if hasattr(resp, "content") else str(resp)).strip()
+        except Exception:
+            return "Synthesised from grouped concept evidence."
+
+    # Build Key Issues with doc coverage
+    for t in final_issue_themes:
+        ids = concept_ids_for_theme(t)
+        doc_ids = sorted(
+            list(
+                {
+                    issue_ex_id_to_doc_id.get(x, "")
+                    for x in ids
+                    if issue_ex_id_to_doc_id.get(x)
+                }
+            )
+        )
+        freq = len(doc_ids)
+        if freq == 0:
+            continue
         issues.append(
             KeyIssue(
                 issue_theme=t.name,
                 summary_description=t.description,
-                frequency=t.frequency,
-                source_doc_ids=[],
-                justification="Mapped via concept-level classification to this theme.",
+                frequency=freq,
+                source_doc_ids=doc_ids,
             )
         )
+
+    # Build Interventions with doc coverage and impact summary
     for t in final_intervention_themes:
+        ids = concept_ids_for_theme(t)
+        doc_ids = sorted(
+            list(
+                {
+                    intr_ex_id_to_doc_id.get(x, "")
+                    for x in ids
+                    if intr_ex_id_to_doc_id.get(x)
+                }
+            )
+        )
+        freq = len(doc_ids)
+        if freq == 0:
+            continue
+        impact = await _impact_for_theme(
+            t.name, [c.canonical_description for c in t.concepts]
+        )
         interventions.append(
             PolicyIntervention(
                 intervention_name=t.name,
                 brief_description=t.description,
-                impact_summary="Synthesised from grouped concept evidence.",
-                frequency=t.frequency,
-                supporting_doc_ids=[],
-                justification="Mapped via concept-level classification to this theme.",
+                impact_summary=impact,
+                frequency=freq,
+                supporting_doc_ids=doc_ids,
             )
         )
 
@@ -384,16 +484,24 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
     """Generates the final executive briefing from separated issues and interventions."""
     print("--- Step 5: Synthesizing Executive Briefing ---")
     rq = state.get("research_question") or "Not specified"
-    issues = state.get("final_issue_themes", []) or []
-    interventions = state.get("final_intervention_themes", []) or []
+    issues = state.get("aggregated_issues", []) or []
+    interventions = state.get("aggregated_interventions", []) or []
 
     payload = {
         "issues": [
-            {"name": t.name, "description": t.description, "frequency": t.frequency}
+            {
+                "name": t.issue_theme,
+                "description": t.summary_description,
+                "frequency": t.frequency,
+            }
             for t in issues
         ],
         "interventions": [
-            {"name": t.name, "description": t.description, "frequency": t.frequency}
+            {
+                "name": t.intervention_name,
+                "description": t.brief_description,
+                "frequency": t.frequency,
+            }
             for t in interventions
         ],
     }

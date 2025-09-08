@@ -26,9 +26,6 @@ class KeyIssue(BaseModel):
     source_doc_ids: List[str] = Field(
         ..., description="A list of document IDs where this issue is discussed."
     )
-    justification: str = Field(
-        ..., description="An explanation of why this theme was created."
-    )
 
 
 class PolicyIntervention(BaseModel):
@@ -56,9 +53,6 @@ class PolicyIntervention(BaseModel):
     )
     supporting_doc_ids: List[str] = Field(
         ..., description="List of document IDs that discuss this intervention."
-    )
-    justification: str = Field(
-        ..., description="An explanation of why this theme was created."
     )
 
 
