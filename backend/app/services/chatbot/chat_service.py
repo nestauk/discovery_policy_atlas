@@ -145,14 +145,15 @@ class ChatbotService:
             set(c.get("document_id") for c in chunks if c.get("document_id"))
         )
 
-        # Fetch document details
+        # Fetch document details from analysis_documents table
+        # Note: document_ids are now UUIDs from analysis_documents.id
         document_details = {}
         if document_ids:
             try:
                 result = (
-                    vectorization_service.supabase.table("documents")
+                    vectorization_service.supabase.table("analysis_documents")
                     .select(
-                        "id, title, authors, doi, overton_url, source_country, published_date"
+                        "id, doc_id, title, authors, doi, overton_url, source_country, year, published_on"
                     )
                     .in_("id", document_ids)
                     .execute()
@@ -170,6 +171,12 @@ class ChatbotService:
             doc_id = chunk.get("document_id")
             if doc_id and doc_id in document_details:
                 doc_details = document_details[doc_id]
+
+                # Handle published date - prefer published_on, fallback to year
+                published_date = doc_details.get("published_on")
+                if not published_date and doc_details.get("year"):
+                    published_date = f"{doc_details.get('year')}-01-01"
+
                 enriched_chunk.update(
                     {
                         "document_title": doc_details.get("title", ""),
@@ -177,7 +184,8 @@ class ChatbotService:
                         "document_doi": doc_details.get("doi"),
                         "document_overton_url": doc_details.get("overton_url"),
                         "document_source_country": doc_details.get("source_country"),
-                        "document_published_date": doc_details.get("published_date"),
+                        "document_published_date": published_date,
+                        "document_year": doc_details.get("year"),
                     }
                 )
             enriched_chunks.append(enriched_chunk)
@@ -306,6 +314,8 @@ Answer the user's question based on this evidence."""
                         doi=doi,
                         url=url,
                         chunk_type=chunk.get("chunk_type"),
+                        published_date=chunk.get("document_published_date"),
+                        year=chunk.get("document_year"),
                     )
                 )
 

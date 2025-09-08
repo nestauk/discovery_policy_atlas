@@ -18,7 +18,8 @@ const sidebarItems = [
 ]
 
 const testItems = [
-  { name: 'Extraction', href: '/v2/test_extraction', icon: Zap },
+  { name: 'Test extraction', href: '/v2/test_extraction', icon: Zap },
+  { name: 'Extractions', href: '/v2/text_extractions', icon: FileText },
 ]
 
 // const quickStats = [
@@ -67,7 +68,9 @@ export default function AgentLayout({
         <div className="p-6 pb-4">
           <div className="flex items-center gap-3">
             <div>
-              <h1 className="text-2xl font-bold">🌐 Policy Atlas</h1>
+              <Link href="/v2">
+                <h1 className="text-2xl font-bold cursor-pointer">🌐 Policy Atlas</h1>
+              </Link>
             </div>
           </div>
         </div>
@@ -76,7 +79,7 @@ export default function AgentLayout({
         <div className="px-6 pb-4">
           <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
             <div className="flex items-center gap-2 mb-1">
-              <Folder className="h-3 w-3 text-slate-500" />
+              <Folder className="h-4 w-4 text-slate-500 -mt-2.5" />
               <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">ACTIVE PROJECT</p>
             </div>
             {activeProject ? (
@@ -184,7 +187,7 @@ export default function AgentLayout({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col ml-64">
+      <div className="flex-1 flex flex-col ml-64 bg-white">
         {children}
       </div>
     </div>

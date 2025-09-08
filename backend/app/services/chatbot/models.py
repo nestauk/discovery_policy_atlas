@@ -38,6 +38,8 @@ class DocumentReference(BaseModel):
     url: Optional[str] = None
     chunk_type: Optional[str] = None
     relevance_score: Optional[float] = None
+    published_date: Optional[str] = None
+    year: Optional[int] = None
 
 
 class ChatResponse(BaseModel):
