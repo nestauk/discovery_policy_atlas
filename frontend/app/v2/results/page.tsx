@@ -49,6 +49,9 @@ interface AnalysisDocument {
   landing_page_url?: string
   full_text_available?: boolean
   extraction_status?: string
+  text_source?: string  // "full_text" or "abstract" - what was used for extraction
+  study_strength?: string  // strongest study type letter from interventions
+  sample_size?: number  // largest sample size from interventions
   cited_by_count?: number  // Citation count from API
 }
 
@@ -417,6 +420,65 @@ export default function AnalysisResultsPage() {
     router.push('/v2/search')
   }
 
+  // Create study strength and sample size mappings from interventions data
+  const { studyStrengthMapping, sampleSizeMapping } = useMemo(() => {
+    const strengthMapping: Record<string, string> = {}
+    const sizeMapping: Record<string, number> = {}
+    
+    // Study type ranking function (same as backend)
+    const getStudyTypeRank = (studyType: string): number => {
+      if (!studyType) return 999
+      const type = studyType.trim().toLowerCase()
+      
+      if (type === 'g') return 1  // RCT - highest quality
+      if (type === 'h') return 2  // Meta-analysis
+      if (type === 'f') return 3  // Quasi-experimental
+      if (type === 'e') return 4  // Comparison of outcomes
+      if (type === 'd') return 5  // Pre/post study
+      if (type === 'c') return 6  // Cross-sectional with controls
+      if (type === 'b') return 7  // Pre/post study
+      if (type === 'a') return 8  // Cross-sectional
+      if (type === 'i') return 9  // Policy recommendation
+      if (type === 'j') return 10 // News/opinion
+      return 999 // Unknown
+    }
+    
+    // Process interventions to find strongest study type and largest sample size per document
+    interventions.forEach(intervention => {
+      intervention.documents?.forEach(doc => {
+        const docId = doc.doc_id
+        if (!docId) return
+        
+        // Get study type from intervention
+        const studyType = intervention.highest_study_type
+        if (studyType) {
+          const currentRank = getStudyTypeRank(studyType)
+          const existingStudyType = strengthMapping[docId]
+          const existingRank = existingStudyType ? getStudyTypeRank(existingStudyType) : 999
+          
+          // Keep the strongest (lowest rank number) study type
+          if (currentRank < existingRank) {
+            strengthMapping[docId] = studyType
+          }
+        }
+        
+        // Get sample size from intervention
+        const sampleSize = intervention.total_sample_size
+        if (sampleSize && sampleSize > 0) {
+          const existingSize = sizeMapping[docId] || 0
+          // Keep the largest sample size
+          if (sampleSize > existingSize) {
+            sizeMapping[docId] = sampleSize
+          }
+        }
+      })
+    })
+    
+    return {
+      studyStrengthMapping: strengthMapping,
+      sampleSizeMapping: sizeMapping
+    }
+  }, [interventions])
 
   // Transform documents for table display and apply filtering
   const { transformedPapers, relevantCount } = useMemo(() => {
@@ -437,7 +499,11 @@ export default function AnalysisResultsPage() {
       top_line: doc.top_line,
       landing_page_url: doc.landing_page_url,
       full_text_available: doc.full_text_available,
-      extraction_status: doc.extraction_status
+      extraction_status: doc.extraction_status,
+      text_source: doc.text_source,
+      source: doc.source,
+      study_strength: studyStrengthMapping[doc.doc_id] || undefined,
+      sample_size: sampleSizeMapping[doc.doc_id] || undefined
     }));
 
     const relevant = allTransformed.filter(doc => doc.is_relevant);
@@ -449,7 +515,7 @@ export default function AnalysisResultsPage() {
       transformedPapers: filtered,
       relevantCount: relevant.length
     };
-  }, [documents, showRelevantOnly]);
+  }, [documents, showRelevantOnly, studyStrengthMapping, sampleSizeMapping]);
 
   return (
     <div className="flex-1 flex flex-col">
