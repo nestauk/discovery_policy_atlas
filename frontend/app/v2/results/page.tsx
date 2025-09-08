@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 import { PapersTable } from '@/components/search/papers-table'
 import { InterventionsTable as InterventionsEvidenceTable, InterventionData } from '@/components/search/interventions-table'
 import { Paper } from '@/types/search'
@@ -16,7 +18,8 @@ import {
   AlertCircle,
   BookOpen,
   Target,
-  Bot
+  Bot,
+  Filter
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
@@ -66,7 +69,9 @@ export default function AnalysisResultsPage() {
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
   // const [activeTab, setActiveTab] = useState('summary')
   const [evidenceSubTab, setEvidenceSubTab] = useState('documents')
-
+  
+  // Relevance filtering state
+  const [showRelevantOnly, setShowRelevantOnly] = useState(true)
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
@@ -413,26 +418,38 @@ export default function AnalysisResultsPage() {
   }
 
 
-  // Transform documents for table display
-  const transformedPapers: Paper[] = documents.map((doc: AnalysisDocument) => ({
-    id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
-    title: String(doc.title || 'Untitled'),
-    doi: String(doc.doi || ''),
-    publication_year: Number(doc.year || 0),
-    cited_by_count: Number(doc.cited_by_count || 0),
-    authors: Array.isArray(doc.authors) ? doc.authors : ['Unknown'],
-    is_relevant: Boolean(doc.is_relevant !== false),
-    abstract: doc.abstract_or_summary,
-    relevance_reason: doc.relevance_reason,
-    confidence: doc.relevance_confidence,
-    source_country: doc.source_country,
-    source_type: doc.source_type,
-    venue: doc.venue,
-    top_line: doc.top_line,
-    landing_page_url: doc.landing_page_url,
-    full_text_available: doc.full_text_available,
-    extraction_status: doc.extraction_status
-  }));
+  // Transform documents for table display and apply filtering
+  const { transformedPapers, relevantCount } = useMemo(() => {
+    const allTransformed: Paper[] = documents.map((doc: AnalysisDocument) => ({
+      id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
+      title: String(doc.title || 'Untitled'),
+      doi: String(doc.doi || ''),
+      publication_year: Number(doc.year || 0),
+      cited_by_count: Number(doc.cited_by_count || 0),
+      authors: Array.isArray(doc.authors) ? doc.authors : ['Unknown'],
+      is_relevant: Boolean(doc.is_relevant !== false),
+      abstract: doc.abstract_or_summary,
+      relevance_reason: doc.relevance_reason,
+      confidence: doc.relevance_confidence,
+      source_country: doc.source_country,
+      source_type: doc.source_type,
+      venue: doc.venue,
+      top_line: doc.top_line,
+      landing_page_url: doc.landing_page_url,
+      full_text_available: doc.full_text_available,
+      extraction_status: doc.extraction_status
+    }));
+
+    const relevant = allTransformed.filter(doc => doc.is_relevant);
+    
+    // Apply filtering based on toggle
+    const filtered = showRelevantOnly ? relevant : allTransformed;
+    
+    return {
+      transformedPapers: filtered,
+      relevantCount: relevant.length
+    };
+  }, [documents, showRelevantOnly]);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -576,26 +593,43 @@ export default function AnalysisResultsPage() {
                 <div className="max-w-6xl mx-auto">
                   {/* Evidence Sub-tabs as smaller buttons */}
                   <div className="mb-6">
-                    <div className="flex gap-2">
-                      <Button
-                        variant={evidenceSubTab === 'documents' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setEvidenceSubTab('documents')}
-                        className="flex items-center gap-2"
-                      >
-                        <FileText className="h-3 w-3" />
-                        Documents ({documents.length})
-                      </Button>
-                      <Button
-                        variant={evidenceSubTab === 'interventions' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setEvidenceSubTab('interventions')}
-                        className="flex items-center gap-2"
-                      >
-                        <Target className="h-3 w-3" />
-                        Interventions ({interventions.length})
-                      </Button>
+                    <div className="flex items-center justify-between">
+                      <div className="flex gap-2">
+                        <Button
+                          variant={evidenceSubTab === 'documents' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setEvidenceSubTab('documents')}
+                          className="flex items-center gap-2"
+                        >
+                          <FileText className="h-3 w-3" />
+                          Documents ({showRelevantOnly ? relevantCount : documents.length})
+                        </Button>
+                        <Button
+                          variant={evidenceSubTab === 'interventions' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setEvidenceSubTab('interventions')}
+                          className="flex items-center gap-2"
+                        >
+                          <Target className="h-3 w-3" />
+                          Interventions ({interventions.length})
+                        </Button>
+                      </div>
 
+                      {/* Relevance Filter Toggle (only show for documents) */}
+                      {evidenceSubTab === 'documents' && (
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="relevance-filter" className="text-sm text-slate-700">
+                              Relevant only
+                            </Label>
+                            <Switch
+                              id="relevance-filter"
+                              checked={showRelevantOnly}
+                              onCheckedChange={setShowRelevantOnly}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -615,8 +649,22 @@ export default function AnalysisResultsPage() {
                           <h3 className="text-lg font-medium text-slate-900 mb-2">Error Loading Data</h3>
                           <p className="text-slate-600">{dataError}</p>
                         </div>
-                      ) : documents.length > 0 ? (
+                      ) : transformedPapers.length > 0 ? (
                         <PapersTable papers={transformedPapers} />
+                      ) : documents.length > 0 && showRelevantOnly ? (
+                        <div className="text-center py-12">
+                          <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                          <h3 className="text-lg font-medium text-slate-900 mb-2">No Relevant Documents</h3>
+                          <p className="text-slate-600 mb-4">All {documents.length} documents in this project were marked as non-relevant.</p>
+                          <Button 
+                            variant="outline" 
+                            onClick={() => setShowRelevantOnly(false)}
+                            className="flex items-center gap-2"
+                          >
+                            <Filter className="h-4 w-4" />
+                            Show All Documents
+                          </Button>
+                        </div>
                       ) : (
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
