@@ -562,6 +562,7 @@ class SynthesisService:
         Returns:
             List[Finding]: Sorted findings (desc by year, then title).
         """
+        # Load documents for the project
         docs_res = (
             self.supabase.table("analysis_documents")
             .select("*")
@@ -574,38 +575,90 @@ class SynthesisService:
 
         filt_intr = (intervention_name or "").strip()
         filt_issue = (issue_theme or "").strip()
-        filt_intr_l = filt_intr.lower()
-        filt_issue_l = filt_issue.lower()
+        if not filt_intr and not filt_issue:
+            return []
 
-        allowed_doc_uuids_from_clusters: set[str] = set()
-        allowed_doc_ids_from_clusters: set[str] = set()
+        # Use theme_assignments to determine exactly which extractions belong
+        # to the selected theme in the latest completed synthesis run.
+        assigned_extraction_ids: set[str] = set()
+        assigned_doc_uuids: set[str] = set()
+        per_doc_assigned_intervention_names: dict[str, set[str]] = {}
+        per_doc_assigned_issue_labels: dict[str, set[str]] = {}
+
         try:
-            cache_res = (
-                self.supabase.table("analysis_syntheses")
-                .select("*")
+            # Latest completed run
+            runs_res = (
+                self.supabase.table("synthesis_runs")
+                .select("id")
                 .eq("analysis_project_id", project_id)
+                .eq("status", "completed")
+                .order("created_at", desc=True)
+                .limit(1)
                 .execute()
             )
-            if cache_res.data:
-                cached = cache_res.data[0]
+            if runs_res.data:
+                run_id = runs_res.data[0]["id"]
+                # Find matching theme record
                 if filt_intr:
-                    for intr in cached.get("interventions") or []:
-                        name = str(intr.get("intervention_name") or "")
-                        if name.lower() == filt_intr_l:
-                            for did in intr.get("supporting_document_ids") or []:
-                                allowed_doc_uuids_from_clusters.add(str(did))
-                            for did in intr.get("supporting_doc_ids") or []:
-                                allowed_doc_ids_from_clusters.add(str(did))
-                if filt_issue:
-                    for issue in cached.get("key_issues") or []:
-                        name = str(issue.get("issue_theme") or "")
-                        if name.lower() == filt_issue_l:
-                            for did in issue.get("source_document_ids") or []:
-                                allowed_doc_uuids_from_clusters.add(str(did))
-                            for did in issue.get("source_doc_ids") or []:
-                                allowed_doc_ids_from_clusters.add(str(did))
+                    themes_res = (
+                        self.supabase.table("synthesis_themes")
+                        .select("id")
+                        .eq("synthesis_run_id", run_id)
+                        .eq("theme_type", "intervention")
+                        .eq("theme_name", filt_intr)
+                        .limit(1)
+                        .execute()
+                    )
+                else:
+                    themes_res = (
+                        self.supabase.table("synthesis_themes")
+                        .select("id")
+                        .eq("synthesis_run_id", run_id)
+                        .eq("theme_type", "issue")
+                        .eq("theme_name", filt_issue)
+                        .limit(1)
+                        .execute()
+                    )
+                if themes_res.data:
+                    theme_id = themes_res.data[0]["id"]
+                    # Assignments for theme
+                    assign_res = (
+                        self.supabase.table("theme_assignments")
+                        .select("extraction_id")
+                        .eq("synthesis_theme_id", theme_id)
+                        .execute()
+                    )
+                    ex_ids = [str(a["extraction_id"]) for a in (assign_res.data or [])]
+                    if ex_ids:
+                        assigned_extraction_ids = set(ex_ids)
+                        # Fetch extraction records to map to documents and names/labels
+                        exts_res = (
+                            self.supabase.table("analysis_extractions")
+                            .select(
+                                "id, analysis_document_id, extraction_type, label, raw_data"
+                            )
+                            .in_("id", list(assigned_extraction_ids))
+                            .execute()
+                        )
+                        for row in exts_res.data or []:
+                            doc_uuid = str(row.get("analysis_document_id") or "")
+                            assigned_doc_uuids.add(doc_uuid)
+                            etype = str(row.get("extraction_type") or "")
+                            raw = row.get("raw_data") or {}
+                            if etype == "intervention":
+                                name = str(row.get("label") or raw.get("name") or "")
+                                if name:
+                                    per_doc_assigned_intervention_names.setdefault(
+                                        doc_uuid, set()
+                                    ).add(name)
+                            elif etype == "issue":
+                                label = str(row.get("label") or raw.get("label") or "")
+                                if label:
+                                    per_doc_assigned_issue_labels.setdefault(
+                                        doc_uuid, set()
+                                    ).add(label)
         except Exception as e:
-            logger.warning("[findings] Failed to read synthesis cache: %s", e)
+            logger.warning("[findings] Failed to use theme_assignments: %s", e)
 
         findings: List[Finding] = []
         for doc in documents:
@@ -613,64 +666,62 @@ class SynthesisService:
             if not extraction_results:
                 continue
 
+            doc_uuid = str(doc.get("id") or "")
+            # If we have precise assignments, restrict to assigned docs
+            if assigned_doc_uuids and doc_uuid not in assigned_doc_uuids:
+                continue
+
             interventions = extraction_results.get("interventions", []) or []
             issues = extraction_results.get("issues", []) or []
             mappings = extraction_results.get("mappings", []) or []
             results = extraction_results.get("results", []) or []
 
-            intr_by_idx = {
-                int(i.get("idx")): i
-                for i in interventions
-                if i is not None and i.get("idx") is not None
-            }
+            # Build lookup maps for exact matching
+            name_to_idx: dict[str, int] = {}
+            for i in interventions:
+                try:
+                    idx_v = int(i.get("idx"))
+                except Exception:
+                    continue
+                nm = str(i.get("name") or "")
+                if nm:
+                    name_to_idx[nm] = idx_v
 
-            doc_uuid = str(doc.get("id") or "")
-            doc_id = str(doc.get("doc_id") or "")
-            if (filt_intr or filt_issue) and (
-                allowed_doc_uuids_from_clusters or allowed_doc_ids_from_clusters
-            ):
-                if (
-                    allowed_doc_uuids_from_clusters
-                    and doc_uuid not in allowed_doc_uuids_from_clusters
-                ) and (
-                    allowed_doc_ids_from_clusters
-                    and doc_id not in allowed_doc_ids_from_clusters
-                ):
-                    if (
-                        allowed_doc_uuids_from_clusters
-                        and not allowed_doc_ids_from_clusters
-                    ):
-                        if doc_uuid not in allowed_doc_uuids_from_clusters:
-                            continue
-                    elif (
-                        allowed_doc_ids_from_clusters
-                        and not allowed_doc_uuids_from_clusters
-                    ):
-                        if doc_id not in allowed_doc_ids_from_clusters:
-                            continue
-                    else:
-                        continue
+            label_to_idx: dict[str, int] = {}
+            for iss in issues:
+                try:
+                    idx_v = int(iss.get("idx"))
+                except Exception:
+                    continue
+                lb = str(iss.get("label") or "")
+                if lb:
+                    label_to_idx[lb] = idx_v
 
             include_intervention_idxs: set[int] = set()
 
             if filt_intr:
-                for i in interventions:
-                    name = str(i.get("name") or "")
-                    if name and name.lower() == filt_intr_l:
-                        try:
-                            include_intervention_idxs.add(int(i.get("idx")))
-                        except Exception:
-                            continue
+                # Prefer assigned intervention names for this document if available
+                assigned_names = per_doc_assigned_intervention_names.get(doc_uuid)
+                if assigned_names:
+                    for nm in assigned_names:
+                        if nm in name_to_idx:
+                            include_intervention_idxs.add(name_to_idx[nm])
+                else:
+                    # Fallback: exact name match in this document
+                    if filt_intr in name_to_idx:
+                        include_intervention_idxs.add(name_to_idx[filt_intr])
 
             if filt_issue:
+                # Prefer assigned issue labels for this document if available
+                assigned_labels = per_doc_assigned_issue_labels.get(doc_uuid)
                 matching_issue_idxs: set[int] = set()
-                for iss in issues:
-                    label = str(iss.get("label") or "")
-                    if label and label.lower() == filt_issue_l:
-                        try:
-                            matching_issue_idxs.add(int(iss.get("idx")))
-                        except Exception:
-                            continue
+                if assigned_labels:
+                    for lb in assigned_labels:
+                        if lb in label_to_idx:
+                            matching_issue_idxs.add(label_to_idx[lb])
+                else:
+                    if filt_issue in label_to_idx:
+                        matching_issue_idxs.add(label_to_idx[filt_issue])
                 if matching_issue_idxs:
                     for m in mappings:
                         try:
@@ -680,15 +731,16 @@ class SynthesisService:
                                 )
                         except Exception:
                             continue
-                else:
-                    for i in interventions:
-                        try:
-                            include_intervention_idxs.add(int(i.get("idx")))
-                        except Exception:
-                            continue
 
-            if not filt_intr and not filt_issue:
+            if not include_intervention_idxs:
                 continue
+
+            intr_by_idx = {}
+            for i in interventions:
+                try:
+                    intr_by_idx[int(i.get("idx"))] = i
+                except Exception:
+                    continue
 
             for res in results:
                 try:
