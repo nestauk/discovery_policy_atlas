@@ -23,24 +23,13 @@ export function useAPI() {
     console.log(`Token length: ${token.length}`);
     console.log(`Request headers:`, options.headers);
     // Don't set Content-Type for FormData - let browser set it with boundary
-    const headers: HeadersInit = new Headers(options.headers);
+    const headers = new Headers(options.headers as HeadersInit);
     headers.set('Authorization', `Bearer ${token}`);
-    
-    let response;
-    try {
-      response = await fetch(fullUrl, {
-        ...options,
-        headers: {
-          ...options.headers,
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-    } catch (fetchError) {
-      console.error('Network fetch error:', fetchError);
-      throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown network error'}`);
+    if (!(options.body instanceof FormData)) {
+      // Set JSON content type only when not sending FormData
+      headers.set('Content-Type', 'application/json');
     }
-    
+
     let response;
     try {
       response = await fetch(fullUrl, {
