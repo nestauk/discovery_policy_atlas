@@ -95,7 +95,6 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                 summary_description=theme["summary_description"] or "",
                 frequency=theme["frequency"] or 0,
                 source_doc_ids=src_doc_ids,
-                justification=theme["justification"] or "",
             )
         )
 
@@ -116,7 +115,6 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                 impact_summary=theme["impact_summary"] or "",
                 frequency=theme["frequency"] or 0,
                 supporting_doc_ids=supp_doc_ids,
-                justification=theme["justification"] or "",
             )
         )
 
