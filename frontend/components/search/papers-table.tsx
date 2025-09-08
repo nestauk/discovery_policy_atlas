@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import { Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Paper } from '@/types/search'
+import { Check, X } from 'lucide-react'
 
 interface PapersTableProps {
   papers: Paper[]
@@ -160,10 +161,17 @@ export function PapersTable({ papers }: PapersTableProps) {
       title: 'Relevance',
       dataIndex: 'confidence',
       key: 'confidence',
-      width: '8%',
+      width: '10%',
       sorter: (a, b) => (a.confidence || 0) - (b.confidence || 0),
       render: (text, record) => (
-        <span>{record.confidence ? (record.confidence * 100).toFixed(1) : 'N/A'}</span>
+        <div className="flex items-center gap-1">
+          <span>{record.confidence ? (record.confidence * 100).toFixed(1) : 'N/A'}</span>
+          {record.is_relevant ? (
+            <Check className="h-3 w-3 text-green-600" />
+          ) : (
+            <X className="h-3 w-3 text-red-500" />
+          )}
+        </div>
       ),
     },
     {
@@ -221,11 +229,6 @@ export function PapersTable({ papers }: PapersTableProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <div className="text-sm text-gray-500">
-          Showing {tableData.length} results
-        </div>
-      </div>
       
       <Table
         columns={columns}
