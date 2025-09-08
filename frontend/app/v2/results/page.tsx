@@ -70,6 +70,7 @@ export default function AnalysisResultsPage() {
   // const [activeTab, setActiveTab] = useState('summary')
   const [evidenceSubTab, setEvidenceSubTab] = useState('interventions')
   const [insightsSubTab, setInsightsSubTab] = useState('network')
+
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
@@ -584,15 +585,6 @@ export default function AnalysisResultsPage() {
                   {/* Evidence Sub-tabs as smaller buttons */}
                   <div className="mb-6">
                     <div className="flex gap-2">
-                    <Button
-                        variant={evidenceSubTab === 'interventions' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setEvidenceSubTab('interventions')}
-                        className="flex items-center gap-2"
-                      >
-                        <Target className="h-3 w-3" />
-                        Interventions ({interventions.length})
-                      </Button>                      
                       <Button
                         variant={evidenceSubTab === 'documents' ? 'default' : 'outline'}
                         size="sm"
@@ -601,6 +593,15 @@ export default function AnalysisResultsPage() {
                       >
                         <FileText className="h-3 w-3" />
                         Documents ({documents.length})
+                      </Button>
+                      <Button
+                        variant={evidenceSubTab === 'interventions' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setEvidenceSubTab('interventions')}
+                        className="flex items-center gap-2"
+                      >
+                        <Target className="h-3 w-3" />
+                        Interventions ({interventions.length})
                       </Button>
 
                     </div>
