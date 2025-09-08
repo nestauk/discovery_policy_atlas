@@ -40,6 +40,10 @@ export interface SearchParams {
     // Processing status fields
     full_text_available?: boolean
     extraction_status?: string
+    text_source?: string  // "full_text" or "abstract" - what was used for extraction
+    study_strength?: string  // strongest study type letter from interventions
+    sample_size?: number  // largest sample size from interventions
+    source?: string  // "openalex" or "overton"
     // Extracted fields (dynamically added based on extraction_fields parameter)
     [key: string]: string | number | boolean | string[] | undefined
   }

@@ -5,6 +5,7 @@ import { Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Paper } from '@/types/search'
 import { Check, X } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
 
 interface PapersTableProps {
   papers: Paper[]
@@ -58,13 +59,31 @@ export function PapersTable({ papers }: PapersTableProps) {
 
 
 
+  // Helper function to get study type rank and description (reversed: 10 = strongest)
+  const getStudyTypeInfo = (studyType?: string) => {
+    if (!studyType) return { rank: 0, sortRank: 999, description: 'Unknown study type' }
+    const type = studyType.trim().toLowerCase()
+    
+    if (type === 'g') return { rank: 10, sortRank: 1, description: 'Randomized Controlled Trial (highest quality)' }
+    if (type === 'h') return { rank: 9, sortRank: 2, description: 'Meta-analysis' }
+    if (type === 'f') return { rank: 8, sortRank: 3, description: 'Quasi-experimental study' }
+    if (type === 'e') return { rank: 7, sortRank: 4, description: 'Comparison of outcomes in treated group' }
+    if (type === 'd') return { rank: 6, sortRank: 5, description: 'Study measures outcome pre and post' }
+    if (type === 'c') return { rank: 5, sortRank: 6, description: 'Cross-sectional with control variables' }
+    if (type === 'b') return { rank: 4, sortRank: 7, description: 'Pre/post study (no control group)' }
+    if (type === 'a') return { rank: 3, sortRank: 8, description: 'Purely cross-sectional study' }
+    if (type === 'i') return { rank: 2, sortRank: 9, description: 'Policy recommendation/theoretical modeling' }
+    if (type === 'j') return { rank: 1, sortRank: 10, description: 'News article/opinion piece (lowest quality)' }
+    return { rank: 0, sortRank: 999, description: 'Unknown study type' }
+  }
+
   // Combine base columns with extracted field columns
   const columns: ColumnsType<DataType> = [
     {
       title: 'Year',
       dataIndex: 'publication_year',
       key: 'publication_year',
-      width: '8%',
+      width: '6%',
       sorter: (a, b) => a.publication_year - b.publication_year,
       render: (text) => (
         <span>{text && text > 0 ? text : 'Unknown'}</span>
@@ -74,9 +93,9 @@ export function PapersTable({ papers }: PapersTableProps) {
       title: 'Title',
       dataIndex: 'title',
       key: 'title',
-      width: '25%',
+      width: '20%',
       render: (text, record) => {
-        const maxLength = 100 // Truncate after 100 characters for titles
+        const maxLength = 80 // Truncate after 80 characters for titles
         // Prioritize landing_page_url, fallback to DOI, then overton_url
         const linkUrl = record.landing_page_url || (record.doi ? `${record.doi}` : record.overton_url)
         
@@ -108,7 +127,7 @@ export function PapersTable({ papers }: PapersTableProps) {
       title: 'Top Line',
       dataIndex: 'top_line',
       key: 'top_line',
-      width: '78%',
+      width: '20%',
       render: (text, record) => (
         <div className="text-sm text-gray-700 whitespace-normal leading-tight">
           {record.top_line || 'No summary available'}
@@ -119,7 +138,7 @@ export function PapersTable({ papers }: PapersTableProps) {
       title: 'Country',
       dataIndex: 'source_country',
       key: 'source_country',
-      width: '12%',
+      width: '8%',
       sorter: (a, b) => (a.source_country || 'Academic').localeCompare(b.source_country || 'Academic'),
       render: (text) => (
         <span>{text || 'Academic'}</span>
@@ -129,11 +148,11 @@ export function PapersTable({ papers }: PapersTableProps) {
       title: 'Authors',
       dataIndex: 'authorsDisplay',
       key: 'authors',
-      width: '20%',
+      width: '12%',
       sorter: (a, b) => a.authorsDisplay.localeCompare(b.authorsDisplay),
       render: (text, record) => {
         const authorsText = record.authors?.join(', ') || 'Unknown'
-        const maxLength = 80 // Truncate after 80 characters
+        const maxLength = 60 // Truncate after 60 characters
         
         return (
           <div className="text-sm text-gray-700 whitespace-normal leading-tight" title={authorsText}>
@@ -149,7 +168,7 @@ export function PapersTable({ papers }: PapersTableProps) {
       title: 'Citations',
       dataIndex: 'cited_by_count',
       key: 'cited_by_count',
-      width: '8%',
+      width: '6%',
       sorter: (a, b) => a.cited_by_count - b.cited_by_count,
       render: (text) => (
         <span className={text > 100 ? 'text-green-600 font-semibold' : ''}>
@@ -158,11 +177,61 @@ export function PapersTable({ papers }: PapersTableProps) {
       ),
     },
     {
+      title: 'Strength',
+      dataIndex: 'study_strength',
+      key: 'study_strength',
+      width: '6%',
+      sorter: (a, b) => {
+        const aSortRank = getStudyTypeInfo(a.study_strength).sortRank
+        const bSortRank = getStudyTypeInfo(b.study_strength).sortRank
+        return aSortRank - bSortRank // Lower sortRank = stronger study (for sorting)
+      },
+      render: (text, record) => {
+        const studyType = record.study_strength
+        if (!studyType) {
+          return <span className="text-gray-400 text-xs">-</span>
+        }
+        
+        const { rank, description } = getStudyTypeInfo(studyType)
+        
+        return (
+          <Tooltip content={description}>
+            <span className="inline-block px-2 py-1 rounded text-xs font-medium text-gray-700 bg-gray-100 cursor-help">
+              {rank === 0 ? '-' : rank}
+            </span>
+          </Tooltip>
+        )
+      },
+    },
+    {
+      title: 'Sample Size',
+      dataIndex: 'sample_size',
+      key: 'sample_size',
+      width: '8%',
+      sorter: (a, b) => (a.sample_size || 0) - (b.sample_size || 0),
+      render: (text, record) => {
+        const sampleSize = record.sample_size
+        if (!sampleSize || sampleSize <= 0) {
+          return <span className="text-gray-400 text-xs">-</span>
+        }
+        
+        // Format large numbers with commas
+        const formatted = sampleSize.toLocaleString()
+        
+        return (
+          <span className="text-sm text-gray-700">
+            {formatted}
+          </span>
+        )
+      },
+    },
+    {
       title: 'Relevance',
       dataIndex: 'confidence',
       key: 'confidence',
-      width: '10%',
+      width: '8%',
       sorter: (a, b) => (a.confidence || 0) - (b.confidence || 0),
+      defaultSortOrder: 'descend',
       render: (text, record) => (
         <div className="flex items-center gap-1">
           <span>{record.confidence ? (record.confidence * 100).toFixed(1) : 'N/A'}</span>
@@ -175,23 +244,26 @@ export function PapersTable({ papers }: PapersTableProps) {
       ),
     },
     {
-      title: 'Full Text',
-      dataIndex: 'full_text_available',
-      key: 'full_text_available',
+      title: 'Source',
+      dataIndex: 'source',
+      key: 'source',
       width: '6%',
-      sorter: (a, b) => {
-        const aVal = a.full_text_available === true ? 1 : a.full_text_available === false ? 0 : -1
-        const bVal = b.full_text_available === true ? 1 : b.full_text_available === false ? 0 : -1
-        return aVal - bVal
-      },
+      sorter: (a, b) => (a.source || '').localeCompare(b.source || ''),
       render: (text, record) => {
-        if (record.full_text_available === true) {
-          return <span className="text-green-600 font-semibold">✓</span>
-        } else if (record.full_text_available === false) {
-          return <span className="text-red-600">✗</span>
-        } else {
-          return <span className="text-gray-400">?</span>
+        const source = record.source || 'unknown'
+        let displayText = source
+        
+        if (source === 'openalex') {
+          displayText = 'OpenAlex'
+        } else if (source === 'overton') {
+          displayText = 'Overton'
         }
+        
+        return (
+          <span className="text-sm text-gray-700">
+            {displayText}
+          </span>
+        )
       },
     },
     {
@@ -199,26 +271,51 @@ export function PapersTable({ papers }: PapersTableProps) {
       dataIndex: 'extraction_status',
       key: 'extraction_status',
       width: '8%',
-      sorter: (a, b) => (a.extraction_status || 'unknown').localeCompare(b.extraction_status || 'unknown'),
+      sorter: (a, b) => {
+        const getStatusPriority = (status: string, textSource?: string) => {
+          if (status === 'completed') return textSource === 'full_text' ? 3 : 2
+          if (status === 'skipped') return 1
+          return 0 // failed, not processed, unknown
+        }
+        
+        const aPriority = getStatusPriority(a.extraction_status || 'unknown', a.text_source)
+        const bPriority = getStatusPriority(b.extraction_status || 'unknown', b.text_source)
+        return aPriority - bPriority
+      },
       render: (text, record) => {
         const status = record.extraction_status || 'unknown'
+        const textSource = record.text_source
+        
         let color = 'text-gray-500'
         let bgColor = 'bg-gray-100'
+        let displayText = 'not processed'
         
-        if (status === 'success') {
+        if (status === 'completed') {
           color = 'text-green-700'
           bgColor = 'bg-green-100'
+          if (textSource === 'full_text') {
+            displayText = 'completed: full-text'
+          } else if (textSource === 'abstract') {
+            displayText = 'completed: abstract'
+          } else {
+            displayText = 'completed'
+          }
         } else if (status === 'failed') {
-          color = 'text-red-700'
-          bgColor = 'bg-red-100'
+          color = 'text-gray-600'
+          bgColor = 'bg-gray-100'
+          displayText = 'not processed'
         } else if (status === 'skipped') {
           color = 'text-yellow-700'
           bgColor = 'bg-yellow-100'
+          displayText = 'skipped'
+        } else {
+          // unknown or any other status
+          displayText = 'not processed'
         }
         
         return (
           <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${color} ${bgColor}`}>
-            {status}
+            {displayText}
           </span>
         )
       },
@@ -243,6 +340,7 @@ export function PapersTable({ papers }: PapersTableProps) {
         size="small"
         bordered
         rowClassName={(record) => record.is_relevant ? 'bg-green-50' : 'bg-white'}
+        sortDirections={['descend', 'ascend']}
       />
     </div>
   )
