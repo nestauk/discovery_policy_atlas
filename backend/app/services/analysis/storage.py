@@ -214,7 +214,7 @@ class AnalysisStorageService:
 
         Args:
             project_id: The analysis project ID
-            doc_id: The document ID
+            doc_id: The document ID (from analysis_documents.doc_id)
             document_data: Document metadata
             full_text: Full document text (if available)
             use_abstracts_only: Force abstract-only mode
@@ -225,6 +225,26 @@ class AnalysisStorageService:
         try:
             logger.debug(
                 f"Creating chunks for document {doc_id} in project {project_id}"
+            )
+
+            # First, get the analysis_documents.id (UUID) for this doc_id
+            analysis_doc_result = (
+                self.supabase.table("analysis_documents")
+                .select("id")
+                .eq("analysis_project_id", project_id)
+                .eq("doc_id", doc_id)
+                .execute()
+            )
+
+            if not analysis_doc_result.data:
+                logger.error(
+                    f"No analysis document found for doc_id {doc_id} in project {project_id}"
+                )
+                return False
+
+            analysis_doc_uuid = analysis_doc_result.data[0]["id"]
+            logger.debug(
+                f"Found analysis document UUID {analysis_doc_uuid} for doc_id {doc_id}"
             )
 
             # Generate chunks
@@ -241,75 +261,12 @@ class AnalysisStorageService:
                 logger.warning(f"No chunks generated for document {doc_id}")
                 return False
 
-            # Create document in vectorization system with proper data cleaning
-            year = document_data.get("year")
-            published_date = None
-            if year and str(year).isdigit():
-                # Convert year to proper date format (January 1st of that year)
-                published_date = f"{year}-01-01"
-
-            # Clean up authors field
-            authors = document_data.get("authors", [])
-            if not isinstance(authors, list):
-                authors = [str(authors)] if authors else []
-
-            # Clean numeric fields to avoid NaN issues
-            cited_by_count = document_data.get("citation_count", 0)
-            try:
-                cited_by_count = (
-                    int(cited_by_count) if cited_by_count is not None else 0
-                )
-                if pd.isna(cited_by_count) or math.isnan(cited_by_count):
-                    cited_by_count = 0
-            except (ValueError, TypeError):
-                cited_by_count = 0
-
-            confidence = 1.0
-
-            paper_data = {
-                "id": doc_id,
-                "title": document_data.get("title", ""),
-                "abstract": document_data.get("abstract_or_summary", ""),
-                "content": full_text or document_data.get("abstract_or_summary", ""),
-                "doi": document_data.get("doi"),
-                "source_country": document_data.get("source_country"),
-                "source_type": document_data.get("source", "analysis"),
-                "published_date": published_date,  # Proper date format
-                "publication_year": year,  # Keep year in metadata
-                "overton_url": document_data.get("landing_page_url"),
-                "confidence": confidence,
-                "relevance_reason": document_data.get("relevance_reason", ""),
-                "top_line": document_data.get("top_line", ""),
-                "is_relevant": document_data.get("is_relevant", True),
-                "cited_by_count": cited_by_count,
-                "authors": authors,
-            }
-
-            try:
-                # Clean data to prevent JSON serialization issues
-                clean_paper_data = self._clean_data_for_json(paper_data)
-
-                vector_doc_id = await self.vectorization_service.store_document(
-                    clean_paper_data, project_id
-                )
-                if not vector_doc_id:
-                    logger.error(
-                        f"Failed to store document {doc_id} in vectorization system"
-                    )
-                    return False
-            except Exception as e:
-                logger.error(
-                    f"Error storing document {doc_id} in vectorization system: {e}"
-                )
-                logger.debug(f"Document data that failed: {paper_data}")
-                return False
-
-            # Clean up existing chunks
+            # Clean up existing chunks for this document UUID
             self.vectorization_service.supabase.table("chunks").delete().eq(
-                "document_id", vector_doc_id
-            ).execute()
+                "document_id", analysis_doc_uuid
+            ).eq("project_id", project_id).execute()
 
-            # Store chunks with embeddings
+            # Store chunks with embeddings (link to analysis_documents.id UUID)
             chunk_count = 0
             for chunk in chunks:
                 try:
@@ -319,7 +276,7 @@ class AnalysisStorageService:
 
                     self.vectorization_service.supabase.table("chunks").insert(
                         {
-                            "document_id": vector_doc_id,
+                            "document_id": analysis_doc_uuid,  # Link to analysis_documents.id (UUID)
                             "project_id": project_id,
                             "content": chunk.content,
                             "chunk_type": chunk.chunk_type,

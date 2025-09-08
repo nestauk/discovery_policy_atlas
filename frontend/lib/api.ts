@@ -22,6 +22,9 @@ export function useAPI() {
     console.log(`API call: ${options.method || 'GET'} ${fullUrl}`);
     console.log(`Token length: ${token.length}`);
     console.log(`Request headers:`, options.headers);
+    // Don't set Content-Type for FormData - let browser set it with boundary
+    const headers: HeadersInit = new Headers(options.headers);
+    headers.set('Authorization', `Bearer ${token}`);
     
     let response;
     try {
@@ -38,6 +41,16 @@ export function useAPI() {
       throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown network error'}`);
     }
     
+    let response;
+    try {
+      response = await fetch(fullUrl, {
+        ...options,
+        headers,
+      });
+    } catch (fetchError) {
+      console.error('Network fetch error:', fetchError);
+      throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown network error'}`);
+    }
     console.log(`Response status: ${response.status}`);
     console.log(`Response headers:`, [...response.headers.entries()]);
     

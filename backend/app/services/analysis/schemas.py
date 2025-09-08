@@ -66,6 +66,12 @@ class RunConfig(BaseModel):
         List[str]
     ] = None  # Additional questions to include in screening
     use_interim_storage: bool = True
+    # Chat interface specific parameters
+    geography_filter: Optional[List[str]] = None  # Countries/regions to filter by
+    access_types: Optional[List[str]] = None  # ["academic", "thinkTank", "government"]
+    sub_questions: Optional[
+        List[str]
+    ] = None  # Additional questions to include in screening
 
 
 class RunResult(BaseModel):
