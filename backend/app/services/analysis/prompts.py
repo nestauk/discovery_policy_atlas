@@ -37,6 +37,8 @@ Guidelines:
 10. Prioritize nouns and key descriptive terms over question words (what, how, why)
 11. Include related research terms like "evaluation", "impact", "effectiveness" for policy questions
 
+Most importantly, keep the query sufficiently general so that we get more results, but roughly in the right ballpark.
+
 Return ONLY the boolean query string, nothing else."""
 
 

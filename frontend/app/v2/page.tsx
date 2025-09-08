@@ -34,7 +34,7 @@ export default function V2HomePage() {
             Search evidence on any topic, or browse already existing projects
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link href="/v2/search/chat">
+            <Link href="/v2/search">
               <Button size="lg" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700">
                 Search
                 <ArrowRight className="h-4 w-4" />
