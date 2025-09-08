@@ -872,11 +872,7 @@ export default function AnalysisResultsPage() {
         {effectiveProjectId && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="summary" className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Extraction
-                </TabsTrigger>
+              <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="evidence" className="flex items-center gap-2">
                   <BookOpen className="h-4 w-4" />
                   Evidence
