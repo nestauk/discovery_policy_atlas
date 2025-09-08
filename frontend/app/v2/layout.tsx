@@ -18,7 +18,8 @@ const sidebarItems = [
 ]
 
 const testItems = [
-  { name: 'Extraction', href: '/v2/test_extraction', icon: Zap },
+  { name: 'Test extraction', href: '/v2/test_extraction', icon: Zap },
+  { name: 'Extractions', href: '/v2/text_extractions', icon: FileText },
 ]
 
 // const quickStats = [
