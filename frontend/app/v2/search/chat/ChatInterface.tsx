@@ -116,6 +116,7 @@ interface ChatState {
   showPlan: boolean;
   editableQuery?: string;
   isGeneratingSubQuestions: boolean;
+  maxResults: number;
   set: (p: Partial<ChatState>) => void;
   next: () => void; back: () => void;
   nextRefine: () => void; backRefine: () => void;
@@ -135,8 +136,16 @@ export const useChat = create<ChatState>((set, get) => ({
   showPlan: false,
   editableQuery: "",
   isGeneratingSubQuestions: false,
+  maxResults: 30,
   set: (p) => set(p),
-  next: () => set({ step: get().step === "ASK" ? "REFINE" : "APPROVE" }),
+  next: () => {
+    const s = get();
+    let maxResults = s.maxResults;
+    // Smart defaults heuristics
+    if ((s.subQuestions?.length || 0) >= 2) maxResults = Math.max(maxResults, 50);
+    if ((s.geography?.length || 0) >= 2) maxResults = Math.max(maxResults, 60);
+    set({ step: s.step === "ASK" ? "REFINE" : "APPROVE", maxResults });
+  },
   back: () => set({ step: get().step === "APPROVE" ? "REFINE" : "ASK" }),
   nextRefine: () => set({ refineStep: (Math.min(5, get().refineStep + 1)) as RefineStep }),
   backRefine: () => set({ refineStep: (Math.max(0, get().refineStep - 1)) as RefineStep }),
@@ -152,6 +161,7 @@ function buildPlan(state: {
   scope: string[]; customFocus: string[];
   excludes: string[]; customExcludes: string[];
   editableQuery?: string;
+  maxResults: number;
 }): Brief {
   const tokens: string[] = [];
   const rq = (state.researchQuestion || "").trim();
@@ -232,7 +242,7 @@ function buildPlan(state: {
     timeFrom,
     timeTo,
     mode: "semantic",
-    limit: 30,
+    limit: state.maxResults,
     relevanceFiltering: true,
     abstractsOnly: false,
     query: finalQuery,
@@ -274,6 +284,7 @@ function PlanDrawer() {
     excludes: s.excludes,
     customExcludes: s.customExcludes,
     editableQuery: s.editableQuery,
+    maxResults: s.maxResults,
   });
   const d = brief.direct;
 
@@ -298,6 +309,24 @@ function PlanDrawer() {
           <div><span className="font-medium">Sources</span><br />{d.sources.join(", ")}</div>
           {d.geography?.length ? (<div><span className="font-medium">Geography</span><br />{d.geography.join(", ")}</div>) : null}
           <div><span className="font-medium">Access</span><br />{[d.access.academic && "academic", d.access.policy && "policy"].filter(Boolean).join(", ")}</div>
+          <div>
+            <span className="font-medium">Max results</span><br />
+            <div className="mt-1 flex flex-wrap gap-2">
+              {[10, 20, 30, 50, 100].map(n => (
+                <button
+                  key={n}
+                  onClick={() => s.set({ maxResults: n })}
+                  className={`px-3 py-1.5 rounded-full text-sm ring-1 ${
+                    s.maxResults === n
+                      ? "bg-blue-600 !text-white ring-blue-600"
+                      : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -650,6 +679,7 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
     excludes: s.excludes,
     customExcludes: s.customExcludes,
     editableQuery: s.editableQuery,
+    maxResults: s.maxResults,
   });
 
   // Build a more comprehensive summary that reflects the actual search scope
@@ -730,6 +760,22 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
               <div><span className="font-medium">Access</span><br />{accessArr.join(", ") || "—"}</div>
               <div><span className="font-medium">Include</span><br />{brief.soft.include.join(", ") || "—"}</div>
               <div><span className="font-medium">Exclude</span><br />{brief.soft.exclude.join(", ") || "—"}</div>
+              <div>
+                <span className="font-medium">Max results</span><br />
+                <div className="inline-flex items-center gap-2 mt-1">
+                  <button
+                    className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50"
+                    onClick={() => s.set({ maxResults: Math.max(10, s.maxResults - 10) })}
+                    aria-label="Decrease results"
+                  >–</button>
+                  <span className="min-w-[2ch] text-center">{s.maxResults}</span>
+                  <button
+                    className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50"
+                    onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 10) })}
+                    aria-label="Increase results"
+                  >+</button>
+                </div>
+              </div>
             </div>
           </section>
         </CardContent>
