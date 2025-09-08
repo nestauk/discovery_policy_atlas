@@ -9,7 +9,7 @@ This module handles reading from and writing to the synthesis caching tables:
 
 import uuid
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Set
 
 from app.core.config import settings
 from app.services.synthesis.schemas import (
@@ -67,28 +67,55 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
     issue_themes = [t for t in themes if t["theme_type"] == "issue"]
     intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
 
+    # Map analysis_document_id (uuid) -> external doc_id for display
+    docs_res = (
+        supabase.table("analysis_documents")
+        .select("id, doc_id")
+        .eq("analysis_project_id", project_id)
+        .execute()
+    )
+    uuid_to_docid = {
+        str(d["id"]): str(d.get("doc_id") or "") for d in (docs_res.data or [])
+    }
+
     # Convert to Pydantic models
     key_issues = []
     for theme in issue_themes:
+        src_doc_ids: List[str] = []
+        uuid_array = theme.get("source_document_ids") or []
+        if uuid_array:
+            src_doc_ids = [
+                uuid_to_docid.get(str(u), "")
+                for u in uuid_array
+                if uuid_to_docid.get(str(u))
+            ]
         key_issues.append(
             KeyIssue(
                 issue_theme=theme["theme_name"],
                 summary_description=theme["summary_description"] or "",
                 frequency=theme["frequency"] or 0,
-                source_doc_ids=theme["source_doc_ids"] or [],
+                source_doc_ids=src_doc_ids,
                 justification=theme["justification"] or "",
             )
         )
 
     interventions = []
     for theme in intervention_themes:
+        supp_doc_ids: List[str] = []
+        uuid_array = theme.get("source_document_ids") or []
+        if uuid_array:
+            supp_doc_ids = [
+                uuid_to_docid.get(str(u), "")
+                for u in uuid_array
+                if uuid_to_docid.get(str(u))
+            ]
         interventions.append(
             PolicyIntervention(
                 intervention_name=theme["theme_name"],
                 brief_description=theme["summary_description"] or "",
                 impact_summary=theme["impact_summary"] or "",
                 frequency=theme["frequency"] or 0,
-                supporting_doc_ids=theme["source_doc_ids"] or [],
+                supporting_doc_ids=supp_doc_ids,
                 justification=theme["justification"] or "",
             )
         )
@@ -139,12 +166,50 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
         },
     }
 
-    supabase.table("synthesis_runs").upsert(
-        run_data, on_conflict="analysis_project_id"
-    ).execute()
+    # Insert a new run record (keep history). If you prefer 1-per-project, add
+    # a UNIQUE constraint on analysis_project_id and switch back to upsert.
+    supabase.table("synthesis_runs").insert(run_data).execute()
 
     # Create theme records and collect assignments
     theme_assignments = []
+
+    # Build extraction-id assignments from final themes if available
+    issue_theme_to_ex_ids: Dict[str, List[str]] = {}
+    for ft in final_state.get("final_issue_themes", []) or []:
+        try:
+            name = ft["name"] if isinstance(ft, dict) else ft.name
+            concepts = ft["concepts"] if isinstance(ft, dict) else ft.concepts
+            ex_ids = []
+            for c in concepts or []:
+                ex_ids.append(c["id"] if isinstance(c, dict) else c.id)
+            # Deduplicate while preserving order
+            seen: Set[str] = set()
+            uniq: List[str] = []
+            for x in ex_ids:
+                if x and x not in seen:
+                    seen.add(x)
+                    uniq.append(x)
+            issue_theme_to_ex_ids[name] = uniq
+        except Exception:
+            continue
+
+    intr_theme_to_ex_ids: Dict[str, List[str]] = {}
+    for ft in final_state.get("final_intervention_themes", []) or []:
+        try:
+            name = ft["name"] if isinstance(ft, dict) else ft.name
+            concepts = ft["concepts"] if isinstance(ft, dict) else ft.concepts
+            ex_ids = []
+            for c in concepts or []:
+                ex_ids.append(c["id"] if isinstance(c, dict) else c.id)
+            seen2: Set[str] = set()
+            uniq2: List[str] = []
+            for x in ex_ids:
+                if x and x not in seen2:
+                    seen2.add(x)
+                    uniq2.append(x)
+            intr_theme_to_ex_ids[name] = uniq2
+        except Exception:
+            continue
 
     # Process issue themes
     for issue in final_state.get("aggregated_issues", []):
@@ -157,25 +222,30 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             "summary_description": issue.summary_description,
             "frequency": issue.frequency,
             "source_doc_ids": issue.source_doc_ids,
-            "justification": issue.justification,
             "created_at": datetime.utcnow().isoformat(),
         }
         supabase.table("synthesis_themes").insert(theme_data).execute()
 
         # Create assignments for this theme
-        # Get extraction IDs that were assigned to this theme
-        finding_to_theme_map = final_state.get("finding_to_theme_map", {})
-        for extraction_id, theme_mapping in finding_to_theme_map.items():
-            if theme_mapping.get("issue_theme") == issue.issue_theme:
-                theme_assignments.append(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "synthesis_run_id": run_id,
-                        "synthesis_theme_id": theme_id,
-                        "extraction_id": extraction_id,
-                        "created_at": datetime.utcnow().isoformat(),
-                    }
-                )
+        # Prefer mapping from final themes; fallback to finding_to_theme_map
+        mapped_ids = issue_theme_to_ex_ids.get(issue.issue_theme, [])
+        if not mapped_ids:
+            finding_to_theme_map = final_state.get("finding_to_theme_map", {})
+            mapped_ids = [
+                ex_id
+                for ex_id, mapping in finding_to_theme_map.items()
+                if mapping.get("issue_theme") == issue.issue_theme
+            ]
+        for extraction_id in mapped_ids:
+            theme_assignments.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "synthesis_run_id": run_id,
+                    "synthesis_theme_id": theme_id,
+                    "extraction_id": extraction_id,
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+            )
 
     # Process intervention themes
     for intervention in final_state.get("aggregated_interventions", []):
@@ -189,30 +259,42 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             "impact_summary": intervention.impact_summary,
             "frequency": intervention.frequency,
             "source_doc_ids": intervention.supporting_doc_ids,
-            "justification": intervention.justification,
             "created_at": datetime.utcnow().isoformat(),
         }
         supabase.table("synthesis_themes").insert(theme_data).execute()
 
         # Create assignments for this theme
-        for extraction_id, theme_mapping in finding_to_theme_map.items():
-            if (
-                theme_mapping.get("intervention_theme")
-                == intervention.intervention_name
-            ):
-                theme_assignments.append(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "synthesis_run_id": run_id,
-                        "synthesis_theme_id": theme_id,
-                        "extraction_id": extraction_id,
-                        "created_at": datetime.utcnow().isoformat(),
-                    }
-                )
+        mapped_ids = intr_theme_to_ex_ids.get(intervention.intervention_name, [])
+        if not mapped_ids:
+            finding_to_theme_map = final_state.get("finding_to_theme_map", {})
+            mapped_ids = [
+                ex_id
+                for ex_id, mapping in finding_to_theme_map.items()
+                if mapping.get("intervention_theme") == intervention.intervention_name
+            ]
+        for extraction_id in mapped_ids:
+            theme_assignments.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "synthesis_run_id": run_id,
+                    "synthesis_theme_id": theme_id,
+                    "extraction_id": extraction_id,
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+            )
 
     # Batch insert theme assignments
     if theme_assignments:
-        supabase.table("theme_assignments").insert(theme_assignments).execute()
+        # Deduplicate by (theme, extraction_id)
+        seen_keys: Set[str] = set()
+        unique_assignments = []
+        for a in theme_assignments:
+            k = f"{a['synthesis_theme_id']}::{a['extraction_id']}"
+            if k in seen_keys:
+                continue
+            seen_keys.add(k)
+            unique_assignments.append(a)
+        supabase.table("theme_assignments").insert(unique_assignments).execute()
 
 
 async def invalidate_cache(project_id: str) -> None:
