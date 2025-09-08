@@ -307,26 +307,36 @@ async def delete_analysis_project(
         if not project_result.data:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        # Clean up chunks from vectorization system first
+        # Clean up chunks that reference analysis_documents from this project
         try:
-            # Delete chunks associated with this project from the old system
+            # First, get all analysis_documents.id values for this project
+            docs_result = (
+                vectorization_service.supabase.table("analysis_documents")
+                .select("id")
+                .eq("analysis_project_id", project_id)
+                .execute()
+            )
+
+            analysis_doc_ids = [doc["id"] for doc in docs_result.data]
+
+            # Delete chunks that reference these analysis_documents
+            if analysis_doc_ids:
+                vectorization_service.supabase.table("chunks").delete().in_(
+                    "document_id", analysis_doc_ids
+                ).execute()
+                logger.info(
+                    f"Deleted chunks for {len(analysis_doc_ids)} analysis documents"
+                )
+
+            # Also delete any chunks by project_id (legacy/fallback)
             vectorization_service.supabase.table("chunks").delete().eq(
                 "project_id", project_id
             ).execute()
 
-            # Delete documents from vectorization system
-            vectorization_service.supabase.table("documents").delete().eq(
-                "project_id", project_id
-            ).execute()
-
-            logger.info(
-                f"Cleaned up vectorization system data for project {project_id}"
-            )
+            logger.info(f"Cleaned up chunks for analysis project {project_id}")
         except Exception as e:
-            logger.warning(
-                f"Failed to clean up vectorization data for project {project_id}: {e}"
-            )
-            # Don't fail the deletion if vectorization cleanup fails
+            logger.warning(f"Failed to clean up chunks for project {project_id}: {e}")
+            # Don't fail the deletion if chunk cleanup fails
 
         # Delete project (cascading delete will handle documents and extractions)
         vectorization_service.supabase.table("analysis_projects").delete().eq(

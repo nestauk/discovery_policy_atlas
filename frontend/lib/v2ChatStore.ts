@@ -15,6 +15,8 @@ export interface DocumentReference {
   doi?: string
   url?: string
   chunk_type?: string
+  published_date?: string
+  year?: number
 }
 
 export interface ChatResponse {
