@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { PapersTable } from '@/components/search/papers-table'
-import { InterventionsTable, InterventionData } from '@/components/search/interventions-table'
+import { InterventionsTable as InterventionsEvidenceTable, InterventionData } from '@/components/search/interventions-table'
 import { Paper } from '@/types/search'
 import { 
   FileText, 
@@ -27,6 +27,10 @@ import {
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
+import { SynthesisSummary } from '@/types/search'
+import { KeyIssuesTable } from './KeyIssuesTable'
+import { InterventionsTable } from './InterventionsTable'
+import { ExecutiveBriefing } from './ExecutiveBriefing'
 import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
 import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
 import NetworkVisualizer from '@/components/network/NetworkVisualizer'
@@ -371,7 +375,10 @@ export default function AnalysisResultsPage() {
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const hasStartedPollingRef = useRef<string | null>(null) // Track which project we're polling
   const lastRefreshTimeRef = useRef<number>(0) // Throttle refreshes
-  const [activeTab, setActiveTab] = useState('summary')
+  const [activeTab, setActiveTab] = useState('evidence')
+  const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false)
+  // const [activeTab, setActiveTab] = useState('summary')
   const [evidenceSubTab, setEvidenceSubTab] = useState('interventions')
   const [insightsSubTab, setInsightsSubTab] = useState('network')
   
@@ -693,6 +700,34 @@ export default function AnalysisResultsPage() {
     }
   }, [effectiveProjectId, hasLoadedData, loadingData]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Lazy-fetch summary data when summary tab is opened first time
+  // Fetch summary when Summary tab is opened or project changes
+  useEffect(() => {
+    const fetchSummary = async () => {
+      if (activeTab !== 'summary') return
+      if (!effectiveProjectId) return
+      if (isLoadingSummary) return
+      setIsLoadingSummary(true)
+              try {
+          console.log('[ResultsPage] Fetching summary for project:', effectiveProjectId);
+          const data = await fetchWithAuth(`api/analysis-projects/${effectiveProjectId}/summary`)
+          console.log('[ResultsPage] Summary data received:', {
+            hasExecutiveBriefing: !!data.executive_briefing,
+            briefingLength: data.executive_briefing?.length || 0,
+            issuesCount: data.key_issues?.length || 0,
+            interventionsCount: data.interventions?.length || 0
+          });
+          setSummaryData(data as SynthesisSummary)
+        } catch (err) {
+        console.error('Failed to fetch summary data', err)
+      } finally {
+        setIsLoadingSummary(false)
+      }
+    }
+    fetchSummary()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, effectiveProjectId])
+
   const goBackToSearch = () => {
     router.push('/v2/search')
   }
@@ -742,7 +777,7 @@ export default function AnalysisResultsPage() {
     landing_page_url: doc.landing_page_url,
     full_text_available: doc.full_text_available,
     extraction_status: doc.extraction_status
-  }))
+  }));
 
   return (
     <div className="flex-1 flex flex-col">
@@ -846,6 +881,14 @@ export default function AnalysisResultsPage() {
                   <BookOpen className="h-4 w-4" />
                   Evidence
                 </TabsTrigger>
+                <TabsTrigger value="summary" className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Summary
+                </TabsTrigger>
+                <TabsTrigger value="extraction" className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Extraction
+                </TabsTrigger>
                 <TabsTrigger value="assistant" className="flex items-center gap-2">
                   <Bot className="h-4 w-4" />
                   Assistant
@@ -858,7 +901,7 @@ export default function AnalysisResultsPage() {
             </div>
 
             <div className="flex-1 overflow-auto">
-              <TabsContent value="summary" className="p-6 m-0">
+              <TabsContent value="extraction" className="p-6 m-0">
                 <div className="max-w-6xl mx-auto">
 
 
@@ -1021,6 +1064,33 @@ export default function AnalysisResultsPage() {
                 </div>
               </TabsContent>
 
+              <TabsContent value="summary" className="p-6 m-0">
+                <div className="max-w-6xl mx-auto">
+                  {isLoadingSummary && (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="text-center">
+                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                        <p className="text-slate-600">Loading summary...</p>
+                      </div>
+                    </div>
+                  )}
+                  {summaryData && (
+                    <div className="space-y-8">
+                      <ExecutiveBriefing briefing={summaryData.executive_briefing} />
+                      <KeyIssuesTable issues={summaryData.key_issues} />
+                      <InterventionsTable interventions={summaryData.interventions} />
+                    </div>
+                  )}
+                  {!isLoadingSummary && !summaryData && (
+                    <div className="text-center py-12">
+                      <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-slate-900 mb-2">No Summary Available</h3>
+                      <p className="text-slate-600">Open the Summary tab after analysis completes to load aggregated insights.</p>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
               <TabsContent value="evidence" className="p-6 m-0">
                 <div className="max-w-6xl mx-auto">
                   {/* Evidence Sub-tabs as smaller buttons */}
@@ -1078,7 +1148,7 @@ export default function AnalysisResultsPage() {
 
                   {evidenceSubTab === 'interventions' && (
                     <div>
-                      <InterventionsTable 
+                      <InterventionsEvidenceTable 
                         interventions={interventions} 
                         loading={loadingData}
                       />

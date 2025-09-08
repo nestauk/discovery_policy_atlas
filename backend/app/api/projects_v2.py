@@ -1,17 +1,76 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 import logging
 from datetime import datetime
 import uuid
-from typing import Optional
+from typing import Optional, List
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.vectorization import vectorization_service
 from app.services.chatbot import ChatRequest, ChatResponse
 from app.services.chatbot.chat_service import chatbot_service
+from app.services.synthesis.schemas import (
+    SynthesisSummary,
+    Finding,
+)
+from app.services.synthesis.service import SynthesisService
+from app.services.synthesis.agent import SynthesisAgent, SynthesisState
+from app.services.synthesis.logbook import read_cached_summary, write_run_from_state
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
+
+
+# END-I - INFO REGION END
+
+
+# END-I - INFO REGION END
+
+
+# Ψ INFO - CONTEXT NOTE
+# Schemas are provided by app.services.synthesis.schemas (imported above).
+# END-I - INFO REGION END
+
+
+# Ψ INFO - CONTEXT NOTE
+# Finding model is provided by app.services.synthesis.schemas (imported above).
+# END-I - INFO REGION END
+
+
+@router.get(
+    "/{project_id}/summary",
+    response_model=SynthesisSummary,
+    summary="Get Synthesized Summary (Agentic)",
+)
+async def get_synthesis_summary(
+    project_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Invoke the synthesis agent to get executive briefing and aggregated tables."""
+    try:
+        # Cache read via Supabase
+        cached = await read_cached_summary(project_id)
+        if cached:
+            return cached
+
+        # Cache miss: run agent
+        synthesis_agent = SynthesisAgent()
+        final_state: SynthesisState = await synthesis_agent.run(project_id)
+
+        # Cache write via Supabase
+        await write_run_from_state(project_id, final_state)
+
+        # Return fresh results
+        return SynthesisSummary(
+            executive_briefing=final_state.get(
+                "executive_briefing", "Failed to generate briefing."
+            ),
+            key_issues=final_state.get("aggregated_issues", []),
+            interventions=final_state.get("aggregated_interventions", []),
+        )
+    except Exception as e:
+        logger.error(f"Error running synthesis agent for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to build synthesis summary")
 
 
 @router.get("")
@@ -313,17 +372,34 @@ async def run_analysis_for_project(
                 status_code=400, detail="Query is required for analysis"
             )
 
+        # Map access_types to appropriate sources
+        access_types = request.get("access_types", [])
+        sources = []
+        if "academic" in access_types:
+            sources.append("openalex")
+        if "policy" in access_types:
+            sources.append("overton")
+
+        # Fallback to default sources if none specified
+        if not sources:
+            sources = request.get("sources", ["openalex", "overton"])
+
         config = RunConfig(
             query=query,
-            sources=request.get("sources", ["openalex", "overton"]),
-            date_from=request.get("since"),
-            date_to=request.get("until"),
+            sources=sources,
+            date_from=request.get("date_from")
+            or request.get("since"),  # Support both chat and legacy formats
+            date_to=request.get("date_to") or request.get("until"),
             limit=int(request.get("limit", 200)),
             screening_enabled=bool(request.get("screening", False)),
             relevance_enabled=bool(request.get("relevance_enabled", True)),
             retrieval_mode=request.get("mode", "semantic"),
             boolean_query=request.get("boolean_query"),
             use_abstracts_only=bool(request.get("use_abstracts_only", False)),
+            # Chat interface parameters
+            geography_filter=request.get("geography_filter"),
+            access_types=access_types,
+            sub_questions=request.get("sub_questions"),
         )
 
         # Update project status to running
@@ -805,3 +881,29 @@ async def chat_with_project(
     except Exception as e:
         logger.error(f"Error in chat for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to process chat message")
+
+
+@router.get(
+    "/{project_id}/findings",
+    response_model=List[Finding],
+    summary="Get Detailed Findings for a Specific Intervention or Issue",
+)
+async def get_detailed_findings(
+    project_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    intervention_name: Optional[str] = Query(
+        None, description="Filter by intervention name"
+    ),
+    issue_theme: Optional[str] = Query(None, description="Filter by issue label/theme"),
+):
+    """Get flattened findings via service layer."""
+    try:
+        service = SynthesisService()
+        return await service.get_findings(
+            project_id,
+            intervention_name=intervention_name,
+            issue_theme=issue_theme,
+        )
+    except Exception as e:
+        logger.error(f"Error fetching findings for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch findings")

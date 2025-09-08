@@ -61,6 +61,7 @@ class AnalysisService:
             date_to=config.date_to,
             mode=config.retrieval_mode,
             boolean_query=config.boolean_query,
+            geography_filter=config.geography_filter,
         )
 
         # Count rows

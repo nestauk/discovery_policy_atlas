@@ -51,3 +51,43 @@ export interface SearchParams {
     total_relevant: number
     download_key?: string
   }
+
+  // Synthesis summary types (MVP)
+  export interface KeyIssue {
+    issue_theme: string
+    summary_description: string
+    frequency: number
+    source_doc_ids: string[]
+  }
+
+  export interface PolicyIntervention {
+    intervention_name: string
+    brief_description: string
+    impact_summary: string
+    supporting_doc_ids: string[]
+    frequency?: number
+  }
+
+  export interface SynthesisSummary {
+    executive_briefing: string
+    key_issues: KeyIssue[]
+    interventions: PolicyIntervention[]
+  }
+
+  // Drill-down finding interface (matches backend endpoint shape)
+  export interface Finding {
+    SourceTitle: string
+    Source?: string
+    DocId?: string
+    Year?: number
+    Url?: string
+    Intervention?: string
+    StudyDesign?: string
+    Outcome?: string
+    EffectDirection?: string
+    EffectSizeType?: string
+    EffectSize?: string
+    PValue?: string
+    Uncertainty?: string
+    Evidence: string[]
+  }
