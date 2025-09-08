@@ -37,7 +37,6 @@ class ReferencesService:
     async def generate_boolean_query(self, natural_query: str) -> str:
         """Generate a boolean query deterministically (temperature 0)."""
         logger.info("🔍 Generating boolean query for: '%s'", natural_query)
-        logger.debug("Using model: %s with temperature: 0.0", settings.LLM_MODEL)
 
         try:
             resp = await self.openai_client.chat.completions.create(
