@@ -10,6 +10,22 @@ import ReactMarkdown from 'react-markdown'
 import { useUser } from '@clerk/nextjs'
 import Image from 'next/image'
 
+// Helper function to process in-text citations
+function processInTextCitations(content: string, references: { url?: string }[]): string {
+  // Replace [Document X] with clickable [X] links
+  return content.replace(/\[Document (\d+)\]/g, (match, docNum) => {
+    const refIndex = parseInt(docNum) - 1
+    if (refIndex >= 0 && refIndex < references.length) {
+      const ref = references[refIndex]
+      const url = ref.url
+      if (url) {
+        return `[[${docNum}]](${url})`
+      }
+    }
+    return `[${docNum}]`
+  })
+}
+
 interface V2ChatInterfaceProps {
   className?: string
   placeholder?: string
@@ -174,37 +190,99 @@ export function V2ChatInterface({
               }`}
             >
               <div className="prose prose-sm max-w-none">
-                <ReactMarkdown>{message.content}</ReactMarkdown>
+                <ReactMarkdown
+                  components={{
+                    a: ({ href, children, ...props }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 hover:underline"
+                        {...props}
+                      >
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {message.role === 'assistant' && message.references
+                    ? processInTextCitations(message.content, message.references)
+                    : message.content
+                  }
+                </ReactMarkdown>
               </div>
               
               {/* Show references for assistant messages */}
               {message.role === 'assistant' && message.references && (
                 <div className="mt-3 pt-3 border-t border-gray-200">
-                  <p className="text-xs font-medium text-gray-600 mb-2">References:</p>
                   <div className="space-y-2">
-                    {message.references.map((ref, idx) => (
-                      <div key={ref.document_id} className="text-xs">
-                        <div className="font-medium text-gray-800">
-                          [{idx + 1}] {ref.title}
-                        </div>
-                        {ref.authors && ref.authors.length > 0 && (
-                          <div className="text-gray-600">
-                            {ref.authors.slice(0, 3).join(', ')}
-                            {ref.authors.length > 3 && ' et al.'}
+                    {message.references.map((ref, idx) => {
+                      // Helper function to process and truncate authors
+                      const formatAuthors = (authors: string[] | string) => {
+                        if (!authors) return ''
+                        
+                        let authorText = ''
+                        
+                        if (Array.isArray(authors)) {
+                          authorText = authors.join(', ')
+                        } else {
+                          authorText = String(authors)
+                        }
+                        
+                        // Simple approach: strip all brackets, quotes, and extra spaces
+                        authorText = authorText
+                          .replace(/[\[\]'"]/g, '') // Remove all brackets and quotes
+                          .replace(/,\s*,/g, ',') // Fix double commas
+                          .replace(/^\s*,|,\s*$/g, '') // Remove leading/trailing commas
+                          .trim()
+                        
+                        // Truncate if too long
+                        if (authorText.length <= 60) return authorText
+                        
+                        // Find the last complete author name within ~50 chars
+                        const truncated = authorText.substring(0, 50)
+                        const lastComma = truncated.lastIndexOf(', ')
+                        if (lastComma > 20) {
+                          return truncated.substring(0, lastComma) + ' et al.'
+                        }
+                        return truncated + '...'
+                      }
+
+                      return (
+                        <div key={ref.document_id} className="text-xs">
+                          <div className="font-medium text-gray-800">
+                            [{idx + 1}]{' '}
+                            {ref.url ? (
+                              <a
+                                href={ref.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
+                              >
+                                {ref.title}
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            ) : (
+                              ref.title
+                            )}
+                            {(ref.published_date || ref.year) && (
+                              <span className="font-normal text-gray-600">
+                                {' '}({
+                                  ref.published_date 
+                                    ? new Date(ref.published_date).getFullYear()
+                                    : ref.year
+                                })
+                              </span>
+                            )}
                           </div>
-                        )}
-                        {ref.url && (
-                          <a
-                            href={ref.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800"
-                          >
-                            View document <ExternalLink className="h-3 w-3" />
-                          </a>
-                        )}
-                      </div>
-                    ))}
+                          {ref.authors && (
+                            <div className="text-gray-600">
+                              {formatAuthors(ref.authors)}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}

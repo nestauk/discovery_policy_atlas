@@ -8,10 +8,10 @@ import { ArrowRight } from 'lucide-react'
 
 export default function V2HomePage() {
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-32">
       {/* Welcome Section */}
-      <section className="space-y-6">
-        <div className="text-center space-y-4">
+      <section className="space-y-12">
+        <div className="text-center space-y-0">
           <div className="flex items-center justify-center gap-3">
             <h1 className="text-4xl font-bold tracking-tight">Welcome to Policy Atlas</h1>
             <Tooltip content={
@@ -30,20 +30,19 @@ export default function V2HomePage() {
         </div>
 
         <div className="text-center space-y-6">
-          <h2 className="text-2xl font-semibold">Get Started</h2>
-          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Create a new analysis project to search, screen, and explore policy and research documents
+          <p className="text-lg max-w-2xl mx-auto">
+            Search evidence on any topic, or browse already existing projects
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link href="/v2/search/chat">
               <Button size="lg" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700">
-                Chat Search (New)
+                Search
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
             <Link href="/v2/projects">
               <Button size="lg" variant="outline" className="flex items-center gap-2">
-                Browse Projects
+                Projects
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
