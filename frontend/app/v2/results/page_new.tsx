@@ -16,8 +16,7 @@ import {
   BookOpen,
   Bot,
   Filter,
-  Target,
-  AlertTriangle
+  Target
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
@@ -687,7 +686,6 @@ export default function AnalysisResultsPage() {
                           onClick={() => setEvidenceSubTab('issues')}
                           className="flex items-center gap-2"
                         >
-                          <AlertTriangle className="h-3 w-3" />
                           Key Issues
                         </Button>
                       </div>
