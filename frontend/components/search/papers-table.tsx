@@ -6,9 +6,11 @@ import type { ColumnsType } from 'antd/es/table'
 import type { Paper } from '@/types/search'
 import { Check, X } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
+import { StarRating } from '@/components/ui/star-rating'
 
 interface PapersTableProps {
   papers: Paper[]
+  showAdditionalColumns?: boolean
 }
 
 interface DataType extends Paper {
@@ -18,7 +20,7 @@ interface DataType extends Paper {
   relevanceDisplay: string
 }
 
-export function PapersTable({ papers }: PapersTableProps) {
+export function PapersTable({ papers, showAdditionalColumns = false }: PapersTableProps) {
   // Transform papers data for the table
   const tableData: DataType[] = useMemo(() => {
     return papers.map((paper) => ({
@@ -77,8 +79,8 @@ export function PapersTable({ papers }: PapersTableProps) {
     return { rank: 0, sortRank: 999, description: 'Unknown study type' }
   }
 
-  // Combine base columns with extracted field columns
-  const columns: ColumnsType<DataType> = [
+  // Build columns conditionally
+  const baseColumns: ColumnsType<DataType> = [
     {
       title: 'Year',
       dataIndex: 'publication_year',
@@ -177,7 +179,61 @@ export function PapersTable({ papers }: PapersTableProps) {
       ),
     },
     {
-      title: 'Strength',
+      title: 'Evidence Strength',
+      dataIndex: 'evidence_strength',
+      key: 'evidence_strength',
+      width: '10%',
+      sorter: (a, b) => (a.evidence_strength ?? 0) - (b.evidence_strength ?? 0),
+      render: (text, record) => {
+        return (
+          <StarRating
+            stars={record.evidence_strength}
+            size="sm"
+            tooltip={record.evidence_strength_justification}
+          />
+        )
+      },
+    },
+    {
+      title: 'Predicted Impact',
+      dataIndex: 'predicted_impact',
+      key: 'predicted_impact',
+      width: '10%',
+      sorter: (a, b) => (a.predicted_impact ?? 0) - (b.predicted_impact ?? 0),
+      render: (text, record) => {
+        return (
+          <StarRating
+            stars={record.predicted_impact}
+            size="sm"
+            tooltip={record.predicted_impact_justification}
+          />
+        )
+      },
+    },
+    {
+      title: 'Relevance',
+      dataIndex: 'confidence',
+      key: 'confidence',
+      width: '8%',
+      sorter: (a, b) => (a.confidence || 0) - (b.confidence || 0),
+      defaultSortOrder: 'descend',
+      render: (text, record) => (
+        <div className="flex items-center gap-1">
+          <span>{record.confidence ? (record.confidence * 100).toFixed(1) : 'N/A'}</span>
+          {record.is_relevant ? (
+            <Check className="h-3 w-3 text-green-600" />
+          ) : (
+            <X className="h-3 w-3 text-red-500" />
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  // Conditional columns (Study Type, Sample Size, Source, and Status)
+  const conditionalColumns: ColumnsType<DataType> = showAdditionalColumns ? [
+    {
+      title: 'Study Type',
       dataIndex: 'study_strength',
       key: 'study_strength',
       width: '6%',
@@ -224,24 +280,6 @@ export function PapersTable({ papers }: PapersTableProps) {
           </span>
         )
       },
-    },
-    {
-      title: 'Relevance',
-      dataIndex: 'confidence',
-      key: 'confidence',
-      width: '8%',
-      sorter: (a, b) => (a.confidence || 0) - (b.confidence || 0),
-      defaultSortOrder: 'descend',
-      render: (text, record) => (
-        <div className="flex items-center gap-1">
-          <span>{record.confidence ? (record.confidence * 100).toFixed(1) : 'N/A'}</span>
-          {record.is_relevant ? (
-            <Check className="h-3 w-3 text-green-600" />
-          ) : (
-            <X className="h-3 w-3 text-red-500" />
-          )}
-        </div>
-      ),
     },
     {
       title: 'Source',
@@ -320,6 +358,12 @@ export function PapersTable({ papers }: PapersTableProps) {
         )
       },
     },
+  ] : [];
+
+  // Combine all columns
+  const columns: ColumnsType<DataType> = [
+    ...baseColumns,
+    ...conditionalColumns,
     // Add extracted fields as additional columns
     ...extractedFields
   ]
