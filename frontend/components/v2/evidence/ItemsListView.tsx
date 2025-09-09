@@ -3,9 +3,9 @@
 import React, { useEffect } from 'react';
 
 import { InterventionsTable, InterventionData } from '@/components/search/interventions-table';
+import type { EvidenceItem } from '@/lib/evidenceStore';
 import { useAPI, getThematicGroupItems as getThematicGroupItemsExternal } from '@/lib/api';
 import EvidenceIssuesTable from '@/components/v2/evidence/EvidenceIssuesTable';
-import type { EvidenceItem } from '@/lib/evidenceStore';
 
 type ItemsListViewProps = {
   projectId: string;
@@ -31,10 +31,8 @@ export default function ItemsListView({ projectId, themeId, themeType }: ItemsLi
         const res = await getThematicGroupItemsExternal(projectId, String(themeId), themeType);
         if (!cancelled) setItems(res as EvidenceItem[]);
       } catch (e: unknown) {
-        if (!cancelled) {
-          const msg = e instanceof Error ? e.message : 'Failed to load items';
-          setError(msg);
-        }
+        const message = e instanceof Error ? e.message : 'Failed to load items';
+        if (!cancelled) setError(message);
       } finally {
         if (!cancelled) setIsLoadingItems(false);
       }
@@ -70,26 +68,30 @@ export default function ItemsListView({ projectId, themeId, themeType }: ItemsLi
   const filteredInterventions = React.useMemo(() => {
     if (themeType !== 'intervention') return [] as InterventionData[];
     if (!allInterventions) return [] as InterventionData[];
-    const titles = new Set(items.map((it) => (it?.title || '').toLowerCase().trim()));
+    const titles = new Set((items || []).map((it) => (it?.title || '').toLowerCase().trim()));
     return (allInterventions || []).filter((iv) => titles.has((iv.name || '').toLowerCase().trim()));
   }, [allInterventions, items, themeType]);
 
   // For issues, use the rich EvidenceItem objects returned by the items endpoint
   const issuesForTheme = React.useMemo(() => {
     if (themeType !== 'issue') return [] as EvidenceItem[];
+    const itemsArr = Array.isArray(items) ? items : [];
     // Deduplicate by normalised title + document id (if available). Merge supporting_evidence.
     const normalise = (s: unknown) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
     const byKey = new Map<string, EvidenceItem>();
-    for (const it of items) {
+    for (const it of itemsArr) {
       const titleKey = normalise(it?.title);
       const docId = it?.document?.doc_id ? String(it.document.doc_id) : '';
       const key = `${titleKey}::${docId}`;
       if (!byKey.has(key)) {
         // clone to avoid mutating original
-        const clone = { ...it, supporting_evidence: Array.isArray(it.supporting_evidence) ? [...it.supporting_evidence] : [] } as EvidenceItem;
+        const clone: EvidenceItem = { 
+          ...it, 
+          supporting_evidence: Array.isArray(it.supporting_evidence) ? [...it.supporting_evidence] : [] 
+        };
         byKey.set(key, clone);
       } else {
-        const existing = byKey.get(key) as EvidenceItem;
+        const existing = byKey.get(key)!;
         // merge supporting evidence uniquely
         const merged = new Set<string>(
           ([] as string[])

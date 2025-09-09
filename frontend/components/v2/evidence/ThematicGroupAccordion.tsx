@@ -22,7 +22,7 @@ export default function ThematicGroupAccordion({ projectId, thematicGroups, them
 
   return (
     <Accordion type="single" collapsible className="w-full space-y-3">
-      {groups.map((thematicGroup: ThematicGroup) => (
+      {groups.map((thematicGroup) => (
         <div key={thematicGroup.id} className="rounded-lg border bg-white shadow-sm">
           <AccordionItem value={String(thematicGroup.id)} className="border-0">
             <AccordionTrigger className="px-4 py-3 hover:no-underline">

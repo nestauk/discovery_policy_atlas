@@ -28,6 +28,7 @@ import { ExecutiveBriefing } from './ExecutiveBriefing'
 import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
 import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
 import EvidenceThematicView from '@/components/v2/evidence/EvidenceThematicView'
+import type { InterventionData } from '@/components/search/interventions-table'
 import { PapersTable } from '@/components/search/papers-table'
 
 interface AnalysisDocument {
@@ -78,9 +79,7 @@ export default function AnalysisResultsPage() {
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
-  type InterventionDocRef = { doc_id?: string }
-  type InterventionSummary = { highest_study_type?: string; total_sample_size?: number; documents?: InterventionDocRef[] }
-  const [interventions, setInterventions] = useState<InterventionSummary[]>([])
+  const [interventions, setInterventions] = useState<InterventionData[]>([])
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState<string | null>(null)
 
@@ -447,7 +446,7 @@ export default function AnalysisResultsPage() {
     
     // Process interventions to find strongest study type and largest sample size per document
     interventions.forEach((intervention) => {
-      intervention.documents?.forEach((doc) => {
+      intervention.documents?.forEach((doc: { doc_id: string }) => {
         const docId = doc.doc_id
         if (!docId) return
         

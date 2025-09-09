@@ -4,25 +4,16 @@ import { AnalysisProject } from "./analysisProjectStore";
 import { ThematicGroup, EvidenceItem } from './evidenceStore';
 
 // Standalone auth fetch to allow usage from non-React files (e.g., Zustand stores)
-export async function fetchWithAuthExternal(
-  url: string,
-  options?: RequestInit,
-  isStreaming?: true
-): Promise<Response>;
-export async function fetchWithAuthExternal<T = unknown>(
-  url: string,
-  options?: RequestInit,
-  isStreaming?: false
-): Promise<T>;
-export async function fetchWithAuthExternal<T = unknown>(
+export const fetchWithAuthExternal = async (
   url: string,
   options: RequestInit = {},
   isStreaming: boolean = false
-): Promise<Response | T> {
+) => {
   let token: string | null = null;
   try {
-    if (typeof window !== 'undefined' && (window as unknown as { Clerk?: { session?: { getToken: () => Promise<string | null> } } }).Clerk?.session) {
-      token = await (window as unknown as { Clerk: { session: { getToken: () => Promise<string | null> } } }).Clerk.session.getToken();
+    if (typeof window !== 'undefined' && (window as unknown as { Clerk?: { session?: { getToken: () => Promise<string> } } }).Clerk?.session) {
+      const clerkWindow = window as unknown as { Clerk?: { session?: { getToken: () => Promise<string> } } }
+      token = await clerkWindow.Clerk!.session!.getToken();
     }
   } catch (err) {
     console.error('Failed to get Clerk token from window:', err);
@@ -66,19 +57,15 @@ export async function fetchWithAuthExternal<T = unknown>(
     throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
   }
 
-  if (isStreaming) {
-    return response;
-  }
-  const data = (await response.json()) as T;
-  return data;
-}
+  return isStreaming ? response : response.json();
+};
 
 // Standalone Evidence tab functions (exported for non-React usage)
 export async function getThematicGroups(
   projectId: string,
   themeType: 'intervention' | 'issue'
 ): Promise<ThematicGroup[]> {
-  return fetchWithAuthExternal<ThematicGroup[]>(`api/analysis-projects/${projectId}/thematic-groups?theme_type=${themeType}`);
+  return fetchWithAuthExternal(`api/analysis-projects/${projectId}/thematic-groups?theme_type=${themeType}`);
 }
 
 export async function getThematicGroupItems(
@@ -86,7 +73,7 @@ export async function getThematicGroupItems(
   themeId: string,
   itemType: 'intervention' | 'issue'
 ): Promise<EvidenceItem[]> {
-  return fetchWithAuthExternal<EvidenceItem[]>(`api/analysis-projects/${projectId}/thematic-groups/${themeId}/items?item_type=${itemType}`);
+  return fetchWithAuthExternal(`api/analysis-projects/${projectId}/thematic-groups/${themeId}/items?item_type=${itemType}`);
 }
 
 export function useAPI() {
