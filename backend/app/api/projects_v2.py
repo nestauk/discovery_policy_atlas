@@ -15,6 +15,7 @@ from app.services.synthesis.schemas import (
 from app.services.synthesis.service import SynthesisService
 from app.services.synthesis.agent import SynthesisAgent, SynthesisState
 from app.services.synthesis.logbook import read_cached_summary, write_run_from_state
+from app.utils.geography import COUNTRY_NAME_TO_CODE, COUNTRY_CODE_TO_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -480,6 +481,135 @@ async def get_project_documents(
     except Exception as e:
         logger.error(f"Error fetching documents for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch project documents")
+
+
+@router.get("/{project_id}/charts-data")
+async def get_project_charts_data(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get aggregated chart data for an analysis project"""
+    try:
+        # Get all documents for this project
+        docs_result = (
+            vectorization_service.supabase.table("analysis_documents")
+            .select("year, source_country, authors")
+            .eq("analysis_project_id", project_id)
+            .execute()
+        )
+
+        if not docs_result.data:
+            return {
+                "documents_by_year": [],
+                "documents_by_country": [],
+                "documents_by_author": [],
+            }
+
+        # Aggregate data
+        year_counts = {}
+        country_counts = {}
+        author_counts = {}
+
+        for doc in docs_result.data:
+            # Count by year
+            year = doc.get("year")
+            if year and year > 1900 and year <= 2025:
+                year_counts[year] = year_counts.get(year, 0) + 1
+
+            # Process countries for this document
+            doc_countries = []
+            country_str = doc.get("source_country")
+            if country_str and country_str.strip():
+                # Split by comma and process each country
+                countries = [c.strip() for c in country_str.split(",") if c.strip()]
+                for country in countries:
+                    # Try to normalize the country name
+                    normalized_country = country
+                    country_code = COUNTRY_NAME_TO_CODE.get(country)
+                    if country_code:
+                        # Use the canonical name from the code mapping
+                        normalized_country = COUNTRY_CODE_TO_NAME.get(
+                            country_code, country
+                        )
+
+                    country_counts[normalized_country] = (
+                        country_counts.get(normalized_country, 0) + 1
+                    )
+                    doc_countries.append(normalized_country)
+
+            # Count by author (add country context to institutional authors)
+            authors = doc.get("authors", [])
+            if isinstance(authors, list):
+                for author in authors:
+                    if author and author.strip():
+                        author = author.strip()
+
+                        # Check if this looks like an institutional author
+                        institutional_keywords = [
+                            "Ministry",
+                            "Department",
+                            "Agency",
+                            "Bureau",
+                            "Office",
+                            "Government",
+                            "National",
+                            "Federal",
+                            "State",
+                            "Regional",
+                            "Institute",
+                            "Center",
+                            "Centre",
+                            "Council",
+                            "Commission",
+                            "Authority",
+                            "Administration",
+                            "Service",
+                        ]
+
+                        is_institutional = any(
+                            keyword in author for keyword in institutional_keywords
+                        )
+
+                        # Add country context to institutional authors if we have country data
+                        if is_institutional and doc_countries:
+                            # Use the first/primary country for context
+                            primary_country = doc_countries[0]
+                            author_with_context = f"{author} ({primary_country})"
+                            author_counts[author_with_context] = (
+                                author_counts.get(author_with_context, 0) + 1
+                            )
+                        else:
+                            # Regular author or no country data available
+                            author_counts[author] = author_counts.get(author, 0) + 1
+
+        # Sort and format data
+        documents_by_year = [
+            {"year": year, "count": count}
+            for year, count in sorted(year_counts.items())
+        ]
+
+        documents_by_country = [
+            {"country": country, "count": count}
+            for country, count in sorted(
+                country_counts.items(), key=lambda x: x[1], reverse=True
+            )[:10]
+        ]
+
+        documents_by_author = [
+            {"author": author, "count": count}
+            for author, count in sorted(
+                author_counts.items(), key=lambda x: x[1], reverse=True
+            )[:10]
+        ]
+
+        return {
+            "documents_by_year": documents_by_year,
+            "documents_by_country": documents_by_country,
+            "documents_by_author": documents_by_author,
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching charts data for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch charts data")
 
 
 @router.get("/{project_id}/extractions")

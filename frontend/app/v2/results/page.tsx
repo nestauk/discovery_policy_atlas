@@ -32,6 +32,7 @@ import { ExecutiveBriefing } from './ExecutiveBriefing'
 import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
 import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
 import NetworkVisualizer from '@/components/network/NetworkVisualizer'
+import { ProjectCharts } from '@/components/charts/ProjectCharts'
 
 interface AnalysisDocument {
   id: string
@@ -802,10 +803,8 @@ export default function AnalysisResultsPage() {
                   )}
 
                   {insightsSubTab === 'charts' && (
-                    <div className="text-center py-12">
-                      <BarChart3 className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                      <h3 className="text-lg font-medium text-slate-900 mb-2">Charts Coming Soon</h3>
-                      <p className="text-slate-600">Interactive charts and analytics will be available here.</p>
+                    <div>
+                      <ProjectCharts projectId={effectiveProjectId} projectTitle={activeProject?.title} />
                     </div>
                   )}
                 </div>
