@@ -85,12 +85,24 @@ class ResultsExtraction(BaseModel):
     results: List[ResultItem]
 
 
+class EvidenceRating(BaseModel):
+    """Evidence strength or impact rating with justification."""
+
+    stars: Optional[int] = None  # 1-5 star rating, null if insufficient evidence
+    justification: str  # 2-4 sentences explaining rating and discounting logic
+    evidence_gap: Optional[str] = None  # explanation if stars is null
+
+
 class ConclusionItem(BaseModel):
     """Study conclusions and key takeaways."""
 
     top_line_summary: str  # One direct sentence summarizing the main conclusion
     detailed_explanation: str  # Paragraph explaining key reasons for the conclusion
     supporting_quote: str
+    evidence_strength: Optional[EvidenceRating] = None  # Overall study evidence quality
+    predicted_impact: Optional[
+        EvidenceRating
+    ] = None  # Predicted scalability and impact
 
 
 class ConclusionsExtraction(BaseModel):

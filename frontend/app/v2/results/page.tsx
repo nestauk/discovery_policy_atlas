@@ -54,6 +54,27 @@ interface AnalysisDocument {
   study_strength?: string  // strongest study type letter from interventions
   sample_size?: number  // largest sample size from interventions
   cited_by_count?: number  // Citation count from API
+  extraction_results?: {
+    conclusion?: {
+      top_line_summary?: string
+      detailed_explanation?: string
+      supporting_quote?: string
+      evidence_strength?: {
+        stars: number | null
+        justification: string
+        evidence_gap?: string | null
+      }
+      predicted_impact?: {
+        stars: number | null
+        justification: string
+        evidence_gap?: string | null
+      }
+    }
+    issues?: unknown[]
+    interventions?: unknown[]
+    mappings?: unknown[]
+    results?: unknown[]
+  }
 }
 
 
@@ -76,6 +97,9 @@ export default function AnalysisResultsPage() {
   
   // Relevance filtering state
   const [showRelevantOnly, setShowRelevantOnly] = useState(true)
+  
+  // Column visibility state - controls Study Type, Sample Size, Source, Status
+  const [showAdditionalColumns, setShowAdditionalColumns] = useState(false)
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
@@ -483,29 +507,41 @@ export default function AnalysisResultsPage() {
 
   // Transform documents for table display and apply filtering
   const { transformedPapers, relevantCount } = useMemo(() => {
-    const allTransformed = documents.map((doc: AnalysisDocument) => ({
-      id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
-      title: String(doc.title || 'Untitled'),
-      doi: String(doc.doi || ''),
-      publication_year: Number(doc.year || 0),
-      cited_by_count: Number(doc.cited_by_count || 0),
-      authors: Array.isArray(doc.authors) ? doc.authors : ['Unknown'],
-      is_relevant: Boolean(doc.is_relevant !== false),
-      abstract: doc.abstract_or_summary,
-      relevance_reason: doc.relevance_reason,
-      confidence: doc.relevance_confidence,
-      source_country: doc.source_country,
-      source_type: doc.source_type,
-      venue: doc.venue,
-      top_line: doc.top_line,
-      landing_page_url: doc.landing_page_url,
-      full_text_available: doc.full_text_available,
-      extraction_status: doc.extraction_status,
-      text_source: doc.text_source,
-      source: doc.source,
-      study_strength: studyStrengthMapping[doc.doc_id] || undefined,
-      sample_size: sampleSizeMapping[doc.doc_id] || undefined
-    }));
+    const allTransformed = documents.map((doc: AnalysisDocument) => {
+      // Extract evidence assessment from conclusion if available
+      const conclusion = doc.extraction_results?.conclusion
+      const evidenceStrength = conclusion?.evidence_strength
+      const predictedImpact = conclusion?.predicted_impact
+      
+      return {
+        id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
+        title: String(doc.title || 'Untitled'),
+        doi: String(doc.doi || ''),
+        publication_year: Number(doc.year || 0),
+        cited_by_count: Number(doc.cited_by_count || 0),
+        authors: Array.isArray(doc.authors) ? doc.authors : ['Unknown'],
+        is_relevant: Boolean(doc.is_relevant !== false),
+        abstract: doc.abstract_or_summary,
+        relevance_reason: doc.relevance_reason,
+        confidence: doc.relevance_confidence,
+        source_country: doc.source_country,
+        source_type: doc.source_type,
+        venue: doc.venue,
+        top_line: doc.top_line,
+        landing_page_url: doc.landing_page_url,
+        full_text_available: doc.full_text_available,
+        extraction_status: doc.extraction_status,
+        text_source: doc.text_source,
+        source: doc.source,
+        study_strength: studyStrengthMapping[doc.doc_id] || undefined,
+        sample_size: sampleSizeMapping[doc.doc_id] || undefined,
+        // Add evidence assessment fields
+        evidence_strength: evidenceStrength?.stars || undefined,
+        evidence_strength_justification: evidenceStrength?.justification,
+        predicted_impact: predictedImpact?.stars || undefined,
+        predicted_impact_justification: predictedImpact?.justification
+      }
+    });
 
     const relevant = allTransformed.filter(doc => doc.is_relevant);
     
@@ -691,9 +727,19 @@ export default function AnalysisResultsPage() {
                         </Button>
                       </div>
 
-                      {/* Relevance Filter Toggle (only show for documents) */}
+                      {/* Filter Toggles (only show for documents) */}
                       {evidenceSubTab === 'documents' && (
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-6">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="additional-columns" className="text-sm text-slate-700">
+                              More info
+                            </Label>
+                            <Switch
+                              id="additional-columns"
+                              checked={showAdditionalColumns}
+                              onCheckedChange={setShowAdditionalColumns}
+                            />
+                          </div>
                           <div className="flex items-center gap-2">
                             <Label htmlFor="relevance-filter" className="text-sm text-slate-700">
                               Relevant only
@@ -726,7 +772,7 @@ export default function AnalysisResultsPage() {
                           <p className="text-slate-600">{dataError}</p>
                         </div>
                       ) : transformedPapers.length > 0 ? (
-                        <PapersTable papers={transformedPapers} />
+                        <PapersTable papers={transformedPapers} showAdditionalColumns={showAdditionalColumns} />
                       ) : documents.length > 0 && showRelevantOnly ? (
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
