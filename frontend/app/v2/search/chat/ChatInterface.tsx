@@ -312,7 +312,7 @@ function PlanDrawer() {
           <div>
             <span className="font-medium">Max results</span><br />
             <div className="mt-1 flex flex-wrap gap-2">
-              {[10, 20, 30, 50, 100].map(n => (
+              {[5, 10, 20, 30, 50, 100].map(n => (
                 <button
                   key={n}
                   onClick={() => s.set({ maxResults: n })}
@@ -811,13 +811,13 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
                 <div className="inline-flex items-center gap-2 mt-1">
                   <button
                     className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50"
-                    onClick={() => s.set({ maxResults: Math.max(10, s.maxResults - 10) })}
+                    onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
                     aria-label="Decrease results"
                   >–</button>
                   <span className="min-w-[2ch] text-center">{s.maxResults}</span>
                   <button
                     className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50"
-                    onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 10) })}
+                    onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
                     aria-label="Increase results"
                   >+</button>
                 </div>
