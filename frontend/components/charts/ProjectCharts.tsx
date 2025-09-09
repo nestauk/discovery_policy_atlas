@@ -182,7 +182,8 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
   }
 
   // Horizontal chart options for countries and authors (no hover tooltips)
-  const horizontalChartOptions = {
+  // Create horizontal chart options dynamically with access to labels
+  const createHorizontalChartOptions = (labels: string[]) => ({
     ...baseOptions,
     indexAxis: 'y' as const,
     layout: {
@@ -207,14 +208,15 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
           maxRotation: 0,
           minRotation: 0,
           callback: function(value: unknown) {
-            // Truncate very long labels with ellipsis  
-            const label = String(value)
+            // Get the actual label from the labels array using the index
+            const index = Number(value)
+            const label = labels[index] || String(value)
             return label.length > 35 ? label.substring(0, 32) + '...' : label
           }
         },
       },
     },
-  }
+  })
 
   /** -------------------- Data -------------------- */
   // Fill in missing years for complete timeline
@@ -472,7 +474,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="h-80">
-                <Bar data={countryChartData} options={horizontalChartOptions} />
+                <Bar data={countryChartData} options={createHorizontalChartOptions(chartData.documents_by_country.map(d => d.country))} />
               </div>
               
               {/* Collapsible data section */}
@@ -518,7 +520,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="h-80">
-                <Bar data={authorChartData} options={horizontalChartOptions} />
+                <Bar data={authorChartData} options={createHorizontalChartOptions(chartData.documents_by_author.map(d => d.author))} />
               </div>
               
               {/* Collapsible data section */}
