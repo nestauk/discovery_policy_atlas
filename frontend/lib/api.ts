@@ -1,6 +1,80 @@
 import { useAuth } from "@clerk/nextjs";
 import { Project } from "./projectStore";
 import { AnalysisProject } from "./analysisProjectStore";
+import { ThematicGroup, EvidenceItem } from './evidenceStore';
+
+// Standalone auth fetch to allow usage from non-React files (e.g., Zustand stores)
+export const fetchWithAuthExternal = async (
+  url: string,
+  options: RequestInit = {},
+  isStreaming: boolean = false
+) => {
+  let token: string | null = null;
+  try {
+    if (typeof window !== 'undefined' && (window as unknown as { Clerk?: { session?: { getToken: () => Promise<string> } } }).Clerk?.session) {
+      const clerkWindow = window as unknown as { Clerk?: { session?: { getToken: () => Promise<string> } } }
+      token = await clerkWindow.Clerk!.session!.getToken();
+    }
+  } catch (err) {
+    console.error('Failed to get Clerk token from window:', err);
+  }
+
+  if (!token) {
+    console.error("No authentication token available (external fetch)");
+    throw new Error("No authentication token available - please sign in");
+  }
+
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+  const cleanUrl = url.replace(/^\//, '');
+  const fullUrl = `${cleanBaseUrl}/${cleanUrl}`;
+
+  console.log(`API call (external): ${options.method || 'GET'} ${fullUrl}`);
+  const headers = new Headers(options.headers as HeadersInit);
+  headers.set('Authorization', `Bearer ${token}`);
+  if (!(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(fullUrl, {
+      ...options,
+      headers,
+    });
+  } catch (fetchError) {
+    console.error('Network fetch error (external):', fetchError);
+    throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown network error'}`);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`Response error body (external):`, errorText);
+    if (response.status === 401) {
+      console.error("Authentication failed - token may be expired");
+      throw new Error("Authentication failed - please refresh the page and sign in again");
+    }
+    throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
+  }
+
+  return isStreaming ? response : response.json();
+};
+
+// Standalone Evidence tab functions (exported for non-React usage)
+export async function getThematicGroups(
+  projectId: string,
+  themeType: 'intervention' | 'issue'
+): Promise<ThematicGroup[]> {
+  return fetchWithAuthExternal(`api/analysis-projects/${projectId}/thematic-groups?theme_type=${themeType}`);
+}
+
+export async function getThematicGroupItems(
+  projectId: string,
+  themeId: string,
+  itemType: 'intervention' | 'issue'
+): Promise<EvidenceItem[]> {
+  return fetchWithAuthExternal(`api/analysis-projects/${projectId}/thematic-groups/${themeId}/items?item_type=${itemType}`);
+}
 
 export function useAPI() {
   const { getToken } = useAuth();
@@ -22,16 +96,14 @@ export function useAPI() {
     console.log(`API call: ${options.method || 'GET'} ${fullUrl}`);
     console.log(`Token length: ${token.length}`);
     console.log(`Request headers:`, options.headers);
-    
     // Don't set Content-Type for FormData - let browser set it with boundary
-    const headers: HeadersInit = new Headers(options.headers);
+    const headers = new Headers(options.headers as HeadersInit);
     headers.set('Authorization', `Bearer ${token}`);
-    
-    // Only set Content-Type to application/json if we're not sending FormData
     if (!(options.body instanceof FormData)) {
+      // Set JSON content type only when not sending FormData
       headers.set('Content-Type', 'application/json');
     }
-    
+
     let response;
     try {
       response = await fetch(fullUrl, {
@@ -42,7 +114,6 @@ export function useAPI() {
       console.error('Network fetch error:', fetchError);
       throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown network error'}`);
     }
-    
     console.log(`Response status: ${response.status}`);
     console.log(`Response headers:`, [...response.headers.entries()]);
     
@@ -149,6 +220,23 @@ export function useAPI() {
     return fetchWithAuth(`api/analysis-projects/${projectId}/interventions`);
   };
 
+  // Evidence tab endpoints
+  // In-hook wrappers use hook-scoped fetchWithAuth for consistency in components
+  const getThematicGroupsInHook = async (
+    projectId: string,
+    themeType: 'intervention' | 'issue'
+  ): Promise<ThematicGroup[]> => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}/thematic-groups?theme_type=${themeType}`);
+  };
+
+  const getThematicGroupItemsInHook = async (
+    projectId: string,
+    themeId: string,
+    itemType: 'intervention' | 'issue'
+  ): Promise<EvidenceItem[]> => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}/thematic-groups/${themeId}/items?item_type=${itemType}`);
+  };
+
   const generateSubQuestions = async (researchQuestion: string): Promise<{ research_question: string; sub_questions: string[] }> => {
     return fetchWithAuth('api/agent/generate-sub-questions', {
       method: 'POST',
@@ -166,6 +254,7 @@ export function useAPI() {
     const url = `api/analysis-projects/${projectId}/findings${qs.toString() ? `?${qs.toString()}` : ''}`;
     return fetchWithAuth(url);
   };
+  
   
   return { 
     fetchWithAuth, 
@@ -186,6 +275,9 @@ export function useAPI() {
     runAnalysisForProject,
     getDocumentExtraction,
     getProjectInterventions,
+    // Evidence tab
+    getThematicGroups: getThematicGroupsInHook,
+    getThematicGroupItems: getThematicGroupItemsInHook,
     // Agent features
     generateSubQuestions,
     getAnalysisFindings

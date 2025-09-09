@@ -11,6 +11,8 @@ from app.services.chatbot.chat_service import chatbot_service
 from app.services.synthesis.schemas import (
     SynthesisSummary,
     Finding,
+    ThematicGroup,
+    EvidenceItem,
 )
 from app.services.synthesis.service import SynthesisService
 from app.services.synthesis.agent import SynthesisAgent, SynthesisState
@@ -510,6 +512,63 @@ async def get_project_extractions(
         raise HTTPException(
             status_code=500, detail="Failed to fetch project extractions"
         )
+
+
+@router.get(
+    "/{project_id}/thematic-groups",
+    response_model=List[ThematicGroup],
+    summary="Get thematic groups for Evidence view (Level 1)",
+)
+async def get_thematic_groups(
+    project_id: str,
+    theme_type: str = Query(..., enum=["intervention", "issue"]),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Return thematic groups by type via Supabase RPC for the Evidence view."""
+    try:
+        response = vectorization_service.supabase.rpc(
+            "get_project_thematic_groups_by_type",
+            {"p_project_id": project_id, "p_theme_type": theme_type},
+        ).execute()
+
+        data = response.data or []
+        return [ThematicGroup(**item) for item in data]
+    except Exception as e:
+        logger.error(f"Error fetching thematic groups for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch thematic groups")
+
+
+@router.get(
+    "/{project_id}/thematic-groups/{theme_id}/items",
+    response_model=List[EvidenceItem],
+    summary="Get level-2 items for a thematic group (Evidence view)",
+)
+async def get_thematic_group_items(
+    project_id: str,
+    theme_id: str,
+    item_type: str = Query(
+        ..., description="Type of items", regex="^(intervention|issue)$"
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Return items for a thematic group via Supabase RPC.
+
+    Uses get_theme_items_rich RPC with parameters p_theme_id and p_item_type.
+    """
+    try:
+        response = vectorization_service.supabase.rpc(
+            "get_theme_items_rich",
+            {"p_theme_id": theme_id, "p_item_type": item_type},
+        ).execute()
+
+        raw_items = response.data or []
+        # RPC returns JSONB array directly as response.data
+        return [EvidenceItem(**item) for item in raw_items]
+    except Exception as e:
+        logger.error(
+            f"Error fetching theme items for project {project_id}, theme {theme_id}: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to fetch theme items")
 
 
 @router.get("/{project_id}/interventions")
