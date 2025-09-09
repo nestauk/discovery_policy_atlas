@@ -26,9 +26,6 @@ class KeyIssue(BaseModel):
     source_doc_ids: List[str] = Field(
         ..., description="A list of document IDs where this issue is discussed."
     )
-    justification: str = Field(
-        ..., description="An explanation of why this theme was created."
-    )
 
 
 class PolicyIntervention(BaseModel):
@@ -56,9 +53,6 @@ class PolicyIntervention(BaseModel):
     )
     supporting_doc_ids: List[str] = Field(
         ..., description="List of document IDs that discuss this intervention."
-    )
-    justification: str = Field(
-        ..., description="An explanation of why this theme was created."
     )
 
 
@@ -112,3 +106,41 @@ class Finding(BaseModel):
     PValue: Optional[str] = None
     Uncertainty: Optional[str] = None
     Evidence: List[str] = []
+
+
+class ThematicGroup(BaseModel):
+    """Represents a level-1 thematic grouping for the Evidence view.
+
+    Attributes:
+        id: Stable numeric identifier for the thematic group.
+        theme_title: Display title of the thematic group.
+        theme_summary: Short description summarising the theme.
+        item_count: Number of items in the thematic group.
+    """
+
+    id: str
+    theme_title: str
+    theme_summary: str
+    item_count: int
+
+
+class Outcome(BaseModel):
+    """Represents a single outcome within an intervention item."""
+
+    outcome: str
+    direction_of_effect: str
+    effect_size: Optional[str] = None
+    significance: Optional[str] = None
+
+
+class EvidenceItem(BaseModel):
+    """Rich evidence item for the Evidence tab cards."""
+
+    id: str
+    title: str
+    brief_description: Optional[str] = None
+    frequency: Optional[int] = None
+    outcomes: List[Outcome] = []
+    supporting_evidence: List[str] = []
+    countries: List[str] = []
+    document: Optional[dict] = None

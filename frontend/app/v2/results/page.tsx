@@ -8,18 +8,16 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { PapersTable } from '@/components/search/papers-table'
-import { InterventionsTable as InterventionsEvidenceTable, InterventionData } from '@/components/search/interventions-table'
-import { Paper } from '@/types/search'
 import { 
   FileText, 
   Loader2,
   ArrowLeft,
   AlertCircle,
   BookOpen,
-  Target,
   Bot,
-  Filter
+  Filter,
+  Target,
+  AlertTriangle
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
@@ -29,6 +27,9 @@ import { InterventionsTable } from './InterventionsTable'
 import { ExecutiveBriefing } from './ExecutiveBriefing'
 import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
 import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
+import EvidenceThematicView from '@/components/v2/evidence/EvidenceThematicView'
+import type { InterventionData } from '@/components/search/interventions-table'
+import { PapersTable } from '@/components/search/papers-table'
 
 interface AnalysisDocument {
   id: string
@@ -444,8 +445,8 @@ export default function AnalysisResultsPage() {
     }
     
     // Process interventions to find strongest study type and largest sample size per document
-    interventions.forEach(intervention => {
-      intervention.documents?.forEach(doc => {
+    interventions.forEach((intervention) => {
+      intervention.documents?.forEach((doc: { doc_id: string }) => {
         const docId = doc.doc_id
         if (!docId) return
         
@@ -482,7 +483,7 @@ export default function AnalysisResultsPage() {
 
   // Transform documents for table display and apply filtering
   const { transformedPapers, relevantCount } = useMemo(() => {
-    const allTransformed: Paper[] = documents.map((doc: AnalysisDocument) => ({
+    const allTransformed = documents.map((doc: AnalysisDocument) => ({
       id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
       title: String(doc.title || 'Untitled'),
       doi: String(doc.doi || ''),
@@ -677,7 +678,16 @@ export default function AnalysisResultsPage() {
                           className="flex items-center gap-2"
                         >
                           <Target className="h-3 w-3" />
-                          Interventions ({interventions.length})
+                          Interventions
+                        </Button>
+                        <Button
+                          variant={evidenceSubTab === 'issues' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setEvidenceSubTab('issues')}
+                          className="flex items-center gap-2"
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          Key Issues
                         </Button>
                       </div>
 
@@ -743,10 +753,13 @@ export default function AnalysisResultsPage() {
 
                   {evidenceSubTab === 'interventions' && (
                     <div>
-                      <InterventionsEvidenceTable 
-                        interventions={interventions} 
-                        loading={loadingData}
-                      />
+                      <EvidenceThematicView projectId={effectiveProjectId} themeType="intervention" />
+                    </div>
+                  )}
+
+                  {evidenceSubTab === 'issues' && (
+                    <div>
+                      <EvidenceThematicView projectId={effectiveProjectId} themeType="issue" />
                     </div>
                   )}
                 </div>
