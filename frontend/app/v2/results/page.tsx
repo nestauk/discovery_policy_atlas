@@ -14,9 +14,11 @@ import {
   ArrowLeft,
   AlertCircle,
   BookOpen,
+  Target,
   Bot,
   Filter,
-  Target,
+  Brain,
+  BarChart3,
   AlertTriangle
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
@@ -27,6 +29,8 @@ import { InterventionsTable } from './InterventionsTable'
 import { ExecutiveBriefing } from './ExecutiveBriefing'
 import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
 import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
+import NetworkVisualizer from '@/components/network/NetworkVisualizer'
+import { ProjectCharts } from '@/components/charts/ProjectCharts'
 import EvidenceThematicView from '@/components/v2/evidence/EvidenceThematicView'
 import type { InterventionData } from '@/components/search/interventions-table'
 import { PapersTable } from '@/components/search/papers-table'
@@ -93,6 +97,7 @@ export default function AnalysisResultsPage() {
   const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
   // const [activeTab, setActiveTab] = useState('summary')
+  const [insightsSubTab, setInsightsSubTab] = useState('charts')
   const [evidenceSubTab, setEvidenceSubTab] = useState('documents')
   
   // Relevance filtering state
@@ -647,7 +652,7 @@ export default function AnalysisResultsPage() {
         {effectiveProjectId && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-4">
                 <TabsTrigger value="evidence" className="flex items-center gap-2">
                   <BookOpen className="h-4 w-4" />
                   Evidence
@@ -659,6 +664,10 @@ export default function AnalysisResultsPage() {
                 <TabsTrigger value="assistant" className="flex items-center gap-2">
                   <Bot className="h-4 w-4" />
                   Assistant
+                </TabsTrigger>
+                <TabsTrigger value="insights" className="flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  Insights
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -817,6 +826,47 @@ export default function AnalysisResultsPage() {
                   placeholder="Ask about the evidence in this project..."
                   className="h-full"
                 />
+              </TabsContent>
+
+              <TabsContent value="insights" className="p-6 m-0">
+                <div className="max-w-6xl mx-auto">
+                  {/* Insights Sub-tabs as smaller buttons */}
+                  <div className="mb-6">
+                    <div className="flex gap-2">
+                      <Button
+                        variant={insightsSubTab === 'charts' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setInsightsSubTab('charts')}
+                        className="flex items-center gap-2"
+                      >
+                        <BarChart3 className="h-3 w-3" />
+                        Charts
+                      </Button>
+                      <Button
+                        variant={insightsSubTab === 'network' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setInsightsSubTab('network')}
+                        className="flex items-center gap-2"
+                      >
+                        <Brain className="h-3 w-3" />
+                        Network
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Content based on active sub-tab */}
+                  {insightsSubTab === 'network' && (
+                    <div>
+                      <NetworkVisualizer />
+                    </div>
+                  )}
+
+                  {insightsSubTab === 'charts' && (
+                    <div>
+                      <ProjectCharts projectId={effectiveProjectId} projectTitle={activeProject?.title} />
+                    </div>
+                  )}
+                </div>
               </TabsContent>
             </div>
           </Tabs>
