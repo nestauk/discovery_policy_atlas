@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as d3 from 'd3';
-import { Upload, Download, Sun, Moon, Plus, Minus, RotateCcw, Search } from 'lucide-react';
+import { Upload, Download, Plus, Minus, RotateCcw, Search } from 'lucide-react';
 
 // D3 Types for force simulation
 type D3Node = Node & d3.SimulationNodeDatum;
@@ -36,7 +36,7 @@ interface Link {
 export default function NetworkVisualizer() {
   const [data, setData] = useState<StudyData[]>([]);
   const [fileName, setFileName] = useState('');
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedLink, setSelectedLink] = useState<Link | null>(null);
@@ -437,18 +437,6 @@ export default function NetworkVisualizer() {
       <div className="flex flex-col w-full max-w-6xl mx-auto p-4">
         {/* Header */}
         <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
-          <h1 className="text-2xl font-bold flex items-center">
-            <svg className="mr-2" width="36" height="36" viewBox="0 0 64 64">
-              <rect width="64" height="64" rx="12" fill="#f0f4f8"/>
-              <path d="M25 21L40 24" stroke="#4682B4" strokeWidth="2.5" fill="none"/>
-              <path d="M22 24L30 42" stroke="#9370DB" strokeWidth="2.5" fill="none"/>
-              <path d="M42 31L35 42" stroke="#3CB371" strokeWidth="2.5" fill="none"/>
-              <circle cx="20" cy="18" r="6" fill="#4682B4" stroke="#ffffff" strokeWidth="1.5"/>
-              <circle cx="46" cy="26" r="6" fill="#3CB371" stroke="#ffffff" strokeWidth="1.5"/>
-              <circle cx="32" cy="48" r="6" fill="#BA55D3" stroke="#ffffff" strokeWidth="1.5"/>
-            </svg>
-            LitSynth Network Visualiser
-          </h1>
           
           <div className="flex flex-wrap gap-3">
             {/* Zoom Controls */}
@@ -528,17 +516,6 @@ export default function NetworkVisualizer() {
               <span>Save Image</span>
             </button>
 
-            {/* Dark Mode Toggle */}
-            <button 
-              onClick={() => setDarkMode(!darkMode)}
-              className={`px-4 py-2 rounded-lg flex items-center transition-colors shadow-sm ${
-                darkMode ? 'bg-gray-800 text-gray-100 hover:bg-gray-700 border border-gray-700' : 
-                'bg-white text-gray-800 hover:bg-gray-100 border border-gray-200'
-              }`}
-            >
-              {darkMode ? <Sun size={18} className="mr-2" /> : <Moon size={18} className="mr-2" />}
-              <span>{darkMode ? 'Light' : 'Dark'} Mode</span>
-            </button>
           </div>
         </div>
 
@@ -569,7 +546,7 @@ export default function NetworkVisualizer() {
                   <circle cx="46" cy="26" r="6" fill="#3CB371" stroke="#ffffff" strokeWidth="1.5"/>
                   <circle cx="32" cy="48" r="6" fill="#BA55D3" stroke="#ffffff" strokeWidth="1.5"/>
                 </svg>
-                <h2 className="text-xl font-semibold mb-2">Upload a CSV to visualise your network</h2>
+                <h2 className="text-xl font-semibold mb-2">TEST FEATURE: Upload a CSV to visualise your network</h2>
                 <p className="text-sm text-center max-w-md mb-6">
                   Upload a CSV file with the required columns to generate an interactive network visualisation.
                 </p>

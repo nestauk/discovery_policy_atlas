@@ -97,7 +97,7 @@ export default function AnalysisResultsPage() {
   const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
   // const [activeTab, setActiveTab] = useState('summary')
-  const [insightsSubTab, setInsightsSubTab] = useState('network')
+  const [insightsSubTab, setInsightsSubTab] = useState('charts')
   const [evidenceSubTab, setEvidenceSubTab] = useState('documents')
   
   // Relevance filtering state
@@ -834,15 +834,6 @@ export default function AnalysisResultsPage() {
                   <div className="mb-6">
                     <div className="flex gap-2">
                       <Button
-                        variant={insightsSubTab === 'network' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setInsightsSubTab('network')}
-                        className="flex items-center gap-2"
-                      >
-                        <Brain className="h-3 w-3" />
-                        Network
-                      </Button>
-                      <Button
                         variant={insightsSubTab === 'charts' ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => setInsightsSubTab('charts')}
@@ -850,6 +841,15 @@ export default function AnalysisResultsPage() {
                       >
                         <BarChart3 className="h-3 w-3" />
                         Charts
+                      </Button>
+                      <Button
+                        variant={insightsSubTab === 'network' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setInsightsSubTab('network')}
+                        className="flex items-center gap-2"
+                      >
+                        <Brain className="h-3 w-3" />
+                        Network
                       </Button>
                     </div>
                   </div>

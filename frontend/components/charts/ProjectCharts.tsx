@@ -97,7 +97,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       }
     }
     fetchChartData()
-  }, [projectId])
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -140,7 +140,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { position: 'top', labels: { boxWidth: 12, usePointStyle: true } },
+      legend: { display: false },
       tooltip: { intersect: false, mode: 'index' },
     },
     scales: {
@@ -387,34 +387,13 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
 
   return (
     <div className="space-y-6">
-      {/* Document Analysis Overview */}
-      <Card className="border-none shadow-none bg-transparent">
-        <CardContent className="pt-6">
-          <div className="flex flex-col gap-1">
-            {projectTitle && (
-              <h1
-                className="text-2xl font-semibold tracking-tight"
-                style={{ color: PALETTE.primaryNavy }}
-              >
-                {toTitleCase(projectTitle.replace(/^Chat Search:\s*/, ''))}
-              </h1>
-            )}
-            <h2 className="text-xl font-medium text-slate-800">
-              Document Distribution Analysis
-            </h2>
-            <p className="text-sm text-slate-600">
-              Research patterns across time, geography, and authorship
-            </p>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {chartData.documents_by_year.length > 0 && (
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle>Documents Over Time</CardTitle>
+              <CardTitle>Published documents over time</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="h-80">
@@ -469,7 +448,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
           <Card>
             <CardHeader>
               <CardTitle>
-                Top {chartData.documents_by_country.length} {chartData.documents_by_country.length === 1 ? 'Country' : 'Countries'}
+                Top {chartData.documents_by_country.length} {chartData.documents_by_country.length === 1 ? 'country' : 'countries'}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -515,7 +494,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
           <Card>
             <CardHeader>
               <CardTitle>
-                Top {chartData.documents_by_author.length} {chartData.documents_by_author.length === 1 ? 'Author' : 'Authors'}
+                Top {chartData.documents_by_author.length} {chartData.documents_by_author.length === 1 ? 'author' : 'authors'}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
