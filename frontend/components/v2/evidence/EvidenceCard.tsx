@@ -53,11 +53,11 @@ export default function EvidenceCard({ item }: Props) {
                   <div className="mt-2 grid grid-cols-1 gap-1 text-sm text-slate-700 sm:grid-cols-2">
                     <div>
                       <span className="text-slate-500">Effect size:</span>{' '}
-                      <span className="font-medium">{o.effect_size || '—'}</span>
+                      <span className="font-medium">{(o.effect_size && o.effect_size !== 'null') ? o.effect_size : '—'}</span>
                     </div>
                     <div>
                       <span className="text-slate-500">Significance:</span>{' '}
-                      <span className="font-medium">{o.significance || '—'}</span>
+                      <span className="font-medium">{(o.significance && o.significance !== 'null') ? o.significance : '—'}</span>
                     </div>
                   </div>
                 </div>

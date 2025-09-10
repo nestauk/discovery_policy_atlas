@@ -245,27 +245,27 @@ function DocumentDetailView({ extraction }: {
                                   </div>
                                   
                                   {/* Quantitative measures */}
-                                  {(result.effect_size || result.effect_size_type || result.uncertainty || result.p_value) && (
+                                  {((result.effect_size && result.effect_size !== 'null') || (result.effect_size_type && result.effect_size_type !== 'null') || (result.uncertainty && result.uncertainty !== 'null') || (result.p_value && result.p_value !== 'null')) && (
                                     <div className="mb-2">
-                                      {result.effect_size_type && (
+                                      {result.effect_size_type && result.effect_size_type !== 'null' && (
                                         <div className="text-xs text-green-600 mb-1">
                                           <span className="font-medium">Effect Type: </span>
                                           {result.effect_size_type}
                                         </div>
                                       )}
-                                      {result.effect_size && (
+                                      {result.effect_size && result.effect_size !== 'null' && (
                                         <div className="text-xs text-green-600 mb-1">
                                           <span className="font-medium">Effect Size: </span>
                                           {result.effect_size}
                                         </div>
                                       )}
-                                      {result.uncertainty && (
+                                      {result.uncertainty && result.uncertainty !== 'null' && (
                                         <div className="text-xs text-green-600 mb-1">
                                           <span className="font-medium">Uncertainty: </span>
                                           ±{result.uncertainty}
                                         </div>
                                       )}
-                                      {result.p_value && (
+                                      {result.p_value && result.p_value !== 'null' && (
                                         <div className="text-xs text-green-600 mb-1">
                                           <span className="font-medium">P-value: </span>
                                           {result.p_value}
