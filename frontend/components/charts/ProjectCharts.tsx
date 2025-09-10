@@ -141,7 +141,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
     maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
-      tooltip: { intersect: false, mode: 'index' },
+      tooltip: { intersect: false, mode: 'index' as const },
     },
     scales: {
       x: {
@@ -169,7 +169,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       ...baseOptions.plugins,
       tooltip: {
         intersect: false,
-        mode: 'index',
+        mode: 'index' as const,
         callbacks: {
           title: (tooltipItems: unknown[]) => {
             const items = tooltipItems as Array<{ dataIndex: number }>
@@ -344,11 +344,11 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
   }
   
   const yearChartData = {
-    labels: completeYearData.labels,
+    labels: completeYearData.labels as string[],
     datasets: [
       {
         label: 'Documents per Year',
-        data: completeYearData.data,
+        data: completeYearData.data as number[],
         backgroundColor: withAlpha(PALETTE.blue, 0.85),
         borderColor: PALETTE.blue,
         borderWidth: 1,
@@ -358,11 +358,11 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
   }
 
   const countryChartData = {
-    labels: chartData.documents_by_country.map((d) => d.country),
+    labels: chartData.documents_by_country.map((d) => d.country) as string[],
     datasets: [
       {
         label: 'Documents per Country',
-        data: chartData.documents_by_country.map((d) => d.count),
+        data: chartData.documents_by_country.map((d) => d.count) as number[],
         backgroundColor: withAlpha(PALETTE.green, 0.85),
         borderColor: PALETTE.green,
         borderWidth: 1,
@@ -372,11 +372,11 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
   }
 
   const authorChartData = {
-    labels: chartData.documents_by_author.map((d) => d.author),
+    labels: chartData.documents_by_author.map((d) => d.author) as string[],
     datasets: [
       {
         label: 'Documents per Author',
-        data: chartData.documents_by_author.map((d) => d.count),
+        data: chartData.documents_by_author.map((d) => d.count) as number[],
         backgroundColor: withAlpha(PALETTE.yellow, 0.85),
         borderColor: PALETTE.yellow,
         borderWidth: 1,

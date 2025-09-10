@@ -44,14 +44,11 @@ export interface SearchParams {
     study_strength?: string  // strongest study type letter from interventions
     sample_size?: number  // largest sample size from interventions
     source?: string  // "openalex" or "overton"
-<<<<<<< HEAD
-=======
     // Evidence assessment fields
     evidence_strength?: number  // 1-5 star rating for evidence quality
     evidence_strength_justification?: string
     predicted_impact?: number  // 1-5 star rating for predicted impact
     predicted_impact_justification?: string
->>>>>>> dev
     // Extracted fields (dynamically added based on extraction_fields parameter)
     [key: string]: string | number | boolean | string[] | undefined
   }
