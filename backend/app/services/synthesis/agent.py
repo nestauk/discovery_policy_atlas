@@ -7,8 +7,15 @@ from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from app.services.vectorization import vectorization_service
 from app.utils.llm.llm_utils import get_llm
-from langchain_core.prompts import ChatPromptTemplate
 from app.services.synthesis.schemas import KeyIssue, PolicyIntervention
+from app.services.synthesis.prompts import (
+    build_discover_themes_prompt,
+    make_discover_themes_instructions,
+    build_theme_critique_prompt,
+    build_classify_concept_prompt,
+    build_impact_summary_prompt,
+    build_executive_briefing_prompt,
+)
 
 
 class Concept(BaseModel):
@@ -80,26 +87,14 @@ async def _discover_themes_for_concepts(
     """Generic helper to discover themes for a given concept set (structured output)."""
     if not concepts:
         return []
-    critique_prompt_addition = (
-        f"You must address the following critique of your previous attempt: {critique}"
-        if critique
-        else ""
-    )
-    system = "You are a senior research analyst at Nesta. Identify the natural thematic structure in the provided concepts."
-    user = (
-        "Follow these principles: 1) Exhaustiveness; 2) Mutual Exclusivity; 3) Appropriate Granularity.\n"
-        f"{critique_prompt_addition}\n"
-        "Return a structured list of themes with name and description only."
-    )
-    prompt = ChatPromptTemplate.from_messages(
-        [("system", system), ("user", "{instructions}\n\nCONCEPTS:\n{concepts}")]
-    )
+    instructions = make_discover_themes_instructions(critique)
+    prompt = build_discover_themes_prompt()
     base_llm = get_llm(HIGH_REASONING_MODEL, temperature=0.0)
     structured_llm = base_llm.with_structured_output(ThemesOut)
     try:
         out: ThemesOut = await structured_llm.ainvoke(
             prompt.format(
-                instructions=user,
+                instructions=instructions,
                 concepts=_escape_braces(json.dumps([c.dict() for c in concepts])),
             )
         )
@@ -222,15 +217,9 @@ async def critique_issue_themes(state: SynthesisState) -> SynthesisState:
     themes_payload = _escape_braces(
         json.dumps([t.dict() for t in state.get("discovered_issue_themes", [])])
     )
-    system = "You return STRICT TEXT only: either 'None' or a concise list of changes."
-    user = (
-        "Assess issue themes against: Exhaustiveness, Mutual Exclusivity, Appropriate Granularity.\n"
-        "If acceptable, reply exactly 'None'. Otherwise, list concise edits.\n\n"
-        f"Themes: {themes_payload}"
-    )
-    prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+    prompt = build_theme_critique_prompt("issue")
     llm = get_llm(HIGH_REASONING_MODEL, temperature=0.0)
-    resp = await llm.ainvoke(prompt.format())
+    resp = await llm.ainvoke(prompt.format(themes=themes_payload))
     critique = (resp.content if hasattr(resp, "content") else str(resp)).strip()
     next_iter = int(state.get("issue_theme_iteration") or 0) + 1
     return {
@@ -244,15 +233,9 @@ async def critique_intervention_themes(state: SynthesisState) -> SynthesisState:
     themes_payload = _escape_braces(
         json.dumps([t.dict() for t in state.get("discovered_intervention_themes", [])])
     )
-    system = "You return STRICT TEXT only: either 'None' or a concise list of changes."
-    user = (
-        "Assess intervention themes against: Exhaustiveness, Mutual Exclusivity, Appropriate Granularity.\n"
-        "If acceptable, reply exactly 'None'. Otherwise, list concise edits.\n\n"
-        f"Themes: {themes_payload}"
-    )
-    prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+    prompt = build_theme_critique_prompt("intervention")
     llm = get_llm(HIGH_REASONING_MODEL, temperature=0.0)
-    resp = await llm.ainvoke(prompt.format())
+    resp = await llm.ainvoke(prompt.format(themes=themes_payload))
     critique = (resp.content if hasattr(resp, "content") else str(resp)).strip()
     next_iter = int(state.get("intervention_theme_iteration") or 0) + 1
     return {
@@ -272,19 +255,11 @@ async def _map_concepts(
         {"name": t.theme_name, "description": t.theme_description} for t in themes
     ]
 
-    sem = asyncio.Semaphore(12)
+    sem = asyncio.Semaphore(32)
     llm = get_llm(CLASSIFICATION_MODEL, temperature=0.0)
 
     async def _classify(concept: Concept) -> Optional[int]:
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "Return only the number."),
-                (
-                    "user",
-                    "Classify the concept to the single best matching theme. Respond ONLY with the theme number (e.g., 1). No words.\n\nThemes:\n{themes}\n\nConcept:\n{concept}",
-                ),
-            ]
-        )
+        prompt = build_classify_concept_prompt()
         async with sem:
             try:
                 r = await llm.ainvoke(
@@ -411,16 +386,10 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         try:
             llm = get_llm(CLASSIFICATION_MODEL, temperature=0.1)
             sample = "\n".join([f"- {s}" for s in concept_texts[:8]])
-            prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", "Write a 35–45 word impact summary, plain text."),
-                    (
-                        "user",
-                        f"Theme: {name}\nRepresentative concepts:\n{_escape_braces(sample)}\nSummarise expected impacts and effectiveness; British English.",
-                    ),
-                ]
+            prompt = build_impact_summary_prompt()
+            resp = await llm.ainvoke(
+                prompt.format(name=name, sample=_escape_braces(sample))
             )
-            resp = await llm.ainvoke(prompt.format())
             return (resp.content if hasattr(resp, "content") else str(resp)).strip()
         except Exception:
             return "Synthesised from grouped concept evidence."
@@ -506,19 +475,15 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
         ],
     }
 
-    system = "You are a senior UK policy advisor. Return plaintext only (no markdown)."
-    user = (
-        "Write a concise executive briefing (2 short paragraphs).\n"
-        "- Directly answer the research question.\n"
-        "- Distinguish clearly between Key Challenges (issues) and Recommended Interventions.\n"
-        "- Close with a high-level assessment of the evidence base.\n\n"
-        f"Research question: {rq}\n"
-        f"Structured data: {_escape_braces(json.dumps(payload))}"
-    )
-    prompt = ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+    prompt = build_executive_briefing_prompt()
     llm = get_llm(BRIEFING_MODEL, temperature=0.2)
     try:
-        resp = llm.invoke(prompt.format())
+        resp = llm.invoke(
+            prompt.format(
+                rq=rq,
+                payload=_escape_braces(json.dumps(payload)),
+            )
+        )
         text = (resp.content if hasattr(resp, "content") else str(resp)).strip()
         if text.startswith("```"):
             text = text.strip("`")

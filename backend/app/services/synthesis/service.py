@@ -673,7 +673,6 @@ class SynthesisService:
 
             interventions = extraction_results.get("interventions", []) or []
             issues = extraction_results.get("issues", []) or []
-            mappings = extraction_results.get("mappings", []) or []
             results = extraction_results.get("results", []) or []
 
             # Build lookup maps for exact matching
@@ -712,25 +711,54 @@ class SynthesisService:
                         include_intervention_idxs.add(name_to_idx[filt_intr])
 
             if filt_issue:
-                # Prefer assigned issue labels for this document if available
+                # ISSUE DRILL-DOWN: show only narrative evidence for the specific issue.
+                # Determine matching issue labels for this document
                 assigned_labels = per_doc_assigned_issue_labels.get(doc_uuid)
-                matching_issue_idxs: set[int] = set()
+                matching_issue_labels: set[str] = set()
                 if assigned_labels:
-                    for lb in assigned_labels:
-                        if lb in label_to_idx:
-                            matching_issue_idxs.add(label_to_idx[lb])
+                    matching_issue_labels.update(assigned_labels)
                 else:
-                    if filt_issue in label_to_idx:
-                        matching_issue_idxs.add(label_to_idx[filt_issue])
-                if matching_issue_idxs:
-                    for m in mappings:
-                        try:
-                            if int(m.get("issue_idx")) in matching_issue_idxs:
-                                include_intervention_idxs.add(
-                                    int(m.get("intervention_idx"))
-                                )
-                        except Exception:
-                            continue
+                    if filt_issue:
+                        matching_issue_labels.add(filt_issue)
+
+                # Emit one finding per matching issue occurrence in this document
+                for iss in issues:
+                    lb = str(iss.get("label") or "")
+                    if not lb or lb not in matching_issue_labels:
+                        continue
+                    evidence_items: List[str] = []
+                    issue_quote = iss.get("supporting_quote")
+                    if issue_quote:
+                        evidence_items.append(str(issue_quote))
+                    explanation = iss.get("explanation")
+                    if explanation and str(explanation) not in evidence_items:
+                        evidence_items.append(str(explanation))
+
+                    finding = Finding(
+                        SourceTitle=str(doc.get("title") or "Unknown Source"),
+                        Source=str(doc.get("source") or "") or None,
+                        DocId=str(doc.get("doc_id") or doc.get("id") or "") or None,
+                        Year=doc.get("year"),
+                        Url=(
+                            doc.get("landing_page_url")
+                            or doc.get("pdf_url")
+                            or doc.get("url")
+                        )
+                        or None,
+                        Intervention=None,  # Intentionally omitted for issues
+                        StudyDesign=None,
+                        Outcome=None,
+                        EffectDirection=None,
+                        EffectSizeType=None,
+                        EffectSize=None,
+                        PValue=None,
+                        Uncertainty=None,
+                        Evidence=[e for e in evidence_items if e],
+                    )
+                    findings.append(finding)
+
+                # For issues we purposely skip intervention-result based evidence
+                continue
 
             if not include_intervention_idxs:
                 continue

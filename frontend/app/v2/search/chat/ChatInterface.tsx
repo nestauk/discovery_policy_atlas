@@ -3,6 +3,8 @@
 import React from "react";
 import { create } from "zustand";
 import { useAPI } from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip } from '@/components/ui/tooltip';
 
 // ---------------- UI PRIMITIVES ----------------
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(" ");
@@ -116,6 +118,7 @@ interface ChatState {
   showPlan: boolean;
   editableQuery?: string;
   isGeneratingSubQuestions: boolean;
+  maxResults: number;
   set: (p: Partial<ChatState>) => void;
   next: () => void; back: () => void;
   nextRefine: () => void; backRefine: () => void;
@@ -135,8 +138,16 @@ export const useChat = create<ChatState>((set, get) => ({
   showPlan: false,
   editableQuery: "",
   isGeneratingSubQuestions: false,
+  maxResults: 30,
   set: (p) => set(p),
-  next: () => set({ step: get().step === "ASK" ? "REFINE" : "APPROVE" }),
+  next: () => {
+    const s = get();
+    let maxResults = s.maxResults;
+    // Smart defaults heuristics
+    if ((s.subQuestions?.length || 0) >= 2) maxResults = Math.max(maxResults, 50);
+    if ((s.geography?.length || 0) >= 2) maxResults = Math.max(maxResults, 60);
+    set({ step: s.step === "ASK" ? "REFINE" : "APPROVE", maxResults });
+  },
   back: () => set({ step: get().step === "APPROVE" ? "REFINE" : "ASK" }),
   nextRefine: () => set({ refineStep: (Math.min(5, get().refineStep + 1)) as RefineStep }),
   backRefine: () => set({ refineStep: (Math.max(0, get().refineStep - 1)) as RefineStep }),
@@ -152,6 +163,7 @@ function buildPlan(state: {
   scope: string[]; customFocus: string[];
   excludes: string[]; customExcludes: string[];
   editableQuery?: string;
+  maxResults: number;
 }): Brief {
   const tokens: string[] = [];
   const rq = (state.researchQuestion || "").trim();
@@ -232,7 +244,7 @@ function buildPlan(state: {
     timeFrom,
     timeTo,
     mode: "semantic",
-    limit: 30,
+    limit: state.maxResults,
     relevanceFiltering: true,
     abstractsOnly: false,
     query: finalQuery,
@@ -274,18 +286,17 @@ function PlanDrawer() {
     excludes: s.excludes,
     customExcludes: s.customExcludes,
     editableQuery: s.editableQuery,
+    maxResults: s.maxResults,
   });
   const d = brief.direct;
 
   return (
     <div className="mt-4 rounded-2xl ring-1 ring-gray-200">
       <div className="p-4 bg-gray-50 rounded-t-2xl flex items-center justify-between">
-        <div className="font-medium">Your search plan</div>
-        <button className="text-sm underline" onClick={() => s.set({ showPlan: false })}>Hide</button>
+        <div className="font-medium">Search plan</div>
       </div>
       <div className="p-4 space-y-3 text-sm">
         <div>
-          <div className="text-xs text-gray-500 mb-1">Search query</div>
           <textarea
             value={(s.editableQuery && s.editableQuery.length) ? s.editableQuery : d.query}
             onChange={(e)=>s.set({ editableQuery: (e.target as HTMLTextAreaElement).value })}
@@ -298,6 +309,24 @@ function PlanDrawer() {
           <div><span className="font-medium">Sources</span><br />{d.sources.join(", ")}</div>
           {d.geography?.length ? (<div><span className="font-medium">Geography</span><br />{d.geography.join(", ")}</div>) : null}
           <div><span className="font-medium">Access</span><br />{[d.access.academic && "academic", d.access.policy && "policy"].filter(Boolean).join(", ")}</div>
+          <div>
+            <span className="font-medium">Max results</span><br />
+            <div className="mt-1 flex flex-wrap gap-2">
+              {[5, 10, 20, 30, 50, 100].map(n => (
+                <button
+                  key={n}
+                  onClick={() => s.set({ maxResults: n })}
+                  className={`px-3 py-1.5 rounded-full text-sm ring-1 ${
+                    s.maxResults === n
+                      ? "bg-blue-600 !text-white ring-blue-600"
+                      : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -337,23 +366,58 @@ function ScreenAsk() {
     }
   };
 
+  const handleQuickSearch = () => {
+    // Skip to approve step with current question only
+    s.set({ step: "APPROVE" });
+  };
+
   return (
-    <div className="mx-auto max-w-4xl px-8 py-20 space-y-8">
-      <div className="text-center space-y-6">
-        <h1 className="text-4xl font-semibold">Find global policy evidence</h1>
-        <p className="text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">Type your research question and we&apos;ll build a search for you. You can refine it before running.</p>
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-32">
+      {/* Header */}
+      <div className="text-center space-y-0">
+        <div className="flex items-center justify-center gap-3">
+          <h1 className="text-4xl font-bold tracking-tight">Find global policy evidence</h1>
+          <Tooltip content={
+            <p className="max-w-xs">
+              Alpha means this is an early prototype with limited functionality. 
+              Features may be incomplete, unstable, or subject to change. 
+              We&apos;re actively developing and improving the tool.
+            </p>
+          }>
+            <Badge variant="default" className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1 -mt-2">ALPHA</Badge>
+          </Tooltip>
+        </div>
       </div>
+
+      {/* Search Form */}
       <div className="space-y-6">
-        <Textarea autoFocus placeholder="Example: Which UK home‑heating incentives reduced gas use since 2019?" value={s.researchQuestion} onChange={(e) => s.set({ researchQuestion: e.target.value })} />
-        <div className="flex items-center justify-between mt-12">
-          <button className="text-sm text-gray-600 underline hover:text-gray-800 transition-colors" onClick={() => s.set({ showPlan: !s.showPlan })}>Show search plan ▸</button>
-          <Button 
-            full 
-            disabled={!s.researchQuestion.trim() || s.isGeneratingSubQuestions} 
-            onClick={handleNext}
-          >
-            {s.isGeneratingSubQuestions ? 'Generating questions...' : 'Find evidence'}
-          </Button>
+        <Textarea autoFocus placeholder="Example: Interventions to improve home learning environment for young children" value={s.researchQuestion} onChange={(e) => s.set({ researchQuestion: e.target.value })} />
+        <div className="space-y-4 mt-12">
+          <div className="flex gap-3">
+            <Button 
+              variant="secondary"
+              full
+              disabled={!s.researchQuestion.trim()}
+              onClick={handleQuickSearch}
+            >
+              Quick search
+            </Button>
+            <Button 
+              full 
+              disabled={!s.researchQuestion.trim() || s.isGeneratingSubQuestions} 
+              onClick={handleNext}
+            >
+              {s.isGeneratingSubQuestions ? 'Generating questions...' : 'Refine search'}
+            </Button>
+          </div>
+          <div className="text-center pt-2">
+            <button 
+              className="text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg transition-colors border-0" 
+              onClick={() => s.set({ showPlan: !s.showPlan })}
+            >
+              {s.showPlan ? 'Hide search plan ▾' : 'Show search plan ▸'}
+            </button>
+          </div>
         </div>
       </div>
       {s.showPlan && <PlanDrawer />}
@@ -435,13 +499,11 @@ function StepSourcesAccess() {
     <div className="space-y-6">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Which sources should we include?</h2>
-        <p className="text-gray-600 text-lg">Choose where you want the information to come from.</p>
       </div>
       <div className="flex flex-wrap gap-3 justify-center">
         <Chip active={s.access.academic} onClick={() => toggleAccess("academic")}>Academic (OpenAlex)</Chip>
         <Chip active={s.access.policy} onClick={() => toggleAccess("policy")}>Policy (think tanks and government)</Chip>
       </div>
-      <div className="text-sm text-gray-500 text-center">More sources coming soon.</div>
     </div>
   );
 }
@@ -595,20 +657,28 @@ function StepExclude() {
 function WizardShell({ children }: React.PropsWithChildren) {
   const s = useChat();
   const steps = ["Sub‑questions","Sources","Time","Geography","Focus","Exclude"];
+
   return (
     <div className="space-y-8">
       <ProgressBar step={s.refineStep} total={steps.length} />
-      <div>{children}</div>
-      <div className="flex justify-between items-center pt-4">
+      <div className="flex justify-between items-center py-4">
         <Button variant="secondary" onClick={() => (s.refineStep === 0 ? s.back() : s.backRefine())}>Back</Button>
         <div className="flex gap-3 items-center">
-          <button className="text-sm text-gray-600 underline hover:text-gray-800 transition-colors" onClick={() => s.set({ showPlan: !s.showPlan })}>{s.showPlan?"Hide search plan":"Show search plan ▸"}</button>
           {s.refineStep < steps.length - 1 ? (
             <Button onClick={() => s.nextRefine()}>Next</Button>
           ) : (
             <Button onClick={() => s.next()}>Review search plan</Button>
           )}
         </div>
+      </div>
+      <div>{children}</div>
+      <div className="text-center pt-2">
+        <button 
+          className="text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg transition-colors border-0" 
+          onClick={() => s.set({ showPlan: !s.showPlan })}
+        >
+          {s.showPlan ? 'Hide search plan ▾' : 'Show search plan ▸'}
+        </button>
       </div>
       {s.showPlan && <PlanDrawer />}
     </div>
@@ -650,6 +720,7 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
     excludes: s.excludes,
     customExcludes: s.customExcludes,
     editableQuery: s.editableQuery,
+    maxResults: s.maxResults,
   });
 
   // Build a more comprehensive summary that reflects the actual search scope
@@ -687,6 +758,12 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
           <CardTitle className="text-2xl">Review your search plan</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
+
+        <section className="space-y-2">
+            <h4 className="font-semibold">Summary</h4>
+            <p className="text-base leading-7 text-gray-800">{summary}</p>
+          </section>
+                    
           <section className="space-y-2">
             <h4 className="font-semibold">Research questions</h4>
             <div className="rounded-xl bg-gray-50 p-4 ring-1 ring-gray-200">
@@ -699,23 +776,22 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
             </div>
           </section>
 
-          <section className="space-y-2">
-            <h4 className="font-semibold">Summary</h4>
-            <p className="text-base leading-7 text-gray-800">{summary}</p>
-          </section>
+
 
           <section className="space-y-2">
-            <h4 className="font-semibold">Exact search query (advanced)</h4>
-            <button className="text-sm text-gray-600 underline" onClick={() => setShowQuery((v)=>!v)}>
-              {showQuery ? "Hide search query" : "Show search query ▸"}
-            </button>
+            <h4 className="font-semibold cursor-pointer hover:text-gray-700 transition-colors" onClick={() => setShowQuery((v)=>!v)}>
+              {showQuery ? 'Hide exact search query ▾' : 'Show exact search query ▸'}
+            </h4>
             {showQuery && (
-              <div className="relative mt-1">
-                <pre className="whitespace-pre-wrap bg-gray-50 ring-1 ring-gray-200 p-3 rounded-xl text-sm pr-16">{brief.direct.query}</pre>
-                <button
-                  className="absolute top-2 right-2 text-xs px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-100"
-                  onClick={() => navigator.clipboard?.writeText(brief.direct.query)}
-                >Copy</button>
+              <div className="space-y-2">
+                <div className="relative">
+                  <pre className="whitespace-pre-wrap bg-gray-50 ring-1 ring-gray-200 p-3 rounded-xl text-sm pr-16">{brief.direct.query}</pre>
+                  <button
+                    className="absolute top-2 right-2 text-xs px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-100"
+                    onClick={() => navigator.clipboard?.writeText(brief.direct.query)}
+                  >Copy</button>
+                </div>
+                <p className="text-xs text-gray-500">We will adjust the query further for OpenAlex searches to increase the number of results</p>
               </div>
             )}
           </section>
@@ -730,6 +806,22 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
               <div><span className="font-medium">Access</span><br />{accessArr.join(", ") || "—"}</div>
               <div><span className="font-medium">Include</span><br />{brief.soft.include.join(", ") || "—"}</div>
               <div><span className="font-medium">Exclude</span><br />{brief.soft.exclude.join(", ") || "—"}</div>
+              <div>
+                <span className="font-medium">Max results</span><br />
+                <div className="inline-flex items-center gap-2 mt-1">
+                  <button
+                    className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50"
+                    onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
+                    aria-label="Decrease results"
+                  >–</button>
+                  <span className="min-w-[2ch] text-center">{s.maxResults}</span>
+                  <button
+                    className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50"
+                    onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
+                    aria-label="Increase results"
+                  >+</button>
+                </div>
+              </div>
             </div>
           </section>
         </CardContent>

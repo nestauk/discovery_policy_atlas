@@ -12,12 +12,33 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import tiktoken
 
 from app.core.config import settings
 from .workflow_langchain import ExtractionWorkflow
 from .storage import AnalysisStorageService
 
 logger = logging.getLogger(__name__)
+
+
+def truncate_text_for_model(
+    text: str, model: str = "gpt-4o-mini", max_tokens: int = 100000
+) -> str:
+    """Truncate text to fit within model's context window."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+        tokens = encoding.encode(text)
+
+        if len(tokens) <= max_tokens:
+            return text
+
+        # Truncate and decode back to text
+        truncated_tokens = tokens[:max_tokens]
+        return encoding.decode(truncated_tokens)
+    except Exception as e:
+        logger.warning(f"Failed to truncate text: {e}")
+        # Fallback: simple character-based truncation
+        return text[: max_tokens * 4]  # Rough estimate: 4 chars per token
 
 
 @dataclass
@@ -131,6 +152,14 @@ class LangChainExtractorService:
                 )
                 print(f"⚠️  Skipping extraction (text too short: {len(doc_text)} chars)")
                 return None
+
+            # Truncate text if it exceeds model's context window
+            original_length = len(doc_text)
+            doc_text = truncate_text_for_model(doc_text, self.config.model, 100000)
+            if len(doc_text) < original_length:
+                print(
+                    f"✂️  Truncated text from {original_length} to {len(doc_text)} chars"
+                )
 
             # Run the LangGraph workflow
             try:

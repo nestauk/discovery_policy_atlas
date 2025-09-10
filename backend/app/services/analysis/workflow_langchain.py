@@ -246,13 +246,31 @@ class ExtractionWorkflow:
             return {"results": [], "error": f"Results extraction failed: {e}"}
 
     async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
-        """Stage E: Extract study conclusions."""
+        """Stage E: Extract study conclusions with evidence strength and impact assessment."""
         try:
+            # Prepare interventions context as JSON string
+            interventions_json = (
+                json.dumps(
+                    [
+                        intervention.model_dump()
+                        for intervention in state["interventions"]
+                    ],
+                    indent=2,
+                )
+                if state["interventions"]
+                else "No interventions extracted"
+            )
+
             chain = CONCLUSIONS_PROMPT | self.llm | self.json_parser
-            result = await chain.ainvoke({"full_text": state["full_text"]})
+            result = await chain.ainvoke(
+                {
+                    "full_text": state["full_text"],
+                    "interventions_json": interventions_json,
+                }
+            )
 
             extraction = ConclusionsExtraction(**result)
-            logger.info("Extracted study conclusion")
+            logger.info("Extracted study conclusion with evidence assessment")
 
             return {"conclusion": extraction.conclusion}
 
