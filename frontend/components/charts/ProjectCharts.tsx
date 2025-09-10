@@ -169,7 +169,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       ...baseOptions.plugins,
       tooltip: {
         intersect: false,
-        mode: 'index' as const,
+        mode: 'index',
         callbacks: {
           title: (tooltipItems: unknown[]) => {
             const items = tooltipItems as Array<{ dataIndex: number }>

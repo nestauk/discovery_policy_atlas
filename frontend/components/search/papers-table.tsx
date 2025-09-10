@@ -248,12 +248,12 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
           return <span className="text-gray-400 text-xs">-</span>
         }
         
-        const { rank, description } = getStudyTypeInfo(studyType)
+        const { description } = getStudyTypeInfo(studyType)
         
         return (
           <Tooltip content={description}>
             <span className="inline-block px-2 py-1 rounded text-xs font-medium text-gray-700 bg-gray-100 cursor-help">
-              {rank === 0 ? '-' : rank}
+              {studyType.toUpperCase()}
             </span>
           </Tooltip>
         )
