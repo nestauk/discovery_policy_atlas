@@ -268,6 +268,9 @@ export default function ProjectsPage() {
                       </div>
                       <div className="text-xs text-slate-400 mt-1">
                         Created: {new Date(project.created_at).toLocaleDateString()}
+                        {project.created_by_name && (
+                          <span className="ml-2">• By {project.created_by_name}</span>
+                        )}
                       </div>
                     </div>
                   </CardContent>

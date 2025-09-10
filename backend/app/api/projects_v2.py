@@ -101,6 +101,8 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
                     "relevant_references": project_data.get("relevant_references", 0),
                     "status": project_data.get("status", "created"),
                     "created_at": project_data["created_at"],
+                    "created_by_user_id": project_data.get("created_by_user_id"),
+                    "created_by_name": project_data.get("created_by_name"),
                 }
             )
 
@@ -133,6 +135,8 @@ async def create_analysis_project(
             "relevant_references": 0,
             "status": "created",
             "created_at": datetime.utcnow().isoformat(),
+            "created_by_user_id": current_user.user_id,
+            "created_by_name": current_user.name,
         }
 
         result = (
@@ -156,6 +160,8 @@ async def create_analysis_project(
             "relevant_references": created_project.get("relevant_references", 0),
             "status": created_project.get("status", "created"),
             "created_at": created_project["created_at"],
+            "created_by_user_id": created_project.get("created_by_user_id"),
+            "created_by_name": created_project.get("created_by_name"),
         }
 
     except HTTPException:
@@ -220,6 +226,8 @@ async def get_analysis_project(
                 "relevant_references": project.get("relevant_references", 0),
                 "status": project.get("status", "unknown"),
                 "created_at": project["created_at"],
+                "created_by_user_id": project.get("created_by_user_id"),
+                "created_by_name": project.get("created_by_name"),
             },
             "documents": documents,
             "extractions": extractions_result.data,
@@ -284,6 +292,8 @@ async def update_analysis_project(
             "relevant_references": updated_project.get("relevant_references", 0),
             "status": updated_project.get("status", "unknown"),
             "created_at": updated_project["created_at"],
+            "created_by_user_id": updated_project.get("created_by_user_id"),
+            "created_by_name": updated_project.get("created_by_name"),
         }
 
     except HTTPException:
@@ -422,7 +432,12 @@ async def run_analysis_for_project(
 
         # Run analysis
         service = AnalysisService(export_dir=settings.EXPORT_FILES_DIR)
-        result = await service.run(config, project_id=project_id)
+        result = await service.run(
+            config,
+            project_id=project_id,
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+        )
 
         # Update project with results
         vectorization_service.supabase.table("analysis_projects").update(

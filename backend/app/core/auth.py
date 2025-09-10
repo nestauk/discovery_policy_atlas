@@ -21,9 +21,12 @@ jwks_client = PyJWKClient(JWKS_URL)
 
 
 class CurrentUser:
-    def __init__(self, user_id: str, email: Optional[str] = None):
+    def __init__(
+        self, user_id: str, email: Optional[str] = None, name: Optional[str] = None
+    ):
         self.user_id = user_id
         self.email = email
+        self.name = name
 
 
 async def get_current_user(
@@ -50,10 +53,31 @@ async def get_current_user(
         user_id = payload.get("sub")
         email = payload.get("email")
 
+        # Extract name information from JWT claims
+        # Try different name fields that Clerk might include
+        name = None
+        first_name = payload.get("first_name")
+        last_name = payload.get("last_name")
+        full_name = payload.get("full_name")
+
+        if full_name:
+            name = full_name
+        elif first_name or last_name:
+            # Combine first and last name, handling None values
+            name_parts = []
+            if first_name:
+                name_parts.append(first_name)
+            if last_name:
+                name_parts.append(last_name)
+            name = " ".join(name_parts) if name_parts else None
+        elif email:
+            # Fallback to email if no name is available
+            name = email.split("@")[0]  # Use email prefix as display name
+
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token: no user ID")
 
-        return CurrentUser(user_id=user_id, email=email)
+        return CurrentUser(user_id=user_id, email=email, name=name)
 
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")

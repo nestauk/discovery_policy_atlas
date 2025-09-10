@@ -201,7 +201,9 @@ async def run_analysis(
     )
 
     service = AnalysisService(export_dir=settings.EXPORT_FILES_DIR)
-    result = await service.run(config)
+    result = await service.run(
+        config, user_id=current_user.user_id, user_name=current_user.name
+    )
     return JSONResponse(
         content={
             "run_id": result.run_id,

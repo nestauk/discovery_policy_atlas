@@ -39,7 +39,13 @@ class AnalysisService:
         self.export_dir = Path(export_dir)
         self.export_dir.mkdir(parents=True, exist_ok=True)
 
-    async def run(self, config: RunConfig, project_id: str = None) -> RunResult:
+    async def run(
+        self,
+        config: RunConfig,
+        project_id: str = None,
+        user_id: str = None,
+        user_name: str = None,
+    ) -> RunResult:
         # Generate run ID with timestamp for better identification (max 12 chars for DB compatibility)
         timestamp = datetime.now().strftime("%m%d%H%M")  # MMDDHHMM = 8 chars
         uuid_part = uuid.uuid4().hex[:4]  # 4 chars
@@ -195,7 +201,7 @@ class AnalysisService:
             logger.info("Starting Supabase upload for run %s", run_id)
             storage_service = AnalysisStorageService()
             storage_project_id = await storage_service.store_analysis_run(
-                config, result, project_id
+                config, result, project_id, user_id, user_name
             )
             logger.info(
                 "Successfully stored analysis run %s to project %s",
