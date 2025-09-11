@@ -56,6 +56,30 @@ class PolicyIntervention(BaseModel):
     )
 
 
+class OutcomeTheme(BaseModel):
+    """Represents a canonicalised outcome theme with supporting evidence.
+
+    Attributes:
+        outcome_theme: Standardised name for the outcome theme.
+        summary_description: Synthesised description of the outcome.
+        frequency: Number of documents that mention this outcome.
+        source_doc_ids: IDs of documents supporting this outcome.
+    """
+
+    outcome_theme: str = Field(
+        ..., description="A standardised name for the outcome theme."
+    )
+    summary_description: str = Field(
+        ..., description="A synthesised description of the outcome."
+    )
+    frequency: int = Field(
+        ..., description="The number of documents that mention this outcome."
+    )
+    source_doc_ids: List[str] = Field(
+        ..., description="List of document IDs that discuss this outcome."
+    )
+
+
 class SynthesisSummary(BaseModel):
     """Container for the executive briefing and aggregated tables.
 
@@ -63,6 +87,7 @@ class SynthesisSummary(BaseModel):
         executive_briefing: Concise narrative summary for policymakers.
         key_issues: Aggregated issue clusters.
         interventions: Aggregated intervention clusters.
+        outcome_themes: Aggregated outcome clusters.
     """
 
     executive_briefing: str = Field(
@@ -70,6 +95,7 @@ class SynthesisSummary(BaseModel):
     )
     key_issues: List[KeyIssue]
     interventions: List[PolicyIntervention]
+    outcome_themes: List[OutcomeTheme]
 
 
 class Finding(BaseModel):

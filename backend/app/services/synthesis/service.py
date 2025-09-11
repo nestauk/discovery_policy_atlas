@@ -226,6 +226,7 @@ class SynthesisService:
                     executive_briefing=cached.get("executive_briefing") or "",
                     key_issues=key_issues_resp,
                     interventions=interventions_resp,
+                    outcome_themes=[],  # Legacy cache compatibility
                 )
 
         # Build mentions for LLM
@@ -543,6 +544,7 @@ class SynthesisService:
             executive_briefing=executive_briefing_text or "",
             key_issues=key_issues_resp,
             interventions=interventions_resp,
+            outcome_themes=[],  # Legacy service compatibility
         )
 
     async def get_findings(

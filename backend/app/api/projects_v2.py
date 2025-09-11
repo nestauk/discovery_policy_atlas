@@ -16,7 +16,11 @@ from app.services.synthesis.schemas import (
 )
 from app.services.synthesis.service import SynthesisService
 from app.services.synthesis.agent import SynthesisAgent, SynthesisState
-from app.services.synthesis.logbook import read_cached_summary, write_run_from_state
+from app.services.synthesis.logbook import (
+    read_cached_summary,
+    write_run_from_state,
+    get_intervention_result_network,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +73,28 @@ async def get_synthesis_summary(
             ),
             key_issues=final_state.get("aggregated_issues", []),
             interventions=final_state.get("aggregated_interventions", []),
+            outcome_themes=final_state.get("aggregated_outcome_themes", []),
         )
     except Exception as e:
         logger.error(f"Error running synthesis agent for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to build synthesis summary")
+
+
+@router.get(
+    "/{project_id}/network",
+    summary="Get Intervention-Result Network Data",
+)
+async def get_network_data(
+    project_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get intervention-result network data for visualization in CSV-compatible format."""
+    try:
+        network_data = await get_intervention_result_network(project_id)
+        return network_data
+    except Exception as e:
+        logger.error(f"Error getting network data for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get network data")
 
 
 @router.get("")

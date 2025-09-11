@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as d3 from 'd3';
-import { Upload, Download, Sun, Moon, Plus, Minus, RotateCcw, Search } from 'lucide-react';
+import { Upload, Download, Sun, Moon, Plus, Minus, RotateCcw, Search, AlertCircle } from 'lucide-react';
+import { useAPI } from '@/lib/api';
 
 // D3 Types for force simulation
 type D3Node = Node & d3.SimulationNodeDatum;
@@ -20,6 +21,19 @@ interface StudyData {
   URL: string;
 }
 
+// API CSV item shape returned from backend before numeric coercion
+interface NetworkCsvItem {
+  Predictor?: string;
+  Outcome?: string;
+  'Effect size'?: number | string;
+  'Standardised effect size'?: number | string;
+  'Effect size type'?: string;
+  'Study type'?: string;
+  'Sample size'?: number | string;
+  Location?: string;
+  URL?: string;
+}
+
 interface Node {
   id: string;
   type: 'predictor' | 'outcome' | 'both';
@@ -33,10 +47,17 @@ interface Link {
   averageEffect: number;
 }
 
-export default function NetworkVisualizer() {
+interface NetworkVisualizerProps {
+  projectId?: string; // Optional: if provided, loads data from API; otherwise falls back to CSV upload
+}
+
+export default function NetworkVisualizer({ projectId }: NetworkVisualizerProps = {}) {
   const [data, setData] = useState<StudyData[]>([]);
   const [fileName, setFileName] = useState('');
   const [darkMode, setDarkMode] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dataSource, setDataSource] = useState<'api' | 'csv' | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [selectedLink, setSelectedLink] = useState<Link | null>(null);
@@ -54,6 +75,64 @@ export default function NetworkVisualizer() {
   
   const svgRef = useRef<SVGSVGElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { fetchWithAuth } = useAPI();
+  const lastLoadedProjectIdRef = useRef<string | null>(null);
+  const fetchRef = useRef(fetchWithAuth);
+  // Keep a stable ref to fetchWithAuth to avoid re-running effect when hook identity changes
+  useEffect(() => {
+    fetchRef.current = fetchWithAuth;
+  }, [fetchWithAuth]);
+
+  // Load data from API when projectId is provided
+  useEffect(() => {
+    const loadApiData = async () => {
+      if (!projectId) {
+        setDataSource('csv');
+        return;
+      }
+
+      // Avoid redundant loads for the same projectId
+      if (lastLoadedProjectIdRef.current === projectId && dataSource === 'api' && data.length > 0) {
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      setDataSource('api');
+
+      try {
+        const networkData = await fetchRef.current(`/api/analysis-projects/${projectId}/network`);
+        const csvData = networkData.csv_data || [];
+        
+        // Transform API data to match CSV format expected by visualization
+        const transformedData: StudyData[] = csvData.map((item: NetworkCsvItem) => ({
+          Predictor: item.Predictor || '',
+          Outcome: item.Outcome || '',
+          'Effect size': Number(item['Effect size'] ?? 0),
+          'Standardised effect size': Number(item['Standardised effect size'] ?? 0),
+          'Effect size type': item['Effect size type'] || 'Document co-occurrence',
+          'Study type': item['Study type'] || 'Theme analysis',
+          'Sample size': Number(item['Sample size'] ?? 0),
+          Location: item.Location || 'Project-wide',
+          URL: item.URL || '',
+        }));
+
+        setData(transformedData);
+        setFileName(`Network Analysis - Project ${projectId}`);
+        lastLoadedProjectIdRef.current = projectId;
+        
+        if (transformedData.length === 0) {
+          setError('No network data available for this project. Make sure synthesis has been completed.');
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load network data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadApiData();
+  }, [projectId, fetchWithAuth, dataSource, data.length]);
 
   // Helper functions to get node IDs from source/target (which can be string or Node after D3 processing)
   const getNodeId = (node: string | Node): string => {
@@ -500,21 +579,45 @@ export default function NetworkVisualizer() {
               <Search className="absolute right-3 top-2.5 text-gray-400" size={18} />
             </div>
 
-            {/* Upload CSV */}
-            <label className={`px-4 py-2 rounded-lg flex items-center transition-colors shadow-sm cursor-pointer ${
-              darkMode ? 'bg-gray-800 text-gray-100 hover:bg-gray-700 border border-gray-700' : 
-              'bg-white text-gray-800 hover:bg-gray-100 border border-gray-200'
-            }`}>
-              <Upload size={18} className="mr-2" />
-              <span>Upload CSV</span>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-            </label>
+            {/* Upload CSV - only show when not using API */}
+            {dataSource !== 'api' && (
+              <label className={`px-4 py-2 rounded-lg flex items-center transition-colors shadow-sm cursor-pointer ${
+                darkMode ? 'bg-gray-800 text-gray-100 hover:bg-gray-700 border border-gray-700' : 
+                'bg-white text-gray-800 hover:bg-gray-100 border border-gray-200'
+              }`}>
+                <Upload size={18} className="mr-2" />
+                <span>Upload CSV</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+              </label>
+            )}
+
+            {/* Loading indicator for API data */}
+            {dataSource === 'api' && loading && (
+              <div className={`px-4 py-2 rounded-lg flex items-center transition-colors shadow-sm ${
+                darkMode ? 'bg-gray-800 text-gray-100 border border-gray-700' : 
+                'bg-white text-gray-800 border border-gray-200'
+              }`}>
+                <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full mr-2"></div>
+                <span>Loading network data...</span>
+              </div>
+            )}
+
+            {/* Error indicator for API data */}
+            {dataSource === 'api' && error && (
+              <div className={`px-4 py-2 rounded-lg flex items-center transition-colors shadow-sm ${
+                darkMode ? 'bg-red-900 text-red-100 border border-red-700' : 
+                'bg-red-50 text-red-800 border border-red-200'
+              }`}>
+                <AlertCircle size={18} className="mr-2" />
+                <span>Failed to load</span>
+              </div>
+            )}
 
             {/* Save Image */}
             <button 
@@ -569,30 +672,74 @@ export default function NetworkVisualizer() {
                   <circle cx="46" cy="26" r="6" fill="#3CB371" stroke="#ffffff" strokeWidth="1.5"/>
                   <circle cx="32" cy="48" r="6" fill="#BA55D3" stroke="#ffffff" strokeWidth="1.5"/>
                 </svg>
-                <h2 className="text-xl font-semibold mb-2">Upload a CSV to visualise your network</h2>
-                <p className="text-sm text-center max-w-md mb-6">
-                  Upload a CSV file with the required columns to generate an interactive network visualisation.
-                </p>
-                <div className="text-left">
-                  <h3 className="font-semibold mb-2">Required CSV Format</h3>
-                  <ul className="list-disc list-inside text-sm space-y-1">
-                    <li>Predictor</li>
-                    <li>Outcome</li>
-                    <li>Effect size</li>
-                    <li>Standardised effect size</li>
-                    <li>Effect size type</li>
-                    <li>Study type</li>
-                    <li>Sample size</li>
-                    <li>Location</li>
-                  </ul>
-                </div>
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="mt-6 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center"
-                >
-                  <Upload size={20} className="mr-2" />
-                  Upload CSV
-                </button>
+                {/* API Mode Loading State */}
+                {dataSource === 'api' && loading && (
+                  <>
+                    <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4"></div>
+                    <h2 className="text-xl font-semibold mb-2">Loading Network Data</h2>
+                    <p className="text-sm text-center max-w-md">
+                      Fetching intervention-result network data from synthesis analysis...
+                    </p>
+                  </>
+                )}
+
+                {/* API Mode Error State */}
+                {dataSource === 'api' && error && (
+                  <>
+                    <AlertCircle size={48} className="mb-4 text-red-500" />
+                    <h2 className="text-xl font-semibold mb-2 text-red-600">Failed to Load Network Data</h2>
+                    <p className="text-sm text-center max-w-md mb-4 text-red-600">
+                      {error}
+                    </p>
+                    <button 
+                      onClick={() => window.location.reload()}
+                      className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </>
+                )}
+
+                {/* API Mode No Data State */}
+                {dataSource === 'api' && !loading && !error && (
+                  <>
+                    <h2 className="text-xl font-semibold mb-2">No Network Data Available</h2>
+                    <p className="text-sm text-center max-w-md">
+                      No intervention-result network data found for this project. 
+                      Make sure synthesis analysis has been completed.
+                    </p>
+                  </>
+                )}
+
+                {/* CSV Mode Upload State */}
+                {dataSource !== 'api' && (
+                  <>
+                    <h2 className="text-xl font-semibold mb-2">Upload a CSV to visualise your network</h2>
+                    <p className="text-sm text-center max-w-md mb-6">
+                      Upload a CSV file with the required columns to generate an interactive network visualisation.
+                    </p>
+                    <div className="text-left">
+                      <h3 className="font-semibold mb-2">Required CSV Format</h3>
+                      <ul className="list-disc list-inside text-sm space-y-1">
+                        <li>Predictor</li>
+                        <li>Outcome</li>
+                        <li>Effect size</li>
+                        <li>Standardised effect size</li>
+                        <li>Effect size type</li>
+                        <li>Study type</li>
+                        <li>Sample size</li>
+                        <li>Location</li>
+                      </ul>
+                    </div>
+                    <button 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="mt-6 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center"
+                    >
+                      <Upload size={20} className="mr-2" />
+                      Upload CSV
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <svg 

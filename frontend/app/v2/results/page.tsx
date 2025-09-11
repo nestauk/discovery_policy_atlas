@@ -114,6 +114,18 @@ export default function AnalysisResultsPage() {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions } = useAPI()
 
+  // Global cleanup on component unmount
+  useEffect(() => {
+    return () => {
+      console.log('AnalysisResultsPage unmounting - cleaning up all intervals')
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+      hasStartedPollingRef.current = null
+    }
+  }, [])
+
   // Get search parameters (memoized to prevent re-runs)
   const searchConfig = useMemo(() => ({
     query: searchParams.get('query') || '',
@@ -131,14 +143,18 @@ export default function AnalysisResultsPage() {
 
   // Define data loading functions
   const loadData = useCallback(async () => {
-    if (hasLoadedData || loadingData) return
-
     // Get current active project ID dynamically
     const currentActiveProject = useAnalysisProjectStore.getState().activeProject
     const currentProjectId = currentActiveProject?.id
     
     if (!currentProjectId) {
       console.log('No active project found, cannot load data')
+      return
+    }
+
+    // Check loading state at call time to avoid race conditions
+    if (loadingData || hasLoadedData) {
+      console.log('Already loading or loaded, skipping:', { loadingData, hasLoadedData })
       return
     }
 
@@ -166,7 +182,7 @@ export default function AnalysisResultsPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [hasLoadedData, loadingData, fetchWithAuth, getProjectInterventions])
+  }, [fetchWithAuth, getProjectInterventions, loadingData, hasLoadedData])
 
   const refreshData = useCallback(async () => {
     // Throttle refreshes to prevent infinite loops (minimum 5 seconds between calls)
@@ -224,7 +240,7 @@ export default function AnalysisResultsPage() {
     }
   }, [searchConfig.projectId, activeProject, router])
 
-  // Reset flags when project changes
+  // Reset flags when project changes and add cleanup
   useEffect(() => {
     setHasLoadedData(false)
     setAnalysisComplete(false)
@@ -238,6 +254,16 @@ export default function AnalysisResultsPage() {
     }
     hasStartedPollingRef.current = null
     setIsPolling(false)
+    
+    // Cleanup function to prevent memory leaks and multiple polling instances
+    return () => {
+      if (pollingIntervalRef.current) {
+        console.log('Cleaning up polling interval on project change/unmount')
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
+      hasStartedPollingRef.current = null
+    }
   }, [effectiveProjectId])
 
   // Stop polling when analysis is complete (safety mechanism)
@@ -415,7 +441,7 @@ export default function AnalysisResultsPage() {
       console.log('Initial load for new project:', effectiveProjectId)
       loadData()
     }
-  }, [effectiveProjectId, hasLoadedData, loadingData]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [effectiveProjectId, hasLoadedData, loadingData, loadData])
 
   // Lazy-fetch summary data when summary tab is opened first time
   // Fetch summary when Summary tab is opened or project changes
@@ -652,21 +678,17 @@ export default function AnalysisResultsPage() {
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
               <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="summary" className="flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  Extraction
-                </TabsTrigger>
                 <TabsTrigger value="evidence" className="flex items-center gap-2">
                   <BookOpen className="h-4 w-4" />
                   Evidence
                 </TabsTrigger>
-                <TabsTrigger value="insights" className="flex items-center gap-2">
-                  <Brain className="h-4 w-4" />
-                  Insights
-                </TabsTrigger>
                 <TabsTrigger value="summary" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   Summary
+                </TabsTrigger>
+                <TabsTrigger value="insights" className="flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  Insights
                 </TabsTrigger>
                 <TabsTrigger value="assistant" className="flex items-center gap-2">
                   <Bot className="h-4 w-4" />
@@ -852,7 +874,7 @@ export default function AnalysisResultsPage() {
                   {/* Content based on active sub-tab */}
                   {insightsSubTab === 'network' && (
                     <div>
-                      <NetworkVisualizer />
+                      <NetworkVisualizer projectId={activeProject?.id} />
                     </div>
                   )}
 

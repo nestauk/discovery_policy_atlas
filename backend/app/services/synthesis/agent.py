@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from app.services.vectorization import vectorization_service
 from app.utils.llm.llm_utils import get_llm
-from app.services.synthesis.schemas import KeyIssue, PolicyIntervention
+from app.services.synthesis.schemas import KeyIssue, PolicyIntervention, OutcomeTheme
 from app.services.synthesis.prompts import (
     build_discover_themes_prompt,
     make_discover_themes_instructions,
@@ -29,6 +29,8 @@ class Concept(BaseModel):
 HIGH_REASONING_MODEL = "gpt-5-mini"  # define_themes, critique_themes
 CLASSIFICATION_MODEL = "gpt-5-nano"  # map_concepts_to_final_themes
 BRIEFING_MODEL = "gpt-5"  # synthesize_executive_briefing
+
+CRITIQUE_LIMIT = 1
 
 
 def _escape_braces(text: str) -> str:
@@ -59,20 +61,26 @@ class SynthesisState(TypedDict):
     # Parallel concept sets
     issue_concepts: List[Concept]
     intervention_concepts: List[Concept]
+    result_concepts: List[Concept]
     # Discovered themes per branch
     discovered_issue_themes: List[DiscoveredTheme]
     discovered_intervention_themes: List[DiscoveredTheme]
+    discovered_result_themes: List[DiscoveredTheme]
     # Critiques and iteration counters per branch
     issue_theme_critique: Optional[str]
     intervention_theme_critique: Optional[str]
+    result_theme_critique: Optional[str]
     issue_theme_iteration: int
     intervention_theme_iteration: int
+    result_theme_iteration: int
     # Final themed concepts per branch
     final_issue_themes: List[FinalTheme]
     final_intervention_themes: List[FinalTheme]
+    final_result_themes: List[FinalTheme]
     executive_briefing: str
     aggregated_issues: List[KeyIssue]
     aggregated_interventions: List[PolicyIntervention]
+    aggregated_outcome_themes: List[OutcomeTheme]
 
 
 class ThemesOut(BaseModel):
@@ -160,6 +168,14 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                     raw.get("explanation") or row.get("description") or ""
                 ),
             }
+        elif et == "result":
+            return {
+                "id": str(row.get("id")),
+                "type": "result",
+                "outcome_variable": str(raw.get("outcome_variable") or ""),
+                "result_text": str(raw.get("result_text") or ""),
+                "effect_direction": str(raw.get("effect_direction") or ""),
+            }
         return {"id": str(row.get("id")), "type": et}
 
     uniform = [to_uniform(r) for r in rows]
@@ -168,11 +184,12 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
 
 
 async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
-    """Create and separate canonical concepts for issues and interventions."""
+    """Create and separate canonical concepts for issues, interventions, and results."""
     print("--- Step 1: Creating and Separating Canonical Concepts ---")
 
     issue_concepts: List[Concept] = []
     intervention_concepts: List[Concept] = []
+    result_concepts: List[Concept] = []
 
     for ext in state.get("raw_extractions", []) or []:
         if ext.get("issue_label"):
@@ -187,13 +204,22 @@ async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
             intervention_concepts.append(
                 Concept(id=ext["id"], canonical_description=desc)
             )
+        if ext.get("outcome_variable") and ext.get("result_text"):
+            desc = (
+                f"Outcome: {ext.get('outcome_variable', '')}. "
+                f"Result: {ext.get('result_text', '')}. "
+                f"Effect direction: {ext.get('effect_direction', '')}"
+            )
+            result_concepts.append(Concept(id=ext["id"], canonical_description=desc))
 
     return {
         **state,
         "issue_concepts": issue_concepts,
         "intervention_concepts": intervention_concepts,
+        "result_concepts": result_concepts,
         "issue_theme_iteration": 0,
         "intervention_theme_iteration": 0,
+        "result_theme_iteration": 0,
     }
 
 
@@ -241,6 +267,30 @@ async def critique_intervention_themes(state: SynthesisState) -> SynthesisState:
     return {
         "intervention_theme_critique": critique if critique.lower() != "none" else None,
         "intervention_theme_iteration": next_iter,
+    }
+
+
+async def define_result_themes(state: SynthesisState) -> SynthesisState:
+    themes = await _discover_themes_for_concepts(
+        state.get("result_concepts", []) or [],
+        state.get("result_theme_critique"),
+    )
+    return {"discovered_result_themes": themes}
+
+
+async def critique_result_themes(state: SynthesisState) -> SynthesisState:
+    print("--- Critiquing Result Themes ---")
+    themes_payload = _escape_braces(
+        json.dumps([t.dict() for t in state.get("discovered_result_themes", [])])
+    )
+    prompt = build_theme_critique_prompt("result")
+    llm = get_llm(HIGH_REASONING_MODEL, temperature=0.0)
+    resp = await llm.ainvoke(prompt.format(themes=themes_payload))
+    critique = (resp.content if hasattr(resp, "content") else str(resp)).strip()
+    next_iter = int(state.get("result_theme_iteration") or 0) + 1
+    return {
+        "result_theme_critique": critique if critique.lower() != "none" else None,
+        "result_theme_iteration": next_iter,
     }
 
 
@@ -320,8 +370,17 @@ async def map_intervention_concepts_to_final_themes(
     return {"final_intervention_themes": finals}
 
 
+async def map_result_concepts_to_final_themes(state: SynthesisState) -> SynthesisState:
+    print("--- Mapping Result Concepts to Final Themes ---")
+    finals = await _map_concepts(
+        state.get("result_concepts", []) or [],
+        state.get("discovered_result_themes", []) or [],
+    )
+    return {"final_result_themes": finals}
+
+
 async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
-    """Derive KeyIssue and PolicyIntervention tables from separate final theme sets.
+    """Derive KeyIssue, PolicyIntervention, and OutcomeTheme tables from separate final theme sets.
 
     Frequency is computed as unique document coverage per theme using Supabase lookups.
     """
@@ -330,8 +389,10 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     final_intervention_themes: List[FinalTheme] = (
         state.get("final_intervention_themes", []) or []
     )
+    final_result_themes: List[FinalTheme] = state.get("final_result_themes", []) or []
     issues: List[KeyIssue] = []
     interventions: List[PolicyIntervention] = []
+    outcome_themes: List[OutcomeTheme] = []
 
     # Build mapping from extraction_id to analysis_document_id -> doc_id
     project_id = state.get("project_id", "")
@@ -348,6 +409,9 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     all_intr_ex_ids: List[str] = []
     for t in final_intervention_themes:
         all_intr_ex_ids.extend(concept_ids_for_theme(t))
+    all_result_ex_ids: List[str] = []
+    for t in final_result_themes:
+        all_result_ex_ids.extend(concept_ids_for_theme(t))
 
     def fetch_doc_ids_for_extractions(ex_ids: List[str]) -> Dict[str, str]:
         mapping: Dict[str, str] = {}
@@ -380,6 +444,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
 
     issue_ex_id_to_doc_id = fetch_doc_ids_for_extractions(all_issue_ex_ids)
     intr_ex_id_to_doc_id = fetch_doc_ids_for_extractions(all_intr_ex_ids)
+    result_ex_id_to_doc_id = fetch_doc_ids_for_extractions(all_result_ex_ids)
 
     # Helper to generate a short impact summary via LLM (fast model)
     async def _impact_for_theme(name: str, concept_texts: List[str]) -> str:
@@ -446,7 +511,35 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             )
         )
 
-    return {"aggregated_issues": issues, "aggregated_interventions": interventions}
+    # Build Outcome Themes with doc coverage
+    for t in final_result_themes:
+        ids = concept_ids_for_theme(t)
+        doc_ids = sorted(
+            list(
+                {
+                    result_ex_id_to_doc_id.get(x, "")
+                    for x in ids
+                    if result_ex_id_to_doc_id.get(x)
+                }
+            )
+        )
+        freq = len(doc_ids)
+        if freq == 0:
+            continue
+        outcome_themes.append(
+            OutcomeTheme(
+                outcome_theme=t.name,
+                summary_description=t.description,
+                frequency=freq,
+                source_doc_ids=doc_ids,
+            )
+        )
+
+    return {
+        "aggregated_issues": issues,
+        "aggregated_interventions": interventions,
+        "aggregated_outcome_themes": outcome_themes,
+    }
 
 
 async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState:
@@ -503,7 +596,7 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
 def check_issue_critique(state: SynthesisState) -> str:
     has_critique = bool(state.get("issue_theme_critique"))
     iter_num = int(state.get("issue_theme_iteration") or 0)
-    if has_critique and iter_num < 2:
+    if has_critique and iter_num < CRITIQUE_LIMIT:
         return "define_issue_themes"
     return "map_issue_concepts_to_final_themes"
 
@@ -511,9 +604,17 @@ def check_issue_critique(state: SynthesisState) -> str:
 def check_intervention_critique(state: SynthesisState) -> str:
     has_critique = bool(state.get("intervention_theme_critique"))
     iter_num = int(state.get("intervention_theme_iteration") or 0)
-    if has_critique and iter_num < 2:
+    if has_critique and iter_num < CRITIQUE_LIMIT:
         return "define_intervention_themes"
     return "map_intervention_concepts_to_final_themes"
+
+
+def check_result_critique(state: SynthesisState) -> str:
+    has_critique = bool(state.get("result_theme_critique"))
+    iter_num = int(state.get("result_theme_iteration") or 0)
+    if has_critique and iter_num < CRITIQUE_LIMIT:
+        return "define_result_themes"
+    return "map_result_concepts_to_final_themes"
 
 
 def create_synthesis_workflow():
@@ -533,6 +634,13 @@ def create_synthesis_workflow():
         "map_intervention_concepts_to_final_themes",
         map_intervention_concepts_to_final_themes,
     )
+    # Result branch
+    workflow.add_node("define_result_themes", define_result_themes)
+    workflow.add_node("critique_result_themes", critique_result_themes)
+    workflow.add_node(
+        "map_result_concepts_to_final_themes",
+        map_result_concepts_to_final_themes,
+    )
     workflow.add_node("build_aggregated_tables", build_aggregated_tables)
     workflow.add_node("synthesize_executive_briefing", synthesize_executive_briefing)
 
@@ -548,11 +656,16 @@ def create_synthesis_workflow():
     workflow.add_conditional_edges(
         "critique_intervention_themes", check_intervention_critique
     )
-    # Both mapping nodes converge to aggregation
+    # Parallel result branch
+    workflow.add_edge("create_canonical_concepts", "define_result_themes")
+    workflow.add_edge("define_result_themes", "critique_result_themes")
+    workflow.add_conditional_edges("critique_result_themes", check_result_critique)
+    # All mapping nodes converge to aggregation
     workflow.add_edge("map_issue_concepts_to_final_themes", "build_aggregated_tables")
     workflow.add_edge(
         "map_intervention_concepts_to_final_themes", "build_aggregated_tables"
     )
+    workflow.add_edge("map_result_concepts_to_final_themes", "build_aggregated_tables")
     workflow.add_edge("build_aggregated_tables", "synthesize_executive_briefing")
     workflow.add_edge("synthesize_executive_briefing", END)
 
