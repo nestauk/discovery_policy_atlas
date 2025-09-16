@@ -213,15 +213,15 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                               </div>
                               
                               {/* Quantitative measures */}
-                              {(result.effect_size || result.p_value || result.uncertainty) && (
+                              {((result.effect_size && result.effect_size !== 'null') || (result.p_value && result.p_value !== 'null') || (result.uncertainty && result.uncertainty !== 'null')) && (
                                 <div className="flex gap-3 text-xs text-green-800 mb-1">
-                                  {result.effect_size && (
+                                  {result.effect_size && result.effect_size !== 'null' && (
                                     <span>Effect: {result.effect_size}</span>
                                   )}
-                                  {result.p_value && (
+                                  {result.p_value && result.p_value !== 'null' && (
                                     <span>p = {result.p_value}</span>
                                   )}
-                                  {result.uncertainty && (
+                                  {result.uncertainty && result.uncertainty !== 'null' && (
                                     <span>CI: {result.uncertainty}</span>
                                   )}
                                 </div>

@@ -29,7 +29,7 @@ export default function SearchPage() {
     try {
       // Create analysis project from chat brief
       const project = await createAnalysisProject({
-        title: `Chat Search: ${brief.researchQuestion}`,
+        title: `${brief.researchQuestion}`,
         description: brief.subQuestions.length > 0 
           ? `Sub-questions: ${brief.subQuestions.join('; ')}` 
           : undefined

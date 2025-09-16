@@ -289,9 +289,9 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
                                 <div>
                                   <span className="font-medium text-gray-600">Effect Size: </span>
-                                  {result.effect_size ? (
+                                  {result.effect_size && result.effect_size !== 'null' && result.effect_size_type !== 'null' ? (
                                     <span className="text-gray-600">
-                                      {result.effect_size_type && `${result.effect_size_type}: `}{result.effect_size}
+                                      {result.effect_size_type && result.effect_size_type !== 'null' && `${result.effect_size_type}: `}{result.effect_size}
                                     </span>
                                   ) : (
                                     <span className="text-gray-400 italic">n/a</span>
