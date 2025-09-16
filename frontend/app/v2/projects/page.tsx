@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FolderOpen, Plus, Search, Edit, Trash2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
@@ -33,6 +33,7 @@ export default function ProjectsPage() {
 
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [showInfoDialog, setShowInfoDialog] = useState(false)
   const [projectForm, setProjectForm] = useState({ title: '', description: '' })
   const [isCreating, setIsCreating] = useState(false)
   const [editProjectDialog, setEditProjectDialog] = useState<AnalysisProject | null>(null)
@@ -144,51 +145,13 @@ export default function ProjectsPage() {
           <div className="flex items-center justify-between mb-8">
             <h2 className="text-xl font-semibold text-slate-900"></h2>
             <div className="flex gap-2">
-              <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-                <DialogTrigger asChild>
-                  <Button 
-                    onClick={() => setShowCreateDialog(true)}
-                    variant="outline"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Project
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Create Analysis Project</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-sm font-medium">Project Title</label>
-                      <Input 
-                        value={projectForm.title}
-                        onChange={(e) => setProjectForm({ ...projectForm, title: e.target.value })}
-                        placeholder="Enter a descriptive title for your project..."
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium">Description (Optional)</label>
-                      <Textarea 
-                        value={projectForm.description}
-                        onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
-                        placeholder="Brief description of your research goals and topics..."
-                        rows={3}
-                      />
-                    </div>
-
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
-                        Cancel
-                      </Button>
-                      <Button onClick={handleCreateProject} disabled={isCreating}>
-                        {isCreating ? 'Creating...' : 'Create Project'}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
+              <Button 
+                onClick={() => setShowInfoDialog(true)}
+                variant="outline"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Create Project
+              </Button>
             </div>
           </div>
 
@@ -205,7 +168,7 @@ export default function ProjectsPage() {
                   Run your first analysis to create a project with structured policy research data and insights.
                 </p>
                 <Button 
-                  onClick={() => setShowCreateDialog(true)}
+                  onClick={() => setShowInfoDialog(true)}
                   className="bg-blue-600 hover:bg-blue-700"
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -278,6 +241,77 @@ export default function ProjectsPage() {
               ))}
             </div>
           )}
+
+          {/* Info Dialog - Guide users to Search page */}
+          <Dialog open={showInfoDialog} onOpenChange={setShowInfoDialog}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New Project</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <p className="text-slate-600">
+                  Projects are automatically created when you run an analysis. To create a new project:
+                </p>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-slate-600">
+                  <li>Go to the <strong>Search</strong> page</li>
+                  <li>Start a new search or analysis</li>
+                  <li>Your project will be automatically created with the results</li>
+                </ol>
+                <div className="flex gap-2 justify-end pt-4">
+                  <Button variant="outline" onClick={() => setShowInfoDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={() => {
+                      setShowInfoDialog(false)
+                      router.push('/v2/search')
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    <Search className="h-4 w-4 mr-2" />
+                    Go to Search
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Create Project Dialog - Hidden but kept for future use */}
+          <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create Analysis Project</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium">Project Title</label>
+                  <Input 
+                    value={projectForm.title}
+                    onChange={(e) => setProjectForm({ ...projectForm, title: e.target.value })}
+                    placeholder="Enter a descriptive title for your project..."
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Description (Optional)</label>
+                  <Textarea 
+                    value={projectForm.description}
+                    onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
+                    placeholder="Brief description of your research goals and topics..."
+                    rows={3}
+                  />
+                </div>
+
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleCreateProject} disabled={isCreating}>
+                    {isCreating ? 'Creating...' : 'Create Project'}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           {/* Edit Project Dialog */}
           <Dialog open={!!editProjectDialog} onOpenChange={() => setEditProjectDialog(null)}>
