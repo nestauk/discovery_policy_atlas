@@ -28,7 +28,7 @@ export default function SearchPage() {
       timeTo?: string;
     };
   }) => {
-    // Prevent multiple simultaneous analysis runs
+    // Prevent user initiating multiple analysis runs with the same search parameters
     if (isRunning) return;
     
     setIsRunning(true);
