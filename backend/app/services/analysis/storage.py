@@ -343,7 +343,12 @@ class AnalysisStorageService:
             logger.info(f"Updated {len(updates)} documents with extraction results")
 
     async def store_analysis_run(
-        self, config: RunConfig, result: RunResult, project_id: str = None
+        self,
+        config: RunConfig,
+        result: RunResult,
+        project_id: str = None,
+        user_id: str = None,
+        user_name: str = None,
     ) -> str:
         """
         Store analysis run results to Supabase tables.
@@ -366,7 +371,9 @@ class AnalysisStorageService:
                 )
             else:
                 # Create new project record
-                storage_project_id = await self._create_analysis_project(config, result)
+                storage_project_id = await self._create_analysis_project(
+                    config, result, user_id, user_name
+                )
 
             # 2. Upload documents from references CSV
             await self._upload_documents(
@@ -399,7 +406,11 @@ class AnalysisStorageService:
             raise
 
     async def _create_analysis_project(
-        self, config: RunConfig, result: RunResult
+        self,
+        config: RunConfig,
+        result: RunResult,
+        user_id: str = None,
+        user_name: str = None,
     ) -> str:
         """Create analysis_project record."""
         project_data = {
@@ -409,6 +420,8 @@ class AnalysisStorageService:
             "total_references": result.total_references,
             "relevant_references": result.relevant_references,
             "status": "uploading",
+            "created_by_user_id": user_id,
+            "created_by_name": user_name,
         }
 
         response = (

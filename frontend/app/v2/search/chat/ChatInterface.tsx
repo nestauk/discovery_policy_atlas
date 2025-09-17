@@ -703,7 +703,7 @@ function ScreenRefine() {
 }
 
 
-function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => void }) {
+function ScreenApprove({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (brief: Brief) => void; isRunning?: boolean }) {
   const s = useChat();
   
   
@@ -827,8 +827,10 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
         </CardContent>
       </Card>
       <div className="flex gap-3">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => onRunAnalysis(brief)}>Run Analysis</Button>
+        <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
+        <Button onClick={() => onRunAnalysis(brief)} disabled={isRunning}>
+          {isRunning ? 'Starting up...' : 'Run Analysis'}
+        </Button>
       </div>
     </div>
   );
@@ -837,15 +839,16 @@ function ScreenApprove({ onRunAnalysis }: { onRunAnalysis: (brief: Brief) => voi
 // ---------------- ROOT ----------------
 interface ChatInterfaceProps {
   onRunAnalysis: (brief: Brief) => void;
+  isRunning?: boolean;
 }
 
-export default function ChatInterface({ onRunAnalysis }: ChatInterfaceProps) {
+export default function ChatInterface({ onRunAnalysis, isRunning = false }: ChatInterfaceProps) {
   const s = useChat();
   return (
     <div className="min-h-screen bg-white text-gray-900">
       {s.step === "ASK" && <ScreenAsk />}
       {s.step === "REFINE" && <ScreenRefine />}
-      {s.step === "APPROVE" && <ScreenApprove onRunAnalysis={onRunAnalysis} />}
+      {s.step === "APPROVE" && <ScreenApprove onRunAnalysis={onRunAnalysis} isRunning={isRunning} />}
     </div>
   );
 }

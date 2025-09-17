@@ -11,6 +11,8 @@ export interface AnalysisProject {
   relevant_references: number
   status: 'created' | 'running' | 'completed' | 'failed' | 'uploading'
   created_at: string
+  created_by_user_id?: string
+  created_by_name?: string
 }
 
 export interface AnalysisDocument {

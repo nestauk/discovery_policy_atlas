@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
@@ -9,6 +10,7 @@ export default function SearchPage() {
   const router = useRouter()
   const { createAnalysisProject, runAnalysisForProject } = useAPI()
   const { setActiveProject } = useAnalysisProjectStore()
+  const [isRunning, setIsRunning] = useState(false)
 
   const handleRunAnalysis = async (brief: {
     researchQuestion: string;
@@ -26,6 +28,10 @@ export default function SearchPage() {
       timeTo?: string;
     };
   }) => {
+    // Prevent user initiating multiple analysis runs with the same search parameters
+    if (isRunning) return;
+    
+    setIsRunning(true);
     try {
       // Create analysis project from chat brief
       const project = await createAnalysisProject({
@@ -80,8 +86,10 @@ export default function SearchPage() {
     } catch (error) {
       console.error('Failed to start chat analysis:', error)
       alert('Failed to start analysis. Please try again.')
+    } finally {
+      setIsRunning(false);
     }
   }
 
-  return <ChatInterface onRunAnalysis={handleRunAnalysis} />
+  return <ChatInterface onRunAnalysis={handleRunAnalysis} isRunning={isRunning} />
 }
