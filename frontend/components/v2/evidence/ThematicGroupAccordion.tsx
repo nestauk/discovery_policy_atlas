@@ -34,7 +34,7 @@ export default function ThematicGroupAccordion({ projectId, thematicGroups, them
                     </span>
                   </div>
                   {thematicGroup.theme_summary && (
-                    <div className="mt-1 text-sm text-slate-600 line-clamp-2">
+                    <div className="mt-1 text-sm text-slate-600">
                       {thematicGroup.theme_summary}
                     </div>
                   )}

@@ -49,10 +49,10 @@ export default function EvidenceIssuesTable({ issues }: Props) {
                 onClick={() => toggle(item.id)}
               >
                 <div className="col-span-4">
-                  <span className="font-medium text-gray-900 text-sm line-clamp-1">{item.title}</span>
+                  <span className="font-medium text-gray-900 text-sm">{item.title}</span>
                 </div>
                 <div className="col-span-5">
-                  <span className="text-sm text-gray-700 line-clamp-2">{item.brief_description}</span>
+                  <span className="text-sm text-gray-700">{item.brief_description}</span>
                 </div>
                 <div className="col-span-3">
                   <div className="flex items-center gap-2 text-xs text-gray-600">
