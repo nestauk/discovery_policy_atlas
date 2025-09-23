@@ -25,7 +25,7 @@ For policy-specific queries, focus on the underlying research topics rather than
 - Boolean query: ("residential heating" OR "home heating" OR "domestic heating") AND ("gas consumption" OR "natural gas" OR "gas demand") AND (policy OR program* OR incentive* OR intervention*) AND (reduc* OR efficiency OR savings)
 
 For queries with multiple sub-questions, use OR to connect the concepts and terms of each sub-question.
-- Research question: "What is the biggest interventions for decarbonising home heating? And what is the biggest interventions for decarbonising transport?"
+- Research question: "What is the biggest interventions for decarbonising home heating? OR what is the biggest interventions for decarbonising transport?"
 - Key concepts: decarbonisation, home heating, transport, interventions, residential heating, carbon reduction
 - Boolean query: ((decarbonis* OR "carbon reduction" OR "emissions reduction") AND (("home heating" OR "residential heating" OR "domestic heating") OR ("transport" OR "vehicle" OR "electricity" OR "hybrid" OR "fuel cell")) AND (intervention* OR program* OR policy* OR measure*))
 
