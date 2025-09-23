@@ -79,7 +79,7 @@ const COUNTRIES = [
 type Step = "ASK" | "REFINE" | "APPROVE";
 // Refine flow: 0 SubQs → 1 Sources → 2 Time → 3 Geography → 4 Focus → 5 Exclude
 type RefineStep = 0 | 1 | 2 | 3 | 4 | 5;
-type TimePreset = "LAST_YEAR" | "LAST_5_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
+type TimePreset = "LAST_YEAR" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
 
 type DirectCriteria = {
@@ -128,7 +128,7 @@ export const useChat = create<ChatState>((set, get) => ({
   step: "ASK",
   refineStep: 0,
   researchQuestion: "",
-  timePreset: "LAST_5_YEARS",
+  timePreset: "LAST_10_YEARS",
   geography: [],
   access: { academic: true, policy: true },
   scope: [], customFocus: [],
@@ -224,6 +224,9 @@ function buildPlan(state: {
         break;
       case "LAST_5_YEARS":
         timeFrom = new Date(now.getFullYear() - 5, now.getMonth(), now.getDate()).toISOString().split('T')[0];
+        break;
+      case "LAST_10_YEARS":
+        timeFrom = new Date(now.getFullYear() - 10, now.getMonth(), now.getDate()).toISOString().split('T')[0];
         break;
       case "SINCE_2000":
         timeFrom = "2000-01-01";
@@ -516,7 +519,7 @@ function StepTime() {
         <h2 className="text-2xl font-semibold">Time window</h2>
       </div>
       <div className="flex flex-wrap gap-3 justify-center">
-        {["LAST_YEAR", "LAST_5_YEARS", "SINCE_2000", "ANY", "CUSTOM"].map((p) => (
+        {["LAST_YEAR", "LAST_5_YEARS", "LAST_10_YEARS", "SINCE_2000", "ANY", "CUSTOM"].map((p) => (
           <Chip key={p} active={s.timePreset === p} onClick={() => s.set({ timePreset: p as TimePreset })}>{p.replaceAll("_"," ")}</Chip>
         ))}
       </div>
