@@ -17,7 +17,7 @@ Given a research question, extract the key concepts and create a targeted boolea
 IMPORTANT: Break down the research question into its core components and search terms. For example:
 - Research question: "What is the biggest interventions for decarbonising home heating?"
 - Key concepts: decarbonisation, home heating, interventions, residential heating, carbon reduction
-- Boolean query: (decarbonis OR "carbon reduction" OR "emissions reduction") AND ("home heating" OR "residential heating" OR "domestic heating") AND (intervention* OR program* OR policy OR measure*)
+- Boolean query: (decarbonis* OR "carbon reduction" OR "emissions reduction") AND ("home heating" OR "residential heating" OR "domestic heating") AND (intervention* OR program* OR policy OR measure*)
 
 For policy-specific queries, focus on the underlying research topics rather than specific policy names:
 - Research question: "Which UK home-heating incentives have reduced gas?"
@@ -27,7 +27,7 @@ For policy-specific queries, focus on the underlying research topics rather than
 For queries with multiple sub-questions, use OR to connect the concepts and terms of each sub-question.
 - Research question: "What is the biggest interventions for decarbonising home heating? And what is the biggest interventions for decarbonising transport?"
 - Key concepts: decarbonisation, home heating, transport, interventions, residential heating, carbon reduction
-- Boolean query: ((decarbonis OR "carbon reduction" OR "emissions reduction") AND (("home heating" OR "residential heating" OR "domestic heating") OR ("transport" OR "vehicle" OR "electricity" OR "hybrid" OR "fuel cell")) AND (intervention* OR program* OR policy* OR measure*))
+- Boolean query: ((decarbonis* OR "carbon reduction" OR "emissions reduction") AND (("home heating" OR "residential heating" OR "domestic heating") OR ("transport" OR "vehicle" OR "electricity" OR "hybrid" OR "fuel cell")) AND (intervention* OR program* OR policy* OR measure*))
 
 Guidelines:
 1. Extract 2-4 main concepts from the research question
