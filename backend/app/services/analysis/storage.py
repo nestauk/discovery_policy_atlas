@@ -5,6 +5,7 @@ Uploads references and extraction results to new analysis tables.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import pandas as pd
@@ -472,7 +473,9 @@ class AnalysisStorageService:
         if not Path(references_csv_path).exists():
             raise FileNotFoundError(f"References CSV not found: {references_csv_path}")
 
-        df = pd.read_csv(references_csv_path)
+        # Run pandas operations in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        df = await loop.run_in_executor(None, pd.read_csv, references_csv_path)
         logger.info(f"Found {len(df)} documents in references CSV")
 
         # Load extractions JSON if available to map extraction results
@@ -577,11 +580,13 @@ class AnalysisStorageService:
             extractions_data = json.load(f)
 
         # Get document IDs mapping
-        doc_response = (
-            self.supabase.table("analysis_documents")
+        loop = asyncio.get_event_loop()
+        doc_response = await loop.run_in_executor(
+            None,
+            lambda: self.supabase.table("analysis_documents")
             .select("id,doc_id")
             .eq("analysis_project_id", project_id)
-            .execute()
+            .execute(),
         )
         doc_id_map = {doc["doc_id"]: doc["id"] for doc in doc_response.data}
 
@@ -806,8 +811,13 @@ class AnalysisStorageService:
 
             # Try regular insert first for new documents
             try:
-                response = (
-                    self.supabase.table("analysis_documents").insert(batch).execute()
+                # Run database operations in thread pool to avoid blocking
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.supabase.table("analysis_documents")
+                    .insert(batch)
+                    .execute(),
                 )
                 if response.data:
                     continue
@@ -818,13 +828,14 @@ class AnalysisStorageService:
                 for doc in batch:
                     try:
                         # Check if document exists
-                        existing = (
-                            self.supabase.table("analysis_documents")
+                        existing = await loop.run_in_executor(
+                            None,
+                            lambda: self.supabase.table("analysis_documents")
                             .select("id")
                             .eq("analysis_project_id", doc["analysis_project_id"])
                             .eq("doc_id", doc["doc_id"])
                             .eq("source", doc["source"])
-                            .execute()
+                            .execute(),
                         )
 
                         if existing.data:
@@ -835,14 +846,21 @@ class AnalysisStorageService:
                                 for k, v in doc.items()
                                 if k not in ["analysis_project_id", "doc_id", "source"]
                             }
-                            self.supabase.table("analysis_documents").update(
-                                update_doc
-                            ).eq("id", doc_id).execute()
+                            await loop.run_in_executor(
+                                None,
+                                lambda: self.supabase.table("analysis_documents")
+                                .update(update_doc)
+                                .eq("id", doc_id)
+                                .execute(),
+                            )
                         else:
                             # Insert new document
-                            self.supabase.table("analysis_documents").insert(
-                                doc
-                            ).execute()
+                            await loop.run_in_executor(
+                                None,
+                                lambda: self.supabase.table("analysis_documents")
+                                .insert(doc)
+                                .execute(),
+                            )
 
                     except Exception as doc_error:
                         logger.error(

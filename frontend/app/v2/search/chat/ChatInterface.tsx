@@ -167,11 +167,14 @@ function buildPlan(state: {
 }): Brief {
   const tokens: string[] = [];
   const rq = (state.researchQuestion || "").trim();
-  if (rq) tokens.push(`(${rq})`);
-
-  if (state.subQuestions?.length) {
-    const subQ = state.subQuestions.map(q => q.trim()).filter(Boolean).map(q => `(${q})`).join(" OR ");
-    if (subQ) tokens.push(`(${subQ})`);
+  
+  // Combine main question and sub-questions with OR
+  const allQuestions = [rq, ...(state.subQuestions || [])].map(q => q.trim()).filter(Boolean);
+  if (allQuestions.length === 1) {
+    tokens.push(`(${allQuestions[0]})`);
+  } else if (allQuestions.length > 1) {
+    const questionGroup = allQuestions.map(q => `(${q})`).join(" OR ");
+    tokens.push(`(${questionGroup})`);
   }
 
   // Geography OR-group (skip OECD token)

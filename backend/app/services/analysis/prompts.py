@@ -24,18 +24,24 @@ For policy-specific queries, focus on the underlying research topics rather than
 - Key concepts: heating policy evaluation, residential gas consumption, energy efficiency programs
 - Boolean query: ("residential heating" OR "home heating" OR "domestic heating") AND ("gas consumption" OR "natural gas" OR "gas demand") AND (policy OR program* OR incentive* OR intervention*) AND (reduc* OR efficiency OR savings)
 
+For queries with multiple sub-questions, use OR to connect the concepts and terms of each sub-question.
+- Research question: "What is the biggest interventions for decarbonising home heating? And what is the biggest interventions for decarbonising transport?"
+- Key concepts: decarbonisation, home heating, transport, interventions, residential heating, carbon reduction
+- Boolean query: ((decarbonis OR "carbon reduction" OR "emissions reduction") AND (("home heating" OR "residential heating" OR "domestic heating") OR ("transport" OR "vehicle" OR "electricity" OR "hybrid" OR "fuel cell")) AND (intervention* OR program* OR policy* OR measure*))
+
 Guidelines:
 1. Extract 2-4 main concepts from the research question
-2. Use AND to connect different concepts
-3. Use OR to include synonyms and related terms within each concept
-4. Use wildcards (*) for word variations (e.g., intervention*)
-5. Use quotes for exact phrases when beneficial
-6. Include both technical and common language terms
-7. Focus on terms that would realistically appear in academic paper titles and abstracts
-8. For policy queries, focus on research about the underlying phenomena rather than specific policy names
-9. Consider broader academic terminology (evaluation, effectiveness, impact, outcomes)
-10. Prioritize nouns and key descriptive terms over question words (what, how, why)
-11. Include related research terms like "evaluation", "impact", "effectiveness" for policy questions
+2. Use AND to connect different concepts that all should be present in the documents
+3. Use OR to include synonyms and related terms within each concept, or alternative concepts that expand the search scope
+4. You can use nested parentheses to group concepts and terms that should be treated as a single concept or term, and then use OR to connect the groups of concepts
+5. Use wildcards (*) for word variations (e.g., intervention*)
+6. Use quotes for exact phrases when beneficial
+7. Include both technical and common language terms
+8. Focus on terms that would realistically appear in academic paper titles and abstracts
+9. For policy queries, focus on research about the underlying phenomena rather than specific policy names
+10. Consider broader academic terminology (evaluation, effectiveness, impact, outcomes)
+11. Prioritize nouns and key descriptive terms over question words (what, how, why)
+12. Include related research terms like "evaluation", "impact", "effectiveness" for policy questions
 
 Most importantly, keep the query sufficiently general so that we get more results, but roughly in the right ballpark.
 
