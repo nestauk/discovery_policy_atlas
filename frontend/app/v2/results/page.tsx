@@ -446,9 +446,6 @@ export default function AnalysisResultsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, effectiveProjectId])
 
-  const goBackToSearch = () => {
-    router.push('/v2/search')
-  }
 
   // Create study strength and sample size mappings from interventions data
   const { studyStrengthMapping, sampleSizeMapping } = useMemo(() => {
@@ -510,6 +507,54 @@ export default function AnalysisResultsPage() {
     }
   }, [interventions])
 
+  // Calculate progress based on project status and document extraction status
+  const progressInfo = useMemo(() => {
+    if (!effectiveProjectId || !activeProject) {
+      return { stage: 'idle', progress: 0, text: 'No project selected' }
+    }
+
+    const status = activeProject.status
+    
+    if (status === 'created') {
+      return { stage: 'created', progress: 0, text: 'Analysis not started' }
+    }
+    
+    if (status === 'running') {
+      // Check if we have documents to determine stage
+      if (documents.length === 0) {
+        return { stage: 'retrieving', progress: 25, text: 'Retrieving and screening documents...' }
+      }
+      
+      // Calculate extraction progress based on relevant documents only
+      const relevantDocs = documents.filter(doc => doc.is_relevant !== false)
+      const totalRelevantDocs = relevantDocs.length
+      const extractedDocs = relevantDocs.filter(doc => 
+        doc.extraction_status === 'completed' || doc.extraction_status === 'success'
+      ).length
+      
+      if (extractedDocs === 0) {
+        return { stage: 'extracting', progress: 50, text: 'Extracting intervention data from documents...' }
+      }
+      
+      const extractionProgress = Math.round((extractedDocs / totalRelevantDocs) * 50) + 50
+      return { 
+        stage: 'extracting', 
+        progress: Math.min(extractionProgress, 95), 
+        text: `Extracting intervention data from documents... (${extractedDocs}/${totalRelevantDocs})` 
+      }
+    }
+    
+    if (status === 'completed') {
+      return { stage: 'completed', progress: 100, text: 'Analysis completed' }
+    }
+    
+    if (status === 'failed') {
+      return { stage: 'failed', progress: 0, text: 'Analysis failed' }
+    }
+    
+    return { stage: 'unknown', progress: 0, text: 'Unknown status' }
+  }, [effectiveProjectId, activeProject, documents])
+
   // Transform documents for table display and apply filtering
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
@@ -565,32 +610,31 @@ export default function AnalysisResultsPage() {
       <div className="border-b border-slate-200 bg-white px-8 py-6">
         <div className="flex items-center justify-between">
           <div>
-            <div className="flex items-center gap-4 mb-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={goBackToSearch}
-                className="flex items-center gap-2"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to Search
-              </Button>
-            </div>
             <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
             Results
               {isPolling && (
                 <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
               )}
             </h1>
-            <p className="text-slate-600 mt-1">
-              {searchConfig.query ? (
-                <>&quot;{searchConfig.query}&quot;</>
-              ) : activeProject ? (
-                <>Project: {activeProject.title}</>
-              ) : (
-                <>No Project Selected</>
-              )}
-            </p>
+            {/* Progress Indicator */}
+            {effectiveProjectId && activeProject && (
+              <div className="flex items-center gap-3 mt-2 mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-32 bg-slate-200 rounded-full h-2">
+                    <div 
+                      className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${progressInfo.progress}%` }}
+                    />
+                  </div>
+                  <span className="text-sm text-slate-600 font-medium">
+                    {progressInfo.progress}%
+                  </span>
+                </div>
+                <span className="text-sm text-slate-600">
+                  {progressInfo.text}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>
