@@ -1121,3 +1121,417 @@ async def get_detailed_findings(
     except Exception as e:
         logger.error(f"Error fetching findings for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch findings")
+
+
+@router.get("/{project_id}/issue-intervention-navigator")
+async def get_issue_intervention_navigator(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get issue-intervention navigator data using synthesis themes and assignments."""
+    try:
+        # Get most recent completed synthesis run (same as Summary tab)
+        runs_res = (
+            vectorization_service.supabase.table("synthesis_runs")
+            .select("*")
+            .eq("analysis_project_id", project_id)
+            .eq("status", "completed")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        if not runs_res.data:
+            return {"issue_themes": []}
+
+        run_id = runs_res.data[0]["id"]
+        logger.info(f"Using synthesis run: {run_id}")
+
+        # Get all themes for this synthesis run
+        themes_res = (
+            vectorization_service.supabase.table("synthesis_themes")
+            .select("*")
+            .eq("synthesis_run_id", run_id)
+            .execute()
+        )
+
+        if not themes_res.data:
+            return {"issue_themes": []}
+
+        themes = themes_res.data
+        issue_themes = [t for t in themes if t["theme_type"] == "issue"]
+        intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
+
+        logger.info(
+            f"Found {len(issue_themes)} issue themes and {len(intervention_themes)} intervention themes"
+        )
+
+        # Get theme assignments to link themes to extractions
+        assignments_res = (
+            vectorization_service.supabase.table("theme_assignments")
+            .select("*")
+            .eq("synthesis_run_id", run_id)
+            .execute()
+        )
+
+        assignments = assignments_res.data or []
+
+        # Build mappings: theme_id -> [extraction_ids]
+        theme_to_extractions = {}
+        for assignment in assignments:
+            if not assignment:
+                continue
+            theme_id = assignment.get("synthesis_theme_id")
+            extraction_id = assignment.get("extraction_id")
+            if theme_id and extraction_id:
+                if theme_id not in theme_to_extractions:
+                    theme_to_extractions[theme_id] = []
+                theme_to_extractions[theme_id].append(extraction_id)
+
+        # Get all extractions for this project
+        extractions_res = (
+            vectorization_service.supabase.table("analysis_extractions")
+            .select("*")
+            .eq("analysis_project_id", project_id)
+            .execute()
+        )
+
+        extractions = extractions_res.data or []
+        extractions_by_id = {str(e["id"]): e for e in extractions if e and e.get("id")}
+
+        # Get documents for metadata and scores
+        docs_result = (
+            vectorization_service.supabase.table("analysis_documents")
+            .select("*")
+            .eq("analysis_project_id", project_id)
+            .execute()
+        )
+
+        documents = docs_result.data or []
+        docs_by_id = {str(d["id"]): d for d in documents if d and d.get("id")}
+
+        # Build document-level issue-intervention mappings from extraction results
+        doc_mappings = {}  # doc_id -> [(issue_extraction_id, intervention_extraction_id)]
+        doc_scores = {}  # doc_id -> {impact_score, evidence_score}
+
+        for document in documents:
+            if not document:
+                continue
+            doc_id = document.get("doc_id")
+            analysis_doc_id = document.get("id")
+            if not analysis_doc_id:
+                continue
+            analysis_doc_id = str(analysis_doc_id)
+            extraction_results = document.get("extraction_results", {})
+
+            if not extraction_results or not doc_id:
+                continue
+
+            # Get conclusion scores
+            conclusion = extraction_results.get("conclusion", {}) or {}
+            evidence_strength = conclusion.get("evidence_strength", {}) or {}
+            predicted_impact = conclusion.get("predicted_impact", {}) or {}
+
+            doc_scores[doc_id] = {
+                "impact_score": evidence_strength.get("stars"),
+                "evidence_score": predicted_impact.get("stars"),
+            }
+
+            # Get mappings from extraction results
+            # Note: issues, interventions, and mappings are available but not currently used
+            # in this simplified implementation that relies on theme assignments
+            # issues = extraction_results.get("issues", [])
+            # interventions = extraction_results.get("interventions", [])
+            # mappings = extraction_results.get("mappings", [])
+
+            # Find corresponding extraction IDs for issues and interventions in this document
+            doc_issue_extractions = []
+            doc_intervention_extractions = []
+
+            for extraction in extractions:
+                if str(extraction.get("analysis_document_id")) == analysis_doc_id:
+                    if extraction.get("extraction_type") == "issue":
+                        doc_issue_extractions.append(extraction["id"])
+                    elif extraction.get("extraction_type") == "intervention":
+                        doc_intervention_extractions.append(extraction["id"])
+
+            # For now, create all possible combinations of issue-intervention pairs from this document
+            # (This is a simplification - in reality we'd want to use the specific mappings)
+            doc_mapping_pairs = []
+            for issue_ext_id in doc_issue_extractions:
+                for intervention_ext_id in doc_intervention_extractions:
+                    doc_mapping_pairs.append((issue_ext_id, intervention_ext_id))
+
+            if doc_mapping_pairs:
+                doc_mappings[doc_id] = doc_mapping_pairs
+
+        # Now build the navigator structure
+        navigator_issue_themes = []
+
+        for issue_theme in issue_themes:
+            theme_id = issue_theme["id"]
+            theme_name = issue_theme["theme_name"]
+            theme_description = issue_theme.get("summary_description", "")
+            frequency = issue_theme.get("frequency", 0)
+
+            logger.info(f"Processing issue theme: {theme_name} (freq: {frequency})")
+
+            # Get extractions assigned to this issue theme
+            issue_extraction_ids = theme_to_extractions.get(theme_id, [])
+
+            # Find related intervention themes based on document co-occurrence
+            related_interventions = []
+
+            for intervention_theme in intervention_themes:
+                intervention_theme_id = intervention_theme["id"]
+                intervention_theme_name = intervention_theme["theme_name"]
+                intervention_description = intervention_theme.get(
+                    "summary_description", ""
+                )
+
+                # Get extractions assigned to this intervention theme
+                intervention_extraction_ids = theme_to_extractions.get(
+                    intervention_theme_id, []
+                )
+
+                # Find documents that have both issue and intervention extractions
+                shared_docs = []
+                impact_scores = []
+                evidence_scores = []
+
+                for doc_id, mapping_pairs in doc_mappings.items():
+                    doc_has_issue = any(
+                        issue_ext_id in issue_extraction_ids
+                        for issue_ext_id, _ in mapping_pairs
+                    )
+                    doc_has_intervention = any(
+                        intervention_ext_id in intervention_extraction_ids
+                        for _, intervention_ext_id in mapping_pairs
+                    )
+
+                    if doc_has_issue and doc_has_intervention:
+                        shared_docs.append(doc_id)
+                        scores = doc_scores.get(doc_id, {})
+                        if scores.get("impact_score") is not None:
+                            impact_scores.append(scores["impact_score"])
+                        if scores.get("evidence_score") is not None:
+                            evidence_scores.append(scores["evidence_score"])
+
+                # Only include intervention themes that have actual connections
+                if shared_docs:
+                    # Calculate average scores
+                    avg_impact_score = (
+                        sum(impact_scores) / len(impact_scores)
+                        if impact_scores
+                        else None
+                    )
+                    avg_evidence_score = (
+                        sum(evidence_scores) / len(evidence_scores)
+                        if evidence_scores
+                        else None
+                    )
+
+                    # Build detailed interventions from the extractions
+                    detailed_interventions = []
+                    for ext_id in intervention_extraction_ids:
+                        extraction = extractions_by_id.get(str(ext_id))
+                        if extraction and extraction.get("analysis_document_id"):
+                            doc = docs_by_id.get(
+                                str(extraction["analysis_document_id"])
+                            )
+                            if doc and doc.get("doc_id") in shared_docs:
+                                raw_data = extraction.get("raw_data", {})
+
+                                # Extract results from document's extraction_results
+                                extraction_results = doc.get("extraction_results", {})
+                                interventions_data = extraction_results.get(
+                                    "interventions", []
+                                )
+                                results_data = extraction_results.get("results", [])
+
+                                # Find matching intervention and its results
+                                intervention_results = []
+                                intervention_name = extraction.get(
+                                    "label", raw_data.get("name", "")
+                                )
+
+                                # Match by intervention name/label
+                                for i, intervention_data in enumerate(
+                                    interventions_data
+                                ):
+                                    if (
+                                        intervention_data.get("name")
+                                        == intervention_name
+                                        or intervention_data.get("label")
+                                        == intervention_name
+                                    ):
+                                        # Find results for this intervention by idx
+                                        for result in results_data:
+                                            if result.get("intervention_idx") == i:
+                                                intervention_results.append(
+                                                    {
+                                                        "outcome_variable": result.get(
+                                                            "outcome_variable"
+                                                        ),
+                                                        "effect_direction": result.get(
+                                                            "effect_direction"
+                                                        ),
+                                                        "effect_size": result.get(
+                                                            "effect_size"
+                                                        ),
+                                                        "p_value": result.get(
+                                                            "p_value"
+                                                        ),
+                                                        "uncertainty": result.get(
+                                                            "uncertainty"
+                                                        ),
+                                                        "result_text": result.get(
+                                                            "result_text"
+                                                        ),
+                                                        "population_measured": result.get(
+                                                            "population_measured"
+                                                        ),
+                                                        "subgroup_or_dose": result.get(
+                                                            "subgroup_or_dose"
+                                                        ),
+                                                    }
+                                                )
+                                        break
+
+                                detailed_interventions.append(
+                                    {
+                                        "name": intervention_name,
+                                        "description": extraction.get(
+                                            "description",
+                                            raw_data.get("description", ""),
+                                        ),
+                                        "country": raw_data.get("country"),
+                                        "study_type": raw_data.get("study_type"),
+                                        "sample_size": raw_data.get("sample_size"),
+                                        "impact_score": doc_scores.get(
+                                            doc.get("doc_id"), {}
+                                        ).get("impact_score"),
+                                        "evidence_score": doc_scores.get(
+                                            doc.get("doc_id"), {}
+                                        ).get("evidence_score"),
+                                        "results": intervention_results,
+                                        "source_documents": [
+                                            {
+                                                "doc_id": doc.get("doc_id"),
+                                                "title": doc.get("title"),
+                                                "source": doc.get("source"),
+                                                "landing_page_url": doc.get(
+                                                    "landing_page_url"
+                                                ),
+                                            }
+                                        ],
+                                    }
+                                )
+
+                    # Deduplicate by name
+                    unique_interventions = {}
+                    for detail in detailed_interventions:
+                        name = detail.get("name", "")
+                        if name and name not in unique_interventions:
+                            unique_interventions[name] = detail
+
+                    related_interventions.append(
+                        {
+                            "theme_name": intervention_theme_name,
+                            "description": intervention_description,
+                            "frequency": len(shared_docs),
+                            "avg_impact_score": round(avg_impact_score, 1)
+                            if avg_impact_score
+                            else None,
+                            "avg_evidence_score": round(avg_evidence_score, 1)
+                            if avg_evidence_score
+                            else None,
+                            "detailed_interventions": list(
+                                unique_interventions.values()
+                            ),
+                        }
+                    )
+
+            # Sort interventions by frequency of connection
+            related_interventions.sort(key=lambda x: x["frequency"], reverse=True)
+
+            # Only include issue themes that have related interventions
+            if related_interventions:
+                navigator_issue_themes.append(
+                    {
+                        "theme_name": theme_name,
+                        "description": theme_description,
+                        "frequency": frequency,
+                        "related_interventions": related_interventions,
+                    }
+                )
+
+        # Sort issue themes by frequency
+        navigator_issue_themes.sort(key=lambda x: x["frequency"], reverse=True)
+
+        logger.info(f"Returning {len(navigator_issue_themes)} issue themes")
+
+        return {"issue_themes": navigator_issue_themes}
+
+    except Exception as e:
+        logger.error(
+            f"Error fetching issue-intervention navigator for project {project_id}: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to fetch navigator data")
+
+
+@router.get("/{project_id}/debug-themes")
+async def debug_themes(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Debug endpoint to check theme data structure."""
+    try:
+        # Get themes via RPC (what we're currently using)
+        issue_themes_response = vectorization_service.supabase.rpc(
+            "get_project_thematic_groups_by_type",
+            {"p_project_id": project_id, "p_theme_type": "issue"},
+        ).execute()
+
+        intervention_themes_response = vectorization_service.supabase.rpc(
+            "get_project_thematic_groups_by_type",
+            {"p_project_id": project_id, "p_theme_type": "intervention"},
+        ).execute()
+
+        # Also get themes directly from synthesis_themes table (what Summary tab uses)
+        # Get most recent completed synthesis run
+        runs_res = (
+            vectorization_service.supabase.table("synthesis_runs")
+            .select("*")
+            .eq("analysis_project_id", project_id)
+            .eq("status", "completed")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        direct_themes = []
+        if runs_res.data:
+            run_id = runs_res.data[0]["id"]
+            themes_res = (
+                vectorization_service.supabase.table("synthesis_themes")
+                .select("*")
+                .eq("synthesis_run_id", run_id)
+                .execute()
+            )
+            direct_themes = themes_res.data or []
+
+        return {
+            "rpc_issue_themes": issue_themes_response.data or [],
+            "rpc_intervention_themes": intervention_themes_response.data or [],
+            "rpc_issue_count": len(issue_themes_response.data or []),
+            "rpc_intervention_count": len(intervention_themes_response.data or []),
+            "direct_themes": direct_themes,
+            "direct_issue_themes": [
+                t for t in direct_themes if t.get("theme_type") == "issue"
+            ],
+            "direct_intervention_themes": [
+                t for t in direct_themes if t.get("theme_type") == "intervention"
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Error in debug themes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
