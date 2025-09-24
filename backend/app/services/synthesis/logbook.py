@@ -295,6 +295,117 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
         supabase.table("theme_assignments").insert(unique_assignments).execute()
 
 
+async def get_synthesis_status(project_id: str) -> str:
+    """
+    Get current synthesis status for a project.
+
+    Returns:
+        'none': No synthesis runs exist
+        'running': Synthesis is currently running
+        'completed': Synthesis has completed successfully
+        'failed': Synthesis has failed
+    """
+    supabase = get_supabase()
+
+    # Get most recent synthesis run
+    runs_res = (
+        supabase.table("synthesis_runs")
+        .select("status")
+        .eq("analysis_project_id", project_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not runs_res.data:
+        return "none"
+
+    status = runs_res.data[0].get("status", "none")
+    return status
+
+
+async def create_synthesis_run_placeholder(project_id: str) -> str:
+    """
+    Create a 'running' synthesis run to prevent duplicates.
+
+    Returns:
+        run_id: The ID of the created synthesis run
+    """
+    supabase = get_supabase()
+
+    run_id = str(uuid.uuid4())
+    run_data = {
+        "id": run_id,
+        "analysis_project_id": project_id,
+        "status": "running",
+        "version": 2,
+        "executive_briefing": "",
+        "model_info": {},
+        "state_after_clustering": {},
+        "state_after_critique": {},
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+    supabase.table("synthesis_runs").insert(run_data).execute()
+    return run_id
+
+
+async def update_synthesis_run_status(
+    run_id: str, status: str, final_state: Optional[Dict] = None
+) -> None:
+    """
+    Update synthesis run status and optionally store results.
+
+    Args:
+        run_id: The synthesis run ID to update
+        status: New status ('completed', 'failed', etc.)
+        final_state: Optional final state data for completed runs
+    """
+    supabase = get_supabase()
+
+    update_data = {
+        "status": status,
+    }
+
+    if status == "completed" and final_state:
+        # Update with full synthesis results
+        update_data.update(
+            {
+                "executive_briefing": final_state.get("executive_briefing", ""),
+                "model_info": {
+                    "theme_iteration": final_state.get("theme_iteration", 0),
+                    "total_issues": len(final_state.get("aggregated_issues", [])),
+                    "total_interventions": len(
+                        final_state.get("aggregated_interventions", [])
+                    ),
+                },
+                "state_after_clustering": {
+                    "issue_clusters": final_state.get("issue_clusters", {}),
+                    "intervention_clusters": final_state.get(
+                        "intervention_clusters", {}
+                    ),
+                    "issue_theme_names": final_state.get("issue_theme_names", {}),
+                    "intervention_theme_names": final_state.get(
+                        "intervention_theme_names", {}
+                    ),
+                },
+                "state_after_critique": {
+                    "theme_critique": final_state.get("theme_critique"),
+                    "aggregated_issues": [
+                        issue.dict()
+                        for issue in final_state.get("aggregated_issues", [])
+                    ],
+                    "aggregated_interventions": [
+                        intv.dict()
+                        for intv in final_state.get("aggregated_interventions", [])
+                    ],
+                },
+            }
+        )
+
+    supabase.table("synthesis_runs").update(update_data).eq("id", run_id).execute()
+
+
 async def invalidate_cache(project_id: str) -> None:
     """
     Invalidate cached synthesis results for a project.
