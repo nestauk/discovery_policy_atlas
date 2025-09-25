@@ -15,8 +15,7 @@ from app.services.synthesis.schemas import (
     EvidenceItem,
 )
 from app.services.synthesis.service import SynthesisService
-from app.services.synthesis.agent import SynthesisAgent, SynthesisState
-from app.services.synthesis.logbook import read_cached_summary, write_run_from_state
+from app.services.synthesis.logbook import read_cached_summary
 from app.utils.geography import COUNTRY_NAME_TO_CODE, COUNTRY_CODE_TO_NAME
 
 logger = logging.getLogger(__name__)
@@ -49,31 +48,79 @@ async def get_synthesis_summary(
     project_id: str,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Invoke the synthesis agent to get executive briefing and aggregated tables."""
+    """Get synthesis summary, handling different project states."""
     try:
-        # Cache read via Supabase
+        from app.services.synthesis.logbook import get_synthesis_status
+
+        # Check project status first
+        project_result = (
+            vectorization_service.supabase.table("analysis_projects")
+            .select("status")
+            .eq("id", project_id)
+            .execute()
+        )
+
+        if not project_result.data:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        project_status = project_result.data[0].get("status")
+
+        # Check if synthesis is already cached
         cached = await read_cached_summary(project_id)
         if cached:
             return cached
 
-        # Cache miss: run agent
-        synthesis_agent = SynthesisAgent()
-        final_state: SynthesisState = await synthesis_agent.run(project_id)
+        # If analysis still running, return appropriate response
+        if project_status == "running":
+            # Check synthesis status
+            synthesis_status = await get_synthesis_status(project_id)
 
-        # Cache write via Supabase
-        await write_run_from_state(project_id, final_state)
+            if synthesis_status == "running":
+                raise HTTPException(
+                    status_code=202,
+                    detail="Synthesis is running. Please wait for completion.",
+                )
+            elif synthesis_status == "none":
+                # Analysis still running, synthesis not started
+                raise HTTPException(
+                    status_code=202,
+                    detail="Analysis is still running. Synthesis will start automatically when analysis completes.",
+                )
 
-        # Return fresh results
-        return SynthesisSummary(
-            executive_briefing=final_state.get(
-                "executive_briefing", "Failed to generate briefing."
-            ),
-            key_issues=final_state.get("aggregated_issues", []),
-            interventions=final_state.get("aggregated_interventions", []),
+        # For completed projects without cache, try to trigger synthesis (fallback)
+        if project_status == "completed":
+            try:
+                await trigger_synthesis_for_project(project_id)
+                # Try to get cached result after synthesis
+                cached = await read_cached_summary(project_id)
+                if cached:
+                    return cached
+            except Exception as e:
+                logger.error(f"Fallback synthesis failed for project {project_id}: {e}")
+
+        # If still no cache, check synthesis status one more time
+        synthesis_status = await get_synthesis_status(project_id)
+        if synthesis_status == "failed":
+            raise HTTPException(
+                status_code=500,
+                detail="Synthesis failed. Please try again or check project logs.",
+            )
+        elif synthesis_status == "running":
+            raise HTTPException(
+                status_code=202,
+                detail="Synthesis is currently running. Please wait for completion.",
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to generate synthesis summary. Please try again.",
         )
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error running synthesis agent for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to build synthesis summary")
+        logger.error(f"Error in synthesis summary for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get synthesis summary")
 
 
 @router.get("")
@@ -365,6 +412,69 @@ async def delete_analysis_project(
         raise HTTPException(status_code=500, detail="Failed to delete analysis project")
 
 
+async def trigger_synthesis_for_project(project_id: str) -> None:
+    """Trigger synthesis for a project if not already running/completed."""
+    from app.services.synthesis.logbook import (
+        get_synthesis_status,
+        create_synthesis_run_placeholder,
+    )
+    from app.services.synthesis.agent import SynthesisAgent
+
+    # Check if synthesis already exists or is running
+    synthesis_status = await get_synthesis_status(project_id)
+
+    if synthesis_status in ["running", "completed"]:
+        logger.info(f"Synthesis already {synthesis_status} for project {project_id}")
+        if synthesis_status == "completed":
+            # Mark project as completed since synthesis is done
+            vectorization_service.supabase.table("analysis_projects").update(
+                {"status": "completed"}
+            ).eq("id", project_id).execute()
+        return
+
+    # Create placeholder to prevent duplicate runs
+    run_id = await create_synthesis_run_placeholder(project_id)
+
+    try:
+        logger.info(f"Starting synthesis for project {project_id}")
+
+        # Run synthesis
+        synthesis_agent = SynthesisAgent()
+        final_state = await synthesis_agent.run(project_id)
+
+        # Remove the placeholder run before creating the final one
+        supabase = vectorization_service.supabase
+        supabase.table("synthesis_runs").delete().eq("id", run_id).execute()
+
+        # Write complete synthesis results (this creates the synthesis_runs record with themes)
+        from app.services.synthesis.logbook import write_run_from_state
+
+        await write_run_from_state(project_id, final_state)
+
+        # Mark project as completed
+        vectorization_service.supabase.table("analysis_projects").update(
+            {"status": "completed"}
+        ).eq("id", project_id).execute()
+
+        logger.info(f"Synthesis completed for project {project_id}")
+
+    except Exception as e:
+        # Clean up placeholder run on failure
+        try:
+            supabase = vectorization_service.supabase
+            supabase.table("synthesis_runs").delete().eq("id", run_id).execute()
+        except Exception:
+            pass  # Ignore cleanup errors
+
+        # Still mark project as completed (analysis succeeded)
+        vectorization_service.supabase.table("analysis_projects").update(
+            {"status": "completed"}
+        ).eq("id", project_id).execute()
+
+        logger.error(f"Synthesis failed for project {project_id}: {e}")
+        raise
+
+
 @router.post("/{project_id}/run-analysis")
 async def run_analysis_for_project(
     project_id: str,
@@ -439,15 +549,25 @@ async def run_analysis_for_project(
             user_name=current_user.name,
         )
 
-        # Update project with results
+        # Update project with analysis results but keep status as "running"
         vectorization_service.supabase.table("analysis_projects").update(
             {
                 "run_id": result.run_id,
                 "total_references": result.total_references,
                 "relevant_references": result.relevant_references,
-                "status": "completed",
+                # Don't set status to "completed" yet - synthesis will do that
             }
         ).eq("id", project_id).execute()
+
+        # Trigger synthesis automatically
+        try:
+            await trigger_synthesis_for_project(project_id)
+        except Exception as e:
+            logger.error(f"Synthesis failed for project {project_id}: {e}")
+            # Even if synthesis fails, mark analysis as completed
+            vectorization_service.supabase.table("analysis_projects").update(
+                {"status": "completed"}
+            ).eq("id", project_id).execute()
 
         return {
             "project_id": project_id,

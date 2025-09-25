@@ -26,9 +26,10 @@ class Concept(BaseModel):
 
 
 # Model selection per node
-HIGH_REASONING_MODEL = "gpt-5-mini"  # define_themes, critique_themes
-CLASSIFICATION_MODEL = "gpt-5-nano"  # map_concepts_to_final_themes
-BRIEFING_MODEL = "gpt-5"  # synthesize_executive_briefing
+THEME_MODEL = "gpt-5-mini"  # define_themes, critique_themes
+MAPPING_MODEL = "gpt-5-nano"  # map concepts to final themes
+BRIEFING_MODEL = "gpt-5-mini"  # synthesize executive briefing
+CRITIQUE_ITERATIONS = 1
 
 
 def _escape_braces(text: str) -> str:
@@ -82,19 +83,20 @@ class ThemesOut(BaseModel):
 
 
 async def _discover_themes_for_concepts(
-    concepts: List[Concept], critique: Optional[str]
+    concepts: List[Concept], critique: Optional[str], rq: str
 ) -> List[DiscoveredTheme]:
     """Generic helper to discover themes for a given concept set (structured output)."""
     if not concepts:
         return []
     instructions = make_discover_themes_instructions(critique)
     prompt = build_discover_themes_prompt()
-    base_llm = get_llm(HIGH_REASONING_MODEL, temperature=0.0)
+    base_llm = get_llm(THEME_MODEL, temperature=0.0)
     structured_llm = base_llm.with_structured_output(ThemesOut)
     try:
         out: ThemesOut = await structured_llm.ainvoke(
             prompt.format(
-                instructions=instructions,
+                critique_instruction=instructions,
+                rq=_escape_braces(rq),
                 concepts=_escape_braces(json.dumps([c.dict() for c in concepts])),
             )
         )
@@ -199,7 +201,9 @@ async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
 
 async def define_issue_themes(state: SynthesisState) -> SynthesisState:
     themes = await _discover_themes_for_concepts(
-        state.get("issue_concepts", []) or [], state.get("issue_theme_critique")
+        state.get("issue_concepts", []) or [],
+        state.get("issue_theme_critique"),
+        str(state.get("research_question") or "Not specified"),
     )
     return {"discovered_issue_themes": themes}
 
@@ -208,6 +212,7 @@ async def define_intervention_themes(state: SynthesisState) -> SynthesisState:
     themes = await _discover_themes_for_concepts(
         state.get("intervention_concepts", []) or [],
         state.get("intervention_theme_critique"),
+        str(state.get("research_question") or "Not specified"),
     )
     return {"discovered_intervention_themes": themes}
 
@@ -218,8 +223,13 @@ async def critique_issue_themes(state: SynthesisState) -> SynthesisState:
         json.dumps([t.dict() for t in state.get("discovered_issue_themes", [])])
     )
     prompt = build_theme_critique_prompt("issue")
-    llm = get_llm(HIGH_REASONING_MODEL, temperature=0.0)
-    resp = await llm.ainvoke(prompt.format(themes=themes_payload))
+    llm = get_llm(THEME_MODEL, temperature=0.0)
+    resp = await llm.ainvoke(
+        prompt.format(
+            rq=_escape_braces(str(state.get("research_question") or "Not specified")),
+            themes=themes_payload,
+        )
+    )
     critique = (resp.content if hasattr(resp, "content") else str(resp)).strip()
     next_iter = int(state.get("issue_theme_iteration") or 0) + 1
     return {
@@ -234,8 +244,13 @@ async def critique_intervention_themes(state: SynthesisState) -> SynthesisState:
         json.dumps([t.dict() for t in state.get("discovered_intervention_themes", [])])
     )
     prompt = build_theme_critique_prompt("intervention")
-    llm = get_llm(HIGH_REASONING_MODEL, temperature=0.0)
-    resp = await llm.ainvoke(prompt.format(themes=themes_payload))
+    llm = get_llm(THEME_MODEL, temperature=0.0)
+    resp = await llm.ainvoke(
+        prompt.format(
+            rq=_escape_braces(str(state.get("research_question") or "Not specified")),
+            themes=themes_payload,
+        )
+    )
     critique = (resp.content if hasattr(resp, "content") else str(resp)).strip()
     next_iter = int(state.get("intervention_theme_iteration") or 0) + 1
     return {
@@ -256,7 +271,7 @@ async def _map_concepts(
     ]
 
     sem = asyncio.Semaphore(32)
-    llm = get_llm(CLASSIFICATION_MODEL, temperature=0.0)
+    llm = get_llm(MAPPING_MODEL, temperature=0.0)
 
     async def _classify(concept: Concept) -> Optional[int]:
         prompt = build_classify_concept_prompt()
@@ -384,7 +399,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     # Helper to generate a short impact summary via LLM (fast model)
     async def _impact_for_theme(name: str, concept_texts: List[str]) -> str:
         try:
-            llm = get_llm(CLASSIFICATION_MODEL, temperature=0.1)
+            llm = get_llm(MAPPING_MODEL, temperature=0.1)
             sample = "\n".join([f"- {s}" for s in concept_texts[:8]])
             prompt = build_impact_summary_prompt()
             resp = await llm.ainvoke(
@@ -476,7 +491,7 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
     }
 
     prompt = build_executive_briefing_prompt()
-    llm = get_llm(BRIEFING_MODEL, temperature=0.2)
+    llm = get_llm(BRIEFING_MODEL, temperature=0.1)
     try:
         resp = llm.invoke(
             prompt.format(
@@ -497,13 +512,10 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
     return {"executive_briefing": executive_briefing}
 
 
-# Removed: load_research_question (consolidated into load_raw_extractions)
-
-
 def check_issue_critique(state: SynthesisState) -> str:
     has_critique = bool(state.get("issue_theme_critique"))
     iter_num = int(state.get("issue_theme_iteration") or 0)
-    if has_critique and iter_num < 2:
+    if has_critique and iter_num < CRITIQUE_ITERATIONS:
         return "define_issue_themes"
     return "map_issue_concepts_to_final_themes"
 
@@ -511,7 +523,7 @@ def check_issue_critique(state: SynthesisState) -> str:
 def check_intervention_critique(state: SynthesisState) -> str:
     has_critique = bool(state.get("intervention_theme_critique"))
     iter_num = int(state.get("intervention_theme_iteration") or 0)
-    if has_critique and iter_num < 2:
+    if has_critique and iter_num < CRITIQUE_ITERATIONS:
         return "define_intervention_themes"
     return "map_intervention_concepts_to_final_themes"
 

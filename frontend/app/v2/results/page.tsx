@@ -438,6 +438,7 @@ export default function AnalysisResultsPage() {
           setSummaryData(data as SynthesisSummary)
         } catch (err) {
         console.error('Failed to fetch summary data', err)
+        setSummaryData(null) // Reset on error to prevent invalid state
       } finally {
         setIsLoadingSummary(false)
       }
@@ -536,10 +537,21 @@ export default function AnalysisResultsPage() {
         return { stage: 'extracting', progress: 50, text: 'Extracting intervention data from documents...' }
       }
       
-      const extractionProgress = Math.round((extractedDocs / totalRelevantDocs) * 50) + 50
+      // Check if extraction is complete (all docs processed)
+      if (extractedDocs >= totalRelevantDocs && totalRelevantDocs > 0) {
+        // Analysis done, synthesis running
+        return { 
+          stage: 'synthesising', 
+          progress: 75, 
+          text: 'Generating summary and insights...' 
+        }
+      }
+      
+      // Still extracting - scale progress from 50% to 70%
+      const extractionProgress = Math.round((extractedDocs / totalRelevantDocs) * 20) + 50
       return { 
         stage: 'extracting', 
-        progress: Math.min(extractionProgress, 95), 
+        progress: Math.min(extractionProgress, 70), 
         text: `Extracting intervention data from documents... (${extractedDocs}/${totalRelevantDocs})` 
       }
     }
@@ -731,8 +743,8 @@ export default function AnalysisResultsPage() {
                   {summaryData && (
                     <div className="space-y-8">
                       <ExecutiveBriefing briefing={summaryData.executive_briefing} />
-                      <KeyIssuesTable issues={summaryData.key_issues} />
-                      <InterventionsTable interventions={summaryData.interventions} />
+                      <KeyIssuesTable issues={summaryData.key_issues || []} />
+                      <InterventionsTable interventions={summaryData.interventions || []} />
                     </div>
                   )}
                   {!isLoadingSummary && !summaryData && (
