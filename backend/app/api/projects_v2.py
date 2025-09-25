@@ -1524,6 +1524,7 @@ async def get_issue_intervention_navigator(
                                             "description",
                                             raw_data.get("description", ""),
                                         ),
+                                        "type": raw_data.get("type", "Unknown"),
                                         "country": raw_data.get("country"),
                                         "study_type": raw_data.get("study_type"),
                                         "sample_size": raw_data.get("sample_size"),

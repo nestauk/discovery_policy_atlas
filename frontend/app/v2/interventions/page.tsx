@@ -29,6 +29,7 @@ interface InterventionTheme {
 interface DetailedIntervention {
   name: string
   description: string
+  type?: string
   country?: string
   study_type?: string
   sample_size?: number
@@ -206,6 +207,7 @@ export default function InterventionsNavigatorPage() {
   const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
     return detailedInterventions.map((detail) => ({
       name: detail.name,
+      type: detail.type || 'Unknown',
       country: detail.country || 'Unknown',
       description: detail.description,
       result_count: detail.results?.length || 0,

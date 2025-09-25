@@ -14,6 +14,7 @@ import {
 
 interface NavigatorInterventionData {
   name: string
+  type: string
   country: string
   description: string
   result_count: number
@@ -45,7 +46,7 @@ interface NavigatorInterventionsTableProps {
   loading?: boolean
 }
 
-type SortField = 'name' | 'country' | 'result_count' | 'sample_size' | 'impact_score' | 'evidence_score'
+type SortField = 'name' | 'type' | 'country' | 'result_count' | 'sample_size' | 'impact_score' | 'evidence_score'
 type SortDirection = 'asc' | 'desc'
 
 export function NavigatorInterventionsTable({ interventions, loading = false }: NavigatorInterventionsTableProps) {
@@ -64,8 +65,8 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
 
   const sortedInterventions = useMemo(() => {
     return [...interventions].sort((a, b) => {
-      let aValue: string | number | null = a[sortField === 'sample_size' ? 'total_sample_size' : sortField]
-      let bValue: string | number | null = b[sortField === 'sample_size' ? 'total_sample_size' : sortField]
+      let aValue: string | number | null = a[sortField === 'sample_size' ? 'total_sample_size' : sortField] ?? null
+      let bValue: string | number | null = b[sortField === 'sample_size' ? 'total_sample_size' : sortField] ?? null
 
       // Handle null values
       if (aValue === null || aValue === undefined) aValue = sortDirection === 'asc' ? Infinity : -Infinity
@@ -160,7 +161,7 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
           <SortButton field="country">Country</SortButton>
         </div>
         <div className="col-span-1 text-center">
-          <SortButton field="result_count">Results</SortButton>
+          <SortButton field="type">Type</SortButton>
         </div>
         <div className="col-span-2">
           <SortButton field="impact_score">Impact</SortButton>
@@ -198,7 +199,9 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                 </div>
                 
                 <div className="col-span-1 text-center">
-                  <span className="text-sm text-gray-700">{intervention.result_count}</span>
+                  <span className="text-sm text-gray-700">
+                    {intervention.type && intervention.type !== 'Unknown' ? intervention.type : '—'}
+                  </span>
                 </div>
                 
                 <div className="col-span-2">
