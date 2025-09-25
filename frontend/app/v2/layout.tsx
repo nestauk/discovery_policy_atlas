@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, HelpCircle } from 'lucide-react'
+import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, HelpCircle, Target } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 
 const sidebarItems = [
@@ -19,6 +19,7 @@ const sidebarItems = [
 const testItems = [
   { name: 'Test extraction', href: '/v2/test_extraction', icon: Zap },
   { name: 'Extractions', href: '/v2/text_extractions', icon: FileText },
+  { name: 'Interventions', href: '/v2/interventions', icon: Target },
 ]
 
 // const quickStats = [
