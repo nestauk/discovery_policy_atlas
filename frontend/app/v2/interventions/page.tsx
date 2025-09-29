@@ -396,31 +396,6 @@ export default function InterventionsNavigatorPage() {
 
           {data && (
             <div className="space-y-6">
-              {/* Summary Stats */}
-              <Card className="bg-blue-50 border-blue-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-medium text-blue-900">Navigator overview</h3>
-                      <p className="text-sm text-blue-700 mt-1">
-                        {viewMode === 'grouped' ? (
-                          <>Found {data.issue_themes.length} key issues linked to {
-                            data.issue_themes.reduce((acc, issue) => acc + issue.related_interventions.length, 0)
-                          } intervention themes</>
-                        ) : (
-                          <>Found {getAllInterventions.length} unique intervention themes</>
-                        )}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-blue-900">
-                        {data.issue_themes.reduce((acc, issue) => acc + issue.frequency, 0)}
-                      </div>
-                      <div className="text-xs text-blue-600">Total mapped documents</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
 
               {data.issue_themes.length === 0 ? (
                 <Card>
