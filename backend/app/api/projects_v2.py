@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
 import uuid
 from typing import Optional, List
+import pandas as pd
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.vectorization import vectorization_service
@@ -17,6 +19,7 @@ from app.services.synthesis.schemas import (
 from app.services.synthesis.service import SynthesisService
 from app.services.synthesis.logbook import read_cached_summary
 from app.utils.geography import COUNTRY_NAME_TO_CODE, COUNTRY_CODE_TO_NAME
+from app.services.download import download_service
 
 logger = logging.getLogger(__name__)
 
@@ -1656,3 +1659,392 @@ async def debug_themes(
     except Exception as e:
         logger.error(f"Error in debug themes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def get_project_title(project_id: str) -> str:
+    """Get project title for filename generation"""
+    try:
+        result = (
+            vectorization_service.supabase.table("analysis_projects")
+            .select("title")
+            .eq("id", project_id)
+            .execute()
+        )
+
+        if result.data and len(result.data) > 0:
+            title = result.data[0].get("title", "")
+            # Clean title for filename: replace spaces with underscores, remove special chars
+            import re
+
+            clean_title = re.sub(
+                r"[^\w\s-]", "", title
+            )  # Remove special chars except spaces and hyphens
+            clean_title = re.sub(
+                r"[-\s]+", "_", clean_title
+            )  # Replace spaces and hyphens with underscores
+            clean_title = clean_title.strip("_")  # Remove leading/trailing underscores
+            return clean_title[:50] if clean_title else "project"  # Limit length
+        else:
+            return "project"
+    except Exception as e:
+        logger.warning(f"Failed to get project title for {project_id}: {e}")
+        return "project"
+
+
+def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
+    """Prepare flattened interventions data for CSV export"""
+    # Reuse the same logic as the issue-intervention-navigator endpoint
+    # but flatten the nested structure into a tabular format
+
+    # Get most recent completed synthesis run
+    runs_res = (
+        vectorization_service.supabase.table("synthesis_runs")
+        .select("*")
+        .eq("analysis_project_id", project_id)
+        .eq("status", "completed")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not runs_res.data:
+        return pd.DataFrame()
+
+    run_id = runs_res.data[0]["id"]
+
+    # Get all themes for this synthesis run
+    themes_res = (
+        vectorization_service.supabase.table("synthesis_themes")
+        .select("*")
+        .eq("synthesis_run_id", run_id)
+        .execute()
+    )
+
+    if not themes_res.data:
+        return pd.DataFrame()
+
+    themes = themes_res.data
+    issue_themes = [t for t in themes if t["theme_type"] == "issue"]
+    intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
+
+    # Get theme assignments to link themes to extractions
+    assignments_res = (
+        vectorization_service.supabase.table("theme_assignments")
+        .select("*")
+        .eq("synthesis_run_id", run_id)
+        .execute()
+    )
+
+    assignments = assignments_res.data or []
+
+    # Build mappings: theme_id -> [extraction_ids]
+    theme_to_extractions = {}
+    for assignment in assignments:
+        if not assignment:
+            continue
+        theme_id = assignment.get("synthesis_theme_id")
+        extraction_id = assignment.get("extraction_id")
+        if theme_id and extraction_id:
+            if theme_id not in theme_to_extractions:
+                theme_to_extractions[theme_id] = []
+            theme_to_extractions[theme_id].append(extraction_id)
+
+    # Get all extractions for this project
+    extractions_res = (
+        vectorization_service.supabase.table("analysis_extractions")
+        .select("*")
+        .eq("analysis_project_id", project_id)
+        .execute()
+    )
+
+    extractions = extractions_res.data or []
+    extractions_by_id = {str(e["id"]): e for e in extractions if e and e.get("id")}
+
+    # Get documents for metadata and scores
+    docs_result = (
+        vectorization_service.supabase.table("analysis_documents")
+        .select("*")
+        .eq("analysis_project_id", project_id)
+        .execute()
+    )
+
+    documents = docs_result.data or []
+    docs_by_id = {str(d["id"]): d for d in documents if d and d.get("id")}
+
+    # Build flattened CSV data
+    csv_rows = []
+
+    for issue_theme in issue_themes:
+        issue_theme_id = issue_theme["id"]
+        issue_theme_name = issue_theme["theme_name"]
+        issue_theme_description = issue_theme.get("summary_description", "")
+        issue_frequency = issue_theme.get("frequency", 0)
+
+        # Get extractions assigned to this issue theme
+        issue_extraction_ids = theme_to_extractions.get(issue_theme_id, [])
+
+        for intervention_theme in intervention_themes:
+            intervention_theme_id = intervention_theme["id"]
+            intervention_theme_name = intervention_theme["theme_name"]
+            intervention_description = intervention_theme.get("summary_description", "")
+
+            # Get extractions assigned to this intervention theme
+            intervention_extraction_ids = theme_to_extractions.get(
+                intervention_theme_id, []
+            )
+
+            # Find documents that have both issue and intervention extractions
+            for ext_id in intervention_extraction_ids:
+                extraction = extractions_by_id.get(str(ext_id))
+                if not extraction or not extraction.get("analysis_document_id"):
+                    continue
+
+                doc = docs_by_id.get(str(extraction["analysis_document_id"]))
+                if not doc:
+                    continue
+
+                # Check if this document also has the issue theme
+                doc_has_issue = False
+                for issue_ext_id in issue_extraction_ids:
+                    issue_extraction = extractions_by_id.get(str(issue_ext_id))
+                    if issue_extraction and str(
+                        issue_extraction.get("analysis_document_id")
+                    ) == str(extraction["analysis_document_id"]):
+                        doc_has_issue = True
+                        break
+
+                if not doc_has_issue:
+                    continue
+
+                raw_data = extraction.get("raw_data", {})
+
+                # Get scores from document conclusion
+                extraction_results = doc.get("extraction_results", {})
+                conclusion = extraction_results.get("conclusion", {}) or {}
+                evidence_strength = conclusion.get("evidence_strength", {}) or {}
+                predicted_impact = conclusion.get("predicted_impact", {}) or {}
+
+                impact_score = evidence_strength.get("stars")
+                evidence_score = predicted_impact.get("stars")
+
+                # Extract results from document's extraction_results
+                interventions_data = extraction_results.get("interventions", [])
+                results_data = extraction_results.get("results", [])
+
+                intervention_name = extraction.get("label", raw_data.get("name", ""))
+
+                # Find matching intervention and its results
+                intervention_results = []
+                for i, intervention_data in enumerate(interventions_data):
+                    if (
+                        intervention_data.get("name") == intervention_name
+                        or intervention_data.get("label") == intervention_name
+                    ):
+                        # Find results for this intervention by idx
+                        for result in results_data:
+                            if result.get("intervention_idx") == i:
+                                intervention_results.append(result)
+                        break
+
+                # If no results found, create one empty row to show the intervention
+                if not intervention_results:
+                    intervention_results = [{}]
+
+                # Create a row for each result
+                for result in intervention_results:
+                    csv_rows.append(
+                        {
+                            "Key Issue Theme": issue_theme_name,
+                            "Key Issue Description": issue_theme_description,
+                            "Issue Frequency": issue_frequency,
+                            "Intervention Theme": intervention_theme_name,
+                            "Intervention Theme Description": intervention_description,
+                            "Intervention Name": intervention_name,
+                            "Intervention Description": extraction.get(
+                                "description", raw_data.get("description", "")
+                            ),
+                            "Country": raw_data.get("country", ""),
+                            "Study Type": raw_data.get("study_type", ""),
+                            "Sample Size": raw_data.get("sample_size", ""),
+                            "Impact Score": impact_score,
+                            "Evidence Score": evidence_score,
+                            "Outcome Variable": result.get("outcome_variable", ""),
+                            "Effect Direction": result.get("effect_direction", ""),
+                            "Effect Size": result.get("effect_size", ""),
+                            "P-Value": result.get("p_value", ""),
+                            "Uncertainty": result.get("uncertainty", ""),
+                            "Result Text": result.get("result_text", ""),
+                            "Population Measured": result.get(
+                                "population_measured", ""
+                            ),
+                            "Subgroup/Dose": result.get("subgroup_or_dose", ""),
+                            "Document ID": doc.get("doc_id", ""),
+                            "Document Title": doc.get("title", ""),
+                            "Document Source": doc.get("source", ""),
+                            "Document URL": doc.get("landing_page_url", ""),
+                            "Document DOI": doc.get("doi", ""),
+                        }
+                    )
+
+    return pd.DataFrame(csv_rows)
+
+
+def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
+    """Prepare documents data for CSV export"""
+    try:
+        # Get all documents for this project
+        docs_result = (
+            vectorization_service.supabase.table("analysis_documents")
+            .select("*")
+            .eq("analysis_project_id", project_id)
+            .execute()
+        )
+
+        documents = docs_result.data or []
+        logger.info(f"Found {len(documents)} documents for project {project_id}")
+
+        if not documents:
+            logger.info(f"No documents found for project {project_id}")
+            return pd.DataFrame()
+
+        # Transform documents into flat structure
+        csv_rows = []
+        for i, doc in enumerate(documents):
+            try:
+                if not doc:  # Skip None documents
+                    logger.warning(f"Skipping None document at index {i}")
+                    continue
+
+                # Extract evidence assessment from conclusion if available
+                extraction_results = doc.get("extraction_results", {}) or {}
+                conclusion = extraction_results.get("conclusion", {}) or {}
+                evidence_strength = conclusion.get("evidence_strength", {}) or {}
+                predicted_impact = conclusion.get("predicted_impact", {}) or {}
+
+                # Handle authors field safely
+                authors = doc.get("authors", [])
+                if not isinstance(authors, list):
+                    authors = []
+
+                csv_rows.append(
+                    {
+                        "Title": doc.get("title", ""),
+                        "Authors": ", ".join(authors) if authors else "",
+                        "Year": doc.get("year", ""),
+                        "DOI": doc.get("doi", ""),
+                        "Source": doc.get("source", ""),
+                        "Country": doc.get("source_country", ""),
+                        "Type": doc.get("source_type", ""),
+                        "Venue": doc.get("venue", ""),
+                        "Relevance": "Yes" if doc.get("is_relevant", False) else "No",
+                        "Relevance Reason": doc.get("relevance_reason", ""),
+                        "Confidence": doc.get("relevance_confidence", ""),
+                        "Evidence Score": evidence_strength.get("stars", ""),
+                        "Evidence Justification": evidence_strength.get(
+                            "justification", ""
+                        ),
+                        "Impact Score": predicted_impact.get("stars", ""),
+                        "Impact Justification": predicted_impact.get(
+                            "justification", ""
+                        ),
+                        "Extraction Status": doc.get("extraction_status", ""),
+                        "Text Source": doc.get("text_source", ""),
+                        "Full Text Available": "Yes"
+                        if doc.get("full_text_available", False)
+                        else "No",
+                        "Top Line": doc.get("top_line", ""),
+                        "Abstract": doc.get("abstract_or_summary", ""),
+                        "Landing Page URL": doc.get("landing_page_url", ""),
+                        "Citation Count": doc.get("citation_count", ""),
+                    }
+                )
+            except Exception as doc_error:
+                logger.error(f"Error processing document {i}: {doc_error}")
+                logger.error(f"Document data: {doc}")
+                continue
+
+        logger.info(f"Successfully processed {len(csv_rows)} documents into CSV rows")
+        return pd.DataFrame(csv_rows)
+
+    except Exception as e:
+        logger.error(f"Error in prepare_documents_csv_data: {e}")
+        raise
+
+
+@router.get("/{project_id}/download/interventions-csv")
+async def download_interventions_csv(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Generate and download interventions navigator data as CSV"""
+    try:
+        logger.info(f"Preparing interventions CSV for project {project_id}")
+
+        # Prepare the DataFrame
+        df = prepare_interventions_csv_data(project_id)
+
+        if df.empty:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "No interventions data found for this project"},
+            )
+
+        # Store DataFrame for download
+        download_key = download_service.store_dataframe(
+            df,
+            current_user.user_id,
+            download_type="interventions",
+            filename_prefix="interventions_navigator",
+            project_id=project_id,
+        )
+
+        return {"download_key": download_key}
+
+    except Exception as e:
+        logger.error(f"Error preparing interventions CSV for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to prepare interventions CSV"
+        )
+
+
+@router.get("/{project_id}/download/documents-csv")
+async def download_documents_csv(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Generate and download documents data as CSV"""
+    try:
+        logger.info(f"Preparing documents CSV for project {project_id}")
+        logger.info(f"User: {current_user.user_id}")
+
+        # Prepare the DataFrame
+        df = prepare_documents_csv_data(project_id)
+
+        logger.info(f"DataFrame shape: {df.shape}")
+        logger.info(f"DataFrame columns: {df.columns.tolist()}")
+
+        if df.empty:
+            logger.warning(f"No documents found for project {project_id}")
+            return JSONResponse(
+                status_code=404,
+                content={"error": "No documents found for this project"},
+            )
+
+        # Store DataFrame for download
+        logger.info(f"Storing DataFrame for download, size: {len(df)} rows")
+        download_key = download_service.store_dataframe(
+            df,
+            current_user.user_id,
+            download_type="documents",
+            filename_prefix="project_documents",
+            project_id=project_id,
+        )
+
+        logger.info(f"Generated download key: {download_key}")
+        return {"download_key": download_key}
+
+    except Exception as e:
+        logger.error(f"Error preparing documents CSV for project {project_id}: {e}")
+        logger.error(f"Exception type: {type(e)}")
+        import traceback
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to prepare documents CSV")

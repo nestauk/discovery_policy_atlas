@@ -19,10 +19,12 @@ import {
   Filter,
   Brain,
   BarChart3,
-  AlertTriangle
+  AlertTriangle,
+  Download
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
+import { useAuth } from '@clerk/nextjs'
 import { SynthesisSummary } from '@/types/search'
 import { KeyIssuesTable } from './KeyIssuesTable'
 import { InterventionsTable } from './InterventionsTable'
@@ -106,6 +108,9 @@ export default function AnalysisResultsPage() {
   // Column visibility state - controls Study Type, Sample Size, Source, Status
   const [showAdditionalColumns, setShowAdditionalColumns] = useState(false)
   
+  // Documents download state
+  const [isPreparingDocumentsDownload, setIsPreparingDocumentsDownload] = useState(false)
+  
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
   const [interventions, setInterventions] = useState<InterventionData[]>([])
@@ -114,6 +119,7 @@ export default function AnalysisResultsPage() {
 
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions } = useAPI()
+  const { getToken } = useAuth()
 
   // Get search parameters (memoized to prevent re-runs)
   const searchConfig = useMemo(() => ({
@@ -214,6 +220,68 @@ export default function AnalysisResultsPage() {
       setLoadingData(false)
     }
   }, [fetchWithAuth, getProjectInterventions]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDownloadDocumentsCSV = useCallback(async () => {
+    if (!effectiveProjectId) return
+    
+    setIsPreparingDocumentsDownload(true)
+    
+    try {
+      console.log('Requesting documents CSV for project:', effectiveProjectId)
+      const response = await fetchWithAuth(`/api/analysis-projects/${effectiveProjectId}/download/documents-csv`)
+      console.log('Documents CSV response:', response)
+      
+      // Immediately trigger download using the download key
+      if (response.download_key) {
+        console.log('Got download key, proceeding with download:', response.download_key)
+        const token = await getToken()
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
+        
+        const downloadResponse = await fetch(`${cleanBaseUrl}/api/download/${response.download_key}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'text/csv',
+          },
+        })
+        
+        console.log('Download response status:', downloadResponse.status)
+        
+        if (downloadResponse.ok) {
+          // Simple approach: generate filename on frontend with project name
+          const projectName = activeProject?.title || 'project'
+          const cleanProjectName = projectName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')
+          const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_')
+          const filename = `${cleanProjectName}_documents_${timestamp}.csv`
+          
+          console.log('Generated filename:', filename)
+
+          const blob = await downloadResponse.blob()
+          const url = window.URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = filename
+          document.body.appendChild(a)
+          a.click()
+          window.URL.revokeObjectURL(url)
+          document.body.removeChild(a)
+          console.log('Download completed successfully')
+        } else {
+          const errorText = await downloadResponse.text()
+          console.error('Download failed:', downloadResponse.status, errorText)
+          alert(`Failed to download file: ${downloadResponse.status}`)
+        }
+      } else {
+        console.error('No download key received:', response)
+        alert('No download key received from server')
+      }
+    } catch (err) {
+      console.error('Failed to download documents CSV:', err)
+      alert('Failed to download documents CSV. Please try again.')
+    } finally {
+      setIsPreparingDocumentsDownload(false)
+    }
+  }, [effectiveProjectId, fetchWithAuth, getToken])
   
   // Handle case where URL has project ID but no active project is set
   useEffect(() => {
@@ -814,6 +882,20 @@ export default function AnalysisResultsPage() {
                               checked={showRelevantOnly}
                               onCheckedChange={setShowRelevantOnly}
                             />
+                          </div>
+                          
+                          {/* Documents Download Button */}
+                          <div className="flex items-center gap-2">
+                            <Button
+                              onClick={handleDownloadDocumentsCSV}
+                              disabled={isPreparingDocumentsDownload || documents.length === 0}
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-2"
+                            >
+                              <Download className="h-4 w-4" />
+                              {isPreparingDocumentsDownload ? 'Downloading...' : 'Download'}
+                            </Button>
                           </div>
                         </div>
                       )}
