@@ -1877,7 +1877,6 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                             "Population Measured": result.get(
                                 "population_measured", ""
                             ),
-                            "Subgroup/Dose": result.get("subgroup_or_dose", ""),
                             "Document ID": doc.get("doc_id", ""),
                             "Document Title": doc.get("title", ""),
                             "Document Source": doc.get("source", ""),
