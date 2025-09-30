@@ -311,3 +311,13 @@ button[data-slot="button"][class*="bg-blue-700"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Shimmer animation for feedback button */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}

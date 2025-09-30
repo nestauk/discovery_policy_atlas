@@ -2047,3 +2047,109 @@ async def download_documents_csv(
 
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to prepare documents CSV")
+
+
+@router.get("/{project_id}/feedback")
+async def get_project_feedback(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get user feedback for a specific project"""
+    try:
+        # Get project with user feedback
+        project_result = (
+            vectorization_service.supabase.table("analysis_projects")
+            .select("user_feedback")
+            .eq("id", project_id)
+            .execute()
+        )
+
+        if not project_result.data:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        user_feedback = project_result.data[0].get("user_feedback")
+
+        # Filter feedback for current user
+        if user_feedback and user_feedback.get("user_id") == current_user.user_id:
+            return {
+                "feedback": {
+                    "rating": user_feedback.get("rating"),
+                    "comment": user_feedback.get("comment", ""),
+                    "updated_at": user_feedback.get("updated_at"),
+                }
+            }
+
+        return {"feedback": None}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching feedback for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch project feedback")
+
+
+@router.post("/{project_id}/feedback")
+async def save_project_feedback(
+    project_id: str,
+    request: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Save or update user feedback for a specific project"""
+    try:
+        # Validate request
+        rating = request.get("rating")
+        comment = request.get("comment", "").strip()
+
+        if not isinstance(rating, int) or rating < 1 or rating > 5:
+            raise HTTPException(
+                status_code=400, detail="Rating must be an integer between 1 and 5"
+            )
+
+        if len(comment) > 500:
+            raise HTTPException(
+                status_code=400, detail="Comment must be 500 characters or less"
+            )
+
+        # Check if project exists
+        project_result = (
+            vectorization_service.supabase.table("analysis_projects")
+            .select("id")
+            .eq("id", project_id)
+            .execute()
+        )
+
+        if not project_result.data:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        # Prepare feedback data
+        feedback_data = {
+            "rating": rating,
+            "comment": comment,
+            "user_id": current_user.user_id,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+        # Update project with feedback
+        result = (
+            vectorization_service.supabase.table("analysis_projects")
+            .update({"user_feedback": feedback_data})
+            .eq("id", project_id)
+            .execute()
+        )
+
+        if not result.data:
+            raise HTTPException(status_code=500, detail="Failed to save feedback")
+
+        return {
+            "message": "Feedback saved successfully",
+            "feedback": {
+                "rating": rating,
+                "comment": comment,
+                "updated_at": feedback_data["updated_at"],
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error saving feedback for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save project feedback")
