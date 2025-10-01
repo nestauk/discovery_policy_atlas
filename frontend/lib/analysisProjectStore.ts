@@ -13,6 +13,25 @@ export interface AnalysisProject {
   created_at: string
   created_by_user_id?: string
   created_by_name?: string
+  search_query?: {
+    original_query?: string
+    boolean_query?: string
+    sub_questions?: string[]
+    sources?: string[]
+    access_types?: string[]
+    geography_filter?: string[]
+    time_preset?: string
+    time_from?: string
+    time_to?: string
+    limit?: number
+    mode?: string
+    scope?: string[]
+    custom_focus?: string[]
+    excludes?: string[]
+    custom_excludes?: string[]
+    relevance_enabled?: boolean
+    use_abstracts_only?: boolean
+  }
 }
 
 export interface AnalysisDocument {

@@ -36,6 +36,7 @@ import { ProjectCharts } from '@/components/charts/ProjectCharts'
 import EvidenceThematicView from '@/components/v2/evidence/EvidenceThematicView'
 import type { InterventionData } from '@/components/search/interventions-table'
 import { PapersTable } from '@/components/search/papers-table'
+import { SearchPlanModal } from '@/components/v2/results/SearchPlanModal'
 
 interface AnalysisDocument {
   id: string
@@ -281,7 +282,7 @@ export default function AnalysisResultsPage() {
     } finally {
       setIsPreparingDocumentsDownload(false)
     }
-  }, [effectiveProjectId, fetchWithAuth, getToken])
+  }, [effectiveProjectId, fetchWithAuth, getToken, activeProject?.title])
   
   // Handle case where URL has project ID but no active project is set
   useEffect(() => {
@@ -379,7 +380,8 @@ export default function AnalysisResultsPage() {
           status: project.status,
           run_id: project.run_id,
           total_references: project.total_references,
-          relevant_references: project.relevant_references
+          relevant_references: project.relevant_references,
+          search_query: project.search_query  // Include search_query data
         })
 
         // Check if analysis is complete
@@ -716,6 +718,13 @@ export default function AnalysisResultsPage() {
               </div>
             )}
           </div>
+          
+          {/* Search Plan Settings Button */}
+          {effectiveProjectId && activeProject?.search_query && (
+            <div>
+              <SearchPlanModal project={activeProject} />
+            </div>
+          )}
         </div>
       </div>
 

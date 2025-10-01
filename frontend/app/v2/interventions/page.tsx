@@ -174,7 +174,7 @@ export default function InterventionsNavigatorPage() {
     } finally {
       setIsPreparingDownload(false)
     }
-  }, [activeProject?.id, fetchWithAuth, getToken])
+  }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken])
 
   const renderStars = useCallback((score?: number) => {
     if (!score) return null

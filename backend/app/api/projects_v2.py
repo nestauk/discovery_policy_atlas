@@ -278,6 +278,7 @@ async def get_analysis_project(
                 "created_at": project["created_at"],
                 "created_by_user_id": project.get("created_by_user_id"),
                 "created_by_name": project.get("created_by_name"),
+                "search_query": project.get("search_query"),
             },
             "documents": documents,
             "extractions": extractions_result.data,
@@ -538,6 +539,27 @@ async def run_analysis_for_project(
             sub_questions=request.get("sub_questions"),
         )
 
+        # Prepare search query metadata to save with the project
+        search_query_data = {
+            "original_query": query,
+            "sub_questions": request.get("sub_questions", []),
+            "sources": sources,
+            "access_types": access_types,
+            "geography_filter": request.get("geography_filter", []),
+            "time_preset": request.get("time_preset"),
+            "time_from": config.date_from,
+            "time_to": config.date_to,
+            "limit": config.limit,
+            "mode": config.retrieval_mode,
+            "scope": request.get("scope", []),
+            "custom_focus": request.get("custom_focus", []),
+            "excludes": request.get("excludes", []),
+            "custom_excludes": request.get("custom_excludes", []),
+            "relevance_enabled": config.relevance_enabled,
+            "use_abstracts_only": config.use_abstracts_only,
+            "boolean_query": None,  # Will be filled in after generation
+        }
+
         # Update project status to running
         vectorization_service.supabase.table("analysis_projects").update(
             {"status": "running"}
@@ -552,12 +574,16 @@ async def run_analysis_for_project(
             user_name=current_user.name,
         )
 
+        # Update search query data with the generated boolean query
+        search_query_data["boolean_query"] = result.boolean_query
+
         # Update project with analysis results but keep status as "running"
         vectorization_service.supabase.table("analysis_projects").update(
             {
                 "run_id": result.run_id,
                 "total_references": result.total_references,
                 "relevant_references": result.relevant_references,
+                "search_query": search_query_data,
                 # Don't set status to "completed" yet - synthesis will do that
             }
         ).eq("id", project_id).execute()
