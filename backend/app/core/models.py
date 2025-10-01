@@ -115,7 +115,11 @@ class ProjectList(BaseModel):
 
 class DownloadCacheEntry(BaseModel):
     df_data: Dict[str, Any]  # Serialized DataFrame data
-    query: str
+    download_type: str  # Type of download: 'search', 'interventions', 'documents'
+    project_id: Optional[str] = None  # For project-specific downloads
+    query: Optional[str] = None  # For search downloads
+    filename_prefix: str  # Base filename without timestamp
+    custom_filename: Optional[str] = None  # Custom filename with project name and date
     user_id: str
     created_at: datetime
     expires_at: datetime

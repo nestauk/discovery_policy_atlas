@@ -26,7 +26,16 @@ class DownloadService:
         size_mb = memory_usage / (1024 * 1024)
         return size_mb
 
-    def store_dataframe(self, df: pd.DataFrame, query: str, user_id: str) -> str:
+    def store_dataframe(
+        self,
+        df: pd.DataFrame,
+        user_id: str,
+        download_type: str,
+        filename_prefix: str,
+        project_id: str = None,
+        query: str = None,
+        custom_filename: str = None,
+    ) -> str:
         """Store a DataFrame and return a download key"""
         # Clean up expired entries before storing new ones
         self._maybe_cleanup()
@@ -56,7 +65,11 @@ class DownloadService:
         now = datetime.utcnow()
         cache_entry = DownloadCacheEntry(
             df_data=df_data,
+            download_type=download_type,
+            project_id=project_id,
             query=query,
+            filename_prefix=filename_prefix,
+            custom_filename=custom_filename,
             user_id=user_id,
             created_at=now,
             expires_at=now + timedelta(hours=self.expiration_hours),
@@ -65,7 +78,9 @@ class DownloadService:
         self._cache[download_key] = cache_entry
         return download_key
 
-    def get_dataframe(self, download_key: str, user_id: str) -> Optional[pd.DataFrame]:
+    def get_dataframe(
+        self, download_key: str, user_id: str
+    ) -> Optional[tuple[pd.DataFrame, DownloadCacheEntry]]:
         """Retrieve a DataFrame from cache and remove it (one-time use)"""
         # Clean up expired entries before retrieving
         self._maybe_cleanup()
@@ -95,7 +110,7 @@ class DownloadService:
         # Remove from cache after successful retrieval (one-time use)
         del self._cache[download_key]
 
-        return df
+        return df, cache_entry
 
     def _remove_oldest_entries(self, count: int):
         """Remove the oldest cache entries to make room for new ones"""

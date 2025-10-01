@@ -3,11 +3,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
+import { useAuth } from '@clerk/nextjs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star } from 'lucide-react'
+import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
 import { NavigatorInterventionsTable } from '@/components/v2/interventions/NavigatorInterventionsTable'
 
 interface IssueTheme {
@@ -61,6 +62,7 @@ interface NavigatorData {
 export default function InterventionsNavigatorPage() {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth } = useAPI()
+  const { getToken } = useAuth()
   
   const [data, setData] = useState<NavigatorData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -69,6 +71,7 @@ export default function InterventionsNavigatorPage() {
   const [expandedInterventions, setExpandedInterventions] = useState<Set<string>>(new Set())
   const [viewMode, setViewMode] = useState<'grouped' | 'all'>('grouped')
   const [sortBy, setSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
+  const [isPreparingDownload, setIsPreparingDownload] = useState(false)
 
   const loadNavigatorData = useCallback(async () => {
     if (!activeProject?.id) return
@@ -122,6 +125,56 @@ export default function InterventionsNavigatorPage() {
     })
   }, [])
 
+  const handleDownloadCSV = useCallback(async () => {
+    if (!activeProject?.id) return
+    
+    setIsPreparingDownload(true)
+    
+    try {
+      const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/download/interventions-csv`)
+      
+      // Immediately trigger download using the download key
+      if (response.download_key) {
+        const token = await getToken()
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
+        
+        const downloadResponse = await fetch(`${cleanBaseUrl}/api/download/${response.download_key}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'text/csv',
+          },
+        })
+        
+        if (downloadResponse.ok) {
+          // Simple approach: generate filename on frontend with project name
+          const projectName = activeProject?.title || 'project'
+          const cleanProjectName = projectName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')
+          const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_')
+          const filename = `${cleanProjectName}_interventions_${timestamp}.csv`
+          
+          console.log('Generated filename:', filename)
+
+          const blob = await downloadResponse.blob()
+          const url = window.URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = filename
+          document.body.appendChild(a)
+          a.click()
+          window.URL.revokeObjectURL(url)
+          document.body.removeChild(a)
+        } else {
+          alert('Failed to download file')
+        }
+      }
+    } catch (err) {
+      console.error('Failed to download CSV:', err)
+      alert('Failed to download CSV. Please try again.')
+    } finally {
+      setIsPreparingDownload(false)
+    }
+  }, [activeProject?.id, fetchWithAuth, getToken])
 
   const renderStars = useCallback((score?: number) => {
     if (!score) return null
@@ -285,6 +338,20 @@ export default function InterventionsNavigatorPage() {
                 <option value="frequency">Frequency</option>
               </select>
             </div>
+            
+            {/* Download Button */}
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleDownloadCSV}
+                disabled={isPreparingDownload || !data || data.issue_themes.length === 0}
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                <Download className="h-4 w-4" />
+                {isPreparingDownload ? 'Downloading...' : 'Download'}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -329,31 +396,6 @@ export default function InterventionsNavigatorPage() {
 
           {data && (
             <div className="space-y-6">
-              {/* Summary Stats */}
-              <Card className="bg-blue-50 border-blue-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-medium text-blue-900">Navigator overview</h3>
-                      <p className="text-sm text-blue-700 mt-1">
-                        {viewMode === 'grouped' ? (
-                          <>Found {data.issue_themes.length} key issues linked to {
-                            data.issue_themes.reduce((acc, issue) => acc + issue.related_interventions.length, 0)
-                          } intervention themes</>
-                        ) : (
-                          <>Found {getAllInterventions.length} unique intervention themes</>
-                        )}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-blue-900">
-                        {data.issue_themes.reduce((acc, issue) => acc + issue.frequency, 0)}
-                      </div>
-                      <div className="text-xs text-blue-600">Total mapped documents</div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
 
               {data.issue_themes.length === 0 ? (
                 <Card>

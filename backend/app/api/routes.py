@@ -119,7 +119,11 @@ async def enhanced_search(
     if len(relevant_df) > 0:
         try:
             download_key = download_service.store_dataframe(
-                relevant_df, request.query, current_user.user_id
+                relevant_df,
+                current_user.user_id,
+                download_type="search",
+                filename_prefix="search_results",
+                query=request.query,
             )
         except ValueError as e:
             # DataFrame too large - log warning but continue without download
@@ -141,12 +145,14 @@ async def download_csv(
 ):
     """Download search results as CSV"""
     # Get DataFrame from cache
-    df = download_service.get_dataframe(download_key, current_user.user_id)
+    result = download_service.get_dataframe(download_key, current_user.user_id)
 
-    if df is None:
+    if result is None:
         return JSONResponse(
             status_code=404, content={"error": "Download not found or expired"}
         )
+
+    df, cache_entry = result
 
     # Convert DataFrame to CSV
     csv_buffer = io.StringIO()
@@ -155,7 +161,7 @@ async def download_csv(
 
     # Create filename with timestamp
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    filename = f"search_results_{timestamp}.csv"
+    filename = f"{cache_entry.filename_prefix}_{timestamp}.csv"
 
     # Return as streaming response
     return StreamingResponse(
