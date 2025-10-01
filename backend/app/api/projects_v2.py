@@ -516,7 +516,7 @@ async def run_analysis_for_project(
         if "policy" in access_types:
             sources.append("overton")
 
-        # Fallback to default sources if none specified
+        # Fallback to default sources if not specified
         if not sources:
             sources = request.get("sources", ["openalex", "overton"])
 
