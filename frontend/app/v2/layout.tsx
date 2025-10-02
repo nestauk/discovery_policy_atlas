@@ -8,6 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, HelpCircle, Target } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
+import { FeedbackButton } from '@/components/ui/feedback-button'
+import { FeedbackModal } from '@/components/ui/feedback-modal'
+import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
 
 const sidebarItems = [
   { name: 'Projects', href: '/v2/projects', icon: FolderOpen },
@@ -38,6 +41,43 @@ export default function AgentLayout({
   const pathname = usePathname()
   const { activeProject } = useAnalysisProjectStore()
   const [testSectionOpen, setTestSectionOpen] = useState(false)
+  
+  // Feedback state
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false)
+  const { isLoading, setFeedback, setLoading, getFeedback } = useFeedbackStore()
+  
+  // Load feedback when active project changes
+  useEffect(() => {
+    if (activeProject?.id && !getFeedback(activeProject.id)) {
+      setLoading(true)
+      fetchProjectFeedback(activeProject.id)
+        .then((feedbackData) => {
+          setFeedback(activeProject.id, feedbackData)
+        })
+        .catch((error) => {
+          console.error('Failed to load feedback:', error)
+        })
+        .finally(() => {
+          setLoading(false)
+        })
+    }
+  }, [activeProject?.id, getFeedback, setFeedback, setLoading])
+
+  const handleFeedbackSubmit = async (feedbackData: { rating: number; comment: string }) => {
+    if (!activeProject?.id) return
+
+    setLoading(true)
+    try {
+      const savedFeedback = await saveProjectFeedback(activeProject.id, feedbackData)
+      setFeedback(activeProject.id, savedFeedback)
+      setFeedbackModalOpen(false)
+    } catch (error) {
+      console.error('Failed to save feedback:', error)
+      // You might want to show a toast notification here
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (!isLoaded) return
@@ -121,6 +161,15 @@ export default function AgentLayout({
                 </Button>
               </Link>
             ))}
+            
+            {/* Feedback Button */}
+            {activeProject && (
+              <FeedbackButton
+                onClick={() => setFeedbackModalOpen(true)}
+                hasFeedback={!!getFeedback(activeProject.id)}
+                className="mt-2"
+              />
+            )}
           </nav>
 
           {/* Divider */}
@@ -190,6 +239,18 @@ export default function AgentLayout({
       <div className="flex-1 flex flex-col ml-64 bg-white">
         {children}
       </div>
+
+      {/* Feedback Modal */}
+      {activeProject && (
+        <FeedbackModal
+          isOpen={feedbackModalOpen}
+          onClose={() => setFeedbackModalOpen(false)}
+          onSubmit={handleFeedbackSubmit}
+          projectTitle={activeProject.title}
+          existingFeedback={getFeedback(activeProject.id)}
+          isLoading={isLoading}
+        />
+      )}
     </div>
   )
 }

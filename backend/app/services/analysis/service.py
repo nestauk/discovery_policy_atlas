@@ -59,7 +59,10 @@ class AnalysisService:
 
         # Step 1: build references
         references_service = ReferencesService(export_dir=str(run_export_dir))
-        references_csv = await references_service.build_references(
+        (
+            references_csv,
+            generated_boolean_query,
+        ) = await references_service.build_references(
             query=config.query,
             sources=config.sources,
             limit=config.limit,
@@ -194,6 +197,7 @@ class AnalysisService:
             relevant_references=relevant_references,
             references_csv_path=str(references_csv),
             extractions_json_path=consolidated_json_path,
+            boolean_query=generated_boolean_query,
         )
 
         # Store results in Supabase and optionally clean up files

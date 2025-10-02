@@ -84,3 +84,4 @@ class RunResult(BaseModel):
     extractions_json_path: Optional[
         str
     ] = None  # Single consolidated extractions JSON file
+    boolean_query: Optional[str] = None  # Generated boolean query used for search

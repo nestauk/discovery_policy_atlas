@@ -1,10 +1,12 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { create } from "zustand";
+import { useSearchParams } from "next/navigation";
 import { useAPI } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
+import { parseSearchParams } from '@/lib/searchParamsUtils';
 
 // ---------------- UI PRIMITIVES ----------------
 const cx = (...c: (string | false | undefined)[]) => c.filter(Boolean).join(" ");
@@ -850,6 +852,24 @@ interface ChatInterfaceProps {
 
 export default function ChatInterface({ onRunAnalysis, isRunning = false }: ChatInterfaceProps) {
   const s = useChat();
+  const searchParams = useSearchParams();
+  const hasPopulatedFromUrl = useRef(false);
+
+  // Populate form from URL parameters (for "Start New Search" feature)
+  // Only run once when searchParams contain a query
+  useEffect(() => {
+    const query = searchParams.get('query');
+    // Only populate if there's a query parameter and we haven't populated yet
+    if (query && !hasPopulatedFromUrl.current) {
+      const updates = parseSearchParams(searchParams);
+      if (Object.keys(updates).length > 0) {
+        s.set(updates);
+        hasPopulatedFromUrl.current = true;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]); // Only depend on searchParams, not on s
+
   return (
     <div className="min-h-screen bg-white text-gray-900">
       {s.step === "ASK" && <ScreenAsk />}

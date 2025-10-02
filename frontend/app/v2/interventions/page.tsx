@@ -174,7 +174,7 @@ export default function InterventionsNavigatorPage() {
     } finally {
       setIsPreparingDownload(false)
     }
-  }, [activeProject?.id, fetchWithAuth, getToken])
+  }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken])
 
   const renderStars = useCallback((score?: number) => {
     if (!score) return null
@@ -482,7 +482,7 @@ export default function InterventionsNavigatorPage() {
                     >
                       <div className="flex-1">
                         <CardTitle className="text-lg flex items-center gap-3">
-                          <AlertTriangle className="h-5 w-5 text-orange-500" />
+                          
                           {issue.theme_name}
                           <Badge variant="secondary">{issue.frequency} documents</Badge>
                         </CardTitle>
@@ -504,8 +504,8 @@ export default function InterventionsNavigatorPage() {
                     <CardContent className="pt-0">
                       <div className="space-y-4">
                         <h4 className="font-medium text-slate-900 flex items-center gap-2">
-                          <Target className="h-4 w-4" />
-                          Related Interventions
+                          
+                          Interventions:
                         </h4>
                         
                         {sortInterventions(issue.related_interventions).map((intervention) => (

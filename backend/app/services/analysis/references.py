@@ -75,7 +75,7 @@ class ReferencesService:
         mode: str = "semantic",  # "boolean" | "semantic"
         boolean_query: Optional[str] = None,
         geography_filter: Optional[List[str]] = None,
-    ) -> Path:
+    ) -> tuple[Path, str]:
         """Fetch and normalize references, write references.csv, and return its path."""
 
         tasks = []
@@ -86,13 +86,15 @@ class ReferencesService:
         df_val = date.fromisoformat(date_from) if date_from else None
         dt_val = date.fromisoformat(date_to) if date_to else None
 
-        # Determine OpenAlex query string
+        # Determine OpenAlex query string and track the final boolean query
         openalex_query_str = query
+        final_boolean_query = None
         logger.info("🔎 Building references with mode: '%s'", mode)
         logger.debug("Original query: '%s'", query)
 
         if mode == "boolean":
             openalex_query_str = boolean_query or query
+            final_boolean_query = openalex_query_str
             logger.info("📋 Using provided boolean query: '%s'", openalex_query_str)
         elif mode == "semantic":
             # Generate boolean query from natural query
@@ -100,6 +102,7 @@ class ReferencesService:
                 "🧠 Semantic mode: generating boolean query from natural language"
             )
             openalex_query_str = await self.generate_boolean_query(query)
+            final_boolean_query = openalex_query_str
             logger.info("🎯 Final OpenAlex query string: '%s'", openalex_query_str)
 
         if openalex_service:
@@ -357,4 +360,4 @@ class ReferencesService:
             )
 
         logger.info("Wrote references.csv with %d rows to %s", len(df), references_csv)
-        return references_csv
+        return references_csv, final_boolean_query or query
