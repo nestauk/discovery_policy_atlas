@@ -304,15 +304,10 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                                 </div>
                               </div>
                               
-                              {/* Population and subgroup info */}
-                              {(result.population_measured || result.subgroup_or_dose) && (
+                              {/* Population info */}
+                              {result.population_measured && (
                                 <div className="mt-2 text-xs text-gray-600">
-                                  {result.population_measured && (
-                                    <div><span className="font-medium">Population:</span> {result.population_measured}</div>
-                                  )}
-                                  {result.subgroup_or_dose && (
-                                    <div><span className="font-medium">Subgroup/Dose:</span> {result.subgroup_or_dose}</div>
-                                  )}
+                                  <div><span className="font-medium">Population:</span> {result.population_measured}</div>
                                 </div>
                               )}
                             </div>

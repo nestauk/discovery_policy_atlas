@@ -479,8 +479,8 @@ export function InterventionsNavigator({
                           )}
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Frequency:</div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-xs text-slate-600">{intervention.detailed_interventions?.length || 0}</span>
+                            <div className="flex items-center gap-1 justify-end">
+                              <span className="text-xs text-slate-600 text-right">{intervention.detailed_interventions?.length || 0}</span>
                             </div>
                           </div>
                           <div className="ml-2">
