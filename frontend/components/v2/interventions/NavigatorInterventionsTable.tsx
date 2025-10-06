@@ -8,8 +8,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { 
   ChevronUp, 
   ChevronDown, 
-  Target,
-  Star
+  Target
 } from 'lucide-react'
 
 interface NavigatorInterventionData {
@@ -39,6 +38,8 @@ interface NavigatorInterventionData {
   }>
   impact_score?: number
   evidence_score?: number
+  impact_justification?: string
+  evidence_justification?: string
 }
 
 interface NavigatorInterventionsTableProps {
@@ -84,33 +85,37 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
     })
   }, [interventions, sortField, sortDirection])
 
-  const toggleRowExpansion = (interventionName: string) => {
+  const toggleRowExpansion = (interventionKey: string) => {
     const newExpanded = new Set(expandedRows)
-    if (newExpanded.has(interventionName)) {
-      newExpanded.delete(interventionName)
+    if (newExpanded.has(interventionKey)) {
+      newExpanded.delete(interventionKey)
     } else {
-      newExpanded.add(interventionName)
+      newExpanded.add(interventionKey)
     }
     setExpandedRows(newExpanded)
   }
 
-  const renderStars = (score?: number) => {
+  const renderRating = (score?: number, justification?: string, defaultText?: string) => {
     if (!score) return <span className="text-xs text-gray-400">—</span>
-    return (
-      <div className="flex items-center gap-1">
-        <div className="flex">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Star
-              key={i}
-              className={`h-3 w-3 ${
-                i <= Math.round(score) ? 'fill-yellow-400 text-yellow-400' : 'text-slate-300'
-              }`}
-            />
-          ))}
-        </div>
-        <span className="text-xs text-slate-600">{score.toFixed(1)}</span>
-      </div>
+    
+    const rating = Math.round(score)
+    const ratingDisplay = (
+      <span className="inline-block px-2 py-0.5 rounded text-center font-medium bg-blue-100 text-blue-800 text-xs cursor-help">
+        {rating}/5
+      </span>
     )
+    
+    const tooltipText = justification || defaultText
+    
+    if (tooltipText) {
+      return (
+        <Tooltip content={tooltipText}>
+          <span>{ratingDisplay}</span>
+        </Tooltip>
+      )
+    }
+    
+    return ratingDisplay
   }
 
   const SortButton = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
@@ -160,10 +165,10 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
         <div className="col-span-2">
           <SortButton field="country">Country</SortButton>
         </div>
-        <div className="col-span-1 text-center">
+        <div className="col-span-2">
           <SortButton field="type">Type</SortButton>
         </div>
-        <div className="col-span-2">
+        <div className="col-span-1">
           <SortButton field="impact_score">Impact</SortButton>
         </div>
         <div className="col-span-2">
@@ -176,15 +181,16 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
 
       {/* Rows */}
       {sortedInterventions.map((intervention, index) => {
-        const isExpanded = expandedRows.has(intervention.name)
+        const interventionKey = `${intervention.name}-${index}`
+        const isExpanded = expandedRows.has(interventionKey)
         
         return (
-          <Card key={`${intervention.name}-${index}`} className="border-gray-200">
+          <Card key={interventionKey} className="border-gray-200">
             <CardContent className="p-0">
               {/* Main Row */}
               <div 
                 className="grid grid-cols-12 gap-4 px-4 py-3 cursor-pointer hover:bg-gray-50"
-                onClick={() => toggleRowExpansion(intervention.name)}
+                onClick={() => toggleRowExpansion(interventionKey)}
               >
                 <div className="col-span-3">
                   <div>
@@ -198,27 +204,35 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                   </span>
                 </div>
                 
-                <div className="col-span-1 text-center">
+                <div className="col-span-2">
                   <span className="text-sm text-gray-700">
                     {intervention.type && intervention.type !== 'Unknown' ? intervention.type : '—'}
                   </span>
                 </div>
                 
-                <div className="col-span-2">
-                  {renderStars(intervention.impact_score)}
+                <div className="col-span-1">
+                  {renderRating(
+                    intervention.impact_score, 
+                    intervention.impact_justification,
+                    'Predicted impact of this intervention based on reported outcomes'
+                  )}
                 </div>
                 
                 <div className="col-span-2">
-                  {renderStars(intervention.evidence_score)}
+                  {renderRating(
+                    intervention.evidence_score,
+                    intervention.evidence_justification,
+                    'Quality of evidence supporting this intervention based on study design and methodology'
+                  )}
                 </div>
                 
                 <div className="col-span-2 text-center">
-                  {intervention.total_sample_size ? (
+                  {intervention.total_sample_size != null && intervention.total_sample_size > 0 ? (
                     <span className="text-sm text-gray-700">
                       {intervention.total_sample_size.toLocaleString()}
                     </span>
                   ) : (
-                    <span className="text-xs text-gray-500">—</span>
+                    <span className="text-xs text-gray-500">n/a</span>
                   )}
                 </div>
               </div>

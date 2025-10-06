@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
 import { NavigatorInterventionsTable } from '@/components/v2/interventions/NavigatorInterventionsTable'
 
@@ -21,6 +22,7 @@ interface IssueTheme {
 interface InterventionTheme {
   theme_name: string
   description: string
+  impact_summary?: string
   frequency: number
   avg_impact_score?: number
   avg_evidence_score?: number
@@ -33,9 +35,11 @@ interface DetailedIntervention {
   type?: string
   country?: string
   study_type?: string
-  sample_size?: number
+  sample_size?: number | null
   impact_score?: number
   evidence_score?: number
+  impact_justification?: string
+  evidence_justification?: string
   document_url?: string
   results: Array<{
     outcome_variable?: string
@@ -59,7 +63,25 @@ interface NavigatorData {
   issue_themes: IssueTheme[]
 }
 
-export default function InterventionsNavigatorPage() {
+interface InterventionsNavigatorProps {
+  showHeader?: boolean
+  viewMode?: 'grouped' | 'all'
+  onViewModeChange?: (mode: 'grouped' | 'all') => void
+  sortBy?: 'frequency' | 'impact' | 'evidence'
+  onSortByChange?: (sortBy: 'frequency' | 'impact' | 'evidence') => void
+  onDownload?: () => void
+  isPreparingDownload?: boolean
+}
+
+export function InterventionsNavigator({ 
+  showHeader = true,
+  viewMode: externalViewMode,
+  onViewModeChange,
+  sortBy: externalSortBy,
+  onSortByChange,
+  onDownload,
+  isPreparingDownload: externalIsPreparingDownload
+}: InterventionsNavigatorProps) {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth } = useAPI()
   const { getToken } = useAuth()
@@ -69,9 +91,17 @@ export default function InterventionsNavigatorPage() {
   const [error, setError] = useState<string | null>(null)
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [expandedInterventions, setExpandedInterventions] = useState<Set<string>>(new Set())
-  const [viewMode, setViewMode] = useState<'grouped' | 'all'>('grouped')
-  const [sortBy, setSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
-  const [isPreparingDownload, setIsPreparingDownload] = useState(false)
+  
+  // Use external state if provided, otherwise use internal state
+  const [internalViewMode, setInternalViewMode] = useState<'grouped' | 'all'>('all')
+  const [internalSortBy, setInternalSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
+  const [internalIsPreparingDownload, setInternalIsPreparingDownload] = useState(false)
+  
+  const viewMode = externalViewMode ?? internalViewMode
+  const setViewMode = onViewModeChange ?? setInternalViewMode
+  const sortBy = externalSortBy ?? internalSortBy
+  const setSortBy = onSortByChange ?? setInternalSortBy
+  const isPreparingDownload = externalIsPreparingDownload ?? internalIsPreparingDownload
 
   const loadNavigatorData = useCallback(async () => {
     if (!activeProject?.id) return
@@ -126,14 +156,20 @@ export default function InterventionsNavigatorPage() {
   }, [])
 
   const handleDownloadCSV = useCallback(async () => {
+    // Use external handler if provided
+    if (onDownload) {
+      onDownload()
+      return
+    }
+    
+    // Otherwise use internal download logic
     if (!activeProject?.id) return
     
-    setIsPreparingDownload(true)
+    setInternalIsPreparingDownload(true)
     
     try {
       const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/download/interventions-csv`)
       
-      // Immediately trigger download using the download key
       if (response.download_key) {
         const token = await getToken()
         const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -147,13 +183,10 @@ export default function InterventionsNavigatorPage() {
         })
         
         if (downloadResponse.ok) {
-          // Simple approach: generate filename on frontend with project name
           const projectName = activeProject?.title || 'project'
           const cleanProjectName = projectName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')
           const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_')
           const filename = `${cleanProjectName}_interventions_${timestamp}.csv`
-          
-          console.log('Generated filename:', filename)
 
           const blob = await downloadResponse.blob()
           const url = window.URL.createObjectURL(blob)
@@ -172,9 +205,9 @@ export default function InterventionsNavigatorPage() {
       console.error('Failed to download CSV:', err)
       alert('Failed to download CSV. Please try again.')
     } finally {
-      setIsPreparingDownload(false)
+      setInternalIsPreparingDownload(false)
     }
-  }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken])
+  }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken, onDownload])
 
   const renderStars = useCallback((score?: number) => {
     if (!score) return null
@@ -195,7 +228,6 @@ export default function InterventionsNavigatorPage() {
     )
   }, [])
 
-  // Sort interventions based on current sortBy criteria
   const sortInterventions = useCallback((interventions: InterventionTheme[]) => {
     return [...interventions].sort((a, b) => {
       switch (sortBy) {
@@ -205,12 +237,11 @@ export default function InterventionsNavigatorPage() {
           return (b.avg_evidence_score || 0) - (a.avg_evidence_score || 0)
         case 'frequency':
         default:
-          return b.frequency - a.frequency
+          return (b.detailed_interventions?.length || 0) - (a.detailed_interventions?.length || 0)
       }
     })
   }, [sortBy])
 
-  // Get all unique interventions with aggregated data for "All Interventions" view
   const getAllInterventions = useMemo(() => {
     if (!data) return []
     
@@ -221,7 +252,6 @@ export default function InterventionsNavigatorPage() {
         const key = intervention.theme_name
         if (interventionsMap.has(key)) {
           const existing = interventionsMap.get(key)
-          // Aggregate frequencies and scores
           existing.frequency += intervention.frequency
           if (intervention.avg_impact_score) {
             existing.impact_scores.push(intervention.avg_impact_score)
@@ -229,7 +259,18 @@ export default function InterventionsNavigatorPage() {
           if (intervention.avg_evidence_score) {
             existing.evidence_scores.push(intervention.avg_evidence_score)
           }
-          existing.detailed_interventions.push(...(intervention.detailed_interventions || []))
+          // Keep the first impact_summary we encounter (if current doesn't have one)
+          if (!existing.impact_summary && intervention.impact_summary) {
+            existing.impact_summary = intervention.impact_summary
+          }
+          // Deduplicate detailed interventions by name
+          const newDetails = intervention.detailed_interventions || []
+          newDetails.forEach(detail => {
+            const exists = existing.detailed_interventions.some((d: DetailedIntervention) => d.name === detail.name)
+            if (!exists) {
+              existing.detailed_interventions.push(detail)
+            }
+          })
         } else {
           interventionsMap.set(key, {
             ...intervention,
@@ -241,7 +282,6 @@ export default function InterventionsNavigatorPage() {
       })
     })
     
-    // Calculate final aggregated scores
     const interventions = Array.from(interventionsMap.values()).map(intervention => ({
       ...intervention,
       avg_impact_score: intervention.impact_scores.length > 0 
@@ -252,11 +292,9 @@ export default function InterventionsNavigatorPage() {
         : undefined
     }))
     
-    // Sort by selected criteria using the memoized sort function
     return sortInterventions(interventions)
   }, [data, sortInterventions])
 
-  // Convert DetailedIntervention to NavigatorInterventionData format for NavigatorInterventionsTable
   const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
     return detailedInterventions.map((detail) => ({
       name: detail.name,
@@ -285,6 +323,8 @@ export default function InterventionsNavigatorPage() {
       })) || [],
       impact_score: detail.impact_score,
       evidence_score: detail.evidence_score,
+      impact_justification: detail.impact_justification,
+      evidence_justification: detail.evidence_justification,
     }))
   }, [])
 
@@ -301,79 +341,70 @@ export default function InterventionsNavigatorPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Header */}
-      <div className="border-b border-slate-200 bg-white px-8 py-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Interventions Navigator</h1>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Button
-                variant={viewMode === 'grouped' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('grouped')}
-              >
-                By Issues
-              </Button>
-              <Button
-                variant={viewMode === 'all' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setViewMode('all')}
-              >
-                All Interventions
-              </Button>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Label className="text-sm">Sort by:</Label>
-              <select 
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as 'frequency' | 'impact' | 'evidence')}
-                className="text-sm border rounded px-2 py-1"
-              >
-                <option value="impact">Impact</option>
-                <option value="evidence">Evidence</option>
-                <option value="frequency">Frequency</option>
-              </select>
-            </div>
-            
-            {/* Download Button */}
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={handleDownloadCSV}
-                disabled={isPreparingDownload || !data || data.issue_themes.length === 0}
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-2"
-              >
-                <Download className="h-4 w-4" />
-                {isPreparingDownload ? 'Downloading...' : 'Download'}
-              </Button>
+    <div className="flex flex-col h-full">
+      {/* Header - only show on standalone page */}
+      {showHeader && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="standalone-group-by-issues" className="text-sm text-slate-700">
+                  Group by issues
+                </Label>
+                <Switch
+                  id="standalone-group-by-issues"
+                  checked={viewMode === 'grouped'}
+                  onCheckedChange={(checked) => setViewMode(checked ? 'grouped' : 'all')}
+                />
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Label className="text-sm text-slate-700">Sort by:</Label>
+                <select 
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as 'frequency' | 'impact' | 'evidence')}
+                  className="text-sm border rounded px-2 py-1 bg-white"
+                >
+                  <option value="impact">Impact</option>
+                  <option value="evidence">Evidence</option>
+                  <option value="frequency">Frequency</option>
+                </select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={handleDownloadCSV}
+                  disabled={isPreparingDownload || !data || data.issue_themes.length === 0}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2"
+                >
+                  <Download className="h-4 w-4" />
+                  {isPreparingDownload ? 'Downloading...' : 'Download'}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-
+      )}
+      
       {/* Content */}
-      <div className="flex-1 bg-slate-50 p-6">
-        <div className="max-w-6xl mx-auto">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-                <p className="text-slate-600">Loading interventions data...</p>
-              </div>
+      <div className="flex-1">
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+              <p className="text-slate-600">Loading interventions data...</p>
             </div>
-          )}
+          </div>
+        )}
 
-          {error && (
-            <div className="text-center py-12">
-              <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-slate-900 mb-2">Error Loading Data</h3>
-              <p className="text-slate-600">{error}</p>
-              <div className="flex gap-2 mt-4">
+        {error && (
+          <div className="text-center py-12">
+            <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-slate-900 mb-2">Error Loading Data</h3>
+            <p className="text-slate-600">{error}</p>
+            <div className="flex gap-2 mt-4 justify-center">
               <Button onClick={loadNavigatorData}>
                 Try Again
               </Button>
@@ -391,89 +422,99 @@ export default function InterventionsNavigatorPage() {
                 Debug Themes
               </Button>
             </div>
-            </div>
-          )}
+          </div>
+        )}
 
-          {data && (
-            <div className="space-y-6">
-
-              {data.issue_themes.length === 0 ? (
-                <Card>
-                  <CardContent className="p-8 text-center">
-                    <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-slate-900 mb-2">No Issue-Intervention Mappings Found</h3>
-                    <p className="text-slate-600">
-                      This project doesn&apos;t have any extracted mappings between issues and interventions yet.
-                      This happens when documents are still being processed or don&apos;t contain linked policy interventions.
-                    </p>
-                  </CardContent>
-                </Card>
-              ) : viewMode === 'all' ? (
-                // All Interventions View
-                <div className="space-y-4">
-                  {getAllInterventions.map((intervention) => (
-                    <Card key={intervention.theme_name} className="overflow-hidden">
-                      <CardHeader className="pb-2">
-                        <div 
-                          className="flex items-center justify-between cursor-pointer"
-                          onClick={() => toggleIntervention(`all-${intervention.theme_name}`)}
-                        >
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3">
-                              <h5 className="font-medium text-lg">{intervention.theme_name}</h5>
-                              <Badge variant="outline">{intervention.frequency} documents</Badge>
-                            </div>
-                            {expandedInterventions.has(`all-${intervention.theme_name}`) && (
-                              <p className="text-sm text-slate-600 mt-1">{intervention.description}</p>
-                            )}
+        {data && (
+          <div className="space-y-6">
+            {data.issue_themes.length === 0 ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-2">No Issue-Intervention Mappings Found</h3>
+                  <p className="text-slate-600">
+                    This project doesn&apos;t have any extracted mappings between issues and interventions yet.
+                    This happens when documents are still being processed or don&apos;t contain linked policy interventions.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : viewMode === 'all' ? (
+              <div className="space-y-4">
+                {getAllInterventions.map((intervention) => (
+                  <Card key={intervention.theme_name} className="overflow-hidden">
+                    <CardHeader className="pb-2">
+                      <div 
+                        className="flex items-center justify-between cursor-pointer"
+                        onClick={() => toggleIntervention(`all-${intervention.theme_name}`)}
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3">
+                            <h5 className="font-medium text-lg">{intervention.theme_name}</h5>
                           </div>
-                          
-                          {/* Impact and Evidence Scores - Right Side */}
-                          <div className="flex items-center gap-4 ml-4">
-                            {intervention.avg_impact_score && (
-                              <div className="text-right">
-                                <div className="text-xs text-slate-500">Impact:</div>
-                                {renderStars(intervention.avg_impact_score)}
-                              </div>
-                            )}
-                            {intervention.avg_evidence_score && (
-                              <div className="text-right">
-                                <div className="text-xs text-slate-500">Evidence:</div>
-                                {renderStars(intervention.avg_evidence_score)}
-                              </div>
-                            )}
-                            <div className="ml-2">
-                              {expandedInterventions.has(`all-${intervention.theme_name}`) ? (
-                                <ChevronDown className="h-4 w-4" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4" />
+                          {expandedInterventions.has(`all-${intervention.theme_name}`) && (
+                            <div className="mt-1 space-y-1">
+                              <p className="text-sm text-slate-600">{intervention.description}</p>
+                              {intervention.impact_summary && (
+                                <p className="text-sm text-slate-600">
+                                  <span className="font-semibold">Impact: </span>
+                                  {intervention.impact_summary}
+                                </p>
                               )}
                             </div>
-                          </div>
+                          )}
                         </div>
-                      </CardHeader>
-
-                      {expandedInterventions.has(`all-${intervention.theme_name}`) && (
-                        <CardContent className="pt-0">
-                          {intervention.detailed_interventions?.length ? (
-                            <div className="space-y-3">
-                              <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                              <NavigatorInterventionsTable 
-                                interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                              />
-                            </div>
-                          ) : (
-                            <div className="text-sm text-slate-600">
-                              <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
+                        
+                        <div className="flex items-start gap-4 ml-4">
+                          {intervention.avg_impact_score && (
+                            <div className="text-right">
+                              <div className="text-xs text-slate-500">Impact:</div>
+                              {renderStars(intervention.avg_impact_score)}
                             </div>
                           )}
-                        </CardContent>
-                      )}
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                data.issue_themes.map((issue) => (
+                          {intervention.avg_evidence_score && (
+                            <div className="text-right">
+                              <div className="text-xs text-slate-500">Evidence:</div>
+                              {renderStars(intervention.avg_evidence_score)}
+                            </div>
+                          )}
+                          <div className="text-right">
+                            <div className="text-xs text-slate-500">Frequency:</div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-slate-600">{intervention.detailed_interventions?.length || 0}</span>
+                            </div>
+                          </div>
+                          <div className="ml-2">
+                            {expandedInterventions.has(`all-${intervention.theme_name}`) ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </CardHeader>
+
+                    {expandedInterventions.has(`all-${intervention.theme_name}`) && (
+                      <CardContent className="pt-0">
+                        {intervention.detailed_interventions?.length ? (
+                          <div className="space-y-3">
+                            <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
+                            <NavigatorInterventionsTable 
+                              interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
+                            />
+                          </div>
+                        ) : (
+                          <div className="text-sm text-slate-600">
+                            <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
+                          </div>
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              data.issue_themes.map((issue) => (
                 <Card key={issue.theme_name} className="overflow-hidden">
                   <CardHeader className="pb-3">
                     <div 
@@ -482,7 +523,6 @@ export default function InterventionsNavigatorPage() {
                     >
                       <div className="flex-1">
                         <CardTitle className="text-lg flex items-center gap-3">
-                          
                           {issue.theme_name}
                           <Badge variant="secondary">{issue.frequency} documents</Badge>
                         </CardTitle>
@@ -504,7 +544,6 @@ export default function InterventionsNavigatorPage() {
                     <CardContent className="pt-0">
                       <div className="space-y-4">
                         <h4 className="font-medium text-slate-900 flex items-center gap-2">
-                          
                           Interventions:
                         </h4>
                         
@@ -518,15 +557,21 @@ export default function InterventionsNavigatorPage() {
                                 <div className="flex-1">
                                   <div className="flex items-center gap-3">
                                     <h5 className="font-medium">{intervention.theme_name}</h5>
-                                    <Badge variant="outline">{intervention.frequency} documents</Badge>
                                   </div>
                                   {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
-                                    <p className="text-sm text-slate-600 mt-1">{intervention.description}</p>
+                                    <div className="mt-1 space-y-1">
+                                      <p className="text-sm text-slate-600">{intervention.description}</p>
+                                      {intervention.impact_summary && (
+                                        <p className="text-sm text-slate-600">
+                                          <span className="font-semibold">Impact: </span>
+                                          {intervention.impact_summary}
+                                        </p>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                                 
-                                {/* Impact and Evidence Scores - Right Side */}
-                                <div className="flex items-center gap-4 ml-4">
+                                <div className="flex items-start gap-4 ml-4">
                                   {intervention.avg_impact_score && (
                                     <div className="text-right">
                                       <div className="text-xs text-slate-500">Impact:</div>
@@ -539,6 +584,12 @@ export default function InterventionsNavigatorPage() {
                                       {renderStars(intervention.avg_evidence_score)}
                                     </div>
                                   )}
+                                  <div className="text-right">
+                                    <div className="text-xs text-slate-500">Frequency:</div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-xs text-slate-600">{intervention.detailed_interventions?.length || 0}</span>
+                                    </div>
+                                  </div>
                                   <div className="ml-2">
                                     {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) ? (
                                       <ChevronDown className="h-4 w-4" />
@@ -572,11 +623,10 @@ export default function InterventionsNavigatorPage() {
                     </CardContent>
                   )}
                 </Card>
-                ))
-              )}
-            </div>
-          )}
-        </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -19,7 +19,6 @@ import {
   Filter,
   Brain,
   BarChart3,
-  AlertTriangle,
   Download
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
@@ -33,7 +32,7 @@ import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
 import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
 import NetworkVisualizer from '@/components/network/NetworkVisualizer'
 import { ProjectCharts } from '@/components/charts/ProjectCharts'
-import EvidenceThematicView from '@/components/v2/evidence/EvidenceThematicView'
+import { InterventionsNavigator } from '@/components/v2/interventions/InterventionsNavigator'
 import type { InterventionData } from '@/components/search/interventions-table'
 import { PapersTable } from '@/components/search/papers-table'
 import { SearchPlanModal } from '@/components/v2/results/SearchPlanModal'
@@ -101,7 +100,7 @@ export default function AnalysisResultsPage() {
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
   // const [activeTab, setActiveTab] = useState('summary')
   const [insightsSubTab, setInsightsSubTab] = useState('charts')
-  const [evidenceSubTab, setEvidenceSubTab] = useState('documents')
+  const [evidenceSubTab, setEvidenceSubTab] = useState('interventions')
   
   // Relevance filtering state
   const [showRelevantOnly, setShowRelevantOnly] = useState(true)
@@ -111,6 +110,11 @@ export default function AnalysisResultsPage() {
   
   // Documents download state
   const [isPreparingDocumentsDownload, setIsPreparingDocumentsDownload] = useState(false)
+  
+  // Interventions view state
+  const [interventionsGroupByIssues, setInterventionsGroupByIssues] = useState(false)
+  const [interventionsSortBy, setInterventionsSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
+  const [isPreparingInterventionsDownload, setIsPreparingInterventionsDownload] = useState(false)
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
@@ -281,6 +285,53 @@ export default function AnalysisResultsPage() {
       alert('Failed to download documents CSV. Please try again.')
     } finally {
       setIsPreparingDocumentsDownload(false)
+    }
+  }, [effectiveProjectId, fetchWithAuth, getToken, activeProject?.title])
+  
+  const handleDownloadInterventionsCSV = useCallback(async () => {
+    if (!effectiveProjectId) return
+    
+    setIsPreparingInterventionsDownload(true)
+    
+    try {
+      const response = await fetchWithAuth(`/api/analysis-projects/${effectiveProjectId}/download/interventions-csv`)
+      
+      if (response.download_key) {
+        const token = await getToken()
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
+        
+        const downloadResponse = await fetch(`${cleanBaseUrl}/api/download/${response.download_key}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'text/csv',
+          },
+        })
+        
+        if (downloadResponse.ok) {
+          const projectName = activeProject?.title || 'project'
+          const cleanProjectName = projectName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')
+          const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_')
+          const filename = `${cleanProjectName}_interventions_${timestamp}.csv`
+
+          const blob = await downloadResponse.blob()
+          const url = window.URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = filename
+          document.body.appendChild(a)
+          a.click()
+          window.URL.revokeObjectURL(url)
+          document.body.removeChild(a)
+        } else {
+          alert('Failed to download file')
+        }
+      }
+    } catch (err) {
+      console.error('Failed to download interventions CSV:', err)
+      alert('Failed to download interventions CSV. Please try again.')
+    } finally {
+      setIsPreparingInterventionsDownload(false)
     }
   }, [effectiveProjectId, fetchWithAuth, getToken, activeProject?.title])
   
@@ -841,15 +892,6 @@ export default function AnalysisResultsPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex gap-2">
                         <Button
-                          variant={evidenceSubTab === 'documents' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setEvidenceSubTab('documents')}
-                          className="flex items-center gap-2"
-                        >
-                          <FileText className="h-3 w-3" />
-                          Documents ({showRelevantOnly ? relevantCount : documents.length})
-                        </Button>
-                        <Button
                           variant={evidenceSubTab === 'interventions' ? 'default' : 'outline'}
                           size="sm"
                           onClick={() => setEvidenceSubTab('interventions')}
@@ -859,13 +901,13 @@ export default function AnalysisResultsPage() {
                           Interventions
                         </Button>
                         <Button
-                          variant={evidenceSubTab === 'issues' ? 'default' : 'outline'}
+                          variant={evidenceSubTab === 'documents' ? 'default' : 'outline'}
                           size="sm"
-                          onClick={() => setEvidenceSubTab('issues')}
+                          onClick={() => setEvidenceSubTab('documents')}
                           className="flex items-center gap-2"
                         >
-                          <AlertTriangle className="h-3 w-3" />
-                          Key Issues
+                          <FileText className="h-3 w-3" />
+                          Documents ({showRelevantOnly ? relevantCount : documents.length})
                         </Button>
                       </div>
 
@@ -908,10 +950,67 @@ export default function AnalysisResultsPage() {
                           </div>
                         </div>
                       )}
+                      
+                      {/* Controls for interventions */}
+                      {evidenceSubTab === 'interventions' && (
+                        <div className="flex items-center gap-6">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="group-by-issues" className="text-sm text-slate-700">
+                              Group by issues
+                            </Label>
+                            <Switch
+                              id="group-by-issues"
+                              checked={interventionsGroupByIssues}
+                              onCheckedChange={setInterventionsGroupByIssues}
+                            />
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <Label className="text-sm text-slate-700">Sort by:</Label>
+                            <select 
+                              value={interventionsSortBy}
+                              onChange={(e) => setInterventionsSortBy(e.target.value as 'frequency' | 'impact' | 'evidence')}
+                              className="text-sm border rounded px-2 py-1 bg-white"
+                            >
+                              <option value="impact">Impact</option>
+                              <option value="evidence">Evidence</option>
+                              <option value="frequency">Frequency</option>
+                            </select>
+                          </div>
+                          
+                          {/* Interventions Download Button */}
+                          <div className="flex items-center gap-2">
+                            <Button
+                              onClick={handleDownloadInterventionsCSV}
+                              disabled={isPreparingInterventionsDownload}
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-2"
+                            >
+                              <Download className="h-4 w-4" />
+                              {isPreparingInterventionsDownload ? 'Downloading...' : 'Download'}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Content based on active sub-tab */}
+                  {evidenceSubTab === 'interventions' && (
+                    <div>
+                      <InterventionsNavigator 
+                        showHeader={false}
+                        viewMode={interventionsGroupByIssues ? 'grouped' : 'all'}
+                        onViewModeChange={(mode) => setInterventionsGroupByIssues(mode === 'grouped')}
+                        sortBy={interventionsSortBy}
+                        onSortByChange={setInterventionsSortBy}
+                        onDownload={handleDownloadInterventionsCSV}
+                        isPreparingDownload={isPreparingInterventionsDownload}
+                      />
+                    </div>
+                  )}
+
                   {evidenceSubTab === 'documents' && (
                     <div>
                       {loadingData ? (
@@ -950,18 +1049,6 @@ export default function AnalysisResultsPage() {
                           <p className="text-slate-600">Documents will appear here once the analysis is processed.</p>
                         </div>
                       )}
-                    </div>
-                  )}
-
-                  {evidenceSubTab === 'interventions' && (
-                    <div>
-                      <EvidenceThematicView projectId={effectiveProjectId} themeType="intervention" />
-                    </div>
-                  )}
-
-                  {evidenceSubTab === 'issues' && (
-                    <div>
-                      <EvidenceThematicView projectId={effectiveProjectId} themeType="issue" />
                     </div>
                   )}
                 </div>

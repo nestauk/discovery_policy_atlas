@@ -1381,8 +1381,10 @@ async def get_issue_intervention_navigator(
             predicted_impact = conclusion.get("predicted_impact", {}) or {}
 
             doc_scores[doc_id] = {
-                "impact_score": evidence_strength.get("stars"),
-                "evidence_score": predicted_impact.get("stars"),
+                "impact_score": predicted_impact.get("stars"),
+                "evidence_score": evidence_strength.get("stars"),
+                "impact_justification": predicted_impact.get("justification", ""),
+                "evidence_justification": evidence_strength.get("justification", ""),
             }
 
             # Get mappings from extraction results
@@ -1563,6 +1565,12 @@ async def get_issue_intervention_navigator(
                                         "evidence_score": doc_scores.get(
                                             doc.get("doc_id"), {}
                                         ).get("evidence_score"),
+                                        "impact_justification": doc_scores.get(
+                                            doc.get("doc_id"), {}
+                                        ).get("impact_justification", ""),
+                                        "evidence_justification": doc_scores.get(
+                                            doc.get("doc_id"), {}
+                                        ).get("evidence_justification", ""),
                                         "results": intervention_results,
                                         "source_documents": [
                                             {
@@ -1588,6 +1596,9 @@ async def get_issue_intervention_navigator(
                         {
                             "theme_name": intervention_theme_name,
                             "description": intervention_description,
+                            "impact_summary": intervention_theme.get(
+                                "impact_summary", ""
+                            ),
                             "frequency": len(shared_docs),
                             "avg_impact_score": round(avg_impact_score, 1)
                             if avg_impact_score
