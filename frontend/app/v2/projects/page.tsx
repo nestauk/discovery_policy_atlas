@@ -149,6 +149,16 @@ export default function ProjectsPage() {
       )
     : projects
 
+  // Helper: can the current user delete this project?
+  const canDeleteProject = (project: AnalysisProject) => {
+    if (currentUserFullName === 'Karlis Kanders') return true
+    return (
+      project.created_by_name === currentUserFullName ||
+      project.created_by_name === currentUserEmail ||
+      project.created_by_name === currentUserEmailUsername
+    )
+  }
+
   return (
     <div className="flex-1 flex flex-col">
       <div className="border-b border-slate-200 bg-white px-8 py-6">
@@ -221,20 +231,24 @@ export default function ProjectsPage() {
                         <span className="truncate max-w-[180px]">{project.title}</span>
                       </div>
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => openEditDialog(project)}
-                        >
-                          <Edit className="h-3 w-3" />
-                        </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => handleDeleteProject(project.id)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
+                        {canDeleteProject(project) && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => openEditDialog(project)}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        )}
+                        {canDeleteProject(project) && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => handleDeleteProject(project.id)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        )}
                       </div>
                     </CardTitle>
                   </CardHeader>
