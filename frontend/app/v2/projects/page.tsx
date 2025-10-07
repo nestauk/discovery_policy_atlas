@@ -10,6 +10,8 @@ import { FolderOpen, Plus, Search, Edit, Trash2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore, AnalysisProject } from '@/lib/analysisProjectStore'
+import { Switch } from '@/components/ui/switch'
+import { useUser } from '@clerk/nextjs'
 
 export default function ProjectsPage() {
   const router = useRouter()
@@ -30,7 +32,7 @@ export default function ProjectsPage() {
     error,
     setError
   } = useAnalysisProjectStore()
-
+  const { user } = useUser()
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [showInfoDialog, setShowInfoDialog] = useState(false)
@@ -38,6 +40,7 @@ export default function ProjectsPage() {
   const [isCreating, setIsCreating] = useState(false)
   const [editProjectDialog, setEditProjectDialog] = useState<AnalysisProject | null>(null)
   const [editForm, setEditForm] = useState({ title: '', description: '' })
+  const [showMyProjectsOnly, setShowMyProjectsOnly] = useState(false)
 
   useEffect(() => {
     loadProjects()
@@ -131,6 +134,21 @@ export default function ProjectsPage() {
     }
   }
 
+  // Determine the user's full name, email, and email username for filtering
+  const currentUserFullName = user?.fullName || ''
+  const currentUserEmail = user?.emailAddresses?.[0]?.emailAddress || ''
+  const currentUserEmailUsername = currentUserEmail.split('@')[0] || ''
+
+  // Filter projects if toggle is on (match by full name, email, or email username)
+  const displayedProjects = showMyProjectsOnly
+    ? projects.filter(
+        p =>
+          p.created_by_name === currentUserFullName ||
+          p.created_by_name === currentUserEmail ||
+          p.created_by_name === currentUserEmailUsername
+      )
+    : projects
+
   return (
     <div className="flex-1 flex flex-col">
       <div className="border-b border-slate-200 bg-white px-8 py-6">
@@ -144,7 +162,17 @@ export default function ProjectsPage() {
         <div className="max-w-6xl mx-auto">
           <div className="flex items-center justify-between mb-8">
             <h2 className="text-xl font-semibold text-slate-900"></h2>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center">
+              <div className="flex items-center gap-2 mr-2">
+                <Switch
+                  checked={showMyProjectsOnly}
+                  onCheckedChange={setShowMyProjectsOnly}
+                  id="show-my-projects-switch"
+                />
+                <label htmlFor="show-my-projects-switch" className="text-sm text-slate-700 select-none cursor-pointer">
+                  Show my projects
+                </label>
+              </div>
               <Button 
                 onClick={() => setShowInfoDialog(true)}
                 variant="outline"
@@ -159,7 +187,7 @@ export default function ProjectsPage() {
             <div className="flex items-center justify-center py-12">
               <div className="text-slate-500">Loading projects...</div>
             </div>
-          ) : projects.length === 0 ? (
+          ) : displayedProjects.length === 0 ? (
             <div className="text-center py-12">
               <div className="bg-slate-50 rounded-lg p-8">
                 <FolderOpen className="h-12 w-12 text-slate-400 mx-auto mb-4" />
@@ -178,7 +206,7 @@ export default function ProjectsPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {projects.map((project) => (
+              {displayedProjects.map((project) => (
                 <Card 
                   key={project.id} 
                   className={`border-slate-200 hover:border-blue-300 transition-colors cursor-pointer ${
@@ -353,4 +381,4 @@ export default function ProjectsPage() {
       </main>
     </div>
   )
-} 
+}

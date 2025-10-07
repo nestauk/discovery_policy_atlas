@@ -444,7 +444,9 @@ export default function AnalysisResultsPage() {
           setAnalysisComplete(true)
           return true
         } else if (project.status === 'running') {
-          console.log('🔄 Analysis still RUNNING - continuing to poll')
+          console.log('🔄 Analysis still RUNNING (extraction phase) - continuing to poll')
+        } else if (project.status === 'synthesising') {
+          console.log('🔄 Analysis SYNTHESISING (generating summary) - continuing to poll')
         } else {
           console.log(`⚠️ Unknown status: ${project.status} - continuing to poll`)
         }
@@ -651,22 +653,21 @@ export default function AnalysisResultsPage() {
         return { stage: 'extracting', progress: 50, text: 'Extracting intervention data from documents...' }
       }
       
-      // Check if extraction is complete (all docs processed)
-      if (extractedDocs >= totalRelevantDocs && totalRelevantDocs > 0) {
-        // Analysis done, synthesis running
-        return { 
-          stage: 'synthesising', 
-          progress: 75, 
-          text: 'Generating summary and insights...' 
-        }
-      }
-      
       // Still extracting - scale progress from 50% to 70%
       const extractionProgress = Math.round((extractedDocs / totalRelevantDocs) * 20) + 50
       return { 
         stage: 'extracting', 
         progress: Math.min(extractionProgress, 70), 
         text: `Extracting intervention data from documents... (${extractedDocs}/${totalRelevantDocs})` 
+      }
+    }
+    
+    if (status === 'synthesising') {
+      // Extraction complete, synthesis in progress
+      return { 
+        stage: 'synthesising', 
+        progress: 85, 
+        text: 'Generating summary and insights...' 
       }
     }
     

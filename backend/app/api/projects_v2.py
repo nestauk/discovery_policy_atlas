@@ -73,8 +73,8 @@ async def get_synthesis_summary(
         if cached:
             return cached
 
-        # If analysis still running, return appropriate response
-        if project_status == "running":
+        # If analysis still running or synthesising, return appropriate response
+        if project_status in ["running", "synthesising"]:
             # Check synthesis status
             synthesis_status = await get_synthesis_status(project_id)
 
@@ -84,11 +84,17 @@ async def get_synthesis_summary(
                     detail="Synthesis is running. Please wait for completion.",
                 )
             elif synthesis_status == "none":
-                # Analysis still running, synthesis not started
-                raise HTTPException(
-                    status_code=202,
-                    detail="Analysis is still running. Synthesis will start automatically when analysis completes.",
-                )
+                # Analysis still running, synthesis not started yet
+                if project_status == "running":
+                    raise HTTPException(
+                        status_code=202,
+                        detail="Analysis is still running. Synthesis will start automatically when analysis completes.",
+                    )
+                else:  # project_status == "synthesising"
+                    raise HTTPException(
+                        status_code=202,
+                        detail="Synthesis is starting. Please wait for completion.",
+                    )
 
         # For completed projects without cache, try to trigger synthesis (fallback)
         if project_status == "completed":
