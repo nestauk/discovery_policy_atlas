@@ -389,8 +389,8 @@ class AnalysisStorageService:
                     storage_project_id, result.extractions_json_path
                 )
 
-            # 4. Mark project as completed
-            await self._mark_project_completed(storage_project_id)
+            # 4. Mark project as analysis completed (ready for synthesis)
+            await self._mark_analysis_completed(storage_project_id)
 
             logger.info(
                 f"Successfully stored analysis run {result.run_id} to project {storage_project_id}"
@@ -626,13 +626,13 @@ class AnalysisStorageService:
                 f"Successfully uploaded {len(extraction_items)} extraction items"
             )
 
-    async def _mark_project_completed(self, project_id: str) -> None:
-        """Mark analysis project as completed."""
+    async def _mark_analysis_completed(self, project_id: str) -> None:
+        """Mark analysis extraction as completed, ready for synthesis."""
         response = (
             self.supabase.table("analysis_projects")
             .update(
                 {
-                    "status": "completed",
+                    "status": "synthesising",
                 }
             )
             .eq("id", project_id)
@@ -640,9 +640,9 @@ class AnalysisStorageService:
         )
 
         if not response.data:
-            raise Exception("Failed to mark project as completed")
+            raise Exception("Failed to mark project as synthesising")
 
-        logger.info(f"Marked analysis project {project_id} as completed")
+        logger.info(f"Marked analysis project {project_id} as synthesising")
 
     async def _mark_project_failed(self, run_id: str, error_message: str) -> None:
         """Mark analysis project as failed."""

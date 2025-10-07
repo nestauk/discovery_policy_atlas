@@ -17,23 +17,17 @@ import {
   Target,
   Bot,
   Filter,
-  Brain,
-  BarChart3,
-  AlertTriangle,
   Download
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
 import { useAuth } from '@clerk/nextjs'
 import { SynthesisSummary } from '@/types/search'
-import { KeyIssuesTable } from './KeyIssuesTable'
-import { InterventionsTable } from './InterventionsTable'
 import { ExecutiveBriefing } from './ExecutiveBriefing'
 import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
 import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
-import NetworkVisualizer from '@/components/network/NetworkVisualizer'
 import { ProjectCharts } from '@/components/charts/ProjectCharts'
-import EvidenceThematicView from '@/components/v2/evidence/EvidenceThematicView'
+import { InterventionsNavigator } from '@/components/v2/interventions/InterventionsNavigator'
 import type { InterventionData } from '@/components/search/interventions-table'
 import { PapersTable } from '@/components/search/papers-table'
 import { SearchPlanModal } from '@/components/v2/results/SearchPlanModal'
@@ -96,12 +90,10 @@ export default function AnalysisResultsPage() {
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const hasStartedPollingRef = useRef<string | null>(null) // Track which project we're polling
   const lastRefreshTimeRef = useRef<number>(0) // Throttle refreshes
-  const [activeTab, setActiveTab] = useState('evidence')
+  const [activeTab, setActiveTab] = useState('summary')
   const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
-  // const [activeTab, setActiveTab] = useState('summary')
-  const [insightsSubTab, setInsightsSubTab] = useState('charts')
-  const [evidenceSubTab, setEvidenceSubTab] = useState('documents')
+  const [evidenceSubTab, setEvidenceSubTab] = useState('interventions')
   
   // Relevance filtering state
   const [showRelevantOnly, setShowRelevantOnly] = useState(true)
@@ -111,6 +103,11 @@ export default function AnalysisResultsPage() {
   
   // Documents download state
   const [isPreparingDocumentsDownload, setIsPreparingDocumentsDownload] = useState(false)
+  
+  // Interventions view state
+  const [interventionsGroupByIssues, setInterventionsGroupByIssues] = useState(false)
+  const [interventionsSortBy, setInterventionsSortBy] = useState<'frequency' | 'impact' | 'evidence'>('frequency')
+  const [isPreparingInterventionsDownload, setIsPreparingInterventionsDownload] = useState(false)
   
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
@@ -284,6 +281,53 @@ export default function AnalysisResultsPage() {
     }
   }, [effectiveProjectId, fetchWithAuth, getToken, activeProject?.title])
   
+  const handleDownloadInterventionsCSV = useCallback(async () => {
+    if (!effectiveProjectId) return
+    
+    setIsPreparingInterventionsDownload(true)
+    
+    try {
+      const response = await fetchWithAuth(`/api/analysis-projects/${effectiveProjectId}/download/interventions-csv`)
+      
+      if (response.download_key) {
+        const token = await getToken()
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
+        
+        const downloadResponse = await fetch(`${cleanBaseUrl}/api/download/${response.download_key}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'text/csv',
+          },
+        })
+        
+        if (downloadResponse.ok) {
+          const projectName = activeProject?.title || 'project'
+          const cleanProjectName = projectName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')
+          const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_')
+          const filename = `${cleanProjectName}_interventions_${timestamp}.csv`
+
+          const blob = await downloadResponse.blob()
+          const url = window.URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = filename
+          document.body.appendChild(a)
+          a.click()
+          window.URL.revokeObjectURL(url)
+          document.body.removeChild(a)
+        } else {
+          alert('Failed to download file')
+        }
+      }
+    } catch (err) {
+      console.error('Failed to download interventions CSV:', err)
+      alert('Failed to download interventions CSV. Please try again.')
+    } finally {
+      setIsPreparingInterventionsDownload(false)
+    }
+  }, [effectiveProjectId, fetchWithAuth, getToken, activeProject?.title])
+  
   // Handle case where URL has project ID but no active project is set
   useEffect(() => {
     const urlProjectId = searchConfig.projectId
@@ -400,7 +444,9 @@ export default function AnalysisResultsPage() {
           setAnalysisComplete(true)
           return true
         } else if (project.status === 'running') {
-          console.log('🔄 Analysis still RUNNING - continuing to poll')
+          console.log('🔄 Analysis still RUNNING (extraction phase) - continuing to poll')
+        } else if (project.status === 'synthesising') {
+          console.log('🔄 Analysis SYNTHESISING (generating summary) - continuing to poll')
         } else {
           console.log(`⚠️ Unknown status: ${project.status} - continuing to poll`)
         }
@@ -518,6 +564,68 @@ export default function AnalysisResultsPage() {
   }, [activeTab, effectiveProjectId])
 
 
+  // --- Stat Cards for Summary Tab ---
+  // Intervention group and intervention counts from navigator API
+  const [navigatorStats, setNavigatorStats] = useState({
+    interventionGroupCount: null as number | null,
+    interventionCount: null as number | null,
+    loading: true,
+    error: null as string | null,
+  });
+
+  useEffect(() => {
+    async function fetchNavigatorStats() {
+      if (!effectiveProjectId) return;
+      setNavigatorStats(prev => ({ ...prev, loading: true, error: null }));
+      try {
+        const response = await fetchWithAuth(`/api/analysis-projects/${effectiveProjectId}/issue-intervention-navigator`);
+        // Count unique intervention themes (groups)
+        const interventionThemeNames = new Set<string>();
+        const interventionNames = new Set<string>();
+        if (response?.issue_themes) {
+          response.issue_themes.forEach((issue: { related_interventions?: { theme_name?: string; detailed_interventions?: { name?: string }[] }[] }) => {
+            issue.related_interventions?.forEach((intervention) => {
+              if (intervention.theme_name) interventionThemeNames.add(intervention.theme_name);
+              // Count unique detailed interventions by name
+              intervention.detailed_interventions?.forEach((d) => {
+                if (d.name) interventionNames.add(d.name);
+              });
+            });
+          });
+        }
+        setNavigatorStats({
+          interventionGroupCount: interventionThemeNames.size,
+          interventionCount: interventionNames.size,
+          loading: false,
+          error: null,
+        });
+        if (typeof window !== 'undefined') {
+          console.log('[StatCards] Intervention themes:', Array.from(interventionThemeNames));
+          console.log('[StatCards] Detailed interventions:', Array.from(interventionNames));
+        }
+      } catch (err) {
+        setNavigatorStats({
+          interventionGroupCount: null,
+          interventionCount: null,
+          loading: false,
+          error: (err as Error)?.message || 'Failed to load intervention stats',
+        });
+      }
+    }
+    fetchNavigatorStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveProjectId]);
+
+  const overtonCount = documents.filter(doc => doc.source === 'overton').length;
+  const openalexCount = documents.filter(doc => doc.source === 'openalex').length;
+  // Debug output
+  if (typeof window !== 'undefined') {
+    // console.log('[StatCards] Unique intervention names:', uniqueInterventionNames);
+    // console.log('[StatCards] Unique group names:', uniqueGroupNames);
+    console.log('[StatCards] Interventions raw:', interventions);
+    console.log('[StatCards] Overton:', overtonCount, 'OpenAlex:', openalexCount);
+  }
+
   // Create study strength and sample size mappings from interventions data
   const { studyStrengthMapping, sampleSizeMapping } = useMemo(() => {
     const strengthMapping: Record<string, string> = {}
@@ -607,22 +715,21 @@ export default function AnalysisResultsPage() {
         return { stage: 'extracting', progress: 50, text: 'Extracting intervention data from documents...' }
       }
       
-      // Check if extraction is complete (all docs processed)
-      if (extractedDocs >= totalRelevantDocs && totalRelevantDocs > 0) {
-        // Analysis done, synthesis running
-        return { 
-          stage: 'synthesising', 
-          progress: 75, 
-          text: 'Generating summary and insights...' 
-        }
-      }
-      
       // Still extracting - scale progress from 50% to 70%
       const extractionProgress = Math.round((extractedDocs / totalRelevantDocs) * 20) + 50
       return { 
         stage: 'extracting', 
         progress: Math.min(extractionProgress, 70), 
         text: `Extracting intervention data from documents... (${extractedDocs}/${totalRelevantDocs})` 
+      }
+    }
+    
+    if (status === 'synthesising') {
+      // Extraction complete, synthesis in progress
+      return { 
+        stage: 'synthesising', 
+        progress: 85, 
+        text: 'Generating summary and insights...' 
       }
     }
     
@@ -785,30 +892,53 @@ export default function AnalysisResultsPage() {
         {effectiveProjectId && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="evidence" className="flex items-center gap-2">
-                  <BookOpen className="h-4 w-4" />
-                  Evidence
-                </TabsTrigger>
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="summary" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   Summary
+                </TabsTrigger>
+                <TabsTrigger value="evidence" className="flex items-center gap-2">
+                  <BookOpen className="h-4 w-4" />
+                  Evidence
                 </TabsTrigger>
                 <TabsTrigger value="assistant" className="flex items-center gap-2">
                   <Bot className="h-4 w-4" />
                   Assistant
                 </TabsTrigger>
-                <TabsTrigger value="insights" className="flex items-center gap-2">
-                  <Brain className="h-4 w-4" />
-                  Insights
-                </TabsTrigger>
               </TabsList>
             </div>
 
             <div className="flex-1 overflow-auto">
-
               <TabsContent value="summary" className="p-6 m-0">
                 <div className="max-w-6xl mx-auto">
+                  {/* Stat Cards Row - only in summary tab */}
+                  <div className="flex flex-wrap gap-4 mb-8">
+                    <div className="bg-white rounded-lg shadow p-4 flex-1 min-w-[140px] text-center">
+                      <div className="text-2xl font-bold">{overtonCount}</div>
+                      <div className="text-xs text-slate-500">Policy documents (Overton)</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow p-4 flex-1 min-w-[140px] text-center">
+                      <div className="text-2xl font-bold">{openalexCount}</div>
+                      <div className="text-xs text-slate-500">Academic documents (OpenAlex)</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow p-4 flex-1 min-w-[140px] text-center">
+                      <div className="text-2xl font-bold">{navigatorStats.loading ? '...' : navigatorStats.interventionGroupCount ?? '-'}</div>
+                      <div className="text-xs text-slate-500">Intervention themes</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow p-4 flex-1 min-w-[140px] text-center">
+                      <div className="text-2xl font-bold">{navigatorStats.loading ? '...' : navigatorStats.interventionCount ?? '-'}</div>
+                      <div className="text-xs text-slate-500">Interventions</div>
+                    </div>
+                    <button
+                      className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 flex items-center font-semibold transition min-w-[180px] justify-center shadow-md shadow-blue-200/40"
+                      style={{ color: 'white' }}
+                      onClick={() => setActiveTab('evidence')}
+                    >
+                      Explore Interventions
+                      <span className="ml-2">→</span>
+                    </button>
+                  </div>
+                  {/* Executive Briefing and charts */}
                   {isLoadingSummary && (
                     <div className="flex items-center justify-center py-12">
                       <div className="text-center">
@@ -820,8 +950,7 @@ export default function AnalysisResultsPage() {
                   {summaryData && (
                     <div className="space-y-8">
                       <ExecutiveBriefing briefing={summaryData.executive_briefing} />
-                      <KeyIssuesTable issues={summaryData.key_issues || []} />
-                      <InterventionsTable interventions={summaryData.interventions || []} />
+                      <ProjectCharts projectId={effectiveProjectId} projectTitle={activeProject?.title} />
                     </div>
                   )}
                   {!isLoadingSummary && !summaryData && (
@@ -841,15 +970,6 @@ export default function AnalysisResultsPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex gap-2">
                         <Button
-                          variant={evidenceSubTab === 'documents' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setEvidenceSubTab('documents')}
-                          className="flex items-center gap-2"
-                        >
-                          <FileText className="h-3 w-3" />
-                          Documents ({showRelevantOnly ? relevantCount : documents.length})
-                        </Button>
-                        <Button
                           variant={evidenceSubTab === 'interventions' ? 'default' : 'outline'}
                           size="sm"
                           onClick={() => setEvidenceSubTab('interventions')}
@@ -859,13 +979,13 @@ export default function AnalysisResultsPage() {
                           Interventions
                         </Button>
                         <Button
-                          variant={evidenceSubTab === 'issues' ? 'default' : 'outline'}
+                          variant={evidenceSubTab === 'documents' ? 'default' : 'outline'}
                           size="sm"
-                          onClick={() => setEvidenceSubTab('issues')}
+                          onClick={() => setEvidenceSubTab('documents')}
                           className="flex items-center gap-2"
                         >
-                          <AlertTriangle className="h-3 w-3" />
-                          Key Issues
+                          <FileText className="h-3 w-3" />
+                          Documents ({showRelevantOnly ? relevantCount : documents.length})
                         </Button>
                       </div>
 
@@ -908,10 +1028,67 @@ export default function AnalysisResultsPage() {
                           </div>
                         </div>
                       )}
+                      
+                      {/* Controls for interventions */}
+                      {evidenceSubTab === 'interventions' && (
+                        <div className="flex items-center gap-6">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="group-by-issues" className="text-sm text-slate-700">
+                              Group by issues
+                            </Label>
+                            <Switch
+                              id="group-by-issues"
+                              checked={interventionsGroupByIssues}
+                              onCheckedChange={setInterventionsGroupByIssues}
+                            />
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <Label className="text-sm text-slate-700">Sort by:</Label>
+                            <select 
+                              value={interventionsSortBy}
+                              onChange={(e) => setInterventionsSortBy(e.target.value as 'frequency' | 'impact' | 'evidence')}
+                              className="text-sm border rounded px-2 py-1 bg-white"
+                            >
+                              <option value="impact">Impact</option>
+                              <option value="evidence">Evidence</option>
+                              <option value="frequency">Frequency</option>
+                            </select>
+                          </div>
+                          
+                          {/* Interventions Download Button */}
+                          <div className="flex items-center gap-2">
+                            <Button
+                              onClick={handleDownloadInterventionsCSV}
+                              disabled={isPreparingInterventionsDownload}
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-2"
+                            >
+                              <Download className="h-4 w-4" />
+                              {isPreparingInterventionsDownload ? 'Downloading...' : 'Download'}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Content based on active sub-tab */}
+                  {evidenceSubTab === 'interventions' && (
+                    <div>
+                      <InterventionsNavigator 
+                        showHeader={false}
+                        viewMode={interventionsGroupByIssues ? 'grouped' : 'all'}
+                        onViewModeChange={(mode) => setInterventionsGroupByIssues(mode === 'grouped')}
+                        sortBy={interventionsSortBy}
+                        onSortByChange={setInterventionsSortBy}
+                        onDownload={handleDownloadInterventionsCSV}
+                        isPreparingDownload={isPreparingInterventionsDownload}
+                      />
+                    </div>
+                  )}
+
                   {evidenceSubTab === 'documents' && (
                     <div>
                       {loadingData ? (
@@ -952,18 +1129,6 @@ export default function AnalysisResultsPage() {
                       )}
                     </div>
                   )}
-
-                  {evidenceSubTab === 'interventions' && (
-                    <div>
-                      <EvidenceThematicView projectId={effectiveProjectId} themeType="intervention" />
-                    </div>
-                  )}
-
-                  {evidenceSubTab === 'issues' && (
-                    <div>
-                      <EvidenceThematicView projectId={effectiveProjectId} themeType="issue" />
-                    </div>
-                  )}
                 </div>
               </TabsContent>
 
@@ -973,47 +1138,6 @@ export default function AnalysisResultsPage() {
                   placeholder="Ask about the evidence in this project..."
                   className="h-full"
                 />
-              </TabsContent>
-
-              <TabsContent value="insights" className="p-6 m-0">
-                <div className="max-w-6xl mx-auto">
-                  {/* Insights Sub-tabs as smaller buttons */}
-                  <div className="mb-6">
-                    <div className="flex gap-2">
-                      <Button
-                        variant={insightsSubTab === 'charts' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setInsightsSubTab('charts')}
-                        className="flex items-center gap-2"
-                      >
-                        <BarChart3 className="h-3 w-3" />
-                        Charts
-                      </Button>
-                      <Button
-                        variant={insightsSubTab === 'network' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setInsightsSubTab('network')}
-                        className="flex items-center gap-2"
-                      >
-                        <Brain className="h-3 w-3" />
-                        Network
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Content based on active sub-tab */}
-                  {insightsSubTab === 'network' && (
-                    <div>
-                      <NetworkVisualizer />
-                    </div>
-                  )}
-
-                  {insightsSubTab === 'charts' && (
-                    <div>
-                      <ProjectCharts projectId={effectiveProjectId} projectTitle={activeProject?.title} />
-                    </div>
-                  )}
-                </div>
               </TabsContent>
             </div>
           </Tabs>
