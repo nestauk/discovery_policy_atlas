@@ -2096,33 +2096,38 @@ async def download_documents_csv(
 async def get_project_feedback(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Get user feedback for a specific project"""
+    """Get user feedback for a specific project from the user_feedback table"""
     try:
-        # Get project with user feedback
+        # Check if project exists
         project_result = (
             vectorization_service.supabase.table("analysis_projects")
-            .select("user_feedback")
+            .select("id")
             .eq("id", project_id)
             .execute()
         )
-
         if not project_result.data:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        user_feedback = project_result.data[0].get("user_feedback")
-
-        # Filter feedback for current user
-        if user_feedback and user_feedback.get("user_id") == current_user.user_id:
+        # Get feedback for this user and project
+        feedback_result = (
+            vectorization_service.supabase.table("user_feedback")
+            .select("rating, comment, updated_at")
+            .eq("project_id", project_id)
+            .eq("user_id", current_user.user_id)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if feedback_result.data and len(feedback_result.data) > 0:
+            feedback = feedback_result.data[0]
             return {
                 "feedback": {
-                    "rating": user_feedback.get("rating"),
-                    "comment": user_feedback.get("comment", ""),
-                    "updated_at": user_feedback.get("updated_at"),
+                    "rating": feedback.get("rating"),
+                    "comment": feedback.get("comment", ""),
+                    "updated_at": feedback.get("updated_at"),
                 }
             }
-
         return {"feedback": None}
-
     except HTTPException:
         raise
     except Exception as e:
@@ -2136,22 +2141,19 @@ async def save_project_feedback(
     request: dict,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Save or update user feedback for a specific project"""
+    """Save user feedback for a specific project as a new row in user_feedback table (no overwrite)"""
     try:
         # Validate request
         rating = request.get("rating")
         comment = request.get("comment", "").strip()
-
         if not isinstance(rating, int) or rating < 1 or rating > 5:
             raise HTTPException(
                 status_code=400, detail="Rating must be an integer between 1 and 5"
             )
-
         if len(comment) > 500:
             raise HTTPException(
                 status_code=400, detail="Comment must be 500 characters or less"
             )
-
         # Check if project exists
         project_result = (
             vectorization_service.supabase.table("analysis_projects")
@@ -2159,29 +2161,26 @@ async def save_project_feedback(
             .eq("id", project_id)
             .execute()
         )
-
         if not project_result.data:
             raise HTTPException(status_code=404, detail="Project not found")
-
-        # Prepare feedback data
+        # Insert new feedback row
         feedback_data = {
+            "project_id": project_id,
+            "user_id": current_user.user_id,
+            "user_email": getattr(current_user, "email", None),
+            "user_name": getattr(current_user, "name", None),
             "rating": rating,
             "comment": comment,
-            "user_id": current_user.user_id,
+            "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat(),
         }
-
-        # Update project with feedback
         result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .update({"user_feedback": feedback_data})
-            .eq("id", project_id)
+            vectorization_service.supabase.table("user_feedback")
+            .insert(feedback_data)
             .execute()
         )
-
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to save feedback")
-
         return {
             "message": "Feedback saved successfully",
             "feedback": {
@@ -2190,7 +2189,6 @@ async def save_project_feedback(
                 "updated_at": feedback_data["updated_at"],
             },
         }
-
     except HTTPException:
         raise
     except Exception as e:
