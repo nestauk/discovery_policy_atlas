@@ -17,6 +17,7 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <base target="_blank" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </head>
       <LayoutWrapper>
         {children}
