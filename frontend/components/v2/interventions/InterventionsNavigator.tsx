@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
 import { NavigatorInterventionsTable } from '@/components/v2/interventions/NavigatorInterventionsTable'
+import { type InterventionData } from '@/components/search/interventions-table'
 
 interface IssueTheme {
   theme_name: string
@@ -92,6 +93,10 @@ export function InterventionsNavigator({
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [expandedInterventions, setExpandedInterventions] = useState<Set<string>>(new Set())
   
+  // Fallback state for extracted interventions (when synthesis is not done)
+  const [fallbackInterventions, setFallbackInterventions] = useState<InterventionData[] | null>(null)
+  const [loadingFallback, setLoadingFallback] = useState(false)
+  
   // Use external state if provided, otherwise use internal state
   const [internalViewMode, setInternalViewMode] = useState<'grouped' | 'all'>('all')
   const [internalSortBy, setInternalSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
@@ -130,6 +135,27 @@ export function InterventionsNavigator({
     if (!activeProject?.id) return
     loadNavigatorData()
   }, [activeProject?.id, loadNavigatorData])
+  
+  // Load fallback interventions if navigator data is empty
+  useEffect(() => {
+    const loadFallback = async () => {
+      if (!activeProject?.id) return
+      if (!data || data.issue_themes.length > 0) return // Only load if navigator is empty
+      
+      setLoadingFallback(true)
+      try {
+        const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/interventions`)
+        setFallbackInterventions(response.interventions || [])
+      } catch (err) {
+        console.error('Failed to load fallback interventions:', err)
+        setFallbackInterventions([])
+      } finally {
+        setLoadingFallback(false)
+      }
+    }
+    
+    loadFallback()
+  }, [activeProject?.id, data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleIssue = useCallback((themeName: string) => {
     setExpandedIssues(prev => {
@@ -327,6 +353,25 @@ export function InterventionsNavigator({
       evidence_justification: detail.evidence_justification,
     }))
   }, [])
+  
+  // Convert fallback interventions to navigator format
+  const convertFallbackToNavigatorFormat = useCallback((interventions: InterventionData[]) => {
+    return interventions.map((intervention) => ({
+      name: intervention.name,
+      type: intervention.type,
+      country: intervention.country,
+      description: intervention.description,
+      result_count: intervention.result_count,
+      results_summary: intervention.results_summary,
+      total_sample_size: intervention.total_sample_size,
+      documents: intervention.documents,
+      // These fields might not be present in fallback data, but include them if available
+      impact_score: undefined,
+      evidence_score: undefined,
+      impact_justification: undefined,
+      evidence_justification: undefined,
+    }))
+  }, [])
 
   if (!activeProject) {
     return (
@@ -428,16 +473,38 @@ export function InterventionsNavigator({
         {data && (
           <div className="space-y-6">
             {data.issue_themes.length === 0 ? (
-              <Card>
-                <CardContent className="p-8 text-center">
-                  <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-slate-900 mb-2">No Issue-Intervention Mappings Found</h3>
-                  <p className="text-slate-600">
-                    This project doesn&apos;t have any extracted mappings between issues and interventions yet.
-                    This happens when documents are still being processed or don&apos;t contain linked policy interventions.
-                  </p>
-                </CardContent>
-              </Card>
+              loadingFallback ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                    <p className="text-slate-600">Loading extracted interventions...</p>
+                  </div>
+                </div>
+              ) : fallbackInterventions && fallbackInterventions.length > 0 ? (
+                <div className="space-y-4">
+                  <Card>
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2 text-sm text-slate-600 mb-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        <span>Synthesis pending - showing extracted interventions (ungrouped)</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <NavigatorInterventionsTable 
+                    interventions={convertFallbackToNavigatorFormat(fallbackInterventions)} 
+                  />
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="p-8 text-center">
+                    <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-slate-900 mb-2">No Interventions Found</h3>
+                    <p className="text-slate-600">
+                      This happens when documents are still being processed.
+                    </p>
+                  </CardContent>
+                </Card>
+              )
             ) : viewMode === 'all' ? (
               <div className="space-y-4">
                 {getAllInterventions.map((intervention) => (

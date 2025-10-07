@@ -23,8 +23,8 @@ export function ExecutiveBriefing({ briefing }: ExecutiveBriefingProps) {
         {briefing ? (
           <p className="text-base leading-relaxed whitespace-pre-wrap">{briefing}</p>
         ) : (
-          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-yellow-800 text-sm">
-            Executive briefing is currently unavailable. Please try again later.
+          <div>
+            We are preparing the executive briefing. Please come back a bit later.
           </div>
         )}
       </CardContent>
