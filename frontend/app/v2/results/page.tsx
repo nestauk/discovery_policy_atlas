@@ -106,7 +106,7 @@ export default function AnalysisResultsPage() {
   
   // Interventions view state
   const [interventionsGroupByIssues, setInterventionsGroupByIssues] = useState(false)
-  const [interventionsSortBy, setInterventionsSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
+  const [interventionsSortBy, setInterventionsSortBy] = useState<'frequency' | 'impact' | 'evidence'>('frequency')
   const [isPreparingInterventionsDownload, setIsPreparingInterventionsDownload] = useState(false)
   
   // Data states
@@ -564,6 +564,68 @@ export default function AnalysisResultsPage() {
   }, [activeTab, effectiveProjectId])
 
 
+  // --- Stat Cards for Summary Tab ---
+  // Intervention group and intervention counts from navigator API
+  const [navigatorStats, setNavigatorStats] = useState({
+    interventionGroupCount: null as number | null,
+    interventionCount: null as number | null,
+    loading: true,
+    error: null as string | null,
+  });
+
+  useEffect(() => {
+    async function fetchNavigatorStats() {
+      if (!effectiveProjectId) return;
+      setNavigatorStats(prev => ({ ...prev, loading: true, error: null }));
+      try {
+        const response = await fetchWithAuth(`/api/analysis-projects/${effectiveProjectId}/issue-intervention-navigator`);
+        // Count unique intervention themes (groups)
+        const interventionThemeNames = new Set<string>();
+        const interventionNames = new Set<string>();
+        if (response?.issue_themes) {
+          response.issue_themes.forEach((issue: { related_interventions?: { theme_name?: string; detailed_interventions?: { name?: string }[] }[] }) => {
+            issue.related_interventions?.forEach((intervention) => {
+              if (intervention.theme_name) interventionThemeNames.add(intervention.theme_name);
+              // Count unique detailed interventions by name
+              intervention.detailed_interventions?.forEach((d) => {
+                if (d.name) interventionNames.add(d.name);
+              });
+            });
+          });
+        }
+        setNavigatorStats({
+          interventionGroupCount: interventionThemeNames.size,
+          interventionCount: interventionNames.size,
+          loading: false,
+          error: null,
+        });
+        if (typeof window !== 'undefined') {
+          console.log('[StatCards] Intervention themes:', Array.from(interventionThemeNames));
+          console.log('[StatCards] Detailed interventions:', Array.from(interventionNames));
+        }
+      } catch (err) {
+        setNavigatorStats({
+          interventionGroupCount: null,
+          interventionCount: null,
+          loading: false,
+          error: (err as Error)?.message || 'Failed to load intervention stats',
+        });
+      }
+    }
+    fetchNavigatorStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveProjectId]);
+
+  const overtonCount = documents.filter(doc => doc.source === 'overton').length;
+  const openalexCount = documents.filter(doc => doc.source === 'openalex').length;
+  // Debug output
+  if (typeof window !== 'undefined') {
+    // console.log('[StatCards] Unique intervention names:', uniqueInterventionNames);
+    // console.log('[StatCards] Unique group names:', uniqueGroupNames);
+    console.log('[StatCards] Interventions raw:', interventions);
+    console.log('[StatCards] Overton:', overtonCount, 'OpenAlex:', openalexCount);
+  }
+
   // Create study strength and sample size mappings from interventions data
   const { studyStrengthMapping, sampleSizeMapping } = useMemo(() => {
     const strengthMapping: Record<string, string> = {}
@@ -847,9 +909,36 @@ export default function AnalysisResultsPage() {
             </div>
 
             <div className="flex-1 overflow-auto">
-
               <TabsContent value="summary" className="p-6 m-0">
                 <div className="max-w-6xl mx-auto">
+                  {/* Stat Cards Row - only in summary tab */}
+                  <div className="flex flex-wrap gap-4 mb-8">
+                    <div className="bg-white rounded-lg shadow p-4 flex-1 min-w-[140px] text-center">
+                      <div className="text-2xl font-bold">{overtonCount}</div>
+                      <div className="text-xs text-slate-500">Policy documents (Overton)</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow p-4 flex-1 min-w-[140px] text-center">
+                      <div className="text-2xl font-bold">{openalexCount}</div>
+                      <div className="text-xs text-slate-500">Academic documents (OpenAlex)</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow p-4 flex-1 min-w-[140px] text-center">
+                      <div className="text-2xl font-bold">{navigatorStats.loading ? '...' : navigatorStats.interventionGroupCount ?? '-'}</div>
+                      <div className="text-xs text-slate-500">Intervention themes</div>
+                    </div>
+                    <div className="bg-white rounded-lg shadow p-4 flex-1 min-w-[140px] text-center">
+                      <div className="text-2xl font-bold">{navigatorStats.loading ? '...' : navigatorStats.interventionCount ?? '-'}</div>
+                      <div className="text-xs text-slate-500">Interventions</div>
+                    </div>
+                    <button
+                      className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 flex items-center font-semibold transition min-w-[180px] justify-center shadow-md shadow-blue-200/40"
+                      style={{ color: 'white' }}
+                      onClick={() => setActiveTab('evidence')}
+                    >
+                      Explore Interventions
+                      <span className="ml-2">→</span>
+                    </button>
+                  </div>
+                  {/* Executive Briefing and charts */}
                   {isLoadingSummary && (
                     <div className="flex items-center justify-center py-12">
                       <div className="text-center">

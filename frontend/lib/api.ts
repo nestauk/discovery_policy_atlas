@@ -20,6 +20,10 @@ export const fetchWithAuthExternal = async (
   }
 
   if (!token) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn("No authentication token available (external fetch)");
+      return null;
+    }
     console.error("No authentication token available (external fetch)");
     throw new Error("No authentication token available - please sign in");
   }
@@ -83,6 +87,10 @@ export function useAPI() {
     const token = await getToken();
     
     if (!token) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn("No authentication token available");
+        return null;
+      }
       console.error("No authentication token available");
       throw new Error("No authentication token available - please sign in");
     }
@@ -282,4 +290,4 @@ export function useAPI() {
     generateSubQuestions,
     getAnalysisFindings
   };
-} 
+}
