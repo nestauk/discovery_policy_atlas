@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
+import asyncio
 import json
 import logging
-from datetime import datetime
 from typing import List, Optional
 
 from app.core.config import settings
@@ -32,6 +31,26 @@ class SynthesisService:
 
     def __init__(self):
         self.supabase = vectorization_service.supabase
+        # Limit concurrent DB queries to prevent connection exhaustion
+        # Generous limit of 50 concurrent queries
+        self._db_semaphore = asyncio.Semaphore(50)
+
+    async def _async_supabase_query(self, query_func):
+        """
+        Execute a Supabase query asynchronously in thread pool.
+
+        This prevents blocking the event loop during database operations.
+        Uses a semaphore to limit concurrent queries and prevent DB connection exhaustion.
+
+        Args:
+            query_func: Lambda or callable that executes the Supabase query
+
+        Returns:
+            Query result
+        """
+        async with self._db_semaphore:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, query_func)
 
     async def summarise(self, project_id: str) -> SynthesisSummary:
         """Aggregate extraction results into key issues, interventions and briefing.
@@ -42,9 +61,9 @@ class SynthesisService:
         Returns:
             SynthesisSummary: Executive briefing and aggregated tables.
         """
-        # Load project
-        project_res = (
-            self.supabase.table("analysis_projects")
+        # Load project (async to avoid blocking)
+        project_res = await self._async_supabase_query(
+            lambda: self.supabase.table("analysis_projects")
             .select("*")
             .eq("id", project_id)
             .execute()
@@ -55,9 +74,9 @@ class SynthesisService:
         project = project_res.data[0]
         research_question = project.get("query") or "Not specified"
 
-        # Load documents
-        docs_res = (
-            self.supabase.table("analysis_documents")
+        # Load documents (async to avoid blocking)
+        docs_res = await self._async_supabase_query(
+            lambda: self.supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -73,8 +92,8 @@ class SynthesisService:
         }
 
         try:
-            exts_res = (
-                self.supabase.table("analysis_extractions")
+            exts_res = await self._async_supabase_query(
+                lambda: self.supabase.table("analysis_extractions")
                 .select("*")
                 .eq("analysis_project_id", project_id)
                 .execute()
@@ -170,63 +189,27 @@ class SynthesisService:
         if not has_any_doc_interventions:
             num_interventions_seen += len(ext_interventions_mentions)
 
-        payload_sorted = sorted(input_payload, key=lambda d: (d["doc_id"], d["id"]))
-        input_hash = hashlib.sha256(
-            json.dumps(payload_sorted, sort_keys=True).encode("utf-8")
-        ).hexdigest()
-        source_stats = {
-            "num_documents": len(documents),
-            "num_issues_seen": num_issues_seen,
-            "num_interventions_seen": num_interventions_seen,
-            "max_document_updated_at": None,
-        }
+        # Payload hashing and stats tracking disabled - only used for caching
+        # payload_sorted = sorted(input_payload, key=lambda d: (d["doc_id"], d["id"]))
+        # input_hash = hashlib.sha256(
+        #     json.dumps(payload_sorted, sort_keys=True).encode("utf-8")
+        # ).hexdigest()
+        # source_stats = {
+        #     "num_documents": len(documents),
+        #     "num_issues_seen": num_issues_seen,
+        #     "num_interventions_seen": num_interventions_seen,
+        #     "max_document_updated_at": None,
+        # }
 
-        # Cache lookup
-        cache_res = (
-            self.supabase.table("analysis_syntheses")
-            .select("*")
-            .eq("analysis_project_id", project_id)
-            .execute()
+        # TODO: Cache lookup disabled - synthesis_runs table has different schema
+        # The legacy analysis_syntheses table doesn't exist anymore
+        # For caching, use the agent-based synthesis (agent.py + logbook.py)
+        # which properly writes to synthesis_runs/synthesis_themes/theme_assignments
+
+        # Skip cache lookup for now - just generate fresh results
+        logger.info(
+            "[synthesis] Cache lookup skipped (legacy table structure incompatible)"
         )
-        if cache_res.data:
-            cached = cache_res.data[0]
-            model_info = cached.get("model_info") or {}
-            if (
-                model_info.get("input_hash") == input_hash
-                and model_info.get("generation_mode") == "llm"
-                and bool(model_info.get("llm_verified", False))
-            ):
-                key_issues_resp: List[KeyIssue] = []
-                for item in cached.get("key_issues") or []:
-                    src_doc_uuids = item.get("source_document_ids") or []
-                    src_doc_ids = item.get("source_doc_ids") or []
-                    key_issues_resp.append(
-                        KeyIssue(
-                            issue_theme=item.get("issue_theme", ""),
-                            summary_description=item.get("summary_description", ""),
-                            frequency=len(set(src_doc_uuids)) or len(set(src_doc_ids)),
-                            source_doc_ids=src_doc_ids,
-                        )
-                    )
-
-                interventions_resp: List[PolicyIntervention] = []
-                for item in cached.get("interventions") or []:
-                    interventions_resp.append(
-                        PolicyIntervention(
-                            intervention_name=item.get("intervention_name", ""),
-                            brief_description=item.get("brief_description", ""),
-                            impact_summary=item.get("impact_summary", ""),
-                            supporting_doc_ids=item.get("supporting_doc_ids", []),
-                        )
-                    )
-
-                key_issues_resp.sort(key=lambda x: x.frequency, reverse=True)
-                interventions_resp.sort(key=lambda x: x.intervention_name)
-                return SynthesisSummary(
-                    executive_briefing=cached.get("executive_briefing") or "",
-                    key_issues=key_issues_resp,
-                    interventions=interventions_resp,
-                )
 
         # Build mentions for LLM
         issues_mentions: List[dict] = []
@@ -264,7 +247,7 @@ class SynthesisService:
         if not interventions_mentions and ext_interventions_mentions:
             interventions_mentions = ext_interventions_mentions
 
-        def call_llm_cluster(
+        async def call_llm_cluster(
             issues_list: List[dict], interventions_list: List[dict]
         ) -> dict:
             system = "You are an expert in policy synthesis. Return ONLY valid JSON."
@@ -291,7 +274,7 @@ class SynthesisService:
                 [("system", system), ("user", user_escaped)]
             )
             llm = get_llm(settings.LLM_MODEL, temperature=0.0)
-            resp = llm.invoke(prompt.format())
+            resp = await llm.ainvoke(prompt.format())
             raw = resp.content if hasattr(resp, "content") else str(resp)
             ts = (raw or "").strip()
             if ts.startswith("```"):
@@ -317,12 +300,10 @@ class SynthesisService:
 
         issues_clusters: List[dict] = []
         interventions_clusters: List[dict] = []
-        llm_ok = False
         try:
-            llm_output = call_llm_cluster(issues_mentions, interventions_mentions)
+            llm_output = await call_llm_cluster(issues_mentions, interventions_mentions)
             issues_clusters = llm_output.get("issues") or []
             interventions_clusters = llm_output.get("interventions") or []
-            llm_ok = bool(issues_clusters or interventions_clusters)
         except Exception as e:
             logger.warning(
                 "[synthesis] LLM synthesis failed for project %s, falling back: %s",
@@ -423,7 +404,7 @@ class SynthesisService:
             for i in interventions_clusters_sorted[:5]
         ]
 
-        def call_llm_executive_briefing(
+        async def call_llm_executive_briefing(
             research_q: str, issues_top: List[dict], intr_top: List[dict]
         ) -> str:
             system = "You are a senior UK policy advisor. Write a concise two-paragraph executive briefing."
@@ -445,7 +426,7 @@ class SynthesisService:
                 [("system", system), ("user", user_escaped)]
             )
             llm = get_llm(settings.LLM_MODEL, temperature=0.2)
-            resp = llm.invoke(prompt.format())
+            resp = await llm.ainvoke(prompt.format())
             text = (resp.content if hasattr(resp, "content") else str(resp)).strip()
             if text.startswith("```"):
                 text = text.strip("`")
@@ -456,7 +437,7 @@ class SynthesisService:
         executive_briefing_text = ""
         try:
             if issues_clusters_sorted or interventions_clusters_sorted:
-                executive_briefing_text = call_llm_executive_briefing(
+                executive_briefing_text = await call_llm_executive_briefing(
                     research_question, top_issues_for_prompt, top_intr_for_prompt
                 )
         except Exception as e:
@@ -467,48 +448,13 @@ class SynthesisService:
             )
             executive_briefing_text = ""
 
-        generation_mode = "llm" if llm_ok else "fallback"
-        model_info = {
-            "provider": settings.LLM_PROVIDER,
-            "model": settings.LLM_MODEL,
-            "temperature": 0.2,
-            "prompt_version": "v1",
-            "input_hash": input_hash,
-            "generation_mode": generation_mode,
-            "llm_verified": llm_ok,
-        }
-        cache_row = {
-            "analysis_project_id": project_id,
-            "key_issues": issues_clusters,
-            "interventions": interventions_clusters,
-            "executive_briefing": executive_briefing_text,
-            "model_info": model_info,
-            "source_stats": source_stats,
-            "status": "ready",
-            "updated_at": datetime.utcnow().isoformat(),
-        }
-
-        try:
-            update_res = (
-                self.supabase.table("analysis_syntheses")
-                .update(
-                    {
-                        "key_issues": cache_row["key_issues"],
-                        "interventions": cache_row["interventions"],
-                        "executive_briefing": cache_row["executive_briefing"],
-                        "model_info": cache_row["model_info"],
-                        "source_stats": cache_row["source_stats"],
-                        "status": cache_row["status"],
-                        "updated_at": cache_row["updated_at"],
-                    }
-                )
-                .eq("analysis_project_id", project_id)
-                .execute()
-            )
-            if not update_res.data:
-                self.supabase.table("analysis_syntheses").insert(cache_row).execute()
-        except Exception:
-            self.supabase.table("analysis_syntheses").insert(cache_row).execute()
+        # TODO: Cache write disabled - synthesis_runs table has different schema
+        # The legacy code tried to write to analysis_syntheses which doesn't exist
+        # For proper caching, use the agent-based synthesis (agent.py + logbook.py)
+        logger.info(
+            "[synthesis] Cache write skipped (legacy table structure incompatible). "
+            "Use agent-based synthesis for caching support."
+        )
 
         key_issues_resp: List[KeyIssue] = []
         for item in issues_clusters:
@@ -562,9 +508,9 @@ class SynthesisService:
         Returns:
             List[Finding]: Sorted findings (desc by year, then title).
         """
-        # Load documents for the project
-        docs_res = (
-            self.supabase.table("analysis_documents")
+        # Load documents for the project (async to avoid blocking)
+        docs_res = await self._async_supabase_query(
+            lambda: self.supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -586,9 +532,9 @@ class SynthesisService:
         per_doc_assigned_issue_labels: dict[str, set[str]] = {}
 
         try:
-            # Latest completed run
-            runs_res = (
-                self.supabase.table("synthesis_runs")
+            # Latest completed run (async to avoid blocking)
+            runs_res = await self._async_supabase_query(
+                lambda: self.supabase.table("synthesis_runs")
                 .select("id")
                 .eq("analysis_project_id", project_id)
                 .eq("status", "completed")
@@ -598,10 +544,10 @@ class SynthesisService:
             )
             if runs_res.data:
                 run_id = runs_res.data[0]["id"]
-                # Find matching theme record
+                # Find matching theme record (async to avoid blocking)
                 if filt_intr:
-                    themes_res = (
-                        self.supabase.table("synthesis_themes")
+                    themes_res = await self._async_supabase_query(
+                        lambda: self.supabase.table("synthesis_themes")
                         .select("id")
                         .eq("synthesis_run_id", run_id)
                         .eq("theme_type", "intervention")
@@ -610,8 +556,8 @@ class SynthesisService:
                         .execute()
                     )
                 else:
-                    themes_res = (
-                        self.supabase.table("synthesis_themes")
+                    themes_res = await self._async_supabase_query(
+                        lambda: self.supabase.table("synthesis_themes")
                         .select("id")
                         .eq("synthesis_run_id", run_id)
                         .eq("theme_type", "issue")
@@ -621,9 +567,9 @@ class SynthesisService:
                     )
                 if themes_res.data:
                     theme_id = themes_res.data[0]["id"]
-                    # Assignments for theme
-                    assign_res = (
-                        self.supabase.table("theme_assignments")
+                    # Assignments for theme (async to avoid blocking)
+                    assign_res = await self._async_supabase_query(
+                        lambda: self.supabase.table("theme_assignments")
                         .select("extraction_id")
                         .eq("synthesis_theme_id", theme_id)
                         .execute()
@@ -631,9 +577,9 @@ class SynthesisService:
                     ex_ids = [str(a["extraction_id"]) for a in (assign_res.data or [])]
                     if ex_ids:
                         assigned_extraction_ids = set(ex_ids)
-                        # Fetch extraction records to map to documents and names/labels
-                        exts_res = (
-                            self.supabase.table("analysis_extractions")
+                        # Fetch extraction records to map to documents and names/labels (async to avoid blocking)
+                        exts_res = await self._async_supabase_query(
+                            lambda: self.supabase.table("analysis_extractions")
                             .select(
                                 "id, analysis_document_id, extraction_type, label, raw_data"
                             )

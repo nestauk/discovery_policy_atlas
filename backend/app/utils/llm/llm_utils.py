@@ -12,9 +12,11 @@ from pydantic import BaseModel
 
 import logging
 
+from app.core.config import settings
 
+# Legacy env var support - use config.py settings by default
 try:
-    LLM_SERVICE = os.getenv("LLM_SERVICE")
+    LLM_SERVICE = os.getenv("LLM_SERVICE", settings.LLM_PROVIDER)
 except KeyError:
     LLM_SERVICE = "OpenAI"
 
@@ -59,9 +61,15 @@ def get_llm(model_name: str = None, temperature: float = None) -> ChatOpenAI:
             )
         logging.info("Using OpenAI")
         return ChatOpenAI(
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_api_key=settings.OPENAI_API_KEY,
             model_name=model_name,
             temperature=temperature,
+            request_timeout=120.0,  # 2 minute timeout to prevent hanging
+        )
+    else:
+        raise ValueError(
+            f"Unknown LLM_SERVICE: {LLM_SERVICE}. Must be 'OpenAI' or 'Azure'. "
+            f"Check your LLM_PROVIDER setting in config.py or LLM_SERVICE environment variable."
         )
 
 

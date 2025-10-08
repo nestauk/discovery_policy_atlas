@@ -109,15 +109,36 @@ class Settings(BaseSettings):
     DEBUG_ANALYSIS_FILES: bool = False  # Keep local analysis files for debugging
 
     # LLM Model Settings
-    LLM_PROVIDER: str = "openai"  # "openai" or "anthropic"
-    LLM_MODEL: str = "gpt-4o-mini"  # or "claude-3-haiku-20240307"
+    LLM_PROVIDER: str = "OpenAI"
+    LLM_MODEL: str = "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4000
 
     # Batch Processing Settings
     BATCH_SIZE_SCREENING: int = 5
-    BATCH_SIZE_EXTRACTION: int = 5
+    BATCH_SIZE_EXTRACTION: int = 5  #
     BATCH_SLEEP_TIME: float = 0.5  # Seconds between API calls
+
+    # Document Processing Limits
+    MAX_DOCUMENT_CHARS: int = 75000  # Max chars for extraction (~18-20k tokens)
+    MAX_DOCUMENT_TOKENS: int = 15000  # Token limit for LLM processing
+    # Note: Workflow makes 5-7 LLM calls per document, so smaller limits = faster processing
+
+    # PDF/File Limits (used during parsing)
+    MAX_PDF_SIZE_MB: float = 50.0  # Maximum PDF file size
+    MAX_PDF_PAGES: int = 50  # Maximum PDF pages
+    MAX_TEXT_LENGTH_CHARS: (
+        int
+    ) = 100000  # Max chars during parsing (before extraction truncation)
+
+    # Timeout Settings (seconds)
+    DOWNLOAD_TIMEOUT: float = 30.0
+    PDF_PARSE_TIMEOUT: float = 30.0
+    HTML_PARSE_TIMEOUT: float = 10.0
+    LLM_REQUEST_TIMEOUT: float = 120.0
+
+    # Concurrency Settings (used by acquisition/extraction services)
+    ACQUISITION_CONCURRENCY: int = 5
 
     # File Storage
     TEMP_FILES_DIR: str = str(config_dir / "temp")
@@ -145,7 +166,7 @@ class Settings(BaseSettings):
     @property
     def llm_config(self) -> dict:
         """Get LLM configuration based on provider"""
-        if self.LLM_PROVIDER == "openai":
+        if self.LLM_PROVIDER == "OpenAI":
             return {
                 "model": self.LLM_MODEL,
                 "temperature": self.LLM_TEMPERATURE,
@@ -157,7 +178,7 @@ class Settings(BaseSettings):
 
     def validate_llm_settings(self):
         """Validate LLM settings on startup"""
-        if self.LLM_PROVIDER == "openai" and not self.OPENAI_API_KEY:
+        if self.LLM_PROVIDER == "OpenAI" and not self.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER is 'openai'")
 
     def validate_api_keys(self):

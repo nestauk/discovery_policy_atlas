@@ -56,7 +56,10 @@ class ExtractionWorkflow:
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required for LangChain workflow")
         self.llm = ChatOpenAI(
-            model=model, temperature=temperature, openai_api_key=settings.OPENAI_API_KEY
+            model=model,
+            temperature=temperature,
+            openai_api_key=settings.OPENAI_API_KEY,
+            request_timeout=120.0,  # 2 minute timeout to prevent hanging
         )
         self.json_parser = JsonOutputParser()
         self.workflow = self._build_workflow()

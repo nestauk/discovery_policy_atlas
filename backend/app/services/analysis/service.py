@@ -17,6 +17,7 @@ from .normalize import normalize_text
 from .extractor_langchain import LangChainExtractorService, LangChainExtractionConfig
 from .storage import AnalysisStorageService
 from app.core.config import settings
+from app.services.monitoring import ResourceMonitor, StageTimer
 
 
 logger = logging.getLogger(__name__)
@@ -52,26 +53,32 @@ class AnalysisService:
         run_id = f"{timestamp}{uuid_part}"  # Total: 12 chars
         logger.info("Starting analysis run %s", run_id)
 
+        # Initialize resource monitoring
+        monitor = ResourceMonitor(f"AnalysisService-{run_id}")
+        monitor.start()
+        monitor.log_snapshot("Pipeline start")
+
         # Create unique subfolder for this run
         run_export_dir = self.export_dir / f"run_{run_id}"
         run_export_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Created run directory: %s", run_export_dir)
 
         # Step 1: build references
-        references_service = ReferencesService(export_dir=str(run_export_dir))
-        (
-            references_csv,
-            generated_boolean_query,
-        ) = await references_service.build_references(
-            query=config.query,
-            sources=config.sources,
-            limit=config.limit,
-            date_from=config.date_from,
-            date_to=config.date_to,
-            mode=config.retrieval_mode,
-            boolean_query=config.boolean_query,
-            geography_filter=config.geography_filter,
-        )
+        with StageTimer(monitor, "references"):
+            references_service = ReferencesService(export_dir=str(run_export_dir))
+            (
+                references_csv,
+                generated_boolean_query,
+            ) = await references_service.build_references(
+                query=config.query,
+                sources=config.sources,
+                limit=config.limit,
+                date_from=config.date_from,
+                date_to=config.date_to,
+                mode=config.retrieval_mode,
+                boolean_query=config.boolean_query,
+                geography_filter=config.geography_filter,
+            )
 
         # Count rows
         try:
@@ -82,6 +89,7 @@ class AnalysisService:
         except Exception:
             total_references = 0
 
+        monitor.record_metric("total_references", total_references)
         logger.info(
             "Run %s completed references stage with %d items", run_id, total_references
         )
@@ -89,30 +97,32 @@ class AnalysisService:
         # Step 1.5: relevance checking (NEW)
         relevant_references = 0
         if config.relevance_enabled:
-            logger.info("Run %s starting relevance checking", run_id)
-            relevance_service = RelevanceService(
-                query=config.query, export_dir=str(run_export_dir)
-            )
-            references_csv = await relevance_service.check_relevance(
-                str(references_csv)
-            )
-
-            # Add acquisition tracking columns to references CSV
-            references_csv = relevance_service.add_acquisition_tracking_columns(
-                str(references_csv)
-            )
-
-            # Count relevant documents for reporting
-            try:
-                df = pd.read_csv(references_csv)
-                relevant_references = (
-                    df["is_relevant"].sum()
-                    if "is_relevant" in df.columns
-                    else total_references
+            with StageTimer(monitor, "relevance"):
+                logger.info("Run %s starting relevance checking", run_id)
+                relevance_service = RelevanceService(
+                    query=config.query, export_dir=str(run_export_dir)
                 )
-            except Exception:
-                relevant_references = total_references
+                references_csv = await relevance_service.check_relevance(
+                    str(references_csv)
+                )
 
+                # Add acquisition tracking columns to references CSV
+                references_csv = relevance_service.add_acquisition_tracking_columns(
+                    str(references_csv)
+                )
+
+                # Count relevant documents for reporting
+                try:
+                    df = pd.read_csv(references_csv)
+                    relevant_references = (
+                        df["is_relevant"].sum()
+                        if "is_relevant" in df.columns
+                        else total_references
+                    )
+                except Exception:
+                    relevant_references = total_references
+
+            monitor.record_metric("relevant_references", relevant_references)
             logger.info(
                 "Run %s completed relevance checking: %d relevant out of %d total",
                 run_id,
@@ -138,54 +148,67 @@ class AnalysisService:
 
         if not config.use_abstracts_only:
             # Step 2: acquisition (download PDFs/HTML) - only for relevant documents
-            acquisition = AcquisitionService(export_dir=str(run_export_dir))
-            acquired = await acquisition.acquire_all(references_csv)
+            with StageTimer(monitor, "acquisition"):
+                acquisition = AcquisitionService(export_dir=str(run_export_dir))
+                acquired = await acquisition.acquire_all(references_csv)
+                monitor.record_metric("acquired_count", len(acquired))
 
             # Step 3: parsing and normalization
-            parser = ParsingService(export_dir=str(run_export_dir))
+            with StageTimer(monitor, "parsing"):
+                parser = ParsingService(export_dir=str(run_export_dir))
+                parsed_count = 0
 
-            for item in acquired:
-                if not item or item.get("status") != "ok":
-                    continue
-                parsed = parser.parse_saved_file(item["doc_id"], item["file_path"])
-                if not parsed or not parsed.text:
-                    continue
-                norm_text = normalize_text(parsed.text)
-                # Use sanitized filename for normalized output as well
-                from .utils_paths import sanitize_id_to_filename
+                for item in acquired:
+                    if not item or item.get("status") != "ok":
+                        continue
+                    # Use async parsing with guardrails
+                    parsed = await parser.parse_saved_file(
+                        item["doc_id"], item["file_path"]
+                    )
+                    if not parsed or not parsed.text:
+                        continue
+                    parsed_count += 1
+                    norm_text = normalize_text(parsed.text)
+                    # Use sanitized filename for normalized output as well
+                    from .utils_paths import sanitize_id_to_filename
 
-                # Match normalized filename to raw base name
-                raw_path = Path(item["file_path"]) if item.get("file_path") else None
-                if raw_path is not None:
-                    base = raw_path.stem  # without extension
-                else:
-                    base = sanitize_id_to_filename(item["doc_id"])
-                safe_name = f"{base}.txt"
-                out_path = parsed_dir / safe_name
-                out_path.write_text(norm_text, encoding="utf-8")
+                    # Match normalized filename to raw base name
+                    raw_path = (
+                        Path(item["file_path"]) if item.get("file_path") else None
+                    )
+                    if raw_path is not None:
+                        base = raw_path.stem  # without extension
+                    else:
+                        base = sanitize_id_to_filename(item["doc_id"])
+                    safe_name = f"{base}.txt"
+                    out_path = parsed_dir / safe_name
+                    out_path.write_text(norm_text, encoding="utf-8")
+
+                monitor.record_metric("parsed_count", parsed_count)
 
         # Step 4: extraction using LangChain workflow
-        extractor = LangChainExtractorService(
-            LangChainExtractionConfig(
-                run_id=run_id,
-                export_dir=str(run_export_dir),
-                use_abstracts_only=config.use_abstracts_only,
-                model=settings.LLM_MODEL,
-                temperature=0.0,
-                concurrency=settings.BATCH_SIZE_EXTRACTION,
-                project_id=project_id,
+        with StageTimer(monitor, "extraction"):
+            extractor = LangChainExtractorService(
+                LangChainExtractionConfig(
+                    run_id=run_id,
+                    export_dir=str(run_export_dir),
+                    use_abstracts_only=config.use_abstracts_only,
+                    model=settings.LLM_MODEL,
+                    temperature=0.0,
+                    concurrency=settings.BATCH_SIZE_EXTRACTION,
+                    project_id=project_id,
+                )
             )
-        )
 
-        # Update references CSV with acquisition status first
-        if acquired:
-            self._update_acquisition_status(str(references_csv), acquired)
+            # Update references CSV with acquisition status first
+            if acquired:
+                self._update_acquisition_status(str(references_csv), acquired)
 
-        # Run extraction and get consolidated JSON path
-        consolidated_json_path = await extractor.extract_for_documents(
-            references_csv=str(references_csv),
-            normalized_dir=str(parsed_dir),
-        )
+            # Run extraction and get consolidated JSON path
+            consolidated_json_path = await extractor.extract_for_documents(
+                references_csv=str(references_csv),
+                normalized_dir=str(parsed_dir),
+            )
 
         # Consolidated outputs are now available:
         # - references.csv: Single file with all reference data, relevance, acquisition, and extraction status
@@ -202,16 +225,17 @@ class AnalysisService:
 
         # Store results in Supabase and optionally clean up files
         try:
-            logger.info("Starting Supabase upload for run %s", run_id)
-            storage_service = AnalysisStorageService()
-            storage_project_id = await storage_service.store_analysis_run(
-                config, result, project_id, user_id, user_name
-            )
-            logger.info(
-                "Successfully stored analysis run %s to project %s",
-                run_id,
-                storage_project_id or project_id,
-            )
+            with StageTimer(monitor, "storage"):
+                logger.info("Starting Supabase upload for run %s", run_id)
+                storage_service = AnalysisStorageService()
+                storage_project_id = await storage_service.store_analysis_run(
+                    config, result, project_id, user_id, user_name
+                )
+                logger.info(
+                    "Successfully stored analysis run %s to project %s",
+                    run_id,
+                    storage_project_id or project_id,
+                )
 
             # Clean up local files unless in debug mode
             if not settings.DEBUG_ANALYSIS_FILES:
@@ -226,6 +250,10 @@ class AnalysisService:
             logger.error("Failed to store analysis run %s in Supabase: %s", run_id, e)
             # Don't fail the entire pipeline if Supabase upload fails
             # Keep the files for manual inspection
+
+        # Log final monitoring summary
+        monitor.log_snapshot("Pipeline complete")
+        monitor.log_summary()
 
         return result
 

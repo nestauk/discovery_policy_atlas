@@ -22,9 +22,16 @@ logger = logging.getLogger(__name__)
 
 
 def truncate_text_for_model(
-    text: str, model: str = "gpt-4o-mini", max_tokens: int = 100000
+    text: str, model: str = "gpt-4o-mini", max_tokens: int = None
 ) -> str:
-    """Truncate text to fit within model's context window."""
+    """Truncate text to fit within model's context window.
+
+    Uses MAX_DOCUMENT_TOKENS from settings by default.
+    The workflow makes 5-7 LLM calls per document, so we need to balance
+    completeness with speed. This leaves room for prompts and structured output.
+    """
+    if max_tokens is None:
+        max_tokens = settings.MAX_DOCUMENT_TOKENS
     try:
         encoding = tiktoken.encoding_for_model(model)
         tokens = encoding.encode(text)
@@ -34,6 +41,10 @@ def truncate_text_for_model(
 
         # Truncate and decode back to text
         truncated_tokens = tokens[:max_tokens]
+        logger.warning(
+            f"Text truncated from {len(tokens)} to {max_tokens} tokens "
+            f"({len(text)} to {len(encoding.decode(truncated_tokens))} chars)"
+        )
         return encoding.decode(truncated_tokens)
     except Exception as e:
         logger.warning(f"Failed to truncate text: {e}")
@@ -141,6 +152,17 @@ class LangChainExtractorService:
                 short_text_only = True
                 print(f"📝 Forced abstract-only mode ({len(doc_text)} chars)")
 
+            # Hard character limit to prevent processing extremely large documents
+            if len(doc_text) > settings.MAX_DOCUMENT_CHARS:
+                original_char_count = len(doc_text)
+                doc_text = doc_text[: settings.MAX_DOCUMENT_CHARS]
+                logger.warning(
+                    f"Document {doc_id} truncated from {original_char_count} to {settings.MAX_DOCUMENT_CHARS} chars"
+                )
+                print(
+                    f"✂️  Hard truncated from {original_char_count} to {settings.MAX_DOCUMENT_CHARS} chars (character limit)"
+                )
+
             # Skip processing if text is too short and likely incomplete
             if len(doc_text) < 500:
                 warnings.append(
@@ -155,7 +177,7 @@ class LangChainExtractorService:
 
             # Truncate text if it exceeds model's context window
             original_length = len(doc_text)
-            doc_text = truncate_text_for_model(doc_text, self.config.model, 100000)
+            doc_text = truncate_text_for_model(doc_text, self.config.model)
             if len(doc_text) < original_length:
                 print(
                     f"✂️  Truncated text from {original_length} to {len(doc_text)} chars"

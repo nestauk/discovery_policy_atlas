@@ -493,7 +493,7 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
     prompt = build_executive_briefing_prompt()
     llm = get_llm(BRIEFING_MODEL, temperature=0.1)
     try:
-        resp = llm.invoke(
+        resp = await llm.ainvoke(
             prompt.format(
                 rq=rq,
                 payload=_escape_braces(json.dumps(payload)),
