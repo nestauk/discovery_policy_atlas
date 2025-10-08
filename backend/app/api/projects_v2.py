@@ -5,6 +5,7 @@ from datetime import datetime
 import uuid
 from typing import Optional, List
 import pandas as pd
+import asyncio
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.vectorization import vectorization_service
@@ -436,10 +437,15 @@ async def trigger_synthesis_for_project(project_id: str) -> None:
     if synthesis_status in ["running", "completed"]:
         logger.info(f"Synthesis already {synthesis_status} for project {project_id}")
         if synthesis_status == "completed":
-            # Mark project as completed since synthesis is done
-            vectorization_service.supabase.table("analysis_projects").update(
-                {"status": "completed"}
-            ).eq("id", project_id).execute()
+            # Mark project as completed since synthesis is done (async to avoid blocking)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: vectorization_service.supabase.table("analysis_projects")
+                .update({"status": "completed"})
+                .eq("id", project_id)
+                .execute(),
+            )
         return
 
     # Create placeholder to prevent duplicate runs
@@ -452,34 +458,58 @@ async def trigger_synthesis_for_project(project_id: str) -> None:
         synthesis_agent = SynthesisAgent()
         final_state = await synthesis_agent.run(project_id)
 
-        # Remove the placeholder run before creating the final one
+        # Remove the placeholder run before creating the final one (async to avoid blocking)
         supabase = vectorization_service.supabase
-        supabase.table("synthesis_runs").delete().eq("id", run_id).execute()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: supabase.table("synthesis_runs")
+            .delete()
+            .eq("id", run_id)
+            .execute(),
+        )
 
         # Write complete synthesis results (this creates the synthesis_runs record with themes)
         from app.services.synthesis.logbook import write_run_from_state
 
         await write_run_from_state(project_id, final_state)
 
-        # Mark project as completed
-        vectorization_service.supabase.table("analysis_projects").update(
-            {"status": "completed"}
-        ).eq("id", project_id).execute()
+        # Mark project as completed (async to avoid blocking)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: vectorization_service.supabase.table("analysis_projects")
+            .update({"status": "completed"})
+            .eq("id", project_id)
+            .execute(),
+        )
 
         logger.info(f"Synthesis completed for project {project_id}")
 
     except Exception as e:
-        # Clean up placeholder run on failure
+        # Clean up placeholder run on failure (async to avoid blocking)
         try:
             supabase = vectorization_service.supabase
-            supabase.table("synthesis_runs").delete().eq("id", run_id).execute()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: supabase.table("synthesis_runs")
+                .delete()
+                .eq("id", run_id)
+                .execute(),
+            )
         except Exception:
             pass  # Ignore cleanup errors
 
-        # Still mark project as completed (analysis succeeded)
-        vectorization_service.supabase.table("analysis_projects").update(
-            {"status": "completed"}
-        ).eq("id", project_id).execute()
+        # Still mark project as completed (analysis succeeded) (async to avoid blocking)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: vectorization_service.supabase.table("analysis_projects")
+            .update({"status": "completed"})
+            .eq("id", project_id)
+            .execute(),
+        )
 
         logger.error(f"Synthesis failed for project {project_id}: {e}")
         raise
@@ -566,10 +596,15 @@ async def run_analysis_for_project(
             "boolean_query": None,  # Will be filled in after generation
         }
 
-        # Update project status to running
-        vectorization_service.supabase.table("analysis_projects").update(
-            {"status": "running"}
-        ).eq("id", project_id).execute()
+        # Update project status to running (async to avoid blocking)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: vectorization_service.supabase.table("analysis_projects")
+            .update({"status": "running"})
+            .eq("id", project_id)
+            .execute(),
+        )
 
         # Run analysis
         service = AnalysisService(export_dir=settings.EXPORT_FILES_DIR)
@@ -583,26 +618,36 @@ async def run_analysis_for_project(
         # Update search query data with the generated boolean query
         search_query_data["boolean_query"] = result.boolean_query
 
-        # Update project with analysis results but keep status as "running"
-        vectorization_service.supabase.table("analysis_projects").update(
-            {
-                "run_id": result.run_id,
-                "total_references": result.total_references,
-                "relevant_references": result.relevant_references,
-                "search_query": search_query_data,
-                # Don't set status to "completed" yet - synthesis will do that
-            }
-        ).eq("id", project_id).execute()
+        # Update project with analysis results but keep status as "running" (async to avoid blocking)
+        await loop.run_in_executor(
+            None,
+            lambda: vectorization_service.supabase.table("analysis_projects")
+            .update(
+                {
+                    "run_id": result.run_id,
+                    "total_references": result.total_references,
+                    "relevant_references": result.relevant_references,
+                    "search_query": search_query_data,
+                    # Don't set status to "completed" yet - synthesis will do that
+                }
+            )
+            .eq("id", project_id)
+            .execute(),
+        )
 
         # Trigger synthesis automatically
         try:
             await trigger_synthesis_for_project(project_id)
         except Exception as e:
             logger.error(f"Synthesis failed for project {project_id}: {e}")
-            # Even if synthesis fails, mark analysis as completed
-            vectorization_service.supabase.table("analysis_projects").update(
-                {"status": "completed"}
-            ).eq("id", project_id).execute()
+            # Even if synthesis fails, mark analysis as completed (async to avoid blocking)
+            await loop.run_in_executor(
+                None,
+                lambda: vectorization_service.supabase.table("analysis_projects")
+                .update({"status": "completed"})
+                .eq("id", project_id)
+                .execute(),
+            )
 
         return {
             "project_id": project_id,
