@@ -10,14 +10,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
-
-try:
-    import psutil
-
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-
+import psutil
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +64,6 @@ class ResourceMonitor:
         self.start_time = time.time()
         self.snapshots = []
         self.metrics = {}
-        if not PSUTIL_AVAILABLE:
-            logger.warning(
-                f"[{self.service_name}] psutil not available - resource monitoring limited"
-            )
 
     def snapshot(self, label: str) -> ResourceSnapshot:
         """
@@ -86,17 +75,6 @@ class ResourceMonitor:
         Returns:
             ResourceSnapshot with current metrics
         """
-        if not PSUTIL_AVAILABLE:
-            return ResourceSnapshot(
-                label=label,
-                timestamp=datetime.now().isoformat(),
-                cpu_percent=0.0,
-                memory_mb=0.0,
-                threads=0,
-                active_tasks=len(asyncio.all_tasks()),
-                elapsed_seconds=time.time() - (self.start_time or time.time()),
-            )
-
         try:
             process = psutil.Process()
 
