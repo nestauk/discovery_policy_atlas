@@ -16,7 +16,7 @@ from app.core.config import settings
 
 # Legacy env var support - use config.py settings by default
 try:
-    LLM_SERVICE = os.getenv("LLM_SERVICE", settings.LLM_PROVIDER.capitalize())
+    LLM_SERVICE = os.getenv("LLM_SERVICE", settings.LLM_PROVIDER)
 except KeyError:
     LLM_SERVICE = "OpenAI"
 
@@ -54,7 +54,7 @@ def get_llm(model_name: str = None, temperature: float = None) -> ChatOpenAI:
             openai_api_key=os.getenv("AZURE_OPENAI_API_KEY"),
             temperature=temperature,
         )
-    elif LLM_SERVICE == "OpenAI" or LLM_SERVICE == "Openai":
+    elif LLM_SERVICE == "OpenAI":
         if (model_name is None) or (temperature is None):
             raise ValueError(
                 "Model name and temperature must be specified when not using Azure OpenAI."

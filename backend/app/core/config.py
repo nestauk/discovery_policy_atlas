@@ -166,7 +166,7 @@ class Settings(BaseSettings):
     @property
     def llm_config(self) -> dict:
         """Get LLM configuration based on provider"""
-        if self.LLM_PROVIDER == "openai":
+        if self.LLM_PROVIDER == "OpenAI":
             return {
                 "model": self.LLM_MODEL,
                 "temperature": self.LLM_TEMPERATURE,
@@ -178,7 +178,7 @@ class Settings(BaseSettings):
 
     def validate_llm_settings(self):
         """Validate LLM settings on startup"""
-        if self.LLM_PROVIDER == "openai" and not self.OPENAI_API_KEY:
+        if self.LLM_PROVIDER == "OpenAI" and not self.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER is 'openai'")
 
     def validate_api_keys(self):
