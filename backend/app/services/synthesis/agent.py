@@ -117,10 +117,10 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     if not project_id:
         return {"raw_extractions": [], "research_question": "Not specified"}  # type: ignore[return-value]
 
-    supabase = vectorization_service.supabase
+    supabase = await vectorization_service._ensure_supabase()
     # Fetch research question
     proj_res = (
-        supabase.table("analysis_projects")
+        await supabase.table("analysis_projects")
         .select("query")
         .eq("id", project_id)
         .execute()
@@ -129,7 +129,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         proj_res.data[0].get("query") if proj_res and proj_res.data else None
     ) or "Not specified"
     res = (
-        supabase.table("analysis_extractions")
+        await supabase.table("analysis_extractions")
         .select(
             "id, analysis_document_id, extraction_type, label, description, raw_data"
         )
@@ -350,7 +350,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
 
     # Build mapping from extraction_id to analysis_document_id -> doc_id
     project_id = state.get("project_id", "")
-    supabase = vectorization_service.supabase
+    supabase = await vectorization_service._ensure_supabase()
 
     # Gather all concept extraction IDs per theme
     def concept_ids_for_theme(t: FinalTheme) -> List[str]:
@@ -364,14 +364,14 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     for t in final_intervention_themes:
         all_intr_ex_ids.extend(concept_ids_for_theme(t))
 
-    def fetch_doc_ids_for_extractions(ex_ids: List[str]) -> Dict[str, str]:
+    async def fetch_doc_ids_for_extractions(ex_ids: List[str]) -> Dict[str, str]:
         mapping: Dict[str, str] = {}
         if not ex_ids:
             return mapping
         CHUNK = 1000
         # Preload analysis_documents for this project to map analysis_document_id -> doc_id
         docs_res = (
-            supabase.table("analysis_documents")
+            await supabase.table("analysis_documents")
             .select("id, doc_id")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -382,7 +382,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         for i in range(0, len(ex_ids), CHUNK):
             chunk = ex_ids[i : i + CHUNK]
             exts_res = (
-                supabase.table("analysis_extractions")
+                await supabase.table("analysis_extractions")
                 .select("id, analysis_document_id")
                 .in_("id", chunk)
                 .execute()
@@ -393,8 +393,8 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 mapping[rid] = doc_uuid_to_doc_id.get(doc_uuid, "")
         return mapping
 
-    issue_ex_id_to_doc_id = fetch_doc_ids_for_extractions(all_issue_ex_ids)
-    intr_ex_id_to_doc_id = fetch_doc_ids_for_extractions(all_intr_ex_ids)
+    issue_ex_id_to_doc_id = await fetch_doc_ids_for_extractions(all_issue_ex_ids)
+    intr_ex_id_to_doc_id = await fetch_doc_ids_for_extractions(all_intr_ex_ids)
 
     # Helper to generate a short impact summary via LLM (fast model)
     async def _impact_for_theme(name: str, concept_texts: List[str]) -> str:

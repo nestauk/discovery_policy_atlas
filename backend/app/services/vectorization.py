@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
-from supabase import create_client
+from supabase import acreate_client, AsyncClient
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ class VectorizationService:
 
     def __init__(self):
         self._openai_client = None
-        self._supabase = None
+        self._supabase: Optional[AsyncClient] = None
 
     @property
     def openai_client(self):
@@ -23,15 +23,26 @@ class VectorizationService:
             self._openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         return self._openai_client
 
-    @property
-    def supabase(self):
+    async def _ensure_supabase(self) -> AsyncClient:
+        """Ensure Supabase async client is initialized."""
         if self._supabase is None:
             if not settings.SUPABASE_URL:
                 raise ValueError("SUPABASE_URL is required for vectorization service")
             if not settings.SUPABASE_KEY:
                 raise ValueError("SUPABASE_KEY is required for vectorization service")
 
-            self._supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+            self._supabase = await acreate_client(
+                settings.SUPABASE_URL, settings.SUPABASE_KEY
+            )
+        return self._supabase
+
+    @property
+    def supabase(self):
+        """Synchronous property for backward compatibility - will be removed."""
+        if self._supabase is None:
+            raise RuntimeError(
+                "Supabase client not initialized. Call await _ensure_supabase() first."
+            )
         return self._supabase
 
     async def generate_embedding(self, text: str) -> List[float]:
@@ -52,6 +63,8 @@ class VectorizationService:
     ) -> Optional[str]:
         """Store a document and its sections in Supabase"""
         try:
+            supabase = await self._ensure_supabase()
+
             # Prepare document data
             document_data = {
                 "project_id": project_id,
@@ -96,7 +109,7 @@ class VectorizationService:
 
             # Insert or update document
             result = (
-                self.supabase.table("documents")
+                await supabase.table("documents")
                 .upsert(document_data, on_conflict="project_id,external_id,source_type")
                 .execute()
             )
@@ -121,6 +134,7 @@ class VectorizationService:
         self, document_id: str, paper: Dict[str, Any], project_id: str
     ):
         """Create embeddings for document summaries only"""
+        supabase = await self._ensure_supabase()
         chunks_to_embed = []
 
         # Create a comprehensive summary section (only chunk type we'll use)
@@ -165,7 +179,7 @@ class VectorizationService:
                     "token_count": len(chunk["content"].split()),
                 }
 
-                self.supabase.table("chunks").insert(chunk_data).execute()
+                await supabase.table("chunks").insert(chunk_data).execute()
                 logger.info(f"Created chunk: {chunk['chunk_type']}")
 
             except Exception as e:
@@ -210,11 +224,13 @@ class VectorizationService:
     ) -> List[Dict[str, Any]]:
         """Search for similar content using pgvector"""
         try:
+            supabase = await self._ensure_supabase()
+
             # Generate embedding for query
             query_embedding = await self.generate_embedding(query)
 
             # Use the PostgreSQL function for similarity search
-            result = self.supabase.rpc(
+            result = await supabase.rpc(
                 "match_chunks",
                 {
                     "query_embedding": query_embedding,
@@ -230,13 +246,14 @@ class VectorizationService:
             logger.error(f"Error searching similar content: {e}")
             return []
 
-    def get_project_documents(
+    async def get_project_documents(
         self, project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
     ) -> List[Dict[str, Any]]:
         """Get all documents for a project"""
         try:
+            supabase = await self._ensure_supabase()
             result = (
-                self.supabase.table("documents")
+                await supabase.table("documents")
                 .select("*")
                 .eq("project_id", project_id)
                 .execute()

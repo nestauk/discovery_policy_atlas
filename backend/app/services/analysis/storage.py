@@ -12,7 +12,7 @@ import pandas as pd
 import math
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from supabase import create_client
+from supabase import acreate_client, AsyncClient
 from app.core.config import settings
 from .schemas import RunConfig, RunResult, UnifiedReference
 from .schemas_langchain import DocumentExtractionBundle
@@ -26,15 +26,11 @@ class AnalysisStorageService:
     """Service for storing analysis results in Supabase."""
 
     def __init__(self):
-        self._supabase = None
+        self._supabase: Optional[AsyncClient] = None
         self._vectorization_service = None
-        # Limit concurrent DB queries to prevent connection exhaustion
-        # Generous limit of 50 concurrent queries
-        self._db_semaphore = asyncio.Semaphore(50)
 
-    @property
-    def supabase(self):
-        """Lazy initialization of Supabase client."""
+    async def _ensure_supabase(self) -> AsyncClient:
+        """Ensure Supabase async client is initialized."""
         if self._supabase is None:
             if not settings.SUPABASE_URL:
                 raise ValueError(
@@ -45,7 +41,9 @@ class AnalysisStorageService:
                     "SUPABASE_KEY is required for analysis storage service"
                 )
 
-            self._supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+            self._supabase = await acreate_client(
+                settings.SUPABASE_URL, settings.SUPABASE_KEY
+            )
         return self._supabase
 
     @property
@@ -54,23 +52,6 @@ class AnalysisStorageService:
         if self._vectorization_service is None:
             self._vectorization_service = VectorizationService()
         return self._vectorization_service
-
-    async def _async_supabase_query(self, query_func):
-        """
-        Execute a Supabase query asynchronously in thread pool.
-
-        This prevents blocking the event loop during database operations.
-        Uses a semaphore to limit concurrent queries and prevent DB connection exhaustion.
-
-        Args:
-            query_func: Lambda or callable that executes the Supabase query
-
-        Returns:
-            Query result
-        """
-        async with self._db_semaphore:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, query_func)
 
     def _clean_data_for_json(self, data: Any) -> Any:
         """Clean data to prevent JSON serialization issues (NaN, None, etc.)."""
@@ -125,9 +106,10 @@ class AnalysisStorageService:
         logger.info(f"Checking existing extractions for project {project_id}")
 
         try:
-            # Query documents that have extraction_status = 'completed' or 'success' (async to avoid blocking)
-            response = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_documents")
+            # Query documents that have extraction_status = 'completed' or 'success'
+            supabase = await self._ensure_supabase()
+            response = (
+                await supabase.table("analysis_documents")
                 .select("doc_id,extraction_status")
                 .eq("analysis_project_id", project_id)
                 .in_("extraction_status", ["completed", "success"])
@@ -165,15 +147,16 @@ class AnalysisStorageService:
                 f"Storing extraction for document {doc_id} in project {project_id}"
             )
 
-            # 1. Update the document with extraction results (async to avoid blocking)
+            # 1. Update the document with extraction results
+            supabase = await self._ensure_supabase()
             doc_update = {
                 "extraction_results": extraction_data,
                 "extraction_status": "completed",
                 "upload_step": "extracted",
             }
 
-            doc_response = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_documents")
+            doc_response = (
+                await supabase.table("analysis_documents")
                 .update(doc_update)
                 .eq("analysis_project_id", project_id)
                 .eq("doc_id", doc_id)
@@ -201,19 +184,19 @@ class AnalysisStorageService:
 
             extraction_items = self._create_extraction_items(bundle, base_data)
 
-            # 4. Insert extraction items (delete existing ones first to handle re-runs) (async to avoid blocking)
+            # 4. Insert extraction items (delete existing ones first to handle re-runs)
             if extraction_items:
                 # Delete existing extractions for this document
-                await self._async_supabase_query(
-                    lambda: self.supabase.table("analysis_extractions")
+                await (
+                    supabase.table("analysis_extractions")
                     .delete()
                     .eq("analysis_document_id", document_db_id)
                     .execute()
                 )
 
                 # Insert new extractions
-                await self._async_supabase_query(
-                    lambda: self.supabase.table("analysis_extractions")
+                await (
+                    supabase.table("analysis_extractions")
                     .insert(extraction_items)
                     .execute()
                 )
@@ -253,9 +236,10 @@ class AnalysisStorageService:
                 f"Creating chunks for document {doc_id} in project {project_id}"
             )
 
-            # First, get the analysis_documents.id (UUID) for this doc_id (async to avoid blocking)
-            analysis_doc_result = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_documents")
+            # First, get the analysis_documents.id (UUID) for this doc_id
+            supabase = await self._ensure_supabase()
+            analysis_doc_result = (
+                await supabase.table("analysis_documents")
                 .select("id")
                 .eq("analysis_project_id", project_id)
                 .eq("doc_id", doc_id)
@@ -287,9 +271,10 @@ class AnalysisStorageService:
                 logger.warning(f"No chunks generated for document {doc_id}")
                 return False
 
-            # Clean up existing chunks for this document UUID (async to avoid blocking)
-            await self._async_supabase_query(
-                lambda: self.vectorization_service.supabase.table("chunks")
+            # Clean up existing chunks for this document UUID
+            vec_supabase = await self.vectorization_service._ensure_supabase()
+            await (
+                vec_supabase.table("chunks")
                 .delete()
                 .eq("document_id", analysis_doc_uuid)
                 .eq("project_id", project_id)
@@ -335,13 +320,7 @@ class AnalysisStorageService:
                 for i in range(0, len(chunk_data_list), batch_size):
                     batch = chunk_data_list[i : i + batch_size]
                     try:
-                        await self._async_supabase_query(
-                            lambda b=batch: self.vectorization_service.supabase.table(
-                                "chunks"
-                            )
-                            .insert(b)
-                            .execute()
-                        )
+                        await vec_supabase.table("chunks").insert(batch).execute()
                         chunk_count += len(batch)
                         logger.debug(
                             f"Inserted chunk batch {i//batch_size + 1}/{(len(chunk_data_list) + batch_size - 1)//batch_size} "
@@ -486,10 +465,9 @@ class AnalysisStorageService:
             "created_by_name": user_name,
         }
 
-        response = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_projects")
-            .insert(project_data)
-            .execute()
+        supabase = await self._ensure_supabase()
+        response = (
+            await supabase.table("analysis_projects").insert(project_data).execute()
         )
 
         if not response.data:
@@ -510,8 +488,9 @@ class AnalysisStorageService:
             "status": "uploading",
         }
 
-        response = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_projects")
+        supabase = await self._ensure_supabase()
+        response = (
+            await supabase.table("analysis_projects")
             .update(update_data)
             .eq("id", project_id)
             .execute()
@@ -643,13 +622,12 @@ class AnalysisStorageService:
             extractions_data = json.load(f)
 
         # Get document IDs mapping
-        loop = asyncio.get_event_loop()
-        doc_response = await loop.run_in_executor(
-            None,
-            lambda: self.supabase.table("analysis_documents")
+        supabase = await self._ensure_supabase()
+        doc_response = (
+            await supabase.table("analysis_documents")
             .select("id,doc_id")
             .eq("analysis_project_id", project_id)
-            .execute(),
+            .execute()
         )
         doc_id_map = {doc["doc_id"]: doc["id"] for doc in doc_response.data}
 
@@ -672,15 +650,14 @@ class AnalysisStorageService:
 
             extraction_items.extend(self._create_extraction_items(bundle, base_data))
 
-        # Batch insert extractions (async to avoid blocking)
+        # Batch insert extractions
         if extraction_items:
+            supabase = await self._ensure_supabase()
             batch_size = 100
             for i in range(0, len(extraction_items), batch_size):
                 batch = extraction_items[i : i + batch_size]
-                response = await self._async_supabase_query(
-                    lambda b=batch: self.supabase.table("analysis_extractions")
-                    .insert(b)
-                    .execute()
+                response = (
+                    await supabase.table("analysis_extractions").insert(batch).execute()
                 )
                 if not response.data:
                     raise Exception(
@@ -693,13 +670,10 @@ class AnalysisStorageService:
 
     async def _mark_analysis_completed(self, project_id: str) -> None:
         """Mark analysis extraction as completed, ready for synthesis."""
-        response = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_projects")
-            .update(
-                {
-                    "status": "synthesising",
-                }
-            )
+        supabase = await self._ensure_supabase()
+        response = (
+            await supabase.table("analysis_projects")
+            .update({"status": "synthesising"})
             .eq("id", project_id)
             .execute()
         )
@@ -712,13 +686,10 @@ class AnalysisStorageService:
     async def _mark_project_failed(self, run_id: str, error_message: str) -> None:
         """Mark analysis project as failed."""
         try:
-            response = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_projects")
-                .update(
-                    {
-                        "status": "failed",
-                    }
-                )
+            supabase = await self._ensure_supabase()
+            response = (
+                await supabase.table("analysis_projects")
+                .update({"status": "failed"})
                 .eq("run_id", run_id)
                 .execute()
             )
@@ -870,19 +841,15 @@ class AnalysisStorageService:
             return
 
         # Use insert with conflict resolution
+        supabase = await self._ensure_supabase()
         batch_size = 100
         for i in range(0, len(documents_data), batch_size):
             batch = documents_data[i : i + batch_size]
 
             # Try regular insert first for new documents
             try:
-                # Run database operations in thread pool to avoid blocking
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: self.supabase.table("analysis_documents")
-                    .insert(batch)
-                    .execute(),
+                response = (
+                    await supabase.table("analysis_documents").insert(batch).execute()
                 )
                 if response.data:
                     continue
@@ -893,14 +860,13 @@ class AnalysisStorageService:
                 for doc in batch:
                     try:
                         # Check if document exists
-                        existing = await loop.run_in_executor(
-                            None,
-                            lambda: self.supabase.table("analysis_documents")
+                        existing = (
+                            await supabase.table("analysis_documents")
                             .select("id")
                             .eq("analysis_project_id", doc["analysis_project_id"])
                             .eq("doc_id", doc["doc_id"])
                             .eq("source", doc["source"])
-                            .execute(),
+                            .execute()
                         )
 
                         if existing.data:
@@ -911,20 +877,18 @@ class AnalysisStorageService:
                                 for k, v in doc.items()
                                 if k not in ["analysis_project_id", "doc_id", "source"]
                             }
-                            await loop.run_in_executor(
-                                None,
-                                lambda: self.supabase.table("analysis_documents")
+                            await (
+                                supabase.table("analysis_documents")
                                 .update(update_doc)
                                 .eq("id", doc_id)
-                                .execute(),
+                                .execute()
                             )
                         else:
                             # Insert new document
-                            await loop.run_in_executor(
-                                None,
-                                lambda: self.supabase.table("analysis_documents")
+                            await (
+                                supabase.table("analysis_documents")
                                 .insert(doc)
-                                .execute(),
+                                .execute()
                             )
 
                     except Exception as doc_error:
@@ -937,14 +901,15 @@ class AnalysisStorageService:
         self, project_id: str, updates: List[Dict[str, Any]]
     ) -> None:
         """Update documents by doc_id."""
+        supabase = await self._ensure_supabase()
         for update in updates:
             doc_id = update.pop("doc_id")
 
-            response = await self._async_supabase_query(
-                lambda u=update, d=doc_id: self.supabase.table("analysis_documents")
-                .update(u)
+            response = (
+                await supabase.table("analysis_documents")
+                .update(update)
                 .eq("analysis_project_id", project_id)
-                .eq("doc_id", d)
+                .eq("doc_id", doc_id)
                 .execute()
             )
 

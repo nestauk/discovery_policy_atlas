@@ -5,7 +5,6 @@ from datetime import datetime
 import uuid
 from typing import Optional, List
 import pandas as pd
-import asyncio
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.vectorization import vectorization_service
@@ -56,9 +55,11 @@ async def get_synthesis_summary(
     try:
         from app.services.synthesis.logbook import get_synthesis_status
 
+        supabase = await vectorization_service._ensure_supabase()
+
         # Check project status first
         project_result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("status")
             .eq("id", project_id)
             .execute()
@@ -138,8 +139,9 @@ async def get_synthesis_summary(
 async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_user)):
     """Get all analysis projects"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
         result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("*")
             .order("created_at", desc=True)
             .execute()
@@ -196,10 +198,9 @@ async def create_analysis_project(
             "created_by_name": current_user.name,
         }
 
+        supabase = await vectorization_service._ensure_supabase()
         result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .insert(project_data)
-            .execute()
+            await supabase.table("analysis_projects").insert(project_data).execute()
         )
 
         if not result.data:
@@ -234,9 +235,11 @@ async def get_analysis_project(
 ):
     """Get a specific analysis project with documents and extractions"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Get project
         project_result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("*")
             .eq("id", project_id)
             .execute()
@@ -249,7 +252,7 @@ async def get_analysis_project(
 
         # Get documents
         docs_result = (
-            vectorization_service.supabase.table("analysis_documents")
+            await supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -257,7 +260,7 @@ async def get_analysis_project(
 
         # Get extractions
         extractions_result = (
-            vectorization_service.supabase.table("analysis_extractions")
+            await supabase.table("analysis_extractions")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -329,8 +332,9 @@ async def update_analysis_project(
         if not update_data:
             raise HTTPException(status_code=400, detail="No valid fields to update")
 
+        supabase = await vectorization_service._ensure_supabase()
         result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .update(update_data)
             .eq("id", project_id)
             .execute()
@@ -367,9 +371,11 @@ async def delete_analysis_project(
 ):
     """Delete an analysis project and all its data"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Check if project exists
         project_result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("id")
             .eq("id", project_id)
             .execute()
@@ -382,7 +388,7 @@ async def delete_analysis_project(
         try:
             # First, get all analysis_documents.id values for this project
             docs_result = (
-                vectorization_service.supabase.table("analysis_documents")
+                await supabase.table("analysis_documents")
                 .select("id")
                 .eq("analysis_project_id", project_id)
                 .execute()
@@ -392,17 +398,20 @@ async def delete_analysis_project(
 
             # Delete chunks that reference these analysis_documents
             if analysis_doc_ids:
-                vectorization_service.supabase.table("chunks").delete().in_(
-                    "document_id", analysis_doc_ids
-                ).execute()
+                await (
+                    supabase.table("chunks")
+                    .delete()
+                    .in_("document_id", analysis_doc_ids)
+                    .execute()
+                )
                 logger.info(
                     f"Deleted chunks for {len(analysis_doc_ids)} analysis documents"
                 )
 
             # Also delete any chunks by project_id (legacy/fallback)
-            vectorization_service.supabase.table("chunks").delete().eq(
-                "project_id", project_id
-            ).execute()
+            await (
+                supabase.table("chunks").delete().eq("project_id", project_id).execute()
+            )
 
             logger.info(f"Cleaned up chunks for analysis project {project_id}")
         except Exception as e:
@@ -410,9 +419,9 @@ async def delete_analysis_project(
             # Don't fail the deletion if chunk cleanup fails
 
         # Delete project (cascading delete will handle documents and extractions)
-        vectorization_service.supabase.table("analysis_projects").delete().eq(
-            "id", project_id
-        ).execute()
+        await (
+            supabase.table("analysis_projects").delete().eq("id", project_id).execute()
+        )
 
         return {"message": "Analysis project deleted successfully"}
 
@@ -437,14 +446,13 @@ async def trigger_synthesis_for_project(project_id: str) -> None:
     if synthesis_status in ["running", "completed"]:
         logger.info(f"Synthesis already {synthesis_status} for project {project_id}")
         if synthesis_status == "completed":
-            # Mark project as completed since synthesis is done (async to avoid blocking)
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: vectorization_service.supabase.table("analysis_projects")
+            # Mark project as completed since synthesis is done
+            supabase = await vectorization_service._ensure_supabase()
+            await (
+                supabase.table("analysis_projects")
                 .update({"status": "completed"})
                 .eq("id", project_id)
-                .execute(),
+                .execute()
             )
         return
 
@@ -458,58 +466,44 @@ async def trigger_synthesis_for_project(project_id: str) -> None:
         synthesis_agent = SynthesisAgent()
         final_state = await synthesis_agent.run(project_id)
 
-        # Remove the placeholder run before creating the final one (async to avoid blocking)
-        supabase = vectorization_service.supabase
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: supabase.table("synthesis_runs")
-            .delete()
-            .eq("id", run_id)
-            .execute(),
-        )
+        # Remove the placeholder run before creating the final one
+        supabase = await vectorization_service._ensure_supabase()
+        await supabase.table("synthesis_runs").delete().eq("id", run_id).execute()
 
         # Write complete synthesis results (this creates the synthesis_runs record with themes)
         from app.services.synthesis.logbook import write_run_from_state
 
         await write_run_from_state(project_id, final_state)
 
-        # Mark project as completed (async to avoid blocking)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
+        # Mark project as completed
+        await (
+            supabase.table("analysis_projects")
             .update({"status": "completed"})
             .eq("id", project_id)
-            .execute(),
+            .execute()
         )
 
         logger.info(f"Synthesis completed for project {project_id}")
 
     except Exception as e:
-        # Clean up placeholder run on failure (async to avoid blocking)
+        # Clean up placeholder run on failure
         try:
-            supabase = vectorization_service.supabase
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: supabase.table("synthesis_runs")
-                .delete()
-                .eq("id", run_id)
-                .execute(),
-            )
+            supabase = await vectorization_service._ensure_supabase()
+            await supabase.table("synthesis_runs").delete().eq("id", run_id).execute()
         except Exception:
             pass  # Ignore cleanup errors
 
-        # Still mark project as completed (analysis succeeded) (async to avoid blocking)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "completed"})
-            .eq("id", project_id)
-            .execute(),
-        )
+        # Still mark project as completed (analysis succeeded)
+        try:
+            supabase = await vectorization_service._ensure_supabase()
+            await (
+                supabase.table("analysis_projects")
+                .update({"status": "completed"})
+                .eq("id", project_id)
+                .execute()
+            )
+        except Exception:
+            pass  # Ignore if this fails too
 
         logger.error(f"Synthesis failed for project {project_id}: {e}")
         raise
@@ -527,9 +521,11 @@ async def run_analysis_for_project(
         from app.services.analysis.schemas import RunConfig
         from app.core.config import settings
 
+        supabase = await vectorization_service._ensure_supabase()
+
         # Check if project exists
         project_result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("*")
             .eq("id", project_id)
             .execute()
@@ -596,14 +592,13 @@ async def run_analysis_for_project(
             "boolean_query": None,  # Will be filled in after generation
         }
 
-        # Update project status to running (async to avoid blocking)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
+        # Update project status to running
+        supabase = await vectorization_service._ensure_supabase()
+        await (
+            supabase.table("analysis_projects")
             .update({"status": "running"})
             .eq("id", project_id)
-            .execute(),
+            .execute()
         )
 
         # Run analysis
@@ -618,10 +613,9 @@ async def run_analysis_for_project(
         # Update search query data with the generated boolean query
         search_query_data["boolean_query"] = result.boolean_query
 
-        # Update project with analysis results but keep status as "running" (async to avoid blocking)
-        await loop.run_in_executor(
-            None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
+        # Update project with analysis results but keep status as "running"
+        await (
+            supabase.table("analysis_projects")
             .update(
                 {
                     "run_id": result.run_id,
@@ -632,7 +626,7 @@ async def run_analysis_for_project(
                 }
             )
             .eq("id", project_id)
-            .execute(),
+            .execute()
         )
 
         # Trigger synthesis automatically
@@ -640,13 +634,12 @@ async def run_analysis_for_project(
             await trigger_synthesis_for_project(project_id)
         except Exception as e:
             logger.error(f"Synthesis failed for project {project_id}: {e}")
-            # Even if synthesis fails, mark analysis as completed (async to avoid blocking)
-            await loop.run_in_executor(
-                None,
-                lambda: vectorization_service.supabase.table("analysis_projects")
+            # Even if synthesis fails, mark analysis as completed
+            await (
+                supabase.table("analysis_projects")
                 .update({"status": "completed"})
                 .eq("id", project_id)
-                .execute(),
+                .execute()
             )
 
         return {
@@ -664,9 +657,13 @@ async def run_analysis_for_project(
         logger.error(f"Error running analysis for project {project_id}: {e}")
         # Mark project as failed
         try:
-            vectorization_service.supabase.table("analysis_projects").update(
-                {"status": "failed"}
-            ).eq("id", project_id).execute()
+            supabase = await vectorization_service._ensure_supabase()
+            await (
+                supabase.table("analysis_projects")
+                .update({"status": "failed"})
+                .eq("id", project_id)
+                .execute()
+            )
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to run analysis: {str(e)}")
@@ -678,8 +675,9 @@ async def get_project_documents(
 ):
     """Get all documents for an analysis project"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
         docs_result = (
-            vectorization_service.supabase.table("analysis_documents")
+            await supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -706,9 +704,11 @@ async def get_project_charts_data(
 ):
     """Get aggregated chart data for an analysis project"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Get all documents for this project
         docs_result = (
-            vectorization_service.supabase.table("analysis_documents")
+            await supabase.table("analysis_documents")
             .select("year, source_country, authors")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -837,8 +837,9 @@ async def get_project_extractions(
 ):
     """Get all extractions for an analysis project, optionally filtered by type"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
         query = (
-            vectorization_service.supabase.table("analysis_extractions")
+            supabase.table("analysis_extractions")
             .select("*")
             .eq("analysis_project_id", project_id)
         )
@@ -846,7 +847,7 @@ async def get_project_extractions(
         if extraction_type:
             query = query.eq("extraction_type", extraction_type)
 
-        extractions_result = query.execute()
+        extractions_result = await query.execute()
         return {
             "extractions": extractions_result.data,
             "total": len(extractions_result.data),
@@ -871,7 +872,8 @@ async def get_thematic_groups(
 ):
     """Return thematic groups by type via Supabase RPC for the Evidence view."""
     try:
-        response = vectorization_service.supabase.rpc(
+        supabase = await vectorization_service._ensure_supabase()
+        response = await supabase.rpc(
             "get_project_thematic_groups_by_type",
             {"p_project_id": project_id, "p_theme_type": theme_type},
         ).execute()
@@ -901,7 +903,8 @@ async def get_thematic_group_items(
     Uses get_theme_items_rich RPC with parameters p_theme_id and p_item_type.
     """
     try:
-        response = vectorization_service.supabase.rpc(
+        supabase = await vectorization_service._ensure_supabase()
+        response = await supabase.rpc(
             "get_theme_items_rich",
             {"p_theme_id": theme_id, "p_item_type": item_type},
         ).execute()
@@ -922,9 +925,11 @@ async def get_project_interventions(
 ):
     """Get aggregated interventions data for an analysis project"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Get all documents for this project that have extraction results
         docs_result = (
-            vectorization_service.supabase.table("analysis_documents")
+            await supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .not_.is_("extraction_results", "null")
@@ -1161,9 +1166,11 @@ async def get_document_extraction(
 ):
     """Get detailed extraction results for a specific document"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # First verify the document belongs to this project
         doc_result = (
-            vectorization_service.supabase.table("analysis_documents")
+            await supabase.table("analysis_documents")
             .select("*")
             .eq("id", document_id)
             .eq("analysis_project_id", project_id)
@@ -1274,9 +1281,11 @@ async def chat_with_project(
 ) -> ChatResponse:
     """Chat with the analysis project using RAG over collected evidence."""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Verify project exists and user has access
         project_result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("id")
             .eq("id", project_id)
             .single()
@@ -1329,9 +1338,11 @@ async def get_issue_intervention_navigator(
 ):
     """Get issue-intervention navigator data using synthesis themes and assignments."""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Get most recent completed synthesis run (same as Summary tab)
         runs_res = (
-            vectorization_service.supabase.table("synthesis_runs")
+            await supabase.table("synthesis_runs")
             .select("*")
             .eq("analysis_project_id", project_id)
             .eq("status", "completed")
@@ -1348,7 +1359,7 @@ async def get_issue_intervention_navigator(
 
         # Get all themes for this synthesis run
         themes_res = (
-            vectorization_service.supabase.table("synthesis_themes")
+            await supabase.table("synthesis_themes")
             .select("*")
             .eq("synthesis_run_id", run_id)
             .execute()
@@ -1367,7 +1378,7 @@ async def get_issue_intervention_navigator(
 
         # Get theme assignments to link themes to extractions
         assignments_res = (
-            vectorization_service.supabase.table("theme_assignments")
+            await supabase.table("theme_assignments")
             .select("*")
             .eq("synthesis_run_id", run_id)
             .execute()
@@ -1389,7 +1400,7 @@ async def get_issue_intervention_navigator(
 
         # Get all extractions for this project
         extractions_res = (
-            vectorization_service.supabase.table("analysis_extractions")
+            await supabase.table("analysis_extractions")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -1400,7 +1411,7 @@ async def get_issue_intervention_navigator(
 
         # Get documents for metadata and scores
         docs_result = (
-            vectorization_service.supabase.table("analysis_documents")
+            await supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -1697,13 +1708,15 @@ async def debug_themes(
 ):
     """Debug endpoint to check theme data structure."""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Get themes via RPC (what we're currently using)
-        issue_themes_response = vectorization_service.supabase.rpc(
+        issue_themes_response = await supabase.rpc(
             "get_project_thematic_groups_by_type",
             {"p_project_id": project_id, "p_theme_type": "issue"},
         ).execute()
 
-        intervention_themes_response = vectorization_service.supabase.rpc(
+        intervention_themes_response = await supabase.rpc(
             "get_project_thematic_groups_by_type",
             {"p_project_id": project_id, "p_theme_type": "intervention"},
         ).execute()
@@ -1711,7 +1724,7 @@ async def debug_themes(
         # Also get themes directly from synthesis_themes table (what Summary tab uses)
         # Get most recent completed synthesis run
         runs_res = (
-            vectorization_service.supabase.table("synthesis_runs")
+            await supabase.table("synthesis_runs")
             .select("*")
             .eq("analysis_project_id", project_id)
             .eq("status", "completed")
@@ -1724,7 +1737,7 @@ async def debug_themes(
         if runs_res.data:
             run_id = runs_res.data[0]["id"]
             themes_res = (
-                vectorization_service.supabase.table("synthesis_themes")
+                await supabase.table("synthesis_themes")
                 .select("*")
                 .eq("synthesis_run_id", run_id)
                 .execute()
@@ -1749,11 +1762,12 @@ async def debug_themes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def get_project_title(project_id: str) -> str:
+async def get_project_title(project_id: str) -> str:
     """Get project title for filename generation"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
         result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("title")
             .eq("id", project_id)
             .execute()
@@ -1779,14 +1793,16 @@ def get_project_title(project_id: str) -> str:
         return "project"
 
 
-def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
+async def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
     """Prepare flattened interventions data for CSV export"""
     # Reuse the same logic as the issue-intervention-navigator endpoint
     # but flatten the nested structure into a tabular format
 
+    supabase = await vectorization_service._ensure_supabase()
+
     # Get most recent completed synthesis run
     runs_res = (
-        vectorization_service.supabase.table("synthesis_runs")
+        await supabase.table("synthesis_runs")
         .select("*")
         .eq("analysis_project_id", project_id)
         .eq("status", "completed")
@@ -1802,7 +1818,7 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
     # Get all themes for this synthesis run
     themes_res = (
-        vectorization_service.supabase.table("synthesis_themes")
+        await supabase.table("synthesis_themes")
         .select("*")
         .eq("synthesis_run_id", run_id)
         .execute()
@@ -1817,7 +1833,7 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
     # Get theme assignments to link themes to extractions
     assignments_res = (
-        vectorization_service.supabase.table("theme_assignments")
+        await supabase.table("theme_assignments")
         .select("*")
         .eq("synthesis_run_id", run_id)
         .execute()
@@ -1839,7 +1855,7 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
     # Get all extractions for this project
     extractions_res = (
-        vectorization_service.supabase.table("analysis_extractions")
+        await supabase.table("analysis_extractions")
         .select("*")
         .eq("analysis_project_id", project_id)
         .execute()
@@ -1850,7 +1866,7 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
     # Get documents for metadata and scores
     docs_result = (
-        vectorization_service.supabase.table("analysis_documents")
+        await supabase.table("analysis_documents")
         .select("*")
         .eq("analysis_project_id", project_id)
         .execute()
@@ -1976,12 +1992,14 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
     return pd.DataFrame(csv_rows)
 
 
-def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
+async def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
     """Prepare documents data for CSV export"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Get all documents for this project
         docs_result = (
-            vectorization_service.supabase.table("analysis_documents")
+            await supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -2067,7 +2085,7 @@ async def download_interventions_csv(
         logger.info(f"Preparing interventions CSV for project {project_id}")
 
         # Prepare the DataFrame
-        df = prepare_interventions_csv_data(project_id)
+        df = await prepare_interventions_csv_data(project_id)
 
         if df.empty:
             return JSONResponse(
@@ -2103,7 +2121,7 @@ async def download_documents_csv(
         logger.info(f"User: {current_user.user_id}")
 
         # Prepare the DataFrame
-        df = prepare_documents_csv_data(project_id)
+        df = await prepare_documents_csv_data(project_id)
 
         logger.info(f"DataFrame shape: {df.shape}")
         logger.info(f"DataFrame columns: {df.columns.tolist()}")
@@ -2143,9 +2161,11 @@ async def get_project_feedback(
 ):
     """Get user feedback for a specific project from the user_feedback table"""
     try:
+        supabase = await vectorization_service._ensure_supabase()
+
         # Check if project exists
         project_result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("id")
             .eq("id", project_id)
             .execute()
@@ -2155,7 +2175,7 @@ async def get_project_feedback(
 
         # Get feedback for this user and project
         feedback_result = (
-            vectorization_service.supabase.table("user_feedback")
+            await supabase.table("user_feedback")
             .select("rating, comment, updated_at")
             .eq("project_id", project_id)
             .eq("user_id", current_user.user_id)
@@ -2199,15 +2219,19 @@ async def save_project_feedback(
             raise HTTPException(
                 status_code=400, detail="Comment must be 500 characters or less"
             )
+
+        supabase = await vectorization_service._ensure_supabase()
+
         # Check if project exists
         project_result = (
-            vectorization_service.supabase.table("analysis_projects")
+            await supabase.table("analysis_projects")
             .select("id")
             .eq("id", project_id)
             .execute()
         )
         if not project_result.data:
             raise HTTPException(status_code=404, detail="Project not found")
+
         # Insert new feedback row
         feedback_data = {
             "project_id": project_id,
@@ -2219,11 +2243,7 @@ async def save_project_feedback(
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat(),
         }
-        result = (
-            vectorization_service.supabase.table("user_feedback")
-            .insert(feedback_data)
-            .execute()
-        )
+        result = await supabase.table("user_feedback").insert(feedback_data).execute()
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to save feedback")
         return {

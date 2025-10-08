@@ -17,12 +17,12 @@ from app.services.synthesis.schemas import (
     KeyIssue,
     PolicyIntervention,
 )
-from supabase import create_client
+from supabase import acreate_client, AsyncClient
 
 
-def get_supabase():
-    """Get Supabase client."""
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+async def get_supabase() -> AsyncClient:
+    """Get async Supabase client."""
+    return await acreate_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 
 
 async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
@@ -31,11 +31,11 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
 
     Returns None if no cached result exists, otherwise returns populated SynthesisSummary.
     """
-    supabase = get_supabase()
+    supabase = await get_supabase()
 
     # Get most recent completed synthesis run
     runs_res = (
-        supabase.table("synthesis_runs")
+        await supabase.table("synthesis_runs")
         .select("*")
         .eq("analysis_project_id", project_id)
         .eq("status", "completed")
@@ -52,7 +52,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
 
     # Get all themes for this run
     themes_res = (
-        supabase.table("synthesis_themes")
+        await supabase.table("synthesis_themes")
         .select("*")
         .eq("synthesis_run_id", run_id)
         .execute()
@@ -69,7 +69,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
 
     # Map analysis_document_id (uuid) -> external doc_id for display
     docs_res = (
-        supabase.table("analysis_documents")
+        await supabase.table("analysis_documents")
         .select("id, doc_id")
         .eq("analysis_project_id", project_id)
         .execute()
@@ -132,7 +132,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
     Creates records in synthesis_runs, synthesis_themes, and theme_assignments
     based on the agent's final state.
     """
-    supabase = get_supabase()
+    supabase = await get_supabase()
 
     # Create synthesis run record
     run_id = str(uuid.uuid4())
@@ -166,7 +166,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
 
     # Insert a new run record (keep history). If you prefer 1-per-project, add
     # a UNIQUE constraint on analysis_project_id and switch back to upsert.
-    supabase.table("synthesis_runs").insert(run_data).execute()
+    await supabase.table("synthesis_runs").insert(run_data).execute()
 
     # Create theme records and collect assignments
     theme_assignments = []
@@ -222,7 +222,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             "source_doc_ids": issue.source_doc_ids,
             "created_at": datetime.utcnow().isoformat(),
         }
-        supabase.table("synthesis_themes").insert(theme_data).execute()
+        await supabase.table("synthesis_themes").insert(theme_data).execute()
 
         # Create assignments for this theme
         # Prefer mapping from final themes; fallback to finding_to_theme_map
@@ -259,7 +259,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             "source_doc_ids": intervention.supporting_doc_ids,
             "created_at": datetime.utcnow().isoformat(),
         }
-        supabase.table("synthesis_themes").insert(theme_data).execute()
+        await supabase.table("synthesis_themes").insert(theme_data).execute()
 
         # Create assignments for this theme
         mapped_ids = intr_theme_to_ex_ids.get(intervention.intervention_name, [])
@@ -292,7 +292,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 continue
             seen_keys.add(k)
             unique_assignments.append(a)
-        supabase.table("theme_assignments").insert(unique_assignments).execute()
+        await supabase.table("theme_assignments").insert(unique_assignments).execute()
 
 
 async def get_synthesis_status(project_id: str) -> str:
@@ -305,11 +305,11 @@ async def get_synthesis_status(project_id: str) -> str:
         'completed': Synthesis has completed successfully
         'failed': Synthesis has failed
     """
-    supabase = get_supabase()
+    supabase = await get_supabase()
 
     # Get most recent synthesis run
     runs_res = (
-        supabase.table("synthesis_runs")
+        await supabase.table("synthesis_runs")
         .select("status")
         .eq("analysis_project_id", project_id)
         .order("created_at", desc=True)
@@ -331,7 +331,7 @@ async def create_synthesis_run_placeholder(project_id: str) -> str:
     Returns:
         run_id: The ID of the created synthesis run
     """
-    supabase = get_supabase()
+    supabase = await get_supabase()
 
     run_id = str(uuid.uuid4())
     run_data = {
@@ -346,7 +346,7 @@ async def create_synthesis_run_placeholder(project_id: str) -> str:
         "created_at": datetime.utcnow().isoformat(),
     }
 
-    supabase.table("synthesis_runs").insert(run_data).execute()
+    await supabase.table("synthesis_runs").insert(run_data).execute()
     return run_id
 
 
@@ -361,7 +361,7 @@ async def update_synthesis_run_status(
         status: New status ('completed', 'failed', etc.)
         final_state: Optional final state data for completed runs
     """
-    supabase = get_supabase()
+    supabase = await get_supabase()
 
     update_data = {
         "status": status,
@@ -403,7 +403,9 @@ async def update_synthesis_run_status(
             }
         )
 
-    supabase.table("synthesis_runs").update(update_data).eq("id", run_id).execute()
+    await (
+        supabase.table("synthesis_runs").update(update_data).eq("id", run_id).execute()
+    )
 
 
 async def invalidate_cache(project_id: str) -> None:
@@ -412,11 +414,15 @@ async def invalidate_cache(project_id: str) -> None:
 
     Marks all synthesis runs as 'invalidated' for the given project.
     """
-    supabase = get_supabase()
+    supabase = await get_supabase()
 
-    supabase.table("synthesis_runs").update({"status": "invalidated"}).eq(
-        "analysis_project_id", project_id
-    ).eq("status", "completed").execute()
+    await (
+        supabase.table("synthesis_runs")
+        .update({"status": "invalidated"})
+        .eq("analysis_project_id", project_id)
+        .eq("status", "completed")
+        .execute()
+    )
 
 
 async def get_cache_stats(project_id: str) -> Dict:
@@ -425,11 +431,11 @@ async def get_cache_stats(project_id: str) -> Dict:
 
     Returns information about cached runs, themes, and assignments.
     """
-    supabase = get_supabase()
+    supabase = await get_supabase()
 
     # Count runs
     runs_res = (
-        supabase.table("synthesis_runs")
+        await supabase.table("synthesis_runs")
         .select("id", count="exact")
         .eq("analysis_project_id", project_id)
         .execute()
@@ -437,7 +443,7 @@ async def get_cache_stats(project_id: str) -> Dict:
 
     # Get latest run details
     latest_res = (
-        supabase.table("synthesis_runs")
+        await supabase.table("synthesis_runs")
         .select("created_at, status, metadata")
         .eq("analysis_project_id", project_id)
         .order("created_at", desc=True)

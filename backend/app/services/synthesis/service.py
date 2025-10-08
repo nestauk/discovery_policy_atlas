@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import List, Optional
@@ -29,28 +28,9 @@ class SynthesisService:
     - get_findings: Flatten detailed findings for a given filter
     """
 
-    def __init__(self):
-        self.supabase = vectorization_service.supabase
-        # Limit concurrent DB queries to prevent connection exhaustion
-        # Generous limit of 50 concurrent queries
-        self._db_semaphore = asyncio.Semaphore(50)
-
-    async def _async_supabase_query(self, query_func):
-        """
-        Execute a Supabase query asynchronously in thread pool.
-
-        This prevents blocking the event loop during database operations.
-        Uses a semaphore to limit concurrent queries and prevent DB connection exhaustion.
-
-        Args:
-            query_func: Lambda or callable that executes the Supabase query
-
-        Returns:
-            Query result
-        """
-        async with self._db_semaphore:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, query_func)
+    async def _ensure_supabase(self):
+        """Ensure Supabase async client is initialized."""
+        return await vectorization_service._ensure_supabase()
 
     async def summarise(self, project_id: str) -> SynthesisSummary:
         """Aggregate extraction results into key issues, interventions and briefing.
@@ -61,9 +41,10 @@ class SynthesisService:
         Returns:
             SynthesisSummary: Executive briefing and aggregated tables.
         """
-        # Load project (async to avoid blocking)
-        project_res = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_projects")
+        # Load project
+        supabase = await self._ensure_supabase()
+        project_res = (
+            await supabase.table("analysis_projects")
             .select("*")
             .eq("id", project_id)
             .execute()
@@ -74,9 +55,9 @@ class SynthesisService:
         project = project_res.data[0]
         research_question = project.get("query") or "Not specified"
 
-        # Load documents (async to avoid blocking)
-        docs_res = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_documents")
+        # Load documents
+        docs_res = (
+            await supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -92,8 +73,8 @@ class SynthesisService:
         }
 
         try:
-            exts_res = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_extractions")
+            exts_res = (
+                await supabase.table("analysis_extractions")
                 .select("*")
                 .eq("analysis_project_id", project_id)
                 .execute()
@@ -508,9 +489,10 @@ class SynthesisService:
         Returns:
             List[Finding]: Sorted findings (desc by year, then title).
         """
-        # Load documents for the project (async to avoid blocking)
-        docs_res = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_documents")
+        # Load documents for the project
+        supabase = await self._ensure_supabase()
+        docs_res = (
+            await supabase.table("analysis_documents")
             .select("*")
             .eq("analysis_project_id", project_id)
             .execute()
@@ -532,9 +514,9 @@ class SynthesisService:
         per_doc_assigned_issue_labels: dict[str, set[str]] = {}
 
         try:
-            # Latest completed run (async to avoid blocking)
-            runs_res = await self._async_supabase_query(
-                lambda: self.supabase.table("synthesis_runs")
+            # Latest completed run
+            runs_res = (
+                await supabase.table("synthesis_runs")
                 .select("id")
                 .eq("analysis_project_id", project_id)
                 .eq("status", "completed")
@@ -544,10 +526,10 @@ class SynthesisService:
             )
             if runs_res.data:
                 run_id = runs_res.data[0]["id"]
-                # Find matching theme record (async to avoid blocking)
+                # Find matching theme record
                 if filt_intr:
-                    themes_res = await self._async_supabase_query(
-                        lambda: self.supabase.table("synthesis_themes")
+                    themes_res = (
+                        await supabase.table("synthesis_themes")
                         .select("id")
                         .eq("synthesis_run_id", run_id)
                         .eq("theme_type", "intervention")
@@ -556,8 +538,8 @@ class SynthesisService:
                         .execute()
                     )
                 else:
-                    themes_res = await self._async_supabase_query(
-                        lambda: self.supabase.table("synthesis_themes")
+                    themes_res = (
+                        await supabase.table("synthesis_themes")
                         .select("id")
                         .eq("synthesis_run_id", run_id)
                         .eq("theme_type", "issue")
@@ -567,9 +549,9 @@ class SynthesisService:
                     )
                 if themes_res.data:
                     theme_id = themes_res.data[0]["id"]
-                    # Assignments for theme (async to avoid blocking)
-                    assign_res = await self._async_supabase_query(
-                        lambda: self.supabase.table("theme_assignments")
+                    # Assignments for theme
+                    assign_res = (
+                        await supabase.table("theme_assignments")
                         .select("extraction_id")
                         .eq("synthesis_theme_id", theme_id)
                         .execute()
@@ -577,9 +559,9 @@ class SynthesisService:
                     ex_ids = [str(a["extraction_id"]) for a in (assign_res.data or [])]
                     if ex_ids:
                         assigned_extraction_ids = set(ex_ids)
-                        # Fetch extraction records to map to documents and names/labels (async to avoid blocking)
-                        exts_res = await self._async_supabase_query(
-                            lambda: self.supabase.table("analysis_extractions")
+                        # Fetch extraction records to map to documents and names/labels
+                        exts_res = (
+                            await supabase.table("analysis_extractions")
                             .select(
                                 "id, analysis_document_id, extraction_type, label, raw_data"
                             )

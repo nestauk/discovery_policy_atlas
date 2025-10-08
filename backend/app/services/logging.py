@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from supabase import create_client, Client
+from supabase import acreate_client, AsyncClient
 from app.core.config import settings
 import uuid
 from datetime import datetime
@@ -10,24 +10,25 @@ logger = logging.getLogger(__name__)
 
 class LoggingService:
     def __init__(self):
-        self.supabase: Optional[Client] = None
-        self._initialize_supabase()
+        self._supabase: Optional[AsyncClient] = None
 
-    def _initialize_supabase(self):
-        """Initialize Supabase client if credentials are available"""
-        if settings.SUPABASE_URL and settings.SUPABASE_KEY:
-            try:
-                self.supabase = create_client(
-                    settings.SUPABASE_URL, settings.SUPABASE_KEY
+    async def _ensure_supabase(self) -> Optional[AsyncClient]:
+        """Ensure Supabase async client is initialized."""
+        if self._supabase is None:
+            if settings.SUPABASE_URL and settings.SUPABASE_KEY:
+                try:
+                    self._supabase = await acreate_client(
+                        settings.SUPABASE_URL, settings.SUPABASE_KEY
+                    )
+                    logger.info("Supabase async client initialized successfully")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Supabase client: {e}")
+                    self._supabase = None
+            else:
+                logger.warning(
+                    "Supabase credentials not configured - logging will be disabled"
                 )
-                logger.info("Supabase client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize Supabase client: {e}")
-                self.supabase = None
-        else:
-            logger.warning(
-                "Supabase credentials not configured - logging will be disabled"
-            )
+        return self._supabase
 
     async def log_search(
         self, project_id: str, search_query: str, user_id: str
@@ -43,7 +44,8 @@ class LoggingService:
         Returns:
             search_id: The generated search ID, or None if logging failed
         """
-        if not self.supabase:
+        supabase = await self._ensure_supabase()
+        if not supabase:
             logger.warning("Supabase not configured - skipping log")
             return None
 
@@ -60,7 +62,7 @@ class LoggingService:
             }
 
             # Insert into the searches table
-            result = self.supabase.table("searches").insert(search_data).execute()  # noqa: F841
+            result = await supabase.table("searches").insert(search_data).execute()  # noqa: F841
 
             logger.info(
                 f"Successfully logged search with ID: {search_id} for user: {user_id}"
@@ -82,13 +84,14 @@ class LoggingService:
         Returns:
             List of search records
         """
-        if not self.supabase:
+        supabase = await self._ensure_supabase()
+        if not supabase:
             logger.warning("Supabase not configured - cannot fetch history")
             return []
 
         try:
             result = (
-                self.supabase.table("searches")
+                await supabase.table("searches")
                 .select("*")
                 .eq("project_id", project_id)
                 .order("created_at", desc=True)

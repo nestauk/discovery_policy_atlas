@@ -110,8 +110,9 @@ class ChatbotService:
                 expanded_max = max_index + 1
 
                 # Fetch all chunks in the expanded range
+                supabase = await vectorization_service._ensure_supabase()
                 result = (
-                    vectorization_service.supabase.table("chunks")
+                    await supabase.table("chunks")
                     .select("*")
                     .eq("document_id", doc_id)
                     .gte("chunk_index", expanded_min)
@@ -150,8 +151,9 @@ class ChatbotService:
         document_details = {}
         if document_ids:
             try:
+                supabase = await vectorization_service._ensure_supabase()
                 result = (
-                    vectorization_service.supabase.table("analysis_documents")
+                    await supabase.table("analysis_documents")
                     .select(
                         "id, doc_id, title, authors, doi, overton_url, source_country, year, published_on"
                     )
