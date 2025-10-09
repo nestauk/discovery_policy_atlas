@@ -28,7 +28,7 @@ class Concept(BaseModel):
 # Model selection per node
 THEME_MODEL = "gpt-5-mini"  # define_themes, critique_themes
 MAPPING_MODEL = "gpt-5-nano"  # map concepts to final themes
-BRIEFING_MODEL = "gpt-5-mini"  # synthesize executive briefing
+BRIEFING_MODEL = "gpt-5"  # synthesize executive briefing
 CRITIQUE_ITERATIONS = 1
 
 
@@ -118,15 +118,17 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         return {"raw_extractions": [], "research_question": "Not specified"}  # type: ignore[return-value]
 
     supabase = vectorization_service.supabase
-    # Fetch research question
+    # Fetch research question (prefer title; fallback to query for backward compatibility)
     proj_res = (
         supabase.table("analysis_projects")
-        .select("query")
+        .select("title, query")
         .eq("id", project_id)
         .execute()
     )
     research_question = (
-        proj_res.data[0].get("query") if proj_res and proj_res.data else None
+        (proj_res.data[0].get("title") or proj_res.data[0].get("query"))
+        if proj_res and proj_res.data
+        else None
     ) or "Not specified"
     res = (
         supabase.table("analysis_extractions")
@@ -504,6 +506,63 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
             text = text.strip("`")
             if text.startswith("text\n"):
                 text = text[len("text\n") :]
+
+        # Enforce required markdown structure with bold sub-headings and bullet points
+        def _truncate_words(s: str, max_words: int = 22) -> str:
+            words = (s or "").split()
+            if len(words) <= max_words:
+                return (s or "").strip()
+            return " ".join(words[:max_words]).rstrip(",.;:") + "…"
+
+        def _bullets_from_issues(items: List[KeyIssue]) -> List[str]:
+            top = sorted(items, key=lambda x: int(x.frequency or 0), reverse=True)[:3]
+            out: List[str] = []
+            for it in top:
+                desc = (it.summary_description or it.issue_theme or "").strip()
+                if desc:
+                    out.append(_truncate_words(desc))
+            return out
+
+        def _bullets_from_interventions(items: List[PolicyIntervention]) -> List[str]:
+            top = sorted(items, key=lambda x: int(x.frequency or 0), reverse=True)[:3]
+            out: List[str] = []
+            for it in top:
+                desc = (
+                    it.brief_description
+                    or it.impact_summary
+                    or it.intervention_name
+                    or ""
+                ).strip()
+                if desc:
+                    out.append(_truncate_words(desc))
+            return out
+
+        has_heads = (
+            "**Key Challenges**" in text and "**Promising Interventions**" in text
+        )
+        has_bullets = any(
+            line.strip().startswith(("* ", "- ")) for line in text.splitlines()
+        )
+        if not (has_heads and has_bullets):
+            first_line = text.split("\n", 1)[0].strip()
+            if "." in first_line:
+                first_sentence = first_line.split(".", 1)[0].strip() + "."
+            else:
+                first_sentence = _truncate_words(first_line)
+                if not first_sentence.endswith("."):
+                    first_sentence += "."
+            issue_bullets = _bullets_from_issues(issues) or [
+                "No critical challenges identified."
+            ]
+            intr_bullets = _bullets_from_interventions(interventions) or [
+                "No clearly supported interventions identified."
+            ]
+            lines: List[str] = [first_sentence, "", "**Key Challenges**"]
+            lines.extend([f"* {b}" for b in issue_bullets])
+            lines.append("")
+            lines.append("**Promising Interventions**")
+            lines.extend([f"* {b}" for b in intr_bullets])
+            text = "\n".join(lines)
         executive_briefing = text
     except Exception:
         executive_briefing = (
