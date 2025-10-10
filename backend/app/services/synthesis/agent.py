@@ -28,7 +28,7 @@ class Concept(BaseModel):
 # Model selection per node
 THEME_MODEL = "gpt-5-mini"  # define_themes, critique_themes
 MAPPING_MODEL = "gpt-5-nano"  # map concepts to final themes
-BRIEFING_MODEL = "gpt-5"  # synthesize executive briefing
+BRIEFING_MODEL = "gpt-5"  # synthesise executive briefing
 CRITIQUE_ITERATIONS = 1
 
 
@@ -401,7 +401,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     # Helper to generate a short impact summary via LLM (fast model)
     async def _impact_for_theme(name: str, concept_texts: List[str]) -> str:
         try:
-            llm = get_llm(MAPPING_MODEL, temperature=0.1)
+            llm = get_llm(MAPPING_MODEL, temperature=0)
             sample = "\n".join([f"- {s}" for s in concept_texts[:8]])
             prompt = build_impact_summary_prompt()
             resp = await llm.ainvoke(
@@ -493,7 +493,7 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
     }
 
     prompt = build_executive_briefing_prompt()
-    llm = get_llm(BRIEFING_MODEL, temperature=0.1)
+    llm = get_llm(BRIEFING_MODEL, temperature=0)
     try:
         resp = await llm.ainvoke(
             prompt.format(
@@ -507,62 +507,6 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
             if text.startswith("text\n"):
                 text = text[len("text\n") :]
 
-        # Enforce required markdown structure with bold sub-headings and bullet points
-        def _truncate_words(s: str, max_words: int = 22) -> str:
-            words = (s or "").split()
-            if len(words) <= max_words:
-                return (s or "").strip()
-            return " ".join(words[:max_words]).rstrip(",.;:") + "…"
-
-        def _bullets_from_issues(items: List[KeyIssue]) -> List[str]:
-            top = sorted(items, key=lambda x: int(x.frequency or 0), reverse=True)[:3]
-            out: List[str] = []
-            for it in top:
-                desc = (it.summary_description or it.issue_theme or "").strip()
-                if desc:
-                    out.append(_truncate_words(desc))
-            return out
-
-        def _bullets_from_interventions(items: List[PolicyIntervention]) -> List[str]:
-            top = sorted(items, key=lambda x: int(x.frequency or 0), reverse=True)[:3]
-            out: List[str] = []
-            for it in top:
-                desc = (
-                    it.brief_description
-                    or it.impact_summary
-                    or it.intervention_name
-                    or ""
-                ).strip()
-                if desc:
-                    out.append(_truncate_words(desc))
-            return out
-
-        has_heads = (
-            "**Key Challenges**" in text and "**Promising Interventions**" in text
-        )
-        has_bullets = any(
-            line.strip().startswith(("* ", "- ")) for line in text.splitlines()
-        )
-        if not (has_heads and has_bullets):
-            first_line = text.split("\n", 1)[0].strip()
-            if "." in first_line:
-                first_sentence = first_line.split(".", 1)[0].strip() + "."
-            else:
-                first_sentence = _truncate_words(first_line)
-                if not first_sentence.endswith("."):
-                    first_sentence += "."
-            issue_bullets = _bullets_from_issues(issues) or [
-                "No critical challenges identified."
-            ]
-            intr_bullets = _bullets_from_interventions(interventions) or [
-                "No clearly supported interventions identified."
-            ]
-            lines: List[str] = [first_sentence, "", "**Key Challenges**"]
-            lines.extend([f"* {b}" for b in issue_bullets])
-            lines.append("")
-            lines.append("**Promising Interventions**")
-            lines.extend([f"* {b}" for b in intr_bullets])
-            text = "\n".join(lines)
         executive_briefing = text
     except Exception:
         executive_briefing = (
