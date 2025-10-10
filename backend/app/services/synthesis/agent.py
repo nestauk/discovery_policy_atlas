@@ -28,7 +28,7 @@ class Concept(BaseModel):
 # Model selection per node
 THEME_MODEL = "gpt-5-mini"  # define_themes, critique_themes
 MAPPING_MODEL = "gpt-5-nano"  # map concepts to final themes
-BRIEFING_MODEL = "gpt-5-mini"  # synthesize executive briefing
+BRIEFING_MODEL = "gpt-5"  # synthesise executive briefing
 CRITIQUE_ITERATIONS = 1
 
 
@@ -118,15 +118,17 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         return {"raw_extractions": [], "research_question": "Not specified"}  # type: ignore[return-value]
 
     supabase = vectorization_service.supabase
-    # Fetch research question
+    # Fetch research question (prefer title; fallback to query for backward compatibility)
     proj_res = (
         supabase.table("analysis_projects")
-        .select("query")
+        .select("title, query")
         .eq("id", project_id)
         .execute()
     )
     research_question = (
-        proj_res.data[0].get("query") if proj_res and proj_res.data else None
+        (proj_res.data[0].get("title") or proj_res.data[0].get("query"))
+        if proj_res and proj_res.data
+        else None
     ) or "Not specified"
     res = (
         supabase.table("analysis_extractions")
@@ -399,7 +401,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     # Helper to generate a short impact summary via LLM (fast model)
     async def _impact_for_theme(name: str, concept_texts: List[str]) -> str:
         try:
-            llm = get_llm(MAPPING_MODEL, temperature=0.1)
+            llm = get_llm(MAPPING_MODEL, temperature=0)
             sample = "\n".join([f"- {s}" for s in concept_texts[:8]])
             prompt = build_impact_summary_prompt()
             resp = await llm.ainvoke(
@@ -491,7 +493,7 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
     }
 
     prompt = build_executive_briefing_prompt()
-    llm = get_llm(BRIEFING_MODEL, temperature=0.1)
+    llm = get_llm(BRIEFING_MODEL, temperature=0)
     try:
         resp = await llm.ainvoke(
             prompt.format(
@@ -504,6 +506,7 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
             text = text.strip("`")
             if text.startswith("text\n"):
                 text = text[len("text\n") :]
+
         executive_briefing = text
     except Exception:
         executive_briefing = (
