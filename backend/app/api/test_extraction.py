@@ -27,11 +27,17 @@ logger = logging.getLogger(__name__)
 def create_custom_prompt(
     custom_text: str, template_variables: str = "{full_text}"
 ) -> ChatPromptTemplate:
-    """Create a custom prompt template from user text"""
+    """Create a custom prompt template from user text
+
+    Args:
+        custom_text: The custom prompt text from the user
+        template_variables: Template string with placeholders (e.g., "{full_text}" or
+                          "Interventions: {interventions_json}\n\nPaper text:\n{full_text}")
+    """
     return ChatPromptTemplate.from_messages(
         [
             ("system", EXTRACTION_SYSTEM_PROMPT),
-            ("human", custom_text + f"\n\nPaper text:\n{template_variables}"),
+            ("human", custom_text + f"\n\n{template_variables}"),
         ]
     )
 
@@ -143,13 +149,28 @@ async def run_extraction_with_custom_prompts(
                 all_results.append(result_item)
 
     # Stage 5: Conclusions
+    # Prepare interventions context for conclusions prompt
+    interventions_json = json.dumps(
+        {
+            "interventions": [
+                intervention.model_dump()
+                for intervention in interventions_extraction.interventions
+            ]
+        }
+    )
+
     conclusions_prompt = (
-        create_custom_prompt(custom_prompts.get("conclusions"))
+        create_custom_prompt(
+            custom_prompts.get("conclusions"),
+            "Paper text:\n{full_text}\n\nInterventions context (if available):\n{interventions_json}",
+        )
         if custom_prompts.get("conclusions")
         else CONCLUSIONS_PROMPT
     )
     chain = conclusions_prompt | workflow.llm | workflow.json_parser
-    conclusions_result = await chain.ainvoke({"full_text": text})
+    conclusions_result = await chain.ainvoke(
+        {"full_text": text, "interventions_json": interventions_json}
+    )
     conclusions_extraction = ConclusionsExtraction(**conclusions_result)
 
     return DocumentExtractionBundle(
