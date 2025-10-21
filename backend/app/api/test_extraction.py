@@ -245,7 +245,7 @@ async def test_extraction(
                 parser = ParsingService(export_dir=str(temp_dir))
 
                 doc_id = f"test_{uuid.uuid4().hex[:8]}"
-                parsed = parser.parse_saved_file(doc_id, temp_file_path)
+                parsed = await parser.parse_saved_file(doc_id, temp_file_path)
 
                 if not parsed or not parsed.text:
                     raise HTTPException(
