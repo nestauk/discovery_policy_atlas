@@ -18,7 +18,8 @@ import {
   ChevronRight,
   ChevronDown,
   Zap,
-  RotateCcw
+  RotateCcw,
+  Download
 } from 'lucide-react'
 import { useAPI } from '@/lib/api'
 
@@ -174,6 +175,23 @@ export default function TestExtractionPage() {
     // Reset file input
     const fileInput = document.getElementById('file-input') as HTMLInputElement
     if (fileInput) fileInput.value = ''
+  }
+
+  const handleDownloadJson = () => {
+    if (!result) return
+    const baseName = (result.document?.title || result.document?.doc_id || 'extraction')
+      .replace(/\.[^/.]+$/, '')
+      .replace(/[^a-zA-Z0-9-_]+/g, '_')
+    const json = JSON.stringify(result, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${baseName}_extraction.json`
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
   }
 
   return (
@@ -353,22 +371,35 @@ export default function TestExtractionPage() {
         {result && (
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Zap className="h-5 w-5" />
-                Extraction Results
-              </CardTitle>
-              {result.extraction.metadata && (
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="outline">
-                    {result.extraction.metadata.text_length} chars
-                  </Badge>
-                  {result.extraction.metadata.custom_prompts_used && (
-                    <Badge variant="outline" className="bg-blue-50 text-blue-700">
-                      Custom prompts used
-                    </Badge>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Zap className="h-5 w-5" />
+                    Extraction Results
+                  </CardTitle>
+                  {result.extraction.metadata && (
+                    <div className="flex gap-2 flex-wrap mt-2">
+                      <Badge variant="outline">
+                        {result.extraction.metadata.text_length} chars
+                      </Badge>
+                      {result.extraction.metadata.custom_prompts_used && (
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                          Custom prompts used
+                        </Badge>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
+                <Button 
+                  onClick={handleDownloadJson}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2"
+                >
+                  <Download className="h-4 w-4" />
+                  Download JSON
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <DocumentDetailView 
