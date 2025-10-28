@@ -6,12 +6,14 @@ Implements: Issues → Interventions → Mapping → Results (per intervention l
 import json
 import logging
 from typing import Any, Dict, List, TypedDict
+from datetime import datetime
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 
 from app.core.config import settings
+from app.utils.llm.llm_utils import get_langfuse_handler
 from .prompts import (
     ISSUES_PROMPT,
     INTERVENTIONS_PROMPT,
@@ -89,6 +91,10 @@ class ExtractionWorkflow:
 
     async def run(self, paper_id: str, full_text: str) -> DocumentExtractionBundle:
         """Run the complete extraction workflow."""
+        # Create a per-run Langfuse session and propagate handler via closure
+        session_id = f"extraction:{paper_id}:{datetime.utcnow().isoformat()}"
+        self._langfuse_handler = get_langfuse_handler(session_id=session_id)
+
         initial_state = WorkflowState(
             paper_id=paper_id,
             full_text=full_text,
@@ -139,7 +145,21 @@ class ExtractionWorkflow:
         """Stage A: Extract issues."""
         try:
             chain = ISSUES_PROMPT | self.llm | self.json_parser
-            result = await chain.ainvoke({"full_text": state["full_text"]})
+            result = await chain.ainvoke(
+                {"full_text": state["full_text"]},
+                config={
+                    "callbacks": [getattr(self, "_langfuse_handler", None)]
+                    if getattr(self, "_langfuse_handler", None)
+                    else [],
+                    "tags": [
+                        "component:extraction",
+                        "component:extraction.issues",
+                        f"paper:{state['paper_id']}",
+                    ],
+                    "metadata": {"paper_id": state["paper_id"]},
+                    "run_name": "extraction.issues",
+                },
+            )
 
             extraction = IssuesExtraction(**result)
             logger.info(f"Extracted {len(extraction.issues)} issues")
@@ -154,7 +174,21 @@ class ExtractionWorkflow:
         """Stage B: Extract interventions."""
         try:
             chain = INTERVENTIONS_PROMPT | self.llm | self.json_parser
-            result = await chain.ainvoke({"full_text": state["full_text"]})
+            result = await chain.ainvoke(
+                {"full_text": state["full_text"]},
+                config={
+                    "callbacks": [getattr(self, "_langfuse_handler", None)]
+                    if getattr(self, "_langfuse_handler", None)
+                    else [],
+                    "tags": [
+                        "component:extraction",
+                        "component:extraction.interventions",
+                        f"paper:{state['paper_id']}",
+                    ],
+                    "metadata": {"paper_id": state["paper_id"]},
+                    "run_name": "extraction.interventions",
+                },
+            )
 
             extraction = InterventionsExtraction(**result)
             logger.info(f"Extracted {len(extraction.interventions)} interventions")
@@ -192,7 +226,19 @@ class ExtractionWorkflow:
                     "full_text": state["full_text"],
                     "issues_json": issues_json,
                     "interventions_json": interventions_json,
-                }
+                },
+                config={
+                    "callbacks": [getattr(self, "_langfuse_handler", None)]
+                    if getattr(self, "_langfuse_handler", None)
+                    else [],
+                    "tags": [
+                        "component:extraction",
+                        "component:extraction.mappings",
+                        f"paper:{state['paper_id']}",
+                    ],
+                    "metadata": {"paper_id": state["paper_id"]},
+                    "run_name": "extraction.mappings",
+                },
             )
 
             extraction = MappingsExtraction(**result)
@@ -222,7 +268,22 @@ class ExtractionWorkflow:
                         {
                             "full_text": state["full_text"],
                             "one_intervention_json": one_intervention_json,
-                        }
+                        },
+                        config={
+                            "callbacks": [getattr(self, "_langfuse_handler", None)]
+                            if getattr(self, "_langfuse_handler", None)
+                            else [],
+                            "tags": [
+                                "component:extraction",
+                                "component:extraction.results",
+                                f"paper:{state['paper_id']}",
+                            ],
+                            "metadata": {
+                                "paper_id": state["paper_id"],
+                                "intervention_idx": intervention.idx,
+                            },
+                            "run_name": "extraction.results",
+                        },
                     )
 
                     extraction = ResultsExtraction(**result)
@@ -269,7 +330,19 @@ class ExtractionWorkflow:
                 {
                     "full_text": state["full_text"],
                     "interventions_json": interventions_json,
-                }
+                },
+                config={
+                    "callbacks": [getattr(self, "_langfuse_handler", None)]
+                    if getattr(self, "_langfuse_handler", None)
+                    else [],
+                    "tags": [
+                        "component:extraction",
+                        "component:extraction.conclusions",
+                        f"paper:{state['paper_id']}",
+                    ],
+                    "metadata": {"paper_id": state["paper_id"]},
+                    "run_name": "extraction.conclusions",
+                },
             )
 
             extraction = ConclusionsExtraction(**result)

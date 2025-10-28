@@ -14,6 +14,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.utils.llm.llm_utils import get_langfuse_handler
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class SimplifiedConversationManager:
     def __init__(self):
         self.llm = None
         self.analyzer = None
+        self.langfuse_handler = None
 
         if settings.OPENAI_API_KEY and not settings.MOCK_OPENAI:
             self.llm = ChatOpenAI(
@@ -60,6 +62,10 @@ class SimplifiedConversationManager:
                 temperature=settings.LLM_TEMPERATURE,
                 max_tokens=settings.LLM_MAX_TOKENS,
                 openai_api_key=settings.OPENAI_API_KEY,
+            )
+            # Langfuse handler for chat sessions
+            self.langfuse_handler = get_langfuse_handler(
+                session_id=f"chat:{settings.PROJECT_NAME}"
             )
             self._setup_analyzer()
 
@@ -128,7 +134,15 @@ Respond with this JSON format:
 
                 try:
                     result = await self.analyzer.ainvoke(
-                        {"messages": langchain_messages}
+                        {"messages": langchain_messages},
+                        config={
+                            "callbacks": [self.langfuse_handler]
+                            if self.langfuse_handler
+                            else [],
+                            "tags": ["component:chat", "component:chat.analyze"],
+                            "metadata": {},
+                            "run_name": "chat.analyze",
+                        },
                     )
 
                     # Handle string response
@@ -288,7 +302,15 @@ Continue to help them refine their thinking, answer questions, or prepare for ev
         langchain_messages.append(HumanMessage(content=user_message))
 
         # Generate response
-        response = await self.llm.ainvoke(langchain_messages)
+        response = await self.llm.ainvoke(
+            langchain_messages,
+            config={
+                "callbacks": [self.langfuse_handler] if self.langfuse_handler else [],
+                "tags": ["component:chat", "component:chat.respond"],
+                "metadata": {},
+                "run_name": "chat.respond",
+            },
+        )
 
         return response.content, analysis
 

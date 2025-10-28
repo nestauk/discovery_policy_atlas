@@ -1,9 +1,12 @@
 import logging
+import os
+from datetime import datetime
 from typing import List, Dict, Any
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.services.vectorization import vectorization_service
+from langfuse import Langfuse
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +89,7 @@ class AdvancedRAGService:
     def __init__(self):
         self._openai_client = None
         self._vectorization = vectorization_service
+        self._langfuse = None
 
     @property
     def openai_client(self):
@@ -94,6 +98,12 @@ class AdvancedRAGService:
                 raise ValueError("OPENAI_API_KEY is required for advanced RAG service")
             self._openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         return self._openai_client
+
+    @property
+    def langfuse(self) -> Langfuse:
+        if self._langfuse is None:
+            self._langfuse = Langfuse()
+        return self._langfuse
 
     async def extract_key_insights(
         self, user_query: str, project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
@@ -132,6 +142,15 @@ class AdvancedRAGService:
         self, user_query: str, project_id: str
     ) -> List[Dict[str, Any]]:
         """Gather evidence from multiple search perspectives for comprehensive insights"""
+        # Start Langfuse trace for retrieval phase
+        session_id = f"retrieval:{project_id}:{datetime.utcnow().isoformat()}"
+        trace = self.langfuse.trace(
+            name="retrieval.insights",
+            user_id=os.environ.get("LANGFUSE_USER_ID"),
+            session_id=session_id,
+            tags=["component:retrieval", f"project:{project_id}"],
+            metadata={"phase": "insights", "query": user_query},
+        )
 
         # Multiple search queries to ensure comprehensive coverage
         search_queries = [
@@ -147,12 +166,20 @@ class AdvancedRAGService:
 
         for query in search_queries:
             try:
+                span = trace.span(
+                    name="retrieval.search",
+                    tags=["component:retrieval"],
+                    metadata={"query": query},
+                )
+                span.start()
                 evidence = await self._vectorization.search_similar_content(
                     query=query,
                     project_id=project_id,
                     match_threshold=0.6,  # Lower threshold for broader coverage
                     match_count=10,  # More documents per query
                 )
+                span.update(metadata={"returned": len(evidence or [])})
+                span.end()
 
                 # Add unique documents only
                 for doc in evidence:
@@ -169,6 +196,12 @@ class AdvancedRAGService:
             all_evidence = await self._enrich_evidence_with_details(
                 all_evidence, project_id
             )
+
+        # Finalize trace
+        try:
+            trace.update(metadata={"total_returned": len(all_evidence)})
+        finally:
+            trace.end()
 
         return all_evidence[:15]  # Limit to top 15 most relevant pieces
 
@@ -481,6 +514,15 @@ INSIGHTS:
         self, user_query: str, project_id: str
     ) -> List[Dict[str, Any]]:
         """Gather evidence specifically focused on policy implications and recommendations"""
+        # Start Langfuse trace for retrieval phase
+        session_id = f"retrieval:{project_id}:{datetime.utcnow().isoformat()}"
+        trace = self.langfuse.trace(
+            name="retrieval.policy",
+            user_id=os.environ.get("LANGFUSE_USER_ID"),
+            session_id=session_id,
+            tags=["component:retrieval", f"project:{project_id}"],
+            metadata={"phase": "policy", "query": user_query},
+        )
 
         # Policy-focused search queries
         policy_queries = [
@@ -497,12 +539,20 @@ INSIGHTS:
 
         for query in policy_queries:
             try:
+                span = trace.span(
+                    name="retrieval.search",
+                    tags=["component:retrieval"],
+                    metadata={"query": query},
+                )
+                span.start()
                 evidence = await self._vectorization.search_similar_content(
                     query=query,
                     project_id=project_id,
                     match_threshold=0.6,
                     match_count=8,
                 )
+                span.update(metadata={"returned": len(evidence or [])})
+                span.end()
 
                 # Add unique documents only
                 for doc in evidence:
@@ -521,6 +571,12 @@ INSIGHTS:
             all_evidence = await self._enrich_evidence_with_details(
                 all_evidence, project_id
             )
+
+        # Finalize trace
+        try:
+            trace.update(metadata={"total_returned": len(all_evidence)})
+        finally:
+            trace.end()
 
         return all_evidence[:12]  # Limit to top 12 most relevant pieces
 

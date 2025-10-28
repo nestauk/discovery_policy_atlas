@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 
 import tiktoken
@@ -7,7 +8,17 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import AzureChatOpenAI
 from langchain_openai import ChatOpenAI
 
-# from langfuse.langchain import CallbackHandler
+from typing import Any
+
+try:
+    # Langfuse >=3 import path
+    from langfuse.langchain import CallbackHandler  # type: ignore
+except Exception:  # pragma: no cover - fallback for Langfuse <3
+    try:
+        # Langfuse <3 import path
+        from langfuse.callback import CallbackHandler  # type: ignore
+    except Exception:
+        CallbackHandler = None  # type: ignore
 from pydantic import BaseModel
 
 import logging
@@ -21,18 +32,16 @@ except KeyError:
     LLM_SERVICE = "OpenAI"
 
 
-# def get_langfuse_handler(session_id: str = None) -> CallbackHandler:
-#     """Initialise a Langfuse callback handler"""
-#     if session_id is None:
-#         session_id = f"{datetime.today().isoformat()}"
+def get_langfuse_handler(session_id: str = None) -> Any:
+    """Initialise a Langfuse callback handler"""
+    if session_id is None:
+        session_id = f"{datetime.today().isoformat()}"
 
-#     return CallbackHandler(
-#         user_id=os.environ.get("USER_EMAIL"),
-#         session_id=session_id,
-#         secret_key=os.environ.get("LANGFUSE_SECRET_KEY"),
-#         public_key=os.environ.get("LANGFUSE_PUBLIC_KEY"),
-#         host=os.environ.get("LANGFUSE_HOST"),
-#     )
+    # The Langfuse LangChain CallbackHandler reads configuration from environment variables.
+    # It does not accept user/session/keys as init kwargs.
+    if CallbackHandler is None:
+        return None
+    return CallbackHandler()
 
 
 def get_llm(model_name: str = None, temperature: float = None) -> ChatOpenAI:
