@@ -34,3 +34,4 @@ python-multipart>=0.0.5
 scikit-learn>=1.6.1
 psutil>=7.0.0
 altair>=5.5.0
+vl-convert-python>=1.8.0

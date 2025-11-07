@@ -11,6 +11,10 @@ Usage (run from backend directory):
     # Full results (slow - retrieve all papers):
     cd backend
     uv run python testing/r_and_d/boolean_queries/test_llm_generation.py
+    
+    # Custom output file name:
+    cd backend
+    uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --output-name experiment1
 """
 
 import asyncio
@@ -28,6 +32,7 @@ from testing.r_and_d.boolean_queries.prompts import (
     policy_atlas_v1,
     policy_atlas_v2,
 )
+from testing import TESTING_DIR
 
 # Set up logging
 logging.basicConfig(
@@ -36,11 +41,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def main(count_only: bool = False):
+async def main(count_only: bool = False, output_name: str = "llm"):
     """Run LLM-generated query retrieval test.
 
     Args:
         count_only: If True, only retrieve counts without fetching full results (much faster)
+        output_name: Name prefix for output files (e.g., 'llm' -> 'llm_counts.jsonl')
     """
     # Get all research questions from reference CSV
     research_questions = reference_df["question"].tolist()
@@ -64,10 +70,18 @@ async def main(count_only: bool = False):
 
     # Define results file path based on mode
     if count_only:
-        results_file = Path("outputs/llm_generation_conc/llm_counts.jsonl")
+        results_file = (
+            TESTING_DIR
+            / "r_and_d/boolean_queries/outputs"
+            / f"{output_name}_counts.jsonl"
+        )
         logger.info("Running in COUNT-ONLY mode (fast, no full results)")
     else:
-        results_file = Path("outputs/llm_generation_conc/llm_results.jsonl")
+        results_file = (
+            TESTING_DIR
+            / "r_and_d/boolean_queries/outputs"
+            / f"{output_name}_results.jsonl"
+        )
         logger.info("Running in FULL RESULTS mode (slow, retrieves all papers)")
 
     logger.info("Using CONCURRENT execution")
@@ -105,13 +119,19 @@ async def main(count_only: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Test LLM-generated boolean queries retrieval performance (CONCURRENT)"
+        description="Test LLM-generated boolean queries retrieval performance"
     )
     parser.add_argument(
         "--count-only",
         action="store_true",
         help="Only retrieve counts without fetching full results (much faster)",
     )
+    parser.add_argument(
+        "--output-name",
+        type=str,
+        default="llm",
+        help="Name prefix for output files (default: 'llm' produces 'llm_counts.jsonl' or 'llm_results.jsonl')",
+    )
     args = parser.parse_args()
 
-    asyncio.run(main(count_only=args.count_only))
+    asyncio.run(main(count_only=args.count_only, output_name=args.output_name))

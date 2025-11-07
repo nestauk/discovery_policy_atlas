@@ -39,3 +39,4 @@ Requires-Dist: python-multipart>=0.0.5
 Requires-Dist: scikit-learn>=1.6.1
 Requires-Dist: psutil>=7.0.0
 Requires-Dist: altair>=5.5.0
+Requires-Dist: vl-convert-python>=1.8.0

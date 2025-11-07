@@ -22,6 +22,7 @@ from testing.r_and_d.boolean_queries.query_tester import (
     reference_df,
 )
 from testing.r_and_d.boolean_queries.prompts import policy_atlas_v2
+from testing import TESTING_DIR
 
 # Set up logging
 logging.basicConfig(
@@ -62,10 +63,14 @@ async def main(count_only: bool = False):
 
     # Define results file path based on mode
     if count_only:
-        results_file = Path("outputs/baseline_conc/baseline_counts.jsonl")
+        results_file = (
+            TESTING_DIR / "r_and_d/boolean_queries/outputs/baseline_counts.jsonl"
+        )
         logger.info("Running in COUNT-ONLY mode (fast, no full results)")
     else:
-        results_file = Path("outputs/baseline_conc/baseline_results.jsonl")
+        results_file = (
+            TESTING_DIR / "r_and_d/boolean_queries/outputs/baseline_results.jsonl"
+        )
         logger.info("Running in FULL RESULTS mode (slow, retrieves all papers)")
 
     # Run the test (results will be saved incrementally to JSONL file)
