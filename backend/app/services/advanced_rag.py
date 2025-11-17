@@ -1,7 +1,6 @@
 import logging
-import os
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from app.core.config import settings
@@ -106,14 +105,17 @@ class AdvancedRAGService:
         return self._langfuse
 
     async def extract_key_insights(
-        self, user_query: str, project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"
+        self,
+        user_query: str,
+        project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+        policy_user_id: Optional[str] = None,
     ) -> InsightExtraction:
         """Extract key insights from evidence using RAG"""
 
         try:
             # Get comprehensive evidence from multiple search angles
             insights_contexts = await self._gather_insights_evidence(
-                user_query, project_id
+                user_query, project_id, policy_user_id=policy_user_id
             )
 
             if not insights_contexts:
@@ -139,17 +141,22 @@ class AdvancedRAGService:
             )
 
     async def _gather_insights_evidence(
-        self, user_query: str, project_id: str
+        self, user_query: str, project_id: str, policy_user_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Gather evidence from multiple search perspectives for comprehensive insights"""
         # Start Langfuse trace for retrieval phase
         session_id = f"retrieval:{project_id}:{datetime.utcnow().isoformat()}"
         trace = self.langfuse.trace(
             name="retrieval.insights",
-            user_id=os.environ.get("LANGFUSE_USER_ID"),
+            user_id=policy_user_id,
             session_id=session_id,
             tags=["component:retrieval", f"project:{project_id}"],
-            metadata={"phase": "insights", "query": user_query},
+            metadata={
+                "phase": "insights",
+                "query": user_query,
+                "policy_project_id": project_id,
+                "policy_user_id": policy_user_id,
+            },
         )
 
         # Multiple search queries to ensure comprehensive coverage
@@ -479,12 +486,15 @@ INSIGHTS:
         user_query: str,
         insights: InsightExtraction = None,
         project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+        policy_user_id: Optional[str] = None,
     ) -> PolicyRecommendations:
         """Generate policy recommendations based on evidence and insights"""
 
         try:
             # Get evidence from multiple angles focused on policy implications
-            policy_contexts = await self._gather_policy_evidence(user_query, project_id)
+            policy_contexts = await self._gather_policy_evidence(
+                user_query, project_id, policy_user_id=policy_user_id
+            )
 
             if not policy_contexts:
                 return PolicyRecommendations(
@@ -511,17 +521,22 @@ INSIGHTS:
             )
 
     async def _gather_policy_evidence(
-        self, user_query: str, project_id: str
+        self, user_query: str, project_id: str, policy_user_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Gather evidence specifically focused on policy implications and recommendations"""
         # Start Langfuse trace for retrieval phase
         session_id = f"retrieval:{project_id}:{datetime.utcnow().isoformat()}"
         trace = self.langfuse.trace(
             name="retrieval.policy",
-            user_id=os.environ.get("LANGFUSE_USER_ID"),
+            user_id=policy_user_id,
             session_id=session_id,
             tags=["component:retrieval", f"project:{project_id}"],
-            metadata={"phase": "policy", "query": user_query},
+            metadata={
+                "phase": "policy",
+                "query": user_query,
+                "policy_project_id": project_id,
+                "policy_user_id": policy_user_id,
+            },
         )
 
         # Policy-focused search queries

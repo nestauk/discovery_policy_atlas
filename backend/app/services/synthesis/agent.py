@@ -7,8 +7,11 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from app.services.vectorization import vectorization_service
-from app.utils.llm.llm_utils import get_llm
-from app.utils.llm.llm_utils import get_langfuse_handler
+from app.utils.llm.llm_utils import (
+    get_llm,
+    get_langfuse_handler,
+    build_langfuse_metadata,
+)
 from app.services.synthesis.schemas import KeyIssue, PolicyIntervention
 from app.services.synthesis.prompts import (
     build_discover_themes_prompt,
@@ -37,6 +40,26 @@ CRITIQUE_ITERATIONS = 1
 def _escape_braces(text: str) -> str:
     """Escape braces to avoid ChatPromptTemplate .format() interpreting them as variables."""
     return (text or "").replace("{", "{{").replace("}", "}}")
+
+
+def _langfuse_config(
+    state: SynthesisState,
+    tags: List[str],
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    handler = state.get("langfuse_handler")
+    metadata = build_langfuse_metadata(
+        tags=tags,
+        session_id=state.get("langfuse_session_id"),
+        user_id=state.get("policy_user_id"),
+        project_id=state.get("project_id"),
+        extra=extra,
+    )
+    return {
+        "callbacks": [handler] if handler else [],
+        "tags": tags,
+        "metadata": metadata,
+    }
 
 
 class DiscoveredTheme(BaseModel):
@@ -78,6 +101,8 @@ class SynthesisState(TypedDict):
     aggregated_interventions: List[PolicyIntervention]
     # Langfuse handler for tracing (injected at runtime)
     langfuse_handler: Any
+    langfuse_session_id: str
+    policy_user_id: Optional[str]
 
 
 class ThemesOut(BaseModel):
@@ -219,39 +244,50 @@ async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
 
 
 async def define_issue_themes(state: SynthesisState) -> SynthesisState:
+    tags = [
+        "component:synthesis",
+        "component:synthesis.discover_themes",
+        "branch:issues",
+        f"project:{state.get('project_id','')}",
+    ]
     themes = await _discover_themes_for_concepts(
         state.get("issue_concepts", []) or [],
         state.get("issue_theme_critique"),
         str(state.get("research_question") or "Not specified"),
         handler=state.get("langfuse_handler"),
-        tags=[
-            "component:synthesis",
-            "component:synthesis.discover_themes",
-            "branch:issues",
-            f"project:{state.get('project_id','')}",
-        ],
-        metadata={"project_id": state.get("project_id", ""), "branch": "issues"},
+        tags=tags,
+        metadata=build_langfuse_metadata(
+            tags=tags,
+            session_id=state.get("langfuse_session_id"),
+            user_id=state.get("policy_user_id"),
+            project_id=state.get("project_id"),
+            extra={"branch": "issues"},
+        ),
         run_name="synthesis.discover_themes",
     )
     return {"discovered_issue_themes": themes}
 
 
 async def define_intervention_themes(state: SynthesisState) -> SynthesisState:
+    tags = [
+        "component:synthesis",
+        "component:synthesis.discover_themes",
+        "branch:interventions",
+        f"project:{state.get('project_id','')}",
+    ]
     themes = await _discover_themes_for_concepts(
         state.get("intervention_concepts", []) or [],
         state.get("intervention_theme_critique"),
         str(state.get("research_question") or "Not specified"),
         handler=state.get("langfuse_handler"),
-        tags=[
-            "component:synthesis",
-            "component:synthesis.discover_themes",
-            "branch:interventions",
-            f"project:{state.get('project_id','')}",
-        ],
-        metadata={
-            "project_id": state.get("project_id", ""),
-            "branch": "interventions",
-        },
+        tags=tags,
+        metadata=build_langfuse_metadata(
+            tags=tags,
+            session_id=state.get("langfuse_session_id"),
+            user_id=state.get("policy_user_id"),
+            project_id=state.get("project_id"),
+            extra={"branch": "interventions"},
+        ),
         run_name="synthesis.discover_themes",
     )
     return {"discovered_intervention_themes": themes}
@@ -264,22 +300,23 @@ async def critique_issue_themes(state: SynthesisState) -> SynthesisState:
     )
     prompt = build_theme_critique_prompt("issue")
     llm = get_llm(THEME_MODEL, temperature=0.0)
+    tags = [
+        "component:synthesis",
+        "component:synthesis.critique",
+        "branch:issues",
+        f"project:{state.get('project_id','')}",
+    ]
     resp = await llm.ainvoke(
         prompt.format(
             rq=_escape_braces(str(state.get("research_question") or "Not specified")),
             themes=themes_payload,
         ),
         config={
-            "callbacks": [state.get("langfuse_handler")]
-            if state.get("langfuse_handler")
-            else [],
-            "tags": [
-                "component:synthesis",
-                "component:synthesis.critique",
-                "branch:issues",
-                f"project:{state.get('project_id','')}",
-            ],
-            "metadata": {"project_id": state.get("project_id", ""), "branch": "issues"},
+            **_langfuse_config(
+                state,
+                tags,
+                extra={"branch": "issues"},
+            ),
             "run_name": "synthesis.critique",
         },
     )
@@ -298,25 +335,23 @@ async def critique_intervention_themes(state: SynthesisState) -> SynthesisState:
     )
     prompt = build_theme_critique_prompt("intervention")
     llm = get_llm(THEME_MODEL, temperature=0.0)
+    tags = [
+        "component:synthesis",
+        "component:synthesis.critique",
+        "branch:interventions",
+        f"project:{state.get('project_id','')}",
+    ]
     resp = await llm.ainvoke(
         prompt.format(
             rq=_escape_braces(str(state.get("research_question") or "Not specified")),
             themes=themes_payload,
         ),
         config={
-            "callbacks": [state.get("langfuse_handler")]
-            if state.get("langfuse_handler")
-            else [],
-            "tags": [
-                "component:synthesis",
-                "component:synthesis.critique",
-                "branch:interventions",
-                f"project:{state.get('project_id','')}",
-            ],
-            "metadata": {
-                "project_id": state.get("project_id", ""),
-                "branch": "interventions",
-            },
+            **_langfuse_config(
+                state,
+                tags,
+                extra={"branch": "interventions"},
+            ),
             "run_name": "synthesis.critique",
         },
     )
@@ -398,17 +433,24 @@ async def _map_concepts(
 
 async def map_issue_concepts_to_final_themes(state: SynthesisState) -> SynthesisState:
     print("--- Mapping Issue Concepts to Final Themes ---")
+    tags = [
+        "component:synthesis",
+        "component:synthesis.map_concepts",
+        "branch:issues",
+        f"project:{state.get('project_id','')}",
+    ]
     finals = await _map_concepts(
         state.get("issue_concepts", []) or [],
         state.get("discovered_issue_themes", []) or [],
         handler=state.get("langfuse_handler"),
-        tags=[
-            "component:synthesis",
-            "component:synthesis.map_concepts",
-            "branch:issues",
-            f"project:{state.get('project_id','')}",
-        ],
-        metadata={"project_id": state.get("project_id", ""), "branch": "issues"},
+        tags=tags,
+        metadata=build_langfuse_metadata(
+            tags=tags,
+            session_id=state.get("langfuse_session_id"),
+            user_id=state.get("policy_user_id"),
+            project_id=state.get("project_id"),
+            extra={"branch": "issues"},
+        ),
         run_name="synthesis.map_concepts",
     )
     return {"final_issue_themes": finals}
@@ -418,20 +460,24 @@ async def map_intervention_concepts_to_final_themes(
     state: SynthesisState
 ) -> SynthesisState:
     print("--- Mapping Intervention Concepts to Final Themes ---")
+    tags = [
+        "component:synthesis",
+        "component:synthesis.map_concepts",
+        "branch:interventions",
+        f"project:{state.get('project_id','')}",
+    ]
     finals = await _map_concepts(
         state.get("intervention_concepts", []) or [],
         state.get("discovered_intervention_themes", []) or [],
         handler=state.get("langfuse_handler"),
-        tags=[
-            "component:synthesis",
-            "component:synthesis.map_concepts",
-            "branch:interventions",
-            f"project:{state.get('project_id','')}",
-        ],
-        metadata={
-            "project_id": state.get("project_id", ""),
-            "branch": "interventions",
-        },
+        tags=tags,
+        metadata=build_langfuse_metadata(
+            tags=tags,
+            session_id=state.get("langfuse_session_id"),
+            user_id=state.get("policy_user_id"),
+            project_id=state.get("project_id"),
+            extra={"branch": "interventions"},
+        ),
         run_name="synthesis.map_concepts",
     )
     return {"final_intervention_themes": finals}
@@ -504,18 +550,18 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             llm = get_llm(MAPPING_MODEL, temperature=0)
             sample = "\n".join([f"- {s}" for s in concept_texts[:8]])
             prompt = build_impact_summary_prompt()
+            tags = [
+                "component:synthesis",
+                "component:synthesis.impact_summary",
+                f"project:{state.get('project_id','')}",
+            ]
             resp = await llm.ainvoke(
                 prompt.format(name=name, sample=_escape_braces(sample)),
                 config={
-                    "callbacks": [state.get("langfuse_handler")]
-                    if state.get("langfuse_handler")
-                    else [],
-                    "tags": [
-                        "component:synthesis",
-                        "component:synthesis.impact_summary",
-                        f"project:{state.get('project_id','')}",
-                    ],
-                    "metadata": {"project_id": state.get("project_id", "")},
+                    **_langfuse_config(
+                        state,
+                        tags,
+                    ),
                     "run_name": "synthesis.impact_summary",
                 },
             )
@@ -607,21 +653,21 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
     prompt = build_executive_briefing_prompt()
     llm = get_llm(BRIEFING_MODEL, temperature=0)
     try:
+        tags = [
+            "component:synthesis",
+            "component:synthesis.executive_brief",
+            f"project:{state.get('project_id','')}",
+        ]
         resp = await llm.ainvoke(
             prompt.format(
                 rq=rq,
                 payload=_escape_braces(json.dumps(payload)),
             ),
             config={
-                "callbacks": [state.get("langfuse_handler")]
-                if state.get("langfuse_handler")
-                else [],
-                "tags": [
-                    "component:synthesis",
-                    "component:synthesis.executive_brief",
-                    f"project:{state.get('project_id','')}",
-                ],
-                "metadata": {"project_id": state.get("project_id", "")},
+                **_langfuse_config(
+                    state,
+                    tags,
+                ),
                 "run_name": "synthesis.executive_brief",
             },
         )
@@ -704,13 +750,33 @@ class SynthesisAgent:
     def __init__(self) -> None:
         self.workflow = create_synthesis_workflow()
 
-    async def run(self, project_id: str) -> SynthesisState:
+    async def run(
+        self, project_id: str, user_id: Optional[str] = None
+    ) -> SynthesisState:
         # Create a per-run Langfuse session and propagate handler through state
         session_id = f"synthesis:{project_id}:{datetime.utcnow().isoformat()}"
         handler = get_langfuse_handler(session_id=session_id)
+        resolved_user = user_id or self._resolve_project_user(project_id)
         initial_state: SynthesisState = {  # type: ignore[assignment]
             "project_id": project_id,
             "langfuse_handler": handler,
+            "langfuse_session_id": session_id,
+            "policy_user_id": resolved_user,
         }
         final_state: SynthesisState = await self.workflow.ainvoke(initial_state)
         return final_state
+
+    @staticmethod
+    def _resolve_project_user(project_id: str) -> Optional[str]:
+        try:
+            result = (
+                vectorization_service.supabase.table("analysis_projects")
+                .select("created_by_user_id")
+                .eq("id", project_id)
+                .execute()
+            )
+            if result.data:
+                return result.data[0].get("created_by_user_id")
+        except Exception:
+            return None
+        return None

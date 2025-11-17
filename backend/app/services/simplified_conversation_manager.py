@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
+from datetime import datetime
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -14,7 +15,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.utils.llm.llm_utils import get_langfuse_handler
+from app.utils.llm.llm_utils import get_langfuse_handler, build_langfuse_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +64,7 @@ class SimplifiedConversationManager:
                 max_tokens=settings.LLM_MAX_TOKENS,
                 openai_api_key=settings.OPENAI_API_KEY,
             )
-            # Langfuse handler for chat sessions
-            self.langfuse_handler = get_langfuse_handler(
-                session_id=f"chat:{settings.PROJECT_NAME}"
-            )
+            self.langfuse_handler = get_langfuse_handler()
             self._setup_analyzer()
 
     def _setup_analyzer(self):
@@ -115,7 +113,14 @@ Respond with this JSON format:
         json_parser = JsonOutputParser(pydantic_object=ConversationAnalysis)
         self.analyzer = analysis_prompt | self.llm | json_parser
 
-    async def analyze_conversation(self, messages: List[Dict]) -> ConversationAnalysis:
+    async def analyze_conversation(
+        self,
+        messages: List[Dict],
+        *,
+        session_id: Optional[str] = None,
+        policy_project_id: Optional[str] = None,
+        policy_user_id: Optional[str] = None,
+    ) -> ConversationAnalysis:
         """Analyze conversation using AI self-assessment"""
 
         try:
@@ -133,14 +138,21 @@ Respond with this JSON format:
                         )
 
                 try:
+                    analyze_tags = ["component:chat", "component:chat.analyze"]
                     result = await self.analyzer.ainvoke(
                         {"messages": langchain_messages},
                         config={
                             "callbacks": [self.langfuse_handler]
                             if self.langfuse_handler
                             else [],
-                            "tags": ["component:chat", "component:chat.analyze"],
-                            "metadata": {},
+                            "tags": analyze_tags,
+                            "metadata": build_langfuse_metadata(
+                                tags=analyze_tags,
+                                session_id=session_id
+                                or f"chat-analyze:{datetime.utcnow().isoformat()}",
+                                user_id=policy_user_id,
+                                project_id=policy_project_id,
+                            ),
                             "run_name": "chat.analyze",
                         },
                     )
@@ -231,18 +243,35 @@ Respond with this JSON format:
         )
 
     async def generate_response(
-        self, messages: List[Dict], user_message: str
+        self,
+        messages: List[Dict],
+        user_message: str,
+        *,
+        policy_project_id: Optional[str] = None,
+        policy_user_id: Optional[str] = None,
     ) -> Tuple[str, ConversationAnalysis]:
         """Generate response with conversation analysis"""
+
+        session_id = f"chat:{policy_project_id or 'global'}:{policy_user_id or 'anonymous'}:{datetime.utcnow().isoformat()}"
 
         try:
             # First analyze the conversation (including new message)
             analysis_messages = messages + [{"role": "user", "content": user_message}]
-            analysis = await self.analyze_conversation(analysis_messages)
+            analysis = await self.analyze_conversation(
+                analysis_messages,
+                session_id=session_id,
+                policy_project_id=policy_project_id,
+                policy_user_id=policy_user_id,
+            )
 
             if self.llm and not settings.MOCK_OPENAI:
                 return await self._generate_ai_response(
-                    messages, user_message, analysis
+                    messages,
+                    user_message,
+                    analysis,
+                    session_id=session_id,
+                    policy_project_id=policy_project_id,
+                    policy_user_id=policy_user_id,
                 )
             else:
                 return await self._generate_mock_response(user_message, analysis)
@@ -256,7 +285,14 @@ Respond with this JSON format:
             return await self._generate_mock_response(user_message, analysis)
 
     async def _generate_ai_response(
-        self, messages: List[Dict], user_message: str, analysis: ConversationAnalysis
+        self,
+        messages: List[Dict],
+        user_message: str,
+        analysis: ConversationAnalysis,
+        *,
+        session_id: str,
+        policy_project_id: Optional[str],
+        policy_user_id: Optional[str],
     ) -> Tuple[str, ConversationAnalysis]:
         """Generate AI response using LangChain"""
 
@@ -302,12 +338,18 @@ Continue to help them refine their thinking, answer questions, or prepare for ev
         langchain_messages.append(HumanMessage(content=user_message))
 
         # Generate response
+        respond_tags = ["component:chat", "component:chat.respond"]
         response = await self.llm.ainvoke(
             langchain_messages,
             config={
                 "callbacks": [self.langfuse_handler] if self.langfuse_handler else [],
-                "tags": ["component:chat", "component:chat.respond"],
-                "metadata": {},
+                "tags": respond_tags,
+                "metadata": build_langfuse_metadata(
+                    tags=respond_tags,
+                    session_id=session_id,
+                    user_id=policy_user_id,
+                    project_id=policy_project_id,
+                ),
                 "run_name": "chat.respond",
             },
         )
