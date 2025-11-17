@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime
 from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.services.vectorization import vectorization_service
+from app.utils.llm.llm_utils import resolve_langfuse_session_id
 from langfuse import Langfuse
 
 logger = logging.getLogger(__name__)
@@ -145,12 +145,12 @@ class AdvancedRAGService:
     ) -> List[Dict[str, Any]]:
         """Gather evidence from multiple search perspectives for comprehensive insights"""
         # Start Langfuse trace for retrieval phase
-        session_id = f"retrieval:{project_id}:{datetime.utcnow().isoformat()}"
+        session_id = resolve_langfuse_session_id(project_id)
         trace = self.langfuse.trace(
             name="retrieval.insights",
             user_id=policy_user_id,
             session_id=session_id,
-            tags=["component:retrieval", f"project:{project_id}"],
+            tags=["component:retrieval"],
             metadata={
                 "phase": "insights",
                 "query": user_query,
@@ -525,12 +525,12 @@ INSIGHTS:
     ) -> List[Dict[str, Any]]:
         """Gather evidence specifically focused on policy implications and recommendations"""
         # Start Langfuse trace for retrieval phase
-        session_id = f"retrieval:{project_id}:{datetime.utcnow().isoformat()}"
+        session_id = resolve_langfuse_session_id(project_id)
         trace = self.langfuse.trace(
             name="retrieval.policy",
             user_id=policy_user_id,
             session_id=session_id,
-            tags=["component:retrieval", f"project:{project_id}"],
+            tags=["component:retrieval"],
             metadata={
                 "phase": "policy",
                 "query": user_query,

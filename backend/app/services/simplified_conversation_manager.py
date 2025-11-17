@@ -138,7 +138,11 @@ Respond with this JSON format:
                         )
 
                 try:
-                    analyze_tags = ["component:chat", "component:chat.analyze"]
+                    analyze_tags = [
+                        "component:chat",
+                        "component:chat.analyze",
+                        f"model:{settings.LLM_MODEL}",
+                    ]
                     result = await self.analyzer.ainvoke(
                         {"messages": langchain_messages},
                         config={
@@ -338,7 +342,11 @@ Continue to help them refine their thinking, answer questions, or prepare for ev
         langchain_messages.append(HumanMessage(content=user_message))
 
         # Generate response
-        respond_tags = ["component:chat", "component:chat.respond"]
+        respond_tags = [
+            "component:chat",
+            "component:chat.respond",
+            f"model:{settings.LLM_MODEL}",
+        ]
         response = await self.llm.ainvoke(
             langchain_messages,
             config={

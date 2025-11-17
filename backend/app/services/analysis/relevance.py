@@ -283,7 +283,7 @@ class RelevanceService:
         processor = batch_check.LLMProcessor(
             output_path=output_path,
             system_message=self.system_message,
-            session_name=session_name,
+            session_name=None,
             output_fields=self.fields,
             component_tags=[
                 "component:relevance",

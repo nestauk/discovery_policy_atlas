@@ -28,7 +28,11 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import create_model
 
-from app.utils.llm.llm_utils import get_langfuse_handler, build_langfuse_metadata
+from app.utils.llm.llm_utils import (
+    get_langfuse_handler,
+    build_langfuse_metadata,
+    resolve_langfuse_session_id,
+)
 from app.utils.llm.llm_utils import get_llm
 
 
@@ -55,12 +59,9 @@ class LLMProcessor:
         run_name: str = "batch_check.process",
     ) -> None:
         self.llm = get_llm(model_name=model_name, temperature=temperature)
-        if session_name is None:
-            session_name = ""
-        else:
-            session_name = f"{session_name}_"
-
-        self.langfuse_session_id = f"{session_name}{datetime.today().isoformat()}"
+        self.langfuse_session_id = resolve_langfuse_session_id(
+            policy_project_id, session_name
+        )
         self.langfuse_handler = get_langfuse_handler(
             session_id=self.langfuse_session_id
         )
@@ -125,9 +126,11 @@ class LLMProcessor:
         start_time = datetime.now(tz=timezone.utc).isoformat()
         structured_llm = self.llm.with_structured_output(self.schema)
         tags = self.component_tags + [
-            "component:batch_check.invoke",
+            "component:batch_check.process",
             f"model:{self.model_name}",
         ]
+        if self.policy_project_id:
+            tags.append(f"project:{self.policy_project_id}")
         response = await structured_llm.ainvoke(
             input_text,
             config={

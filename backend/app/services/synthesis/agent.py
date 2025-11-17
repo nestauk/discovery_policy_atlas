@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import List, Dict, TypedDict, Optional, Any
-from datetime import datetime
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from app.services.vectorization import vectorization_service
@@ -11,6 +10,7 @@ from app.utils.llm.llm_utils import (
     get_llm,
     get_langfuse_handler,
     build_langfuse_metadata,
+    resolve_langfuse_session_id,
 )
 from app.services.synthesis.schemas import KeyIssue, PolicyIntervention
 from app.services.synthesis.prompts import (
@@ -248,7 +248,7 @@ async def define_issue_themes(state: SynthesisState) -> SynthesisState:
         "component:synthesis",
         "component:synthesis.discover_themes",
         "branch:issues",
-        f"project:{state.get('project_id','')}",
+        f"model:{THEME_MODEL}",
     ]
     themes = await _discover_themes_for_concepts(
         state.get("issue_concepts", []) or [],
@@ -273,7 +273,7 @@ async def define_intervention_themes(state: SynthesisState) -> SynthesisState:
         "component:synthesis",
         "component:synthesis.discover_themes",
         "branch:interventions",
-        f"project:{state.get('project_id','')}",
+        f"model:{THEME_MODEL}",
     ]
     themes = await _discover_themes_for_concepts(
         state.get("intervention_concepts", []) or [],
@@ -304,7 +304,7 @@ async def critique_issue_themes(state: SynthesisState) -> SynthesisState:
         "component:synthesis",
         "component:synthesis.critique",
         "branch:issues",
-        f"project:{state.get('project_id','')}",
+        f"model:{THEME_MODEL}",
     ]
     resp = await llm.ainvoke(
         prompt.format(
@@ -339,7 +339,7 @@ async def critique_intervention_themes(state: SynthesisState) -> SynthesisState:
         "component:synthesis",
         "component:synthesis.critique",
         "branch:interventions",
-        f"project:{state.get('project_id','')}",
+        f"model:{THEME_MODEL}",
     ]
     resp = await llm.ainvoke(
         prompt.format(
@@ -437,7 +437,7 @@ async def map_issue_concepts_to_final_themes(state: SynthesisState) -> Synthesis
         "component:synthesis",
         "component:synthesis.map_concepts",
         "branch:issues",
-        f"project:{state.get('project_id','')}",
+        f"model:{MAPPING_MODEL}",
     ]
     finals = await _map_concepts(
         state.get("issue_concepts", []) or [],
@@ -464,7 +464,7 @@ async def map_intervention_concepts_to_final_themes(
         "component:synthesis",
         "component:synthesis.map_concepts",
         "branch:interventions",
-        f"project:{state.get('project_id','')}",
+        f"model:{MAPPING_MODEL}",
     ]
     finals = await _map_concepts(
         state.get("intervention_concepts", []) or [],
@@ -553,7 +553,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             tags = [
                 "component:synthesis",
                 "component:synthesis.impact_summary",
-                f"project:{state.get('project_id','')}",
+                f"model:{MAPPING_MODEL}",
             ]
             resp = await llm.ainvoke(
                 prompt.format(name=name, sample=_escape_braces(sample)),
@@ -656,7 +656,7 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
         tags = [
             "component:synthesis",
             "component:synthesis.executive_brief",
-            f"project:{state.get('project_id','')}",
+            f"model:{BRIEFING_MODEL}",
         ]
         resp = await llm.ainvoke(
             prompt.format(
@@ -754,7 +754,7 @@ class SynthesisAgent:
         self, project_id: str, user_id: Optional[str] = None
     ) -> SynthesisState:
         # Create a per-run Langfuse session and propagate handler through state
-        session_id = f"synthesis:{project_id}:{datetime.utcnow().isoformat()}"
+        session_id = resolve_langfuse_session_id(project_id)
         handler = get_langfuse_handler(session_id=session_id)
         resolved_user = user_id or self._resolve_project_user(project_id)
         initial_state: SynthesisState = {  # type: ignore[assignment]

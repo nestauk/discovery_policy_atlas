@@ -30,6 +30,17 @@ def get_langfuse_handler(session_id: str = None) -> CallbackHandler:
     return CallbackHandler()
 
 
+def resolve_langfuse_session_id(
+    project_id: Optional[str] = None, session_name: Optional[str] = None
+) -> str:
+    """Return a canonical Langfuse session id for the given project."""
+    if session_name:
+        return session_name
+    if project_id:
+        return f"project:{project_id}"
+    return "project:global"
+
+
 def build_langfuse_metadata(
     *,
     tags: Optional[List[str]] = None,
@@ -47,8 +58,9 @@ def build_langfuse_metadata(
     if tags:
         metadata["langfuse_tags"] = tags
 
-    if session_id:
-        metadata["langfuse_session_id"] = session_id
+    resolved_session = session_id or resolve_langfuse_session_id(project_id)
+    if resolved_session:
+        metadata["langfuse_session_id"] = resolved_session
 
     if user_id:
         metadata["langfuse_user_id"] = user_id

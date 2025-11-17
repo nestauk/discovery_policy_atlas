@@ -6,14 +6,17 @@ Implements: Issues → Interventions → Mapping → Results (per intervention l
 import json
 import logging
 from typing import Any, Dict, List, Optional, TypedDict
-from datetime import datetime
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 
 from app.core.config import settings
-from app.utils.llm.llm_utils import get_langfuse_handler, build_langfuse_metadata
+from app.utils.llm.llm_utils import (
+    get_langfuse_handler,
+    build_langfuse_metadata,
+    resolve_langfuse_session_id,
+)
 from .prompts import (
     ISSUES_PROMPT,
     INTERVENTIONS_PROMPT,
@@ -70,6 +73,7 @@ class ExtractionWorkflow:
             openai_api_key=settings.OPENAI_API_KEY,
             request_timeout=120.0,  # 2 minute timeout to prevent hanging
         )
+        self.model_name = model
         self.json_parser = JsonOutputParser()
         self.workflow = self._build_workflow()
         self.policy_project_id = policy_project_id
@@ -101,8 +105,8 @@ class ExtractionWorkflow:
 
     async def run(self, paper_id: str, full_text: str) -> DocumentExtractionBundle:
         """Run the complete extraction workflow."""
-        # Create a per-run Langfuse session and propagate handler via closure
-        session_id = f"extraction:{paper_id}:{datetime.utcnow().isoformat()}"
+        # Create a per-project Langfuse session and propagate handler via closure
+        session_id = resolve_langfuse_session_id(self.policy_project_id)
         self._langfuse_session_id = session_id
         self._langfuse_handler = get_langfuse_handler(session_id=session_id)
 
@@ -172,6 +176,7 @@ class ExtractionWorkflow:
                 "component:extraction.issues",
                 f"paper:{state['paper_id']}",
             ]
+            tags.append(f"model:{self.model_name}")
             result = await chain.ainvoke(
                 {"full_text": state["full_text"]},
                 config={
@@ -204,6 +209,7 @@ class ExtractionWorkflow:
                 "component:extraction.interventions",
                 f"paper:{state['paper_id']}",
             ]
+            tags.append(f"model:{self.model_name}")
             result = await chain.ainvoke(
                 {"full_text": state["full_text"]},
                 config={
@@ -254,6 +260,7 @@ class ExtractionWorkflow:
                 "component:extraction.mappings",
                 f"paper:{state['paper_id']}",
             ]
+            tags.append(f"model:{self.model_name}")
             result = await chain.ainvoke(
                 {
                     "full_text": state["full_text"],
@@ -299,6 +306,7 @@ class ExtractionWorkflow:
                         "component:extraction.results",
                         f"paper:{state['paper_id']}",
                     ]
+                    tags.append(f"model:{self.model_name}")
 
                     result = await chain.ainvoke(
                         {
@@ -366,6 +374,7 @@ class ExtractionWorkflow:
                 "component:extraction.conclusions",
                 f"paper:{state['paper_id']}",
             ]
+            tags.append(f"model:{self.model_name}")
             result = await chain.ainvoke(
                 {
                     "full_text": state["full_text"],
