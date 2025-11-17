@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import create_model
 
-from app.utils.llm.llm_utils import get_langfuse_handler
+from app.utils.llm.llm_utils import get_langfuse_handler, build_langfuse_metadata
 from app.utils.llm.llm_utils import get_llm
 
 
@@ -49,6 +49,10 @@ class LLMProcessor:
         system_message: Optional[str] = None,
         output_fields: Optional[List[Dict[str, str]]] = None,
         session_name: Optional[str] = None,
+        component_tags: Optional[List[str]] = None,
+        policy_project_id: Optional[str] = None,
+        policy_user_id: Optional[str] = None,
+        run_name: str = "batch_check.process",
     ) -> None:
         self.llm = get_llm(model_name=model_name, temperature=temperature)
         if session_name is None:
@@ -56,12 +60,17 @@ class LLMProcessor:
         else:
             session_name = f"{session_name}_"
 
+        self.langfuse_session_id = f"{session_name}{datetime.today().isoformat()}"
         self.langfuse_handler = get_langfuse_handler(
-            session_id=f"{session_name}{datetime.today().isoformat()}"
+            session_id=self.langfuse_session_id
         )
         self.output_path = Path(output_path)
         self.model_name = model_name
         self.temperature = temperature
+        self.component_tags = component_tags or ["component:batch_check"]
+        self.policy_project_id = policy_project_id
+        self.policy_user_id = policy_user_id
+        self.run_name = run_name
 
         self.output_fields = output_fields or [
             {
@@ -115,20 +124,26 @@ class LLMProcessor:
     async def _invoke_llm(self, input_text: str, _id: str) -> Dict:
         start_time = datetime.now(tz=timezone.utc).isoformat()
         structured_llm = self.llm.with_structured_output(self.schema)
+        tags = self.component_tags + [
+            "component:batch_check.invoke",
+            f"model:{self.model_name}",
+        ]
         response = await structured_llm.ainvoke(
             input_text,
             config={
                 "callbacks": [self.langfuse_handler] if self.langfuse_handler else [],
-                "tags": [
-                    "component:batch_check",
-                    "component:batch_check.invoke",
-                    f"model:{self.model_name}",
-                ],
-                "metadata": {
-                    "model": self.model_name,
-                    "temperature": self.temperature,
-                },
-                "run_name": "batch_check.invoke",
+                "tags": tags,
+                "metadata": build_langfuse_metadata(
+                    tags=tags,
+                    session_id=self.langfuse_session_id,
+                    user_id=self.policy_user_id,
+                    project_id=self.policy_project_id,
+                    extra={
+                        "model": self.model_name,
+                        "temperature": self.temperature,
+                    },
+                ),
+                "run_name": self.run_name,
             },
         )
         response = response.dict()
