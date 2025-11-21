@@ -65,7 +65,7 @@ async def generate_with_llm(
     model: str,
     temperature: float,
     system_prompt: str,
-    client: AsyncOpenAI,
+    client: AsyncOpenAI = AsyncOpenAI(api_key=settings.OPENAI_API_KEY),
     max_tokens: int = None,
 ) -> str:
     """Generate boolean query using an LLM with the given prompt and parameters."""
@@ -96,7 +96,7 @@ async def use_baseline_query(
     model: str,
     temperature: float,
     system_prompt: str,
-    client: AsyncOpenAI,
+    client: AsyncOpenAI = AsyncOpenAI(api_key=settings.OPENAI_API_KEY),
     *args,
     **kwargs,
 ) -> str:
@@ -421,7 +421,17 @@ class BooleanQueryTester:
                 for generator_name in generator_names:
                     for prompt_name in prompt_names:
                         for model in models:
-                            for temperature in temperatures:
+                            # GPT-5 models don't use temperature, so only run once
+                            is_gpt5_model = model in [
+                                "gpt-5",
+                                "gpt-5-mini",
+                                "gpt-5-nano",
+                            ]
+                            temps_to_use = (
+                                temperatures[:1] if is_gpt5_model else temperatures
+                            )
+
+                            for temperature in temps_to_use:
                                 for run in range(1, runs_per_query + 1):
                                     # Check if this combination already exists
                                     experiment_key = (

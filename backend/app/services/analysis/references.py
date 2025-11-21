@@ -9,7 +9,10 @@ from typing import List, Optional
 import pandas as pd
 
 from app.core.config import settings
-from app.services.analysis.prompts import BOOLEAN_QUERY_SYSTEM_PROMPT
+from app.services.analysis.prompts import (
+    BOOLEAN_QUERY_SYSTEM_PROMPT,
+    BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT,
+)
 from openai import AsyncOpenAI
 from app.services.openalex import OpenAlexService
 from app.services.overton import OvertonService
@@ -39,15 +42,29 @@ class ReferencesService:
         logger.info("🔍 Generating boolean query for: '%s'", natural_query)
 
         try:
-            resp = await self.openai_client.chat.completions.create(
-                model=settings.LLM_MODEL,
-                temperature=0.0,
-                messages=[
-                    {"role": "system", "content": BOOLEAN_QUERY_SYSTEM_PROMPT},
-                    {"role": "user", "content": natural_query},
-                ],
-                max_tokens=1000,
-            )
+            model = settings.LLM_MODEL
+            messages = [
+                {"role": "system", "content": BOOLEAN_QUERY_SYSTEM_PROMPT},
+                {"role": "user", "content": natural_query},
+            ]
+
+            # GPT-5 models don't use temperature and use max_completion_tokens
+            is_gpt5_model = model in ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
+
+            if is_gpt5_model:
+                resp = await self.openai_client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_completion_tokens=1000,
+                )
+            else:
+                resp = await self.openai_client.chat.completions.create(
+                    model=model,
+                    temperature=0.0,
+                    messages=messages,
+                    max_tokens=1000,
+                )
+
             boolean_query = (resp.choices[0].message.content or natural_query).strip()
 
             logger.info("✅ Generated boolean query: '%s'", boolean_query)
@@ -65,6 +82,83 @@ class ReferencesService:
             logger.info("🔄 Falling back to original query: '%s'", natural_query)
             return natural_query
 
+    async def generate_boolean_queries_multi(
+        self,
+        natural_query: str,
+        n_runs: int = 5,
+        temperature: float = 1.0,
+        model: str = None,
+    ) -> List[str]:
+        """Generate multiple boolean queries with temperature for diversity.
+
+        This method generates multiple diverse boolean queries by using temperature > 0,
+        then deduplicates them. Based on R&D findings showing that combining results
+        from multiple diverse queries improves coverage.
+
+        Args:
+            natural_query: The research question in natural language
+            n_runs: Number of different queries to generate
+            temperature: Temperature for LLM generation (higher = more diverse)
+            model: LLM model to use (defaults to settings.BOOLEAN_QUERY_MODEL)
+
+        Returns:
+            List of unique boolean query strings
+        """
+        logger.info(
+            "🔍 Generating %d boolean queries (temp=%.1f) for: '%s'",
+            n_runs,
+            temperature,
+            natural_query,
+        )
+
+        model = model or settings.BOOLEAN_QUERY_MODEL
+        queries = []
+
+        # Check if this is a GPT-5 model (different parameter structure)
+        is_gpt5_model = model in ["gpt-5", "gpt-5-mini", "gpt-5-nano"]
+
+        try:
+            for i in range(n_runs):
+                messages = [
+                    {"role": "system", "content": BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT},
+                    {"role": "user", "content": natural_query},
+                ]
+
+                # GPT-5 models don't use temperature and use max_completion_tokens
+                if is_gpt5_model:
+                    resp = await self.openai_client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        max_completion_tokens=1000,
+                    )
+                else:
+                    resp = await self.openai_client.chat.completions.create(
+                        model=model,
+                        temperature=temperature,
+                        messages=messages,
+                        max_tokens=1000,
+                    )
+
+                boolean_query = (resp.choices[0].message.content or "").strip()
+                if boolean_query:
+                    queries.append(boolean_query)
+                    logger.debug("Query %d/%d: '%s'", i + 1, n_runs, boolean_query)
+
+            # Remove exact duplicates while preserving order
+            unique_queries = list(dict.fromkeys(queries))
+            logger.info(
+                "✅ Generated %d queries (%d unique) for multi-query search",
+                len(queries),
+                len(unique_queries),
+            )
+
+            return unique_queries
+
+        except Exception as e:
+            logger.warning("❌ Multi-query generation failed: %s", e)
+            logger.info("🔄 Falling back to single query with original text")
+            return [natural_query]
+
     async def build_references(
         self,
         query: str,
@@ -75,8 +169,35 @@ class ReferencesService:
         mode: str = "semantic",  # "boolean" | "semantic"
         boolean_query: Optional[str] = None,
         geography_filter: Optional[List[str]] = None,
+        use_multi_query: Optional[bool] = None,
+        n_query_runs: Optional[int] = None,
+        query_temperature: Optional[float] = None,
     ) -> tuple[Path, str]:
-        """Fetch and normalize references, write references.csv, and return its path."""
+        """Fetch and normalize references, write references.csv, and return its path.
+
+        New multi-query mode generates multiple diverse queries and combines results
+        for better coverage based on R&D findings.
+
+        Args:
+            query: Natural language query or boolean query
+            sources: List of sources to search (e.g., ["openalex", "overton"])
+            limit: Maximum number of results to return
+            date_from: Start date filter (ISO format)
+            date_to: End date filter (ISO format)
+            mode: Search mode - "boolean" or "semantic"
+            boolean_query: Pre-defined boolean query (used in boolean mode)
+            geography_filter: List of country codes to filter by
+            use_multi_query: Enable multi-query mode (None = use config default)
+            n_query_runs: Number of queries to generate in multi-query mode
+            query_temperature: Temperature for query generation diversity
+        """
+
+        # Determine whether to use multi-query mode
+        if use_multi_query is None:
+            use_multi_query = settings.BOOLEAN_QUERY_GENERATION_MODE == "multi"
+
+        n_runs = n_query_runs or settings.BOOLEAN_QUERY_N_RUNS
+        temperature = query_temperature or settings.BOOLEAN_QUERY_TEMPERATURE
 
         tasks = []
         openalex_service = OpenAlexService() if "openalex" in sources else None
@@ -86,45 +207,78 @@ class ReferencesService:
         df_val = date.fromisoformat(date_from) if date_from else None
         dt_val = date.fromisoformat(date_to) if date_to else None
 
-        # Determine OpenAlex query string and track the final boolean query
-        openalex_query_str = query
+        # Determine OpenAlex query string(s) and track the final boolean query
+        openalex_queries = []  # List of queries to execute
         final_boolean_query = None
         logger.info("🔎 Building references with mode: '%s'", mode)
         logger.debug("Original query: '%s'", query)
 
         if mode == "boolean":
-            openalex_query_str = boolean_query or query
-            final_boolean_query = openalex_query_str
-            logger.info("📋 Using provided boolean query: '%s'", openalex_query_str)
+            # Boolean mode: use provided query directly
+            openalex_queries = [boolean_query or query]
+            final_boolean_query = openalex_queries[0]
+            logger.info("📋 Using provided boolean query: '%s'", final_boolean_query)
+
         elif mode == "semantic":
-            # Generate boolean query from natural query
             logger.info(
                 "🧠 Semantic mode: generating boolean query from natural language"
             )
-            openalex_query_str = await self.generate_boolean_query(query)
-            final_boolean_query = openalex_query_str
-            logger.info("🎯 Final OpenAlex query string: '%s'", openalex_query_str)
 
+            if use_multi_query:
+                # Multi-query mode: generate multiple diverse queries
+                logger.info(
+                    "🔄 Multi-query mode: generating %d queries (temp=%.1f)",
+                    n_runs,
+                    temperature,
+                )
+                openalex_queries = await self.generate_boolean_queries_multi(
+                    natural_query=query,
+                    n_runs=n_runs,
+                    temperature=temperature,
+                )
+                # Store all queries for debugging
+                final_boolean_query = " | ".join(openalex_queries)
+                logger.info("✅ Generated %d unique queries", len(openalex_queries))
+            else:
+                # Single-query mode: generate one deterministic query
+                logger.info(
+                    "🎯 Single-query mode: generating deterministic query (temp=0)"
+                )
+                single_query = await self.generate_boolean_query(query)
+                openalex_queries = [single_query]
+                final_boolean_query = single_query
+
+        # Execute OpenAlex queries
         if openalex_service:
-            tasks.append(
-                openalex_service.search(
-                    query=openalex_query_str,
-                    max_results=limit,
-                    min_citations=settings.DEFAULT_MIN_CITATIONS,
-                    date_from=df_val,
-                    date_to=dt_val,
+            for idx, query_str in enumerate(openalex_queries):
+                logger.info(
+                    "🔍 Executing OpenAlex query %d/%d: '%s'",
+                    idx + 1,
+                    len(openalex_queries),
+                    query_str[:100] + ("..." if len(query_str) > 100 else ""),
                 )
-            )
-            # Also collect raw OpenAlex responses for debugging
-            tasks.append(
-                openalex_service.fetch_raw(
-                    query=openalex_query_str,
-                    max_results=limit,
-                    min_citations=settings.DEFAULT_MIN_CITATIONS,
-                    date_from=df_val,
-                    date_to=dt_val,
+
+                tasks.append(
+                    openalex_service.search(
+                        query=query_str,
+                        max_results=limit if len(openalex_queries) == 1 else None,
+                        min_citations=settings.DEFAULT_MIN_CITATIONS,
+                        date_from=df_val,
+                        date_to=dt_val,
+                    )
                 )
-            )
+
+                # Also collect raw responses for first query only (to avoid too much data)
+                if idx == 0:
+                    tasks.append(
+                        openalex_service.fetch_raw(
+                            query=query_str,
+                            max_results=limit,
+                            min_citations=settings.DEFAULT_MIN_CITATIONS,
+                            date_from=df_val,
+                            date_to=dt_val,
+                        )
+                    )
 
         if overton_service:
             # Determine source_country parameter from geography_filter
@@ -215,6 +369,10 @@ class ReferencesService:
                     "pdf_url",
                     "is_oa",
                     "type",
+                    "cited_by_count",
+                    "relevance_score",
+                    "source_country",
+                    "author_institution_countries",
                 ]
             )
         else:
@@ -262,9 +420,11 @@ class ReferencesService:
                         "pdf_url": df.get(pdf_col, pd.Series([None] * len(df))),
                         "is_oa": df.get("is_oa", pd.Series([None] * len(df))),
                         "type": type_value,
-                        # Essential fields: citation count and source country
                         "cited_by_count": df.get(
                             "cited_by_count", pd.Series([None] * len(df))
+                        ),
+                        "relevance_score": df.get(
+                            "relevance_score", pd.Series([0] * len(df))
                         ),
                     }
                 )
@@ -329,9 +489,9 @@ class ReferencesService:
                             "is_oa",
                             "type",
                             "author_institution_countries",
-                            # Essential new fields
                             "cited_by_count",
                             "source_country",
+                            "relevance_score",
                         ]
                     ]
                 )
@@ -339,6 +499,27 @@ class ReferencesService:
             df = pd.concat(frames, ignore_index=True).drop_duplicates(
                 subset=["doc_id"]
             )  # de-dupe by doc_id
+
+            # Log combination statistics
+            if len(frames) > 1:
+                logger.info(
+                    "📊 Combined %d source dataframes into %d unique documents",
+                    len(frames),
+                    len(df),
+                )
+
+        # If we got more results than limit due to multi-query, trim them
+        if use_multi_query and len(df) > limit:
+            logger.info(
+                "✂️ Trimming results from %d to %d (limit) - keeping most cited papers",
+                len(df),
+                limit,
+            )
+            # Sort by relevance_score to keep most cited papers
+            if "relevance_score" in df.columns:
+                df = df.sort_values("relevance_score", ascending=False).head(limit)
+            else:
+                df = df.head(limit)
 
         # Ensure export directory exists
         self.export_dir.mkdir(parents=True, exist_ok=True)

@@ -1,10 +1,11 @@
 from pyalex import Works, config
 import pandas as pd
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 from datetime import date
 from openai import AsyncOpenAI
 from app.core.config import settings
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,9 @@ class OpenAlexService:
                 # Extract citation count
                 cited_by_count = page.get("cited_by_count", 0)
 
+                # Extract relevance score
+                relevance_score = page.get("relevance_score", 0)
+
                 # Extract work type
                 work_type = page.get("type_crossref", "unknown")
 
@@ -199,6 +203,7 @@ class OpenAlexService:
                     "publication_year": page.get("publication_year"),
                     "venue": venue,
                     "cited_by_count": cited_by_count,
+                    "relevance_score": relevance_score,
                     "work_type": work_type,
                     "source_country": "Academic",  # OpenAlex is academic literature
                     "source_type": "Academic Paper",
@@ -232,6 +237,7 @@ class OpenAlexService:
         )
         df["venue"] = df["venue"].fillna("")
         df["cited_by_count"] = df["cited_by_count"].fillna(0)
+        df["relevance_score"] = df["relevance_score"].fillna(0)
         df["work_type"] = df["work_type"].fillna("unknown")
         df["source_country"] = df["source_country"].fillna("Academic")
         df["source_type"] = df["source_type"].fillna("Academic Paper")
@@ -250,7 +256,7 @@ class OpenAlexService:
         date_to: Optional[date] = None,
         return_n_total: bool = False,
         count_only: bool = False,
-        fields: list[str] = ["id", "doi", "title", "cited_by_count"],
+        fields: list[str] = ["id", "doi", "title", "cited_by_count", "relevance_score"],
     ) -> pd.DataFrame | Tuple[pd.DataFrame, int] | int:
         """Minimal search that only returns id, DOI, and title fields
 
@@ -323,6 +329,7 @@ class OpenAlexService:
                     "doi": page.get("doi", ""),
                     "title": page.get("title", ""),
                     "cited_by_count": page.get("cited_by_count", 0),
+                    "relevance_score": page.get("relevance_score", 0),
                 }
             )
 
@@ -333,6 +340,74 @@ class OpenAlexService:
             return df, n_total
         else:
             return df
+
+    async def search_multi_query(
+        self,
+        queries: List[str],
+        max_results_per_query: Optional[int] = None,
+        min_citations: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+    ) -> pd.DataFrame:
+        """Execute multiple queries and combine results, removing duplicates.
+
+        This method is designed for multi-query search strategies where multiple
+        diverse boolean queries are generated and their results are combined
+        for better coverage.
+
+        Args:
+            queries: List of boolean query strings
+            max_results_per_query: Max results per individual query (None = unlimited)
+            min_citations: Minimum citation count filter
+            date_from: Filter by minimum publication date
+            date_to: Filter by maximum publication date
+
+        Returns:
+            Combined DataFrame with duplicates removed by ID
+        """
+        logger.info(
+            "🔍 Executing %d queries and combining results (de-duplicating by ID)",
+            len(queries),
+        )
+
+        # Execute all queries concurrently
+        tasks = [
+            self.search(
+                query=q,
+                max_results=max_results_per_query,
+                min_citations=min_citations,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            for q in queries
+        ]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Combine results
+        valid_dfs = []
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                logger.error("Query %d failed: %s", i + 1, r)
+            elif isinstance(r, pd.DataFrame):
+                valid_dfs.append(r)
+
+        if not valid_dfs:
+            logger.warning("❌ No valid results from any query")
+            return pd.DataFrame()
+
+        # Concatenate and de-duplicate by ID
+        combined = pd.concat(valid_dfs, ignore_index=True)
+        deduped = combined.drop_duplicates(subset=["id"], keep="first")
+
+        logger.info(
+            "✅ Combined %d results from %d queries → %d unique documents",
+            len(combined),
+            len(valid_dfs),
+            len(deduped),
+        )
+
+        return deduped
 
     def format_for_screening(self, df: pd.DataFrame) -> Dict[str, Dict[str, str]]:
         """Format papers for LLM screening"""

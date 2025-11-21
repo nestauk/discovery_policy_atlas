@@ -1,9 +1,14 @@
 """Generate experiment charts for individual questions and prompt summaries.
 
+This script generates various visualizations including:
+- Individual question metrics (retrieved totals, F1 scores, etc.)
+- Prompt-level summaries aggregating across questions
+- Optional combined runs analysis comparing single-run vs multi-run performance
+
 Usage (run from backend directory):
     cd backend
     
-    # Default experiment (experiment1) with 3 questions:
+    # Default experiment (experiment1) with 3 questions, using config.yaml:
     uv run python testing/r_and_d/boolean_queries/plot_experiment.py
     
     # Custom experiment name:
@@ -11,25 +16,31 @@ Usage (run from backend directory):
     
     # Specify number of questions (identifiers) to plot:
     uv run python testing/r_and_d/boolean_queries/plot_experiment.py --n-questions 10
+    
+    # Use alternate config file:
+    uv run python testing/r_and_d/boolean_queries/plot_experiment.py --config config_2.yaml
+    
+    # Combine runs (deduplicate across multiple runs):
+    uv run python testing/r_and_d/boolean_queries/plot_experiment.py --combine-runs
+    
+    # Generate comparison charts between single and combined runs:
+    uv run python testing/r_and_d/boolean_queries/plot_experiment.py --compare-combined-runs
 """
 
 import argparse
 import pandas as pd
 import altair as alt
 import yaml
+import numpy as np
 from pathlib import Path
 from testing import TESTING_DIR, logger
 from testing.r_and_d.boolean_queries.query_tester import get_question_id
 
 # Paths
 BOOL_DIR = TESTING_DIR / "r_and_d/boolean_queries/outputs/"
-CONFIG_PATH = TESTING_DIR / "r_and_d/boolean_queries/config.yaml"
-
-# Load config
-config = yaml.load(open(CONFIG_PATH, "r"), Loader=yaml.SafeLoader)
 
 
-def process_results(df: pd.DataFrame) -> pd.DataFrame:
+def process_results(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     """Process experiment results.
 
     More specifically, it adds the following columns:
@@ -102,8 +113,65 @@ def get_metrics(
     return precision, recall, f1, topn_recall, topn_precision
 
 
+def combine_runs(
+    df: pd.DataFrame, max_runs: int = 5, random_seed: int = 42
+) -> pd.DataFrame:
+    """Combine and deduplicate results across multiple runs.
+
+    For each unique combination of (identifier, model, temperature, prompt),
+    combines the results_id lists from all runs (or random sample if > max_runs).
+
+    Args:
+        df: DataFrame with columns including identifier, model, temperature, prompt, results_id
+        max_runs: Maximum number of runs to combine (randomly sampled if more exist)
+        random_seed: Random seed for reproducibility
+
+    Returns:
+        DataFrame with combined results, one row per (identifier, model, temperature, prompt)
+    """
+    np.random.seed(random_seed)
+
+    combined_results = []
+    group_cols = ["identifier", "model", "temperature", "prompt", "model_temp"]
+
+    for group_key, group_df in df.groupby(group_cols):
+        # If more than max_runs, randomly sample
+        if len(group_df) > max_runs:
+            group_df = group_df.sample(n=max_runs, random_state=random_seed)
+
+        # Combine and deduplicate result IDs
+        all_results = []
+        for results_id in group_df["results_id"]:
+            if isinstance(results_id, list):
+                all_results.extend(results_id)
+
+        combined_results_id = list(set(all_results))  # Deduplicate
+
+        # Create combined row
+        combined_row = {
+            "identifier": group_key[0],
+            "model": group_key[1],
+            "temperature": group_key[2],
+            "prompt": group_key[3],
+            "model_temp": group_key[4],
+            "results_id": combined_results_id,
+            "n_runs_combined": len(group_df),
+            "n_elements": len(combined_results_id),
+            "retrieved_total": len(combined_results_id),
+            "question": group_df.iloc[0]["question"],
+            "identifier_no": group_df.iloc[0]["identifier_no"],
+        }
+        combined_results.append(combined_row)
+
+    return pd.DataFrame(combined_results)
+
+
 def plot_individual_question(
-    analysis_df: pd.DataFrame, reference: str, outputs_dir: Path, model_temps: list
+    analysis_df: pd.DataFrame,
+    reference: str,
+    outputs_dir: Path,
+    model_temps: list,
+    skip_ranges: bool = False,
 ):
     """Generate charts for a single question.
 
@@ -116,6 +184,7 @@ def plot_individual_question(
         reference: the question ID
         outputs_dir: the directory to save the charts
         model_temps: the model temperatures to include in the charts
+        skip_ranges: if True, skip charts with IQR/ranges (for combined runs with single values)
     """
     logger.info(f"  Plotting question: {reference}")
 
@@ -147,6 +216,9 @@ def plot_individual_question(
     fig.save(
         str(outputs_dir / f"retrieved_total_horizontal_{reference}.png"), scale_factor=2
     )
+
+    if skip_ranges:
+        return
 
     # Chart 2: Retrieved total median with IQR
     base = alt.Chart(
@@ -219,9 +291,23 @@ def plot_individual_question(
 
 
 def plot_individual_question_with_metrics(
-    metrics_df: pd.DataFrame, reference: str, outputs_dir: Path, model_temps: list
+    metrics_df: pd.DataFrame,
+    reference: str,
+    outputs_dir: Path,
+    model_temps: list,
+    skip_ranges: bool = False,
 ):
-    """Generate metric charts for a single question."""
+    """Generate metric charts for a single question.
+
+    Args:
+        metrics_df: DataFrame with metrics for the question
+        reference: the question ID
+        outputs_dir: the directory to save the charts
+        model_temps: the model temperatures to include in the charts
+        skip_ranges: if True, skip charts with IQR/ranges (for combined runs with single values)
+    """
+    if skip_ranges:
+        return
     # Chart 4: F1 median with IQR
     base = alt.Chart(metrics_df[["model", "temperature", "f1", "model_temp"]])
 
@@ -273,14 +359,238 @@ def plot_individual_question_with_metrics(
     fig.save(str(outputs_dir / f"elements_median_iqr_{reference}.png"), scale_factor=2)
 
 
+def plot_combined_vs_single_comparison(
+    single_run_df: pd.DataFrame,
+    combined_df: pd.DataFrame,
+    baseline_df: pd.DataFrame,
+    outputs_dir: Path,
+    model_temps: list,
+):
+    """Compare single-run vs combined-runs metrics.
+
+    Args:
+        single_run_df: Original DataFrame with individual runs
+        combined_df: DataFrame with combined and deduplicated runs
+        baseline_df: Baseline results for computing metrics
+        outputs_dir: Directory to save charts
+        model_temps: List of model-temperature combinations for sorting
+    """
+    logger.info("  Plotting combined vs single-run comparison")
+
+    # Prepare baseline lookup
+    baseline_lookup = {}
+    for _, row in baseline_df.iterrows():
+        baseline_lookup[row["identifier"]] = row.get("results_id")
+
+    # Compute metrics for single runs
+    single_metrics = []
+    for _, row in single_run_df.iterrows():
+        baseline_ids = baseline_lookup.get(row["identifier"])
+        results_id = row.get("results_id")
+        if not isinstance(results_id, list):
+            results_id = []
+
+        if baseline_ids and isinstance(baseline_ids, list):
+            precision, recall, f1, _, _ = get_metrics(baseline_ids, results_id)
+            single_metrics.append(
+                {
+                    "identifier": row["identifier"],
+                    "model_temp": row["model_temp"],
+                    "temperature": row["temperature"],
+                    "precision": precision,
+                    "recall": recall,
+                    "f1": f1,
+                    "n_elements": len(results_id) if results_id else 0,
+                    "run_type": "single",
+                }
+            )
+
+    single_metrics_df = pd.DataFrame(single_metrics)
+
+    # Compute metrics for combined runs
+    combined_metrics = []
+    for _, row in combined_df.iterrows():
+        baseline_ids = baseline_lookup.get(row["identifier"])
+        results_id = row.get("results_id")
+        if not isinstance(results_id, list):
+            results_id = []
+
+        if baseline_ids and isinstance(baseline_ids, list):
+            precision, recall, f1, _, _ = get_metrics(baseline_ids, results_id)
+            combined_metrics.append(
+                {
+                    "identifier": row["identifier"],
+                    "model_temp": row["model_temp"],
+                    "temperature": row["temperature"],
+                    "precision": precision,
+                    "recall": recall,
+                    "f1": f1,
+                    "n_elements": len(results_id) if results_id else 0,
+                    "n_runs_combined": row["n_runs_combined"],
+                    "run_type": "combined",
+                }
+            )
+
+    combined_metrics_df = pd.DataFrame(combined_metrics)
+
+    # Aggregate metrics by model_temp
+    single_agg = (
+        single_metrics_df.groupby("model_temp")
+        .agg(
+            f1_mean=("f1", "mean"),
+            f1_median=("f1", "median"),
+            precision_mean=("precision", "mean"),
+            recall_mean=("recall", "mean"),
+            n_elements_mean=("n_elements", "mean"),
+            temperature=("temperature", "first"),
+        )
+        .reset_index()
+        .assign(run_type="single")
+    )
+
+    combined_agg = (
+        combined_metrics_df.groupby("model_temp")
+        .agg(
+            f1_mean=("f1", "mean"),
+            f1_median=("f1", "median"),
+            precision_mean=("precision", "mean"),
+            recall_mean=("recall", "mean"),
+            n_elements_mean=("n_elements", "mean"),
+            n_runs_combined_mean=("n_runs_combined", "mean"),
+            temperature=("temperature", "first"),
+        )
+        .reset_index()
+        .assign(run_type="combined")
+    )
+
+    comparison_df = pd.concat([single_agg, combined_agg], ignore_index=True)
+
+    # Save comparison metrics
+    comparison_df.to_csv(outputs_dir / "combined_vs_single_metrics.csv", index=False)
+    logger.info("  Saved: combined_vs_single_metrics.csv")
+
+    # Chart 1: F1 comparison by model-temp
+    fig = (
+        alt.Chart(comparison_df)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "model_temp:N",
+                title="Model-Temperature",
+                axis=alt.Axis(labelAngle=-45),
+                sort=model_temps,
+            ),
+            y=alt.Y("f1_mean:Q", title="F1 Score (Mean)"),
+            color=alt.Color(
+                "run_type:N",
+                title="Run Type",
+                scale=alt.Scale(
+                    domain=["single", "combined"], range=["steelblue", "orange"]
+                ),
+            ),
+            xOffset="run_type:N",
+            tooltip=[
+                "model_temp:N",
+                "run_type:N",
+                "f1_mean:Q",
+                "precision_mean:Q",
+                "recall_mean:Q",
+            ],
+        )
+        .properties(
+            width=800,
+            height=400,
+            title="F1 Score: Single Run vs Combined Runs",
+        )
+    )
+    fig.save(str(outputs_dir / "f1_single_vs_combined.png"), scale_factor=2)
+
+    # Chart 2: Precision and Recall comparison
+    comparison_long = pd.melt(
+        comparison_df,
+        id_vars=["model_temp", "run_type", "temperature"],
+        value_vars=["precision_mean", "recall_mean"],
+        var_name="metric",
+        value_name="score",
+    )
+
+    fig = (
+        alt.Chart(comparison_long)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "model_temp:N",
+                title="Model-Temperature",
+                axis=alt.Axis(labelAngle=-45),
+                sort=model_temps,
+            ),
+            y=alt.Y("score:Q", title="Score"),
+            color=alt.Color(
+                "run_type:N",
+                title="Run Type",
+                scale=alt.Scale(
+                    domain=["single", "combined"], range=["steelblue", "orange"]
+                ),
+            ),
+            xOffset="run_type:N",
+            column=alt.Column("metric:N", title="Metric"),
+        )
+        .properties(
+            width=350, height=400, title="Precision & Recall: Single vs Combined"
+        )
+    )
+    fig.save(
+        str(outputs_dir / "precision_recall_single_vs_combined.png"), scale_factor=2
+    )
+
+    # Chart 3: N elements comparison
+    fig = (
+        alt.Chart(comparison_df)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "model_temp:N",
+                title="Model-Temperature",
+                axis=alt.Axis(labelAngle=-45),
+                sort=model_temps,
+            ),
+            y=alt.Y("n_elements_mean:Q", title="Number of Elements (Mean)"),
+            color=alt.Color(
+                "run_type:N",
+                title="Run Type",
+                scale=alt.Scale(
+                    domain=["single", "combined"], range=["steelblue", "orange"]
+                ),
+            ),
+            xOffset="run_type:N",
+        )
+        .properties(
+            width=800,
+            height=400,
+            title="Number of Retrieved Elements: Single vs Combined",
+        )
+    )
+    fig.save(str(outputs_dir / "n_elements_single_vs_combined.png"), scale_factor=2)
+
+
 def plot_prompt_analysis(
     llm_filtered: pd.DataFrame,
     baseline_filtered: pd.DataFrame,
     prompt: str,
     outputs_dir: Path,
     model_temps: list,
+    skip_ranges: bool = False,
 ):
-    """Generate prompt analysis charts."""
+    """Generate prompt analysis charts.
+
+    Args:
+        llm_filtered: DataFrame with LLM results
+        baseline_filtered: DataFrame with baseline results
+        prompt: the prompt name
+        outputs_dir: the directory to save the charts
+        model_temps: the model temperatures to include in the charts
+        skip_ranges: if True, skip charts with IQR/ranges (for combined runs with single values)
+    """
     logger.info(f"  Plotting prompt analysis: {prompt}")
 
     # Compute F1 scores with baseline
@@ -358,7 +668,7 @@ def plot_prompt_analysis(
     by_question.to_csv(outputs_dir / "prompt_metrics_by_question.csv", index=False)
     logger.info("  Saved: prompt_metrics_by_question.csv")
 
-    # Chart 1: Retrieved total by model-temp with IQR
+    # Chart 1: Retrieved total by model-temp (with IQR if not skip_ranges)
     base = alt.Chart(by_model_temp)
 
     points = base.mark_circle(size=80, opacity=1).encode(
@@ -380,16 +690,21 @@ def plot_prompt_analysis(
         ],
     )
 
-    error_bars = base.mark_errorbar().encode(
-        x=alt.X("model_temp:N", axis=alt.Axis(labelAngle=-45), sort=model_temps),
-        y=alt.Y("retrieved_total_q1:Q", title=""),
-        y2=alt.Y2("retrieved_total_q3:Q", title=""),
-        color=alt.Color("temperature:N", scale=alt.Scale(scheme="orangered")),
-    )
+    if skip_ranges:
+        fig = points.properties(
+            width=800, height=400, title=f"Retrieved Total by Model-Temp - {prompt}"
+        )
+    else:
+        error_bars = base.mark_errorbar().encode(
+            x=alt.X("model_temp:N", axis=alt.Axis(labelAngle=-45), sort=model_temps),
+            y=alt.Y("retrieved_total_q1:Q", title=""),
+            y2=alt.Y2("retrieved_total_q3:Q", title=""),
+            color=alt.Color("temperature:N", scale=alt.Scale(scheme="orangered")),
+        )
+        fig = (error_bars + points).properties(
+            width=800, height=400, title=f"Retrieved Total by Model-Temp - {prompt}"
+        )
 
-    fig = (error_bars + points).properties(
-        width=800, height=400, title=f"Retrieved Total by Model-Temp - {prompt}"
-    )
     fig.save(
         str(outputs_dir / "prompt_retrieved_total_by_model_temp.png"), scale_factor=2
     )
@@ -482,25 +797,59 @@ def plot_prompt_analysis(
     fig.save(str(outputs_dir / "prompt_f1_median_by_question.png"), scale_factor=2)
 
 
-def main(experiment_name: str, n_questions: int):
-    """Generate all experiment charts."""
+def main(
+    experiment_name: str,
+    n_questions: int,
+    config_path: Path,
+    combine_runs_flag: bool = False,
+    compare_combined_runs: bool = False,
+):
+    """Generate all experiment charts.
+
+    Args:
+        experiment_name: Name of the experiment
+        n_questions: Number of questions to process
+        config_path: Path to config YAML file
+        combine_runs_flag: If True, combine and deduplicate results across runs
+        compare_combined_runs: If True, generate comparison charts between single and combined runs
+    """
+    # Load config
+    config = yaml.load(open(config_path, "r"), Loader=yaml.SafeLoader)
+
+    mode_str = "COMBINED RUNS" if combine_runs_flag else "INDIVIDUAL RUNS"
     logger.info("=" * 80)
-    logger.info(f"EXPERIMENT CHARTS: {experiment_name}")
+    logger.info(f"EXPERIMENT CHARTS: {experiment_name} ({mode_str})")
     logger.info("=" * 80)
 
     # Setup output directory
-    BASE_OUTPUTS_DIR = TESTING_DIR / "r_and_d/boolean_queries/outputs" / experiment_name
+    if combine_runs_flag:
+        BASE_OUTPUTS_DIR = (
+            TESTING_DIR
+            / "r_and_d/boolean_queries/outputs"
+            / experiment_name
+            / "combined_results"
+        )
+    else:
+        BASE_OUTPUTS_DIR = (
+            TESTING_DIR / "r_and_d/boolean_queries/outputs" / experiment_name
+        )
     BASE_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Load data
     llm_results_df = pd.read_json(
         BOOL_DIR / f"{experiment_name}_results.jsonl", lines=True
-    ).pipe(process_results)
+    ).pipe(process_results, config=config)
     logger.info(f"Loaded {experiment_name} results: {llm_results_df.shape}")
+
+    # Combine runs if requested
+    if combine_runs_flag:
+        logger.info("Combining runs (max 5 per parameter combination)...")
+        llm_results_df = combine_runs(llm_results_df, max_runs=5, random_seed=42)
+        logger.info(f"Combined results shape: {llm_results_df.shape}")
 
     baseline_results_df = (
         pd.read_json(BOOL_DIR / "baseline_results.jsonl", lines=True)
-        .pipe(process_results)
+        .pipe(process_results, config=config)
         .drop_duplicates(subset=["identifier"], keep="first")
     )
     logger.info(f"Loaded baseline results: {baseline_results_df.shape}")
@@ -557,8 +906,14 @@ def main(experiment_name: str, n_questions: int):
                 logger.warning(f"  No data for {reference}, skipping")
                 continue
 
-            # Plot basic charts
-            plot_individual_question(analysis_df, reference, OUTPUTS_DIR, model_temps)
+            # Plot basic charts (skip ranges for combined runs)
+            plot_individual_question(
+                analysis_df,
+                reference,
+                OUTPUTS_DIR,
+                model_temps,
+                skip_ranges=combine_runs_flag,
+            )
 
             # Compute metrics for this question
             baseline_result_ids = baseline_results_df.query("identifier == @reference")
@@ -592,7 +947,11 @@ def main(experiment_name: str, n_questions: int):
 
                 # Plot metric charts
                 plot_individual_question_with_metrics(
-                    metrics_df, reference, OUTPUTS_DIR, model_temps
+                    metrics_df,
+                    reference,
+                    OUTPUTS_DIR,
+                    model_temps,
+                    skip_ranges=combine_runs_flag,
                 )
 
         # Plot prompt summary analysis
@@ -615,8 +974,34 @@ def main(experiment_name: str, n_questions: int):
 
         # Plot prompt analysis
         plot_prompt_analysis(
-            llm_filtered, baseline_filtered, prompt, OUTPUTS_DIR, model_temps
+            llm_filtered,
+            baseline_filtered,
+            prompt,
+            OUTPUTS_DIR,
+            model_temps,
+            skip_ranges=combine_runs_flag,
         )
+
+        # Combined runs comparison analysis (optional)
+        if compare_combined_runs and not combine_runs_flag:
+            logger.info("\n" + "-" * 80)
+            logger.info(f"COMBINED RUNS ANALYSIS - {prompt}")
+            logger.info("-" * 80)
+
+            # Combine results across runs (max 5 runs per parameter combination)
+            combined_df = combine_runs(llm_filtered, max_runs=5, random_seed=42)
+            logger.info(
+                f"  Combined {len(llm_filtered)} individual runs into {len(combined_df)} combined results"
+            )
+
+            # Plot comparison between single and combined runs
+            plot_combined_vs_single_comparison(
+                llm_filtered,
+                combined_df,
+                baseline_filtered,
+                OUTPUTS_DIR,
+                model_temps,
+            )
 
     logger.info("\n" + "=" * 80)
     logger.info(f"✓ Experiment charts complete! Saved to: {BASE_OUTPUTS_DIR}")
@@ -637,6 +1022,32 @@ if __name__ == "__main__":
         default=3,
         help="Number of questions (identifiers) to process",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.yaml",
+        help="Config file name (e.g., 'config.yaml', 'config_2.yaml')",
+    )
+    parser.add_argument(
+        "--combine-runs",
+        action="store_true",
+        help="Combine and deduplicate results across runs (max 5 runs per parameter)",
+    )
+    parser.add_argument(
+        "--compare-combined-runs",
+        action="store_true",
+        help="Generate comparison charts between single and combined runs",
+    )
 
     args = parser.parse_args()
-    main(experiment_name=args.experiment, n_questions=args.n_questions)
+
+    # Build config path
+    config_path = TESTING_DIR / "r_and_d/boolean_queries" / args.config
+
+    main(
+        experiment_name=args.experiment,
+        n_questions=args.n_questions,
+        config_path=config_path,
+        combine_runs_flag=args.combine_runs,
+        compare_combined_runs=args.compare_combined_runs,
+    )

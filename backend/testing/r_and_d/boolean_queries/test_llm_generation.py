@@ -1,20 +1,22 @@
 """Test LLM-generated boolean queries retrieval performance.
 
 This script tests query generation using LLMs across different models, temperatures,
-and prompts as specified in config.yaml. Experiments run concurrently for faster execution.
+and prompts as specified in a config file. Experiments run concurrently for faster execution.
 
 Usage (run from backend directory):
-    # Count only (fast - just get total counts):
     cd backend
+    
+    # Count only (fast - just get total counts):
     uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --count-only
     
     # Full results (slow - retrieve all papers):
-    cd backend
     uv run python testing/r_and_d/boolean_queries/test_llm_generation.py
     
     # Custom output file name:
-    cd backend
     uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --output-name experiment1
+    
+    # Use alternate config file:
+    uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --config config_2.yaml
 """
 
 import asyncio
@@ -31,6 +33,8 @@ from testing.r_and_d.boolean_queries.query_tester import (
 from testing.r_and_d.boolean_queries.prompts import (
     policy_atlas_v1,
     policy_atlas_v2,
+    wang_et_al_q2_prompt,
+    wang_et_al_q3_prompt,
 )
 from testing import TESTING_DIR
 
@@ -40,19 +44,53 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Prompt registry - maps prompt names to prompt strings
+PROMPT_REGISTRY = {
+    "policy_atlas_v1": policy_atlas_v1,
+    "policy_atlas_v2": policy_atlas_v2,
+    "wang_et_al_q2_prompt": wang_et_al_q2_prompt,
+    "wang_et_al_q3_prompt": wang_et_al_q3_prompt,
+}
 
-async def main(count_only: bool = False, output_name: str = "llm"):
+
+async def main(
+    count_only: bool = False, output_name: str = "llm", config_file: str = "config.yaml"
+):
     """Run LLM-generated query retrieval test.
 
     Args:
         count_only: If True, only retrieve counts without fetching full results (much faster)
         output_name: Name prefix for output files (e.g., 'llm' -> 'llm_counts.jsonl')
+        config_file: Name of the config file to use (e.g., 'config.yaml', 'config_2.yaml')
     """
     # Get all research questions from reference CSV
     research_questions = reference_df["question"].tolist()
 
-    # Paths relative to this file
-    config_path = Path(__file__).parent / "config.yaml"
+    # Build config path
+    config_path = Path(__file__).parent / config_file
+
+    # Load config to get prompts
+    import yaml
+
+    config = yaml.load(open(config_path, "r"), Loader=yaml.SafeLoader)
+
+    # Build system_prompts dict from config
+    prompt_names = config.get("prompts", [])
+    system_prompts = {}
+    for prompt_name in prompt_names:
+        if prompt_name in PROMPT_REGISTRY:
+            system_prompts[prompt_name] = PROMPT_REGISTRY[prompt_name]
+        else:
+            logger.warning(
+                f"Prompt '{prompt_name}' not found in PROMPT_REGISTRY, skipping"
+            )
+
+    if not system_prompts:
+        raise ValueError(
+            f"No valid prompts found in config. Available: {list(PROMPT_REGISTRY.keys())}"
+        )
+
+    logger.info(f"Using prompts: {list(system_prompts.keys())}")
 
     # Set up the tester with LLM generator
     tester = BooleanQueryTester(
@@ -62,10 +100,7 @@ async def main(count_only: bool = False, output_name: str = "llm"):
             "generate_with_llm": generate_with_llm,
         },
         query_function=query_openalex_minimal,
-        system_prompts={
-            "policy_atlas_v1": policy_atlas_v1,
-            "policy_atlas_v2": policy_atlas_v2,
-        },
+        system_prompts=system_prompts,
     )
 
     # Define results file path based on mode
@@ -132,6 +167,18 @@ if __name__ == "__main__":
         default="llm",
         help="Name prefix for output files (default: 'llm' produces 'llm_counts.jsonl' or 'llm_results.jsonl')",
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.yaml",
+        help="Config file name (e.g., 'config.yaml', 'config_2.yaml')",
+    )
     args = parser.parse_args()
 
-    asyncio.run(main(count_only=args.count_only, output_name=args.output_name))
+    asyncio.run(
+        main(
+            count_only=args.count_only,
+            output_name=args.output_name,
+            config_file=args.config,
+        )
+    )

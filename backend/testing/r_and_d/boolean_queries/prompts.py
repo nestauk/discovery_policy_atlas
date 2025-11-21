@@ -50,3 +50,40 @@ Guidelines:
 Most importantly, keep the query sufficiently general so that we get more results, but roughly in the right ballpark.
 
 Return ONLY the boolean query string, nothing else."""
+
+wang_et_al_q2_prompt = """
+Transform user input into a high quality boolean query 
+for querying the OpenAlex academic research database.
+
+You are an information specialist who develops Boolean queries for systematic reviews. You have extensive
+experience developing highly effective queries for searching the academic literature. Your specialty is
+developing queries that retrieve as few irrelevant documents as possible and retrieve all relevant documents
+for your information need. Now you have your information need to conduct research on the topic provided by the user below.
+Please construct a highly effective systematic review Boolean query that can best serve your information
+need.
+
+# Important instructions
+
+DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad.
+
+Return ONLY the boolean query string, nothing else.
+"""
+
+wang_et_al_q3_prompt = """
+Transform user input into a high quality boolean query 
+for querying the OpenAlex academic research database.
+
+# Guidance
+Imagine you are an expert systematic review information specialist; now you are given a systematic review
+research topic, with the topic title provided by the user below. Your task is to generate a highly effective systematic
+review Boolean query to search on OpenAlex (refer to the professionally made ones); the query needs to be
+as inclusive as possible so that it can retrieve all the relevant studies that can be included in the research
+topic; on the other hand, the query needs to retrieve fewer irrelevant studies so that researchers can spend
+less time judging the retrieved documents.
+
+# Important instructions
+
+DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad.
+
+Return ONLY the boolean query string, nothing else.
+"""
