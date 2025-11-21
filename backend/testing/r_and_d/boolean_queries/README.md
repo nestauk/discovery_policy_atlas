@@ -19,20 +19,20 @@ cd backend
 ### 1. Generate Test Results
 
 ```bash
-# Fast mode - count only (no full paper retrieval)
+# Fast mode - count only (no paper ID retrieval, just the total count)
 uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --count-only --output-name experiment1
 
-# Full mode - retrieve all papers (slower but complete)
+# Full mode - retrieve all papers (slower but complete, retrieves all paper IDs)
 uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --output-name experiment1
 ```
 
 ### 2. Generate Visualizations
 
 ```bash
-# Basic visualization (3 questions by default)
+# Visualization
 uv run python testing/r_and_d/boolean_queries/plot_experiment.py --experiment experiment1
 
-# Analyze more questions
+# Analyze only the top_n user questions (I usually stopped running experiments after the first 10 questions were done)
 uv run python testing/r_and_d/boolean_queries/plot_experiment.py --experiment experiment1 --n-questions 10
 ```
 
@@ -41,7 +41,7 @@ uv run python testing/r_and_d/boolean_queries/plot_experiment.py --experiment ex
 Two configuration files are provided:
 
 - **`config.yaml`** - Default configuration with Policy Atlas prompts
-- **`config_2.yaml`** - Alternative configuration with Wang et al. prompts
+- **`config_2.yaml`** - Alternative configuration with Wang et al. inspired prompts
 
 Each config file specifies:
 - Models to test (e.g., gpt-4o, claude-3-5-sonnet)
@@ -63,7 +63,7 @@ uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --output-na
 # Use alternate config
 uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --config config_2.yaml --output-name experiment2
 
-# Count only (much faster - no paper retrieval)
+# Count only (much faster - no paper ID retrieval)
 uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --count-only --output-name experiment1
 ```
 
@@ -92,7 +92,7 @@ Generates comprehensive visualizations and analysis of experimental results.
 ### Usage Examples
 
 ```bash
-# Basic usage - analyze first 3 questions
+# Basic usage
 uv run python testing/r_and_d/boolean_queries/plot_experiment.py --experiment experiment1
 
 # Analyze more questions
@@ -101,7 +101,7 @@ uv run python testing/r_and_d/boolean_queries/plot_experiment.py --experiment ex
 # Use alternate config (must match the config used in test_llm_generation)
 uv run python testing/r_and_d/boolean_queries/plot_experiment.py --experiment experiment2 --config config_2.yaml
 
-# Generate combined runs output (deduplicate across multiple runs)
+# Generate combined runs analysis (combine and deduplicate across multiple runs of the same parameters)
 uv run python testing/r_and_d/boolean_queries/plot_experiment.py --experiment experiment1 --combine-runs
 
 # Generate comparison charts (single vs combined runs)
@@ -173,11 +173,6 @@ uv run python testing/r_and_d/boolean_queries/plot_experiment.py --experiment wa
 ## Available Prompts
 
 See `prompts.py` for the full prompt definitions. Current prompts:
-
-- **`policy_atlas_v1`** - Basic boolean query generation
-- **`policy_atlas_v2`** - Advanced query generation with concept extraction
-- **`wang_et_al_q2_prompt`** - High-precision systematic review query (from Wang et al.)
-- **`wang_et_al_q3_prompt`** - High-recall systematic review query (from Wang et al.)
 
 ## Adding New Prompts
 
