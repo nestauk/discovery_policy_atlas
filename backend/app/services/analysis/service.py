@@ -78,6 +78,8 @@ class AnalysisService:
                 mode=config.retrieval_mode,
                 boolean_query=config.boolean_query,
                 geography_filter=config.geography_filter,
+                project_id=project_id,
+                user_id=user_id,
             )
 
         # Count rows

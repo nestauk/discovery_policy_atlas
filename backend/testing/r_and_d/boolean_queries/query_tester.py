@@ -27,7 +27,8 @@ import logging
 from pathlib import Path
 from typing import Callable, Dict, Any, Optional, List, Tuple
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
 
 # Load environment variables
 load_dotenv()
@@ -65,30 +66,24 @@ async def generate_with_llm(
     model: str,
     temperature: float,
     system_prompt: str,
-    client: AsyncOpenAI = AsyncOpenAI(api_key=settings.OPENAI_API_KEY),
     max_tokens: int = None,
 ) -> str:
     """Generate boolean query using an LLM with the given prompt and parameters."""
+    # Create LLM instance
+    llm = ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        openai_api_key=settings.OPENAI_API_KEY,
+        max_tokens=max_tokens,
+    )
+
     messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": question},
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=question),
     ]
 
-    # Support legacy models that expect no explicit system role
-    if model in ["gpt-5", "gpt-5-mini", "gpt-5-nano"]:
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_completion_tokens=max_tokens,
-        )
-    else:
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-    return resp.choices[0].message.content.strip()
+    resp = await llm.ainvoke(messages)
+    return resp.content.strip()
 
 
 async def use_baseline_query(
@@ -96,7 +91,6 @@ async def use_baseline_query(
     model: str,
     temperature: float,
     system_prompt: str,
-    client: AsyncOpenAI = AsyncOpenAI(api_key=settings.OPENAI_API_KEY),
     *args,
     **kwargs,
 ) -> str:
@@ -155,7 +149,7 @@ class BooleanQueryTester:
         research_questions: list of research questions
         config_path: YAML with iteration params (e.g., models, temperatures, prompts, max_concurrent).
         prompt_generators: Dict mapping generator names to generator functions.
-            Signature: async fn(question, model, temperature, system_prompt, client, **kwargs) -> str
+            Signature: async fn(question, model, temperature, system_prompt, **kwargs) -> str
         query_function: Query execution function.
             Signature: async fn(query: str) -> Tuple[pd.DataFrame, Optional[int]]
         system_prompts: Dict mapping prompt names to prompt text strings
@@ -173,7 +167,6 @@ class BooleanQueryTester:
         with open(config_path, "r") as f:
             self.config = yaml.load(f, Loader=yaml.SafeLoader)
         self.openalex = OpenAlexService()
-        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
         self.prompt_generators = prompt_generators
         self.query_function = query_function
@@ -250,7 +243,6 @@ class BooleanQueryTester:
                     model=model,
                     temperature=temperature,
                     system_prompt=self.system_prompts[prompt_name],
-                    client=self.client,
                 )
                 boolean_query = sanitize_openalex_query(boolean_query)
                 t1 = time.perf_counter()
