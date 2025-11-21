@@ -100,7 +100,10 @@ class AnalysisService:
             with StageTimer(monitor, "relevance"):
                 logger.info("Run %s starting relevance checking", run_id)
                 relevance_service = RelevanceService(
-                    query=config.query, export_dir=str(run_export_dir)
+                    query=config.query,
+                    export_dir=str(run_export_dir),
+                    project_id=project_id,
+                    user_id=user_id,
                 )
                 references_csv = await relevance_service.check_relevance(
                     str(references_csv)
@@ -197,6 +200,7 @@ class AnalysisService:
                     temperature=0.0,
                     concurrency=settings.BATCH_SIZE_EXTRACTION,
                     project_id=project_id,
+                    user_id=user_id,
                 )
             )
 

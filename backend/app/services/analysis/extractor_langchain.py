@@ -63,6 +63,7 @@ class LangChainExtractionConfig:
     temperature: float = 0.0
     concurrency: int = 3
     project_id: Optional[str] = None  # For interim storage
+    user_id: Optional[str] = None  # Policy Atlas user initiating the run
 
 
 class LangChainExtractorService:
@@ -74,6 +75,8 @@ class LangChainExtractorService:
         self.workflow = ExtractionWorkflow(
             model=config.model,
             temperature=config.temperature,
+            policy_project_id=config.project_id,
+            policy_user_id=config.user_id,
         )
         # Initialize storage service for interim storage
         self.storage_service = AnalysisStorageService() if config.project_id else None
