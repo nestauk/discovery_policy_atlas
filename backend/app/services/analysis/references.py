@@ -553,11 +553,11 @@ class ReferencesService:
         # If we got more results than limit due to multi-query, trim them
         if use_multi_query and len(df) > limit:
             logger.info(
-                "✂️ Trimming results from %d to %d (limit) - keeping most cited papers",
+                "✂️ Trimming results from %d to %d (limit) - keeping most relevant papers",
                 len(df),
                 limit,
             )
-            # Sort by relevance_score to keep most cited papers
+            # Sort by relevance_score to keep most relevant papers
             if "relevance_score" in df.columns:
                 df = df.sort_values("relevance_score", ascending=False).head(limit)
             else:
