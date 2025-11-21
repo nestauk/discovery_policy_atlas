@@ -1,0 +1,19 @@
+# Comparison configurations for plot_prompt_comparison.py
+# Each comparison is a pairwise comparison between two prompts
+
+comparison_1:
+  experiment1: "experiment1"
+  prompt1: "policy_atlas_v2"
+  experiment2: "experiment2"  # can omit or set to same as experiment1
+  prompt2: "wang_et_al_q3_prompt"
+  output_dir: "prompt_comparison_1"
+  config: "config.yaml"  # config file for model ordering
+
+comparison_2:
+  experiment1: "experiment1"
+  prompt1: "policy_atlas_v1"
+  experiment2: "experiment1"  # same experiment
+  prompt2: "policy_atlas_v2"
+  output_dir: "prompt_comparison_2"
+  config: "config.yaml"
+

@@ -29,6 +29,7 @@ from typing import Callable, Dict, Any, Optional, List, Tuple
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
+from testing import TESTING_DIR
 
 # Load environment variables
 load_dotenv()
@@ -44,7 +45,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Reference queries (relative to this file)
-reference_path = Path(__file__).parent / "inputs/reference_queries.csv"
+reference_path = TESTING_DIR / "r_and_d/boolean_queries/inputs/reference_queries.csv"
 reference_df = pd.read_csv(reference_path)
 reference_question_to_query = dict(
     zip(reference_df["question"], reference_df["boolean_query"])

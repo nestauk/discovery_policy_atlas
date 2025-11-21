@@ -4,9 +4,10 @@ This directory contains tools for testing and evaluating LLM-generated boolean q
 
 ## Overview
 
-The framework consists of two main scripts:
+The framework consists of three main scripts:
 1. **`test_llm_generation.py`** - Generates boolean queries using LLMs and tests their retrieval performance
 2. **`plot_experiment.py`** - Analyzes and visualizes the experimental results
+3. **`plot_prompt_comparison.py`** - Compares results from two different prompts. Configure comparisons in `config_comparison.yaml` and run: `uv run python testing/r_and_d/boolean_queries/plot_prompt_comparison.py --comparison comparison_1`
 
 ## Quick Start
 
