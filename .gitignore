@@ -64,6 +64,7 @@ __pycache__/
 .uv/
 *.egg-info/
 *.egg
+backend/backend.egg-info/
 dist/
 build/
 
