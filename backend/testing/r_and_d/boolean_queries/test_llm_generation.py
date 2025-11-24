@@ -54,7 +54,10 @@ PROMPT_REGISTRY = {
 
 
 async def main(
-    count_only: bool = False, output_name: str = "llm", config_file: str = "config.yaml"
+    count_only: bool = False,
+    output_name: str = "llm",
+    config_file: str = "config.yaml",
+    quick: bool = False,
 ):
     """Run LLM-generated query retrieval test.
 
@@ -62,6 +65,7 @@ async def main(
         count_only: If True, only retrieve counts without fetching full results (much faster)
         output_name: Name prefix for output files (e.g., 'llm' -> 'llm_counts.jsonl')
         config_file: Name of the config file to use (e.g., 'config.yaml', 'config_2.yaml')
+        quick: If True, run minimal test with 1 model, 1 temperature, 1 prompt (for quick iteration)
     """
     # Get all research questions from reference CSV
     research_questions = reference_df["question"].tolist()
@@ -73,6 +77,14 @@ async def main(
     import yaml
 
     config = yaml.load(open(config_path, "r"), Loader=yaml.SafeLoader)
+
+    # Quick mode: use only first model, temperature, and prompt
+    if quick:
+        config["models"] = config["models"][:1]
+        config["temperatures"] = config["temperatures"][:1]
+        config["prompts"] = config["prompts"][:1]
+        config["runs_per_query"] = 1
+        logger.info("QUICK MODE: Testing with 1 model, 1 temperature, 1 prompt, 1 run")
 
     # Build system_prompts dict from config
     prompt_names = config.get("prompts", [])
@@ -141,15 +153,22 @@ async def main(
     # Run the test (results will be saved incrementally to JSONL file)
     logger.info("\nStarting LLM query generation test...")
     logger.info("=" * 80)
-    results_records = await tester.run(
-        results_file=results_file,
-        count_only=count_only,
-    )
-
-    logger.info("=" * 80)
-    logger.info("\n✓ Completed!")
-    logger.info(f"  New results processed: {len(results_records)}")
-    logger.info(f"  Results saved to: {results_file}")
+    try:
+        results_records = await tester.run(
+            results_file=results_file,
+            count_only=count_only,
+        )
+        logger.info("=" * 80)
+        logger.info("\n✓ Completed!")
+        logger.info(f"  New results processed: {len(results_records)}")
+        logger.info(f"  Results saved to: {results_file}")
+    except KeyboardInterrupt:
+        logger.info("\n" + "=" * 80)
+        logger.info("⚠ Interrupted by user")
+        logger.info(f"  Partial results saved to: {results_file}")
+        logger.info(
+            "  You can resume this experiment by running the same command again"
+        )
 
 
 if __name__ == "__main__":
@@ -160,6 +179,11 @@ if __name__ == "__main__":
         "--count-only",
         action="store_true",
         help="Only retrieve counts without fetching full results (much faster)",
+    )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick test mode: uses only 1 model, 1 temperature, 1 prompt (great for testing parameters before long runs)",
     )
     parser.add_argument(
         "--output-name",
@@ -180,5 +204,6 @@ if __name__ == "__main__":
             count_only=args.count_only,
             output_name=args.output_name,
             config_file=args.config,
+            quick=args.quick,
         )
     )
