@@ -726,6 +726,7 @@ async def generate_policy_assistant_response(
     conversation: ConversationRecord,
     user_message: str,
     project_id: str = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    user_id: Optional[str] = None,
 ) -> tuple[str, str, str, bool, bool, bool]:
     """Generate response using simplified LangChain conversation manager or RAG"""
 
@@ -780,7 +781,10 @@ async def generate_policy_assistant_response(
             response_content,
             analysis,
         ) = await simplified_conversation_manager.generate_response(
-            message_dicts, user_message
+            message_dicts,
+            user_message,
+            policy_project_id=project_id,
+            policy_user_id=user_id,
         )
 
         return (
@@ -836,6 +840,7 @@ async def chat_with_policy_assistant(
             conversation,
             request.message,
             request.project_id or "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            user_id=current_user.user_id,
         )
 
         # Add assistant message to conversation
@@ -1282,7 +1287,9 @@ async def extract_key_insights(
     try:
         # Extract insights
         insights = await advanced_rag_service.extract_key_insights(
-            user_query=request.query, project_id=request.project_id
+            user_query=request.query,
+            project_id=request.project_id,
+            policy_user_id=current_user.user_id,
         )
 
         # Review the insights
@@ -1294,6 +1301,7 @@ async def extract_key_insights(
             insights = await advanced_rag_service.extract_key_insights(
                 user_query=f"{request.query} - provide more detailed analysis",
                 project_id=request.project_id,
+                policy_user_id=current_user.user_id,
             )
             review = await advanced_rag_service.review_insights(insights)
 

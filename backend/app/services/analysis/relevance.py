@@ -30,10 +30,18 @@ class RelevanceService:
     - Classify document type (research_paper | policy_document | other)
     """
 
-    def __init__(self, query: str, export_dir: Optional[str] = None):
+    def __init__(
+        self,
+        query: str,
+        export_dir: Optional[str] = None,
+        project_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ):
         self.query = query
         self.export_dir = Path(export_dir) if export_dir else Path("./temp")
         self.export_dir.mkdir(parents=True, exist_ok=True)
+        self.project_id = project_id
+        self.user_id = user_id
 
         # System message for relevance and document type assessment
         self.system_message = RELEVANCE_SYSTEM_PROMPT(query)
@@ -275,8 +283,15 @@ class RelevanceService:
         processor = batch_check.LLMProcessor(
             output_path=output_path,
             system_message=self.system_message,
-            session_name=session_name,
+            session_name=None,
             output_fields=self.fields,
+            component_tags=[
+                "component:relevance",
+                "component:relevance.batch_check",
+            ],
+            policy_project_id=self.project_id,
+            policy_user_id=self.user_id,
+            run_name="relevance.batch_check",
         )
 
         # Run relevance assessment

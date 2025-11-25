@@ -159,6 +159,7 @@ class ScreeningService:
             system_message=self.system_message,
             session_name=session_name,
             output_fields=self.fields,
+            run_name="screening.batch_check",
         )
 
         # Run screening

@@ -454,9 +454,22 @@ async def trigger_synthesis_for_project(project_id: str) -> None:
     try:
         logger.info(f"Starting synthesis for project {project_id}")
 
+        project_user_id = None
+        try:
+            project_row = (
+                vectorization_service.supabase.table("analysis_projects")
+                .select("created_by_user_id")
+                .eq("id", project_id)
+                .execute()
+            )
+            if project_row.data:
+                project_user_id = project_row.data[0].get("created_by_user_id")
+        except Exception:
+            project_user_id = None
+
         # Run synthesis
         synthesis_agent = SynthesisAgent()
-        final_state = await synthesis_agent.run(project_id)
+        final_state = await synthesis_agent.run(project_id, user_id=project_user_id)
 
         # Remove the placeholder run before creating the final one (async to avoid blocking)
         supabase = vectorization_service.supabase
