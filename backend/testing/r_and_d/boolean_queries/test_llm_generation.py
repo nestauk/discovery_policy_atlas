@@ -23,6 +23,8 @@ import asyncio
 import argparse
 from pathlib import Path
 import logging
+import json
+from datetime import datetime
 
 from testing.r_and_d.boolean_queries.query_tester import (
     BooleanQueryTester,
@@ -104,17 +106,6 @@ async def main(
 
     logger.info(f"Using prompts: {list(system_prompts.keys())}")
 
-    # Set up the tester with LLM generator
-    tester = BooleanQueryTester(
-        research_questions=research_questions,
-        config_path=config_path,
-        prompt_generators={
-            "generate_with_llm": generate_with_llm,
-        },
-        query_function=query_openalex_minimal,
-        system_prompts=system_prompts,
-    )
-
     # Define results file path based on mode
     if count_only:
         results_file = (
@@ -130,6 +121,40 @@ async def main(
             / f"{output_name}_results.jsonl"
         )
         logger.info("Running in FULL RESULTS mode (slow, retrieves all papers)")
+
+    # Write metadata to a new metadata.json file
+    metadata_path = Path(results_file).parent / f"{output_name}_metadata.json"
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+
+    metadata = {
+        "timestamp": datetime.now().isoformat(),
+        "config_file": config_file,
+        "output_name": output_name,
+        "count_only": count_only,
+        "quick_mode": quick,
+        "models": config.get("models", []),
+        "temperatures": config.get("temperatures", []),
+        "prompts": list(system_prompts.keys()),
+        "runs_per_query": config.get("runs_per_query", 1),
+        "max_concurrent": config.get("max_concurrent", 10),
+        "research_questions": research_questions,
+        "n_questions": len(research_questions),
+    }
+
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=4)
+    logger.info(f"Metadata written to {metadata_path.name}")
+
+    # Set up the tester with LLM generator
+    tester = BooleanQueryTester(
+        research_questions=research_questions,
+        config_path=config_path,
+        prompt_generators={
+            "generate_with_llm": generate_with_llm,
+        },
+        query_function=query_openalex_minimal,
+        system_prompts=system_prompts,
+    )
 
     logger.info("Using CONCURRENT execution")
 

@@ -17,6 +17,18 @@ All commands should be run from the `backend` directory:
 cd backend
 ```
 
+### 0. Generate Baseline Results (Required)
+
+Before running plotting scripts, you must first generate baseline results:
+
+```bash
+# Fast mode - count only
+uv run python testing/r_and_d/boolean_queries/test_baseline.py --count-only
+
+# Full mode - retrieve all papers
+uv run python testing/r_and_d/boolean_queries/test_baseline.py
+```
+
 ### 1. Generate Test Results
 
 ```bash
@@ -28,6 +40,14 @@ uv run python testing/r_and_d/boolean_queries/test_llm_generation.py --output-na
 ```
 
 ### 2. Generate Visualizations
+
+For baseline visualisations:
+
+```bash
+uv run python testing/r_and_d/boolean_queries/plot_baseline.py
+```
+
+For tests:
 
 ```bash
 # Visualization
