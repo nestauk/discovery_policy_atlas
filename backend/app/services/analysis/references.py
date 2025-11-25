@@ -366,12 +366,13 @@ class ReferencesService:
                     )
                 )
             # Add raw Overton first-page JSON for debugging
+            # Use the same query parameters as the search() call above
             tasks.append(
                 overton_service.fetch_raw(
                     **(
                         {"squery": query}
                         if mode == "semantic"
-                        else {"query": boolean_query or query}
+                        else {"query": overton_boolean_query}
                     ),
                     min_similarity=0.3,
                     pp=limit if limit and limit < 50 else 50,
@@ -551,17 +552,31 @@ class ReferencesService:
                 )
 
         # If we got more results than limit due to multi-query, trim them
+        # BUT: trim OpenAlex and Overton separately to preserve Overton results
         if use_multi_query and len(df) > limit:
             logger.info(
-                "✂️ Trimming results from %d to %d (limit) - keeping most relevant papers",
+                "✂️ Trimming results from %d to %d (limit)",
                 len(df),
                 limit,
             )
-            # Sort by relevance_score to keep most relevant papers
-            if "relevance_score" in df.columns:
-                df = df.sort_values("relevance_score", ascending=False).head(limit)
-            else:
-                df = df.head(limit)
+
+            # Separate OpenAlex and Overton results
+            openalex_df = df[df["source"] == "openalex"].copy()
+            overton_df = df[df["source"] == "overton"].copy()
+
+            # Trim OpenAlex results by relevance_score, keep all Overton results
+            if len(openalex_df) > 0 and "relevance_score" in openalex_df.columns:
+                openalex_df = openalex_df.sort_values(
+                    "relevance_score", ascending=False
+                ).head(limit)
+                logger.info(
+                    "  📊 Kept top %d OpenAlex results (sorted by relevance), all %d Overton results",
+                    len(openalex_df),
+                    len(overton_df),
+                )
+
+            # Recombine
+            df = pd.concat([openalex_df, overton_df], ignore_index=True)
 
         # Ensure export directory exists
         self.export_dir.mkdir(parents=True, exist_ok=True)
