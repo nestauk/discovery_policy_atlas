@@ -114,6 +114,12 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4000
 
+    # Boolean Query Generation Settings
+    BOOLEAN_QUERY_GENERATION_MODE: str = "multi"  # "single" or "multi"
+    BOOLEAN_QUERY_TEMPERATURE: float = 1.0  # Temperature for query generation
+    BOOLEAN_QUERY_N_RUNS: int = 5  # Number of queries to generate in multi mode
+    BOOLEAN_QUERY_MODEL: str = "gpt-4.1"  # Model for query generation
+
     # Batch Processing Settings
     BATCH_SIZE_SCREENING: int = 5
     BATCH_SIZE_EXTRACTION: int = 5  #

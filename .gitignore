@@ -62,6 +62,10 @@ __pycache__/
 *.py[cod]
 .venv/
 .uv/
+*.egg-info/
+*.egg
+dist/
+build/
 
 # ========================================
 # 🚀 Deployment and Platforms
@@ -74,3 +78,4 @@ reference/*
 temp/*
 memory-bank/*
 backend/temp/*
+backend/testing/r_and_d/boolean_queries/outputs/*

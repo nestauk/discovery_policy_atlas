@@ -10,6 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 # BOOLEAN QUERY GENERATION
 # =============================================================================
 
+
 BOOLEAN_QUERY_SYSTEM_PROMPT = """You are an expert at creating boolean search queries for academic literature databases like OpenAlex and Overton.
 
 Given a research question, extract the key concepts and create a targeted boolean search query. DO NOT use the entire research question as a search term.
@@ -261,3 +262,29 @@ Interventions context (if available):
         ),
     ]
 )
+
+
+# =============================================================================
+# MULTI-QUERY BOOLEAN GENERATION
+# =============================================================================
+
+# Based on R&D findings using Wang et al. Q3 prompt
+# This prompt is used when generating multiple diverse queries with temperature > 0
+BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT = """Transform user input into a high quality boolean query 
+for querying the OpenAlex academic research database.
+
+# Guidance
+Imagine you are an expert systematic review information specialist; now you are given a systematic review
+research topic, with the topic title provided by the user below. Your task is to generate a highly effective systematic
+review Boolean query to search on OpenAlex (refer to the professionally made ones); the query needs to be
+as inclusive as possible so that it can retrieve all the relevant studies that can be included in the research
+topic; on the other hand, the query needs to retrieve fewer irrelevant studies so that researchers can spend
+less time judging the retrieved documents.
+
+# Important instructions
+
+DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. 
+For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad.
+
+Return ONLY the boolean query string, nothing else.
+"""
