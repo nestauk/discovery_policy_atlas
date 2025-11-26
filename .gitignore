@@ -16,6 +16,10 @@
 # 🧪 Testing and Coverage
 # ========================================
 **/coverage/
+**/results/
+**/bibliographies/
+**/bibliographies_standardized/
+**/datasets/
 
 # ========================================
 # ⚙️ Build and Production Artifacts
