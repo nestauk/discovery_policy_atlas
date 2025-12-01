@@ -5,11 +5,20 @@ into executive summaries, key issues, interventions, and detailed
 findings.
 """
 
-from .schemas import KeyIssue, PolicyIntervention, SynthesisSummary, Finding
+from .schemas import (
+    KeyIssue,
+    PolicyIntervention,
+    SynthesisSummary,
+    Finding,
+    ThematicGroup,
+    EvidenceItem,
+)
 
 __all__ = [
     "KeyIssue",
     "PolicyIntervention",
     "SynthesisSummary",
     "Finding",
+    "ThematicGroup",
+    "EvidenceItem",
 ]
