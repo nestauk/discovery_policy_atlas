@@ -1,36 +1,75 @@
 import os
-
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 import tiktoken
-
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import AzureChatOpenAI
 from langchain_openai import ChatOpenAI
-
-# from langfuse.langchain import CallbackHandler
+from langfuse.langchain import CallbackHandler
 from pydantic import BaseModel
 
 import logging
 
+from app.core.config import settings
 
+# Legacy env var support - use config.py settings by default
 try:
-    LLM_SERVICE = os.getenv("LLM_SERVICE")
+    LLM_SERVICE = os.getenv("LLM_SERVICE", settings.LLM_PROVIDER)
 except KeyError:
     LLM_SERVICE = "OpenAI"
 
 
-# def get_langfuse_handler(session_id: str = None) -> CallbackHandler:
-#     """Initialise a Langfuse callback handler"""
-#     if session_id is None:
-#         session_id = f"{datetime.today().isoformat()}"
+def get_langfuse_handler(session_id: str = None) -> CallbackHandler:
+    """Initialise a Langfuse callback handler"""
+    if session_id is None:
+        session_id = f"{datetime.today().isoformat()}"
 
-#     return CallbackHandler(
-#         user_id=os.environ.get("USER_EMAIL"),
-#         session_id=session_id,
-#         secret_key=os.environ.get("LANGFUSE_SECRET_KEY"),
-#         public_key=os.environ.get("LANGFUSE_PUBLIC_KEY"),
-#         host=os.environ.get("LANGFUSE_HOST"),
-#     )
+    # The Langfuse LangChain CallbackHandler reads configuration from environment variables.
+    # It does not accept user/session/keys as init kwargs.
+    return CallbackHandler()
+
+
+def resolve_langfuse_session_id(
+    project_id: Optional[str] = None, session_name: Optional[str] = None
+) -> str:
+    """Return a canonical Langfuse session id for the given project."""
+    if session_name:
+        return session_name
+    if project_id:
+        return f"project:{project_id}"
+    return "project:global"
+
+
+def build_langfuse_metadata(
+    *,
+    tags: Optional[List[str]] = None,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Compose metadata payload that Langfuse understands for tags/user/session."""
+
+    metadata: Dict[str, Any] = {}
+    if extra:
+        metadata.update(extra)
+
+    if tags:
+        metadata["langfuse_tags"] = tags
+
+    resolved_session = session_id or resolve_langfuse_session_id(project_id)
+    if resolved_session:
+        metadata["langfuse_session_id"] = resolved_session
+
+    if user_id:
+        metadata["langfuse_user_id"] = user_id
+        metadata["policy_user_id"] = user_id
+
+    if project_id:
+        metadata["policy_project_id"] = project_id
+
+    return metadata
 
 
 def get_llm(model_name: str = None, temperature: float = None) -> ChatOpenAI:
@@ -59,9 +98,15 @@ def get_llm(model_name: str = None, temperature: float = None) -> ChatOpenAI:
             )
         logging.info("Using OpenAI")
         return ChatOpenAI(
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            openai_api_key=settings.OPENAI_API_KEY,
             model_name=model_name,
             temperature=temperature,
+            request_timeout=120.0,  # 2 minute timeout to prevent hanging
+        )
+    else:
+        raise ValueError(
+            f"Unknown LLM_SERVICE: {LLM_SERVICE}. Must be 'OpenAI' or 'Azure'. "
+            f"Check your LLM_PROVIDER setting in config.py or LLM_SERVICE environment variable."
         )
 
 

@@ -1,12 +1,41 @@
 from pyalex import Works, config
 import pandas as pd
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple, List
 from datetime import date
 from openai import AsyncOpenAI
 from app.core.config import settings
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_openalex_query(query: str) -> str:
+    """
+    Sanitize boolean query for OpenAlex compatibility.
+
+    OpenAlex doesn't handle commas inside quoted phrases properly,
+    so we remove them while preserving the query structure.
+
+    Args:
+        query: Boolean query string
+
+    Returns:
+        Sanitized query string safe for OpenAlex
+    """
+    import re
+
+    # Find all quoted phrases and remove commas within them
+    def remove_commas_in_quotes(match):
+        quoted_text = match.group(0)
+        # Remove commas inside the quotes
+        return quoted_text.replace(",", "")
+
+    # Pattern to match quoted strings (both single and double quotes)
+    pattern = r'"[^"]*"'
+    sanitized = re.sub(pattern, remove_commas_in_quotes, query)
+
+    return sanitized
 
 
 class OpenAlexService:
@@ -26,47 +55,6 @@ class OpenAlexService:
                 "OpenAI API key not configured - boolean query generation will be disabled"
             )
 
-    async def generate_boolean_query(self, original_query: str) -> str:
-        """Generate a boolean search query optimized for OpenAlex using OpenAI"""
-        if not self._openai_client:
-            logger.warning("OpenAI client not available, returning original query")
-            return original_query
-
-        system_prompt = """You are an expert at creating boolean search queries for academic literature databases like OpenAlex.
-
-Given a research question, create an optimized boolean search query that will find the most relevant academic papers. Follow these guidelines:
-
-1. Use AND, OR, NOT operators appropriately
-2. Group related terms with parentheses
-3. Include synonyms and related terms with OR
-4. Use quotes for exact phrases when appropriate
-5. Consider academic terminology and jargon
-6. Focus on terms that would appear in titles and abstracts
-7. Keep the query concise but comprehensive
-
-Return ONLY the boolean query string, nothing else."""
-
-        user_prompt = f"Original research question: {original_query}\n\nCreate an optimized boolean search query for academic literature:"
-
-        try:
-            response = await self._openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.3,
-                max_tokens=200,
-            )
-
-            boolean_query = response.choices[0].message.content.strip()
-            logger.info(f"Generated boolean query: {boolean_query}")
-            return boolean_query
-
-        except Exception as e:
-            logger.error(f"Error generating boolean query: {e}")
-            return original_query
-
     async def search(
         self,
         query: str,
@@ -74,8 +62,23 @@ Return ONLY the boolean query string, nothing else."""
         min_citations: Optional[int] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
+        return_n_total: bool = False,
     ) -> pd.DataFrame:
-        """Search OpenAlex for papers using PyAlex"""
+        """Search OpenAlex for papers using PyAlex
+
+        Args:
+            query: The search query to use
+            max_results: The maximum number of results to return
+            min_citations: The minimum number of citations to return
+            date_from: The minimum date to return
+            date_to: The maximum date to return
+            return_n_total: Whether to return the total number of results matching the query
+
+        Returns:
+            pd.DataFrame: A DataFrame of the results (up to max_results)
+            If return_n_total is True, returns tuple (pd.DataFrame, int) where int is the
+            total count of all results matching the query (from meta.count in OpenAlex API)
+        """
 
         # Build query with PyAlex
         works_query = Works().search_filter(title_and_abstract=query)
@@ -92,12 +95,23 @@ Return ONLY the boolean query string, nothing else."""
         if date_to:
             works_query = works_query.filter(to_publication_date=date_to.isoformat())
 
+        # Get total count if requested
+        n_total = None
+        if return_n_total:
+            n_total = works_query.count()
+
         # Get results directly into DataFrame
         results = []
-        for page in works_query.paginate(
-            per_page=min(25, max_results), n_max=max_results
-        ):
-            results.extend(page)
+        if max_results is None:
+            # Fetch all results
+            for page in works_query.paginate(per_page=200):
+                results.extend(page)
+        else:
+            # Fetch up to max_results
+            for page in works_query.paginate(
+                per_page=min(200, max_results), n_max=max_results
+            ):
+                results.extend(page)
 
         # Apply pyalex trick to reinvert abstracts
         for page in results:
@@ -173,6 +187,9 @@ Return ONLY the boolean query string, nothing else."""
                 # Extract citation count
                 cited_by_count = page.get("cited_by_count", 0)
 
+                # Extract relevance score
+                relevance_score = page.get("relevance_score", 0)
+
                 # Extract work type
                 work_type = page.get("type_crossref", "unknown")
 
@@ -186,6 +203,7 @@ Return ONLY the boolean query string, nothing else."""
                     "publication_year": page.get("publication_year"),
                     "venue": venue,
                     "cited_by_count": cited_by_count,
+                    "relevance_score": relevance_score,
                     "work_type": work_type,
                     "source_country": "Academic",  # OpenAlex is academic literature
                     "source_type": "Academic Paper",
@@ -219,182 +237,177 @@ Return ONLY the boolean query string, nothing else."""
         )
         df["venue"] = df["venue"].fillna("")
         df["cited_by_count"] = df["cited_by_count"].fillna(0)
+        df["relevance_score"] = df["relevance_score"].fillna(0)
         df["work_type"] = df["work_type"].fillna("unknown")
         df["source_country"] = df["source_country"].fillna("Academic")
         df["source_type"] = df["source_type"].fillna("Academic Paper")
 
-        return df
+        if return_n_total:
+            return df, n_total
+        else:
+            return df
 
-    async def search_for_agent(
+    async def search_minimal(
         self,
         query: str,
-        max_results: int = 20,
-        focus_on_reviews: bool = True,
+        max_results: Optional[int] = settings.DEFAULT_MAX_RESULTS,
+        min_citations: Optional[int] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        return_n_total: bool = False,
+        count_only: bool = False,
+        fields: list[str] = ["id", "doi", "title", "cited_by_count", "relevance_score"],
+    ) -> pd.DataFrame | Tuple[pd.DataFrame, int] | int:
+        """Minimal search that only returns id, DOI, and title fields
+
+        Args:
+            query: The search query to use
+            max_results: The maximum number of results to return. If None, fetches all results.
+            min_citations: The minimum number of citations to return
+            date_from: The minimum date to return
+            date_to: The maximum date to return
+            return_n_total: Whether to return the total number of results matching the query
+            count_only: If True, only return the count without fetching any results
+
+        Returns:
+            pd.DataFrame: A DataFrame with only id, doi, and title columns
+            If return_n_total is True, returns tuple (pd.DataFrame, int) where int is the
+            total count of all results matching the query (from meta.count in OpenAlex API)
+            If count_only is True, returns only int (the total count)
+        """
+        # Sanitize query for OpenAlex compatibility (removes commas from quoted phrases)
+        sanitized_query = sanitize_openalex_query(query)
+        logger.debug(f"Original query: {query}")
+        logger.debug(f"Sanitized query: {sanitized_query}")
+
+        # Build query with PyAlex
+        works_query = Works().search_filter(title_and_abstract=sanitized_query)
+
+        # Add filters using PyAlex filter syntax
+        if min_citations:
+            works_query = works_query.filter(cited_by_count=f">{min_citations}")
+
+        if date_from:
+            works_query = works_query.filter(
+                from_publication_date=date_from.isoformat()
+            )
+
+        if date_to:
+            works_query = works_query.filter(to_publication_date=date_to.isoformat())
+
+        # Select only the essential fields
+        works_query = works_query.select(fields)
+
+        # Get total count if requested or if count_only
+        n_total = None
+        if return_n_total or count_only:
+            n_total = works_query.count()
+
+        # If only count is requested, return early
+        if count_only:
+            return n_total
+
+        # Get results directly into DataFrame
+        results = []
+        if max_results is None:
+            # Fetch all results
+            for page in works_query.paginate(per_page=200):
+                results.extend(page)
+        else:
+            # Fetch up to max_results
+            for page in works_query.paginate(
+                per_page=min(200, max_results), n_max=max_results
+            ):
+                results.extend(page)
+
+        # Extract only essential fields
+        minimal_results = []
+        for page in results:
+            minimal_results.append(
+                {
+                    "id": page.get("id", ""),
+                    "doi": page.get("doi", ""),
+                    "title": page.get("title", ""),
+                    "cited_by_count": page.get("cited_by_count", 0),
+                    "relevance_score": page.get("relevance_score", 0),
+                }
+            )
+
+        # Convert to DataFrame
+        df = pd.DataFrame(minimal_results)
+
+        if return_n_total:
+            return df, n_total
+        else:
+            return df
+
+    async def search_multi_query(
+        self,
+        queries: List[str],
+        max_results_per_query: Optional[int] = None,
         min_citations: Optional[int] = None,
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
     ) -> pd.DataFrame:
+        """Execute multiple queries and combine results, removing duplicates.
+
+        This method is designed for multi-query search strategies where multiple
+        diverse boolean queries are generated and their results are combined
+        for better coverage.
+
+        Args:
+            queries: List of boolean query strings
+            max_results_per_query: Max results per individual query (None = unlimited)
+            min_citations: Minimum citation count filter
+            date_from: Filter by minimum publication date
+            date_to: Filter by maximum publication date
+
+        Returns:
+            Combined DataFrame with duplicates removed by ID
         """
-        Enhanced search for agent functionality with boolean query generation
-        and focus on reviews and meta-studies
-        """
-        try:
-            # Generate boolean query using OpenAI
-            boolean_query = await self.generate_boolean_query(query)
+        logger.info(
+            "🔍 Executing %d queries and combining results (de-duplicating by ID)",
+            len(queries),
+        )
 
-            # Add review terms if focusing on reviews
-            if focus_on_reviews:
-                boolean_query = f'({boolean_query}) AND ("review" OR "meta analysis" OR "systematic" OR "metastudy")'
-                logger.info("Enhanced query to prioritize reviews and meta-analyses")
-
-            logger.info(f"Using boolean query for search: {boolean_query}")
-
-            # Build query with PyAlex using the boolean query
-            works_query = Works().search_filter(title_and_abstract=boolean_query)
-
-            # Add filters for reviews and meta-studies if requested
-            if focus_on_reviews:
-                # Instead of filtering by type (which seems too restrictive),
-                # enhance the boolean query to prioritize reviews and meta-analyses
-                # The boolean query already includes these terms from OpenAI
-                logger.info(
-                    "Search optimized for review articles and meta-analyses via boolean query"
-                )
-
-            # Add other filters
-            if min_citations:
-                works_query = works_query.filter(cited_by_count=f">{min_citations}")
-
-            if date_from:
-                works_query = works_query.filter(
-                    from_publication_date=date_from.isoformat()
-                )
-
-            if date_to:
-                works_query = works_query.filter(
-                    to_publication_date=date_to.isoformat()
-                )
-
-            # Sort by citation count for highest impact reviews
-            # Note: PyAlex sort format is different - use .sort() method without sort param
-            works_query = works_query.sort(cited_by_count="desc")
-
-            # Get results directly into DataFrame
-            results = []
-            for page in works_query.paginate(
-                per_page=min(25, max_results), n_max=max_results
-            ):
-                results.extend(page)
-
-            if not results:
-                logger.warning("No results found for OpenAlex search")
-                return pd.DataFrame()
-
-            # Apply pyalex trick to reinvert abstracts
-            for page in results:
-                page["abstract"] = page["abstract"]
-
-            logger.info(f"Retrieved {len(results)} results from OpenAlex")
-
-            # Process results similar to the original search method
-            processed_results = []
-            for i, page in enumerate(results):
-                try:
-                    # Extract authors with proper null checks
-                    authors = []
-                    if page.get("authorships"):
-                        for authorship in page["authorships"]:
-                            if authorship and isinstance(authorship, dict):
-                                author = authorship.get("author")
-                                if author and isinstance(author, dict):
-                                    display_name = author.get("display_name")
-                                    if display_name:
-                                        authors.append(display_name)
-
-                    # Extract publication date
-                    publication_date = None
-                    if page.get("publication_date"):
-                        publication_date = page["publication_date"]
-                        logger.debug(f"Found publication_date: {publication_date}")
-                    elif page.get("publication_year"):
-                        publication_date = f"{page['publication_year']}-01-01"
-                        logger.debug(
-                            f"Found publication_year: {page['publication_year']}"
-                        )
-                    else:
-                        logger.debug(
-                            f"No publication date/year found for paper: {page.get('title', 'Unknown')}"
-                        )
-
-                    # Extract venue/journal information with proper null checks
-                    venue = ""
-                    primary_location = page.get("primary_location")
-                    if primary_location and isinstance(primary_location, dict):
-                        source = primary_location.get("source")
-                        if source and isinstance(source, dict):
-                            display_name = source.get("display_name")
-                            if display_name:
-                                venue = display_name
-
-                    # Extract citation count
-                    cited_by_count = page.get("cited_by_count", 0)
-
-                    # Extract work type
-                    work_type = page.get("type_crossref", "unknown")
-
-                    processed_result = {
-                        "id": page.get("id", ""),
-                        "title": page.get("title", "No title available"),
-                        "abstract": page.get("abstract", "No abstract available"),
-                        "doi": page.get("doi", ""),
-                        "authors": authors,
-                        "publication_date": publication_date,
-                        "publication_year": page.get("publication_year"),
-                        "venue": venue,
-                        "cited_by_count": cited_by_count,
-                        "work_type": work_type,
-                        "source_country": "Academic",  # OpenAlex is academic literature
-                        "source_type": "Academic Paper",
-                    }
-                    logger.debug(
-                        f"Processed result - Year: {processed_result['publication_year']}, Date: {processed_result['publication_date']}"
-                    )
-                    processed_results.append(processed_result)
-                except Exception as e:
-                    logger.error(f"Error processing result {i}: {e}")
-                    logger.error(f"Problematic page data: {page}")
-                    continue
-
-            df = pd.DataFrame(processed_results)
-
-            # Clean up the data and handle NaN values
-            df["abstract"] = df["abstract"].fillna("No abstract available")
-            df["content"] = df["abstract"].str[
-                :1000
-            ]  # Limit content to first 1000 chars
-            df["title"] = df["title"].fillna("No title available")
-            df["doi"] = df["doi"].fillna("")
-            df["authors"] = df["authors"].apply(
-                lambda x: x if isinstance(x, list) and len(x) > 0 else ["Unknown"]
+        # Execute all queries concurrently
+        tasks = [
+            self.search(
+                query=q,
+                max_results=max_results_per_query,
+                min_citations=min_citations,
+                date_from=date_from,
+                date_to=date_to,
             )
-            df["publication_date"] = df["publication_date"].fillna("")
-            # Handle publication_year properly - convert NaN to None for missing years
-            df["publication_year"] = df["publication_year"].where(
-                df["publication_year"].notna(), None
-            )
-            df["venue"] = df["venue"].fillna("")
-            df["cited_by_count"] = df["cited_by_count"].fillna(0)
-            df["work_type"] = df["work_type"].fillna("unknown")
-            df["source_country"] = df["source_country"].fillna("Academic")
-            df["source_type"] = df["source_type"].fillna("Academic Paper")
+            for q in queries
+        ]
 
-            logger.info(f"OpenAlex search returned {len(df)} results")
-            return df
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        except Exception as e:
-            logger.error(f"Error in OpenAlex agent search: {e}")
-            # Return empty DataFrame on error
+        # Combine results
+        valid_dfs = []
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                logger.error("Query %d failed: %s", i + 1, r)
+            elif isinstance(r, pd.DataFrame):
+                valid_dfs.append(r)
+
+        if not valid_dfs:
+            logger.warning("❌ No valid results from any query")
             return pd.DataFrame()
+
+        # Concatenate and de-duplicate by ID
+        combined = pd.concat(valid_dfs, ignore_index=True)
+        deduped = combined.drop_duplicates(subset=["id"], keep="first")
+
+        logger.info(
+            "✅ Combined %d results from %d queries → %d unique documents",
+            len(combined),
+            len(valid_dfs),
+            len(deduped),
+        )
+
+        return deduped
 
     def format_for_screening(self, df: pd.DataFrame) -> Dict[str, Dict[str, str]]:
         """Format papers for LLM screening"""

@@ -6,7 +6,12 @@ from typing import List, Dict, TypedDict, Optional, Any
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from app.services.vectorization import vectorization_service
-from app.utils.llm.llm_utils import get_llm
+from app.utils.llm.llm_utils import (
+    get_llm,
+    get_langfuse_handler,
+    build_langfuse_metadata,
+    resolve_langfuse_session_id,
+)
 from app.services.synthesis.schemas import KeyIssue, PolicyIntervention
 from app.services.synthesis.prompts import (
     build_discover_themes_prompt,
@@ -28,13 +33,33 @@ class Concept(BaseModel):
 # Model selection per node
 THEME_MODEL = "gpt-5-mini"  # define_themes, critique_themes
 MAPPING_MODEL = "gpt-5-nano"  # map concepts to final themes
-BRIEFING_MODEL = "gpt-5-mini"  # synthesize executive briefing
+BRIEFING_MODEL = "gpt-5"  # synthesise executive briefing
 CRITIQUE_ITERATIONS = 1
 
 
 def _escape_braces(text: str) -> str:
     """Escape braces to avoid ChatPromptTemplate .format() interpreting them as variables."""
     return (text or "").replace("{", "{{").replace("}", "}}")
+
+
+def _langfuse_config(
+    state: SynthesisState,
+    tags: List[str],
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    handler = state.get("langfuse_handler")
+    metadata = build_langfuse_metadata(
+        tags=tags,
+        session_id=state.get("langfuse_session_id"),
+        user_id=state.get("policy_user_id"),
+        project_id=state.get("project_id"),
+        extra=extra,
+    )
+    return {
+        "callbacks": [handler] if handler else [],
+        "tags": tags,
+        "metadata": metadata,
+    }
 
 
 class DiscoveredTheme(BaseModel):
@@ -74,6 +99,10 @@ class SynthesisState(TypedDict):
     executive_briefing: str
     aggregated_issues: List[KeyIssue]
     aggregated_interventions: List[PolicyIntervention]
+    # Langfuse handler for tracing (injected at runtime)
+    langfuse_handler: Any
+    langfuse_session_id: str
+    policy_user_id: Optional[str]
 
 
 class ThemesOut(BaseModel):
@@ -83,7 +112,14 @@ class ThemesOut(BaseModel):
 
 
 async def _discover_themes_for_concepts(
-    concepts: List[Concept], critique: Optional[str], rq: str
+    concepts: List[Concept],
+    critique: Optional[str],
+    rq: str,
+    *,
+    handler: Any = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    run_name: Optional[str] = None,
 ) -> List[DiscoveredTheme]:
     """Generic helper to discover themes for a given concept set (structured output)."""
     if not concepts:
@@ -98,7 +134,13 @@ async def _discover_themes_for_concepts(
                 critique_instruction=instructions,
                 rq=_escape_braces(rq),
                 concepts=_escape_braces(json.dumps([c.dict() for c in concepts])),
-            )
+            ),
+            config={
+                "callbacks": [handler] if handler else [],
+                "tags": tags or [],
+                "metadata": metadata or {},
+                "run_name": run_name or "synthesis.discover_themes",
+            },
         )
         return out.themes or []
     except Exception:
@@ -118,15 +160,17 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         return {"raw_extractions": [], "research_question": "Not specified"}  # type: ignore[return-value]
 
     supabase = vectorization_service.supabase
-    # Fetch research question
+    # Fetch research question (prefer title; fallback to query for backward compatibility)
     proj_res = (
         supabase.table("analysis_projects")
-        .select("query")
+        .select("title, query")
         .eq("id", project_id)
         .execute()
     )
     research_question = (
-        proj_res.data[0].get("query") if proj_res and proj_res.data else None
+        (proj_res.data[0].get("title") or proj_res.data[0].get("query"))
+        if proj_res and proj_res.data
+        else None
     ) or "Not specified"
     res = (
         supabase.table("analysis_extractions")
@@ -200,19 +244,51 @@ async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
 
 
 async def define_issue_themes(state: SynthesisState) -> SynthesisState:
+    tags = [
+        "component:synthesis",
+        "component:synthesis.discover_themes",
+        "branch:issues",
+        f"model:{THEME_MODEL}",
+    ]
     themes = await _discover_themes_for_concepts(
         state.get("issue_concepts", []) or [],
         state.get("issue_theme_critique"),
         str(state.get("research_question") or "Not specified"),
+        handler=state.get("langfuse_handler"),
+        tags=tags,
+        metadata=build_langfuse_metadata(
+            tags=tags,
+            session_id=state.get("langfuse_session_id"),
+            user_id=state.get("policy_user_id"),
+            project_id=state.get("project_id"),
+            extra={"branch": "issues"},
+        ),
+        run_name="synthesis.discover_themes",
     )
     return {"discovered_issue_themes": themes}
 
 
 async def define_intervention_themes(state: SynthesisState) -> SynthesisState:
+    tags = [
+        "component:synthesis",
+        "component:synthesis.discover_themes",
+        "branch:interventions",
+        f"model:{THEME_MODEL}",
+    ]
     themes = await _discover_themes_for_concepts(
         state.get("intervention_concepts", []) or [],
         state.get("intervention_theme_critique"),
         str(state.get("research_question") or "Not specified"),
+        handler=state.get("langfuse_handler"),
+        tags=tags,
+        metadata=build_langfuse_metadata(
+            tags=tags,
+            session_id=state.get("langfuse_session_id"),
+            user_id=state.get("policy_user_id"),
+            project_id=state.get("project_id"),
+            extra={"branch": "interventions"},
+        ),
+        run_name="synthesis.discover_themes",
     )
     return {"discovered_intervention_themes": themes}
 
@@ -224,11 +300,25 @@ async def critique_issue_themes(state: SynthesisState) -> SynthesisState:
     )
     prompt = build_theme_critique_prompt("issue")
     llm = get_llm(THEME_MODEL, temperature=0.0)
+    tags = [
+        "component:synthesis",
+        "component:synthesis.critique",
+        "branch:issues",
+        f"model:{THEME_MODEL}",
+    ]
     resp = await llm.ainvoke(
         prompt.format(
             rq=_escape_braces(str(state.get("research_question") or "Not specified")),
             themes=themes_payload,
-        )
+        ),
+        config={
+            **_langfuse_config(
+                state,
+                tags,
+                extra={"branch": "issues"},
+            ),
+            "run_name": "synthesis.critique",
+        },
     )
     critique = (resp.content if hasattr(resp, "content") else str(resp)).strip()
     next_iter = int(state.get("issue_theme_iteration") or 0) + 1
@@ -245,11 +335,25 @@ async def critique_intervention_themes(state: SynthesisState) -> SynthesisState:
     )
     prompt = build_theme_critique_prompt("intervention")
     llm = get_llm(THEME_MODEL, temperature=0.0)
+    tags = [
+        "component:synthesis",
+        "component:synthesis.critique",
+        "branch:interventions",
+        f"model:{THEME_MODEL}",
+    ]
     resp = await llm.ainvoke(
         prompt.format(
             rq=_escape_braces(str(state.get("research_question") or "Not specified")),
             themes=themes_payload,
-        )
+        ),
+        config={
+            **_langfuse_config(
+                state,
+                tags,
+                extra={"branch": "interventions"},
+            ),
+            "run_name": "synthesis.critique",
+        },
     )
     critique = (resp.content if hasattr(resp, "content") else str(resp)).strip()
     next_iter = int(state.get("intervention_theme_iteration") or 0) + 1
@@ -260,7 +364,13 @@ async def critique_intervention_themes(state: SynthesisState) -> SynthesisState:
 
 
 async def _map_concepts(
-    concepts: List[Concept], themes: List[DiscoveredTheme]
+    concepts: List[Concept],
+    themes: List[DiscoveredTheme],
+    *,
+    handler: Any = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    run_name: Optional[str] = None,
 ) -> List[FinalTheme]:
     if not concepts or not themes:
         return []
@@ -281,7 +391,13 @@ async def _map_concepts(
                     prompt.format(
                         themes=_escape_braces(json.dumps(theme_defs)),
                         concept=_escape_braces(json.dumps(concept.dict())),
-                    )
+                    ),
+                    config={
+                        "callbacks": [handler] if handler else [],
+                        "tags": tags or [],
+                        "metadata": metadata or {},
+                        "run_name": run_name or "synthesis.map_concepts",
+                    },
                 )
                 raw = (r.content if hasattr(r, "content") else str(r)).strip()
                 # Parse integer index directly
@@ -317,9 +433,25 @@ async def _map_concepts(
 
 async def map_issue_concepts_to_final_themes(state: SynthesisState) -> SynthesisState:
     print("--- Mapping Issue Concepts to Final Themes ---")
+    tags = [
+        "component:synthesis",
+        "component:synthesis.map_concepts",
+        "branch:issues",
+        f"model:{MAPPING_MODEL}",
+    ]
     finals = await _map_concepts(
         state.get("issue_concepts", []) or [],
         state.get("discovered_issue_themes", []) or [],
+        handler=state.get("langfuse_handler"),
+        tags=tags,
+        metadata=build_langfuse_metadata(
+            tags=tags,
+            session_id=state.get("langfuse_session_id"),
+            user_id=state.get("policy_user_id"),
+            project_id=state.get("project_id"),
+            extra={"branch": "issues"},
+        ),
+        run_name="synthesis.map_concepts",
     )
     return {"final_issue_themes": finals}
 
@@ -328,9 +460,25 @@ async def map_intervention_concepts_to_final_themes(
     state: SynthesisState
 ) -> SynthesisState:
     print("--- Mapping Intervention Concepts to Final Themes ---")
+    tags = [
+        "component:synthesis",
+        "component:synthesis.map_concepts",
+        "branch:interventions",
+        f"model:{MAPPING_MODEL}",
+    ]
     finals = await _map_concepts(
         state.get("intervention_concepts", []) or [],
         state.get("discovered_intervention_themes", []) or [],
+        handler=state.get("langfuse_handler"),
+        tags=tags,
+        metadata=build_langfuse_metadata(
+            tags=tags,
+            session_id=state.get("langfuse_session_id"),
+            user_id=state.get("policy_user_id"),
+            project_id=state.get("project_id"),
+            extra={"branch": "interventions"},
+        ),
+        run_name="synthesis.map_concepts",
     )
     return {"final_intervention_themes": finals}
 
@@ -399,11 +547,23 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     # Helper to generate a short impact summary via LLM (fast model)
     async def _impact_for_theme(name: str, concept_texts: List[str]) -> str:
         try:
-            llm = get_llm(MAPPING_MODEL, temperature=0.1)
+            llm = get_llm(MAPPING_MODEL, temperature=0)
             sample = "\n".join([f"- {s}" for s in concept_texts[:8]])
             prompt = build_impact_summary_prompt()
+            tags = [
+                "component:synthesis",
+                "component:synthesis.impact_summary",
+                f"model:{MAPPING_MODEL}",
+            ]
             resp = await llm.ainvoke(
-                prompt.format(name=name, sample=_escape_braces(sample))
+                prompt.format(name=name, sample=_escape_braces(sample)),
+                config={
+                    **_langfuse_config(
+                        state,
+                        tags,
+                    ),
+                    "run_name": "synthesis.impact_summary",
+                },
             )
             return (resp.content if hasattr(resp, "content") else str(resp)).strip()
         except Exception:
@@ -491,19 +651,32 @@ async def synthesize_executive_briefing(state: SynthesisState) -> SynthesisState
     }
 
     prompt = build_executive_briefing_prompt()
-    llm = get_llm(BRIEFING_MODEL, temperature=0.1)
+    llm = get_llm(BRIEFING_MODEL, temperature=0)
     try:
-        resp = llm.invoke(
+        tags = [
+            "component:synthesis",
+            "component:synthesis.executive_brief",
+            f"model:{BRIEFING_MODEL}",
+        ]
+        resp = await llm.ainvoke(
             prompt.format(
                 rq=rq,
                 payload=_escape_braces(json.dumps(payload)),
-            )
+            ),
+            config={
+                **_langfuse_config(
+                    state,
+                    tags,
+                ),
+                "run_name": "synthesis.executive_brief",
+            },
         )
         text = (resp.content if hasattr(resp, "content") else str(resp)).strip()
         if text.startswith("```"):
             text = text.strip("`")
             if text.startswith("text\n"):
                 text = text[len("text\n") :]
+
         executive_briefing = text
     except Exception:
         executive_briefing = (
@@ -577,7 +750,33 @@ class SynthesisAgent:
     def __init__(self) -> None:
         self.workflow = create_synthesis_workflow()
 
-    async def run(self, project_id: str) -> SynthesisState:
-        initial_state: SynthesisState = {"project_id": project_id}  # type: ignore[assignment]
+    async def run(
+        self, project_id: str, user_id: Optional[str] = None
+    ) -> SynthesisState:
+        # Create a per-run Langfuse session and propagate handler through state
+        session_id = resolve_langfuse_session_id(project_id)
+        handler = get_langfuse_handler(session_id=session_id)
+        resolved_user = user_id or self._resolve_project_user(project_id)
+        initial_state: SynthesisState = {  # type: ignore[assignment]
+            "project_id": project_id,
+            "langfuse_handler": handler,
+            "langfuse_session_id": session_id,
+            "policy_user_id": resolved_user,
+        }
         final_state: SynthesisState = await self.workflow.ainvoke(initial_state)
         return final_state
+
+    @staticmethod
+    def _resolve_project_user(project_id: str) -> Optional[str]:
+        try:
+            result = (
+                vectorization_service.supabase.table("analysis_projects")
+                .select("created_by_user_id")
+                .eq("id", project_id)
+                .execute()
+            )
+            if result.data:
+                return result.data[0].get("created_by_user_id")
+        except Exception:
+            return None
+        return None

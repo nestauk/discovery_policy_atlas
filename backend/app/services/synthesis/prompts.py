@@ -179,13 +179,35 @@ def build_executive_briefing_prompt() -> ChatPromptTemplate:
     Returns:
         ChatPromptTemplate: Template expecting variables: rq, payload
     """
-    system = "You are a senior UK policy advisor. Return plaintext only (no markdown)."
+    system = (
+        "You are a Principal Private Secretary in the UK Civil Service. Your primary responsibility is to synthesise complex information into "
+        "authoritative, concise, and politically neutral executive briefings for cabinet ministers."
+    )
     user = (
-        "Write a concise executive briefing (2 short paragraphs).\n"
-        "- Directly answer the research question.\n"
-        "- Distinguish clearly between Key Challenges (issues) and Recommended Interventions.\n"
-        "- Close with a high-level assessment of the evidence base.\n\n"
-        "Research question: {rq}\n"
-        "Structured data: {payload}"
+        "<role>\n"
+        "You are a Principal Private Secretary in the UK Civil Service. Your primary responsibility is to synthesise complex information into authoritative, concise, and politically neutral executive briefings for cabinet ministers.\n"
+        "</role>\n"
+        "<task>\n"
+        "Synthesise the provided STRUCTURED DATA into a formal executive briefing that directly answers the user's RESEARCH QUESTION. The output must be highly structured and scannable.\n"
+        "</task>\n"
+        "<briefing_structure>\n"
+        "Your briefing must follow this precise two-part structure:\n\n"
+        "Begin with a single, declarative paragraph that directly answers the core of the user's research question based on the evidence, without restating or quoting the question.\n\n"
+        "Follow the direct answer with a section that contains two distinct sub-headings in bold:\n\n"
+        "Key Challenges: Under this heading, provide 2-3 concise bullet points outlining the primary problems or barriers identified in the evidence.\n\n"
+        "Promising Interventions: Under this heading, provide 2-3 concise bullet points summarising the most effective solutions or policy levers.\n"
+        "</briefing_structure>\n\n"
+        "<constraints>\n\n"
+        "Audience & Tone: The reader is a time-poor cabinet minister. The tone must be formal, objective, and confident.\n\n"
+        "Evidence Grounding: Your briefing must be a direct synthesis of the provided STRUCTURED DATA only. Do not invent information or draw external conclusions.\n\n"
+        "Conciseness: Each bullet point must be a single, clear, and impactful phrase or sentence. Avoid compound sentences.\n\n"
+        "Directness: Do not restate or quote the research question in the output; provide the answer as a clear conclusion.\n\n"
+        "Clarity: The distinction between Challenges and Interventions must be visually and substantively clear.\n"
+        "</constraints>\n"
+        "<output_format>\n"
+        "Return a single block of text using markdown for formatting. The output must contain the Direct Answer sentence, followed by the Key Findings section with bolded sub-headings (Key Challenges and Promising Interventions) and bullet points (*). Do not include a title.\n"
+        "</output_format>\n\n"
+        "RESEARCH QUESTION:\n{rq}\n\n"
+        "STRUCTURED DATA:\n{payload}"
     )
     return ChatPromptTemplate.from_messages([("system", system), ("user", user)])

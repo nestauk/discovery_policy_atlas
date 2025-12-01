@@ -51,7 +51,7 @@ export async function fetchProjectFeedback(projectId: string): Promise<FeedbackD
     const { fetchWithAuthExternal } = await import('./api')
     
     const data = await fetchWithAuthExternal(`api/analysis-projects/${projectId}/feedback`)
-    return data.feedback
+    return data?.feedback || null
   } catch (error: unknown) {
     console.error('Error fetching project feedback:', error)
     // If it's a 404, return null (no feedback exists)
@@ -74,6 +74,10 @@ export async function saveProjectFeedback(
       method: 'POST',
       body: JSON.stringify(feedback),
     })
+    
+    if (!data?.feedback) {
+      throw new Error('Invalid response from server')
+    }
     
     return data.feedback
   } catch (error: unknown) {

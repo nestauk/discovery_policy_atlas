@@ -111,7 +111,7 @@ async def health_check():
     }
 
     # Check API keys
-    if settings.LLM_PROVIDER == "openai":
+    if settings.LLM_PROVIDER == "OpenAI":
         health_status["openai_configured"] = bool(settings.OPENAI_API_KEY)
 
     return health_status

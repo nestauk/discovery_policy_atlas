@@ -5,13 +5,18 @@ Implements: Issues → Interventions → Mapping → Results (per intervention l
 
 import json
 import logging
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 
 from app.core.config import settings
+from app.utils.llm.llm_utils import (
+    get_langfuse_handler,
+    build_langfuse_metadata,
+    resolve_langfuse_session_id,
+)
 from .prompts import (
     ISSUES_PROMPT,
     INTERVENTIONS_PROMPT,
@@ -52,14 +57,28 @@ class WorkflowState(TypedDict):
 class ExtractionWorkflow:
     """LangGraph workflow for document extraction."""
 
-    def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.0):
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.0,
+        *,
+        policy_project_id: Optional[str] = None,
+        policy_user_id: Optional[str] = None,
+    ):
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required for LangChain workflow")
         self.llm = ChatOpenAI(
-            model=model, temperature=temperature, openai_api_key=settings.OPENAI_API_KEY
+            model=model,
+            temperature=temperature,
+            openai_api_key=settings.OPENAI_API_KEY,
+            request_timeout=120.0,  # 2 minute timeout to prevent hanging
         )
+        self.model_name = model
         self.json_parser = JsonOutputParser()
         self.workflow = self._build_workflow()
+        self.policy_project_id = policy_project_id
+        self.policy_user_id = policy_user_id
+        self._langfuse_session_id: Optional[str] = None
 
     def _build_workflow(self) -> StateGraph:
         """Build the LangGraph workflow."""
@@ -86,6 +105,11 @@ class ExtractionWorkflow:
 
     async def run(self, paper_id: str, full_text: str) -> DocumentExtractionBundle:
         """Run the complete extraction workflow."""
+        # Create a per-project Langfuse session and propagate handler via closure
+        session_id = resolve_langfuse_session_id(self.policy_project_id)
+        self._langfuse_session_id = session_id
+        self._langfuse_handler = get_langfuse_handler(session_id=session_id)
+
         initial_state = WorkflowState(
             paper_id=paper_id,
             full_text=full_text,
@@ -132,11 +156,40 @@ class ExtractionWorkflow:
                 conclusion=None,
             )
 
+    def _build_metadata(
+        self, tags: List[str], extra: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        return build_langfuse_metadata(
+            tags=tags,
+            session_id=self._langfuse_session_id,
+            user_id=self.policy_user_id,
+            project_id=self.policy_project_id,
+            extra=extra,
+        )
+
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage A: Extract issues."""
         try:
             chain = ISSUES_PROMPT | self.llm | self.json_parser
-            result = await chain.ainvoke({"full_text": state["full_text"]})
+            tags = [
+                "component:extraction",
+                "component:extraction.issues",
+                f"paper:{state['paper_id']}",
+            ]
+            tags.append(f"model:{self.model_name}")
+            result = await chain.ainvoke(
+                {"full_text": state["full_text"]},
+                config={
+                    "callbacks": [getattr(self, "_langfuse_handler", None)]
+                    if getattr(self, "_langfuse_handler", None)
+                    else [],
+                    "tags": tags,
+                    "metadata": self._build_metadata(
+                        tags, extra={"paper_id": state["paper_id"]}
+                    ),
+                    "run_name": "extraction.issues",
+                },
+            )
 
             extraction = IssuesExtraction(**result)
             logger.info(f"Extracted {len(extraction.issues)} issues")
@@ -151,7 +204,25 @@ class ExtractionWorkflow:
         """Stage B: Extract interventions."""
         try:
             chain = INTERVENTIONS_PROMPT | self.llm | self.json_parser
-            result = await chain.ainvoke({"full_text": state["full_text"]})
+            tags = [
+                "component:extraction",
+                "component:extraction.interventions",
+                f"paper:{state['paper_id']}",
+            ]
+            tags.append(f"model:{self.model_name}")
+            result = await chain.ainvoke(
+                {"full_text": state["full_text"]},
+                config={
+                    "callbacks": [getattr(self, "_langfuse_handler", None)]
+                    if getattr(self, "_langfuse_handler", None)
+                    else [],
+                    "tags": tags,
+                    "metadata": self._build_metadata(
+                        tags, extra={"paper_id": state["paper_id"]}
+                    ),
+                    "run_name": "extraction.interventions",
+                },
+            )
 
             extraction = InterventionsExtraction(**result)
             logger.info(f"Extracted {len(extraction.interventions)} interventions")
@@ -184,12 +255,28 @@ class ExtractionWorkflow:
             )
 
             chain = MAPPING_PROMPT | self.llm | self.json_parser
+            tags = [
+                "component:extraction",
+                "component:extraction.mappings",
+                f"paper:{state['paper_id']}",
+            ]
+            tags.append(f"model:{self.model_name}")
             result = await chain.ainvoke(
                 {
                     "full_text": state["full_text"],
                     "issues_json": issues_json,
                     "interventions_json": interventions_json,
-                }
+                },
+                config={
+                    "callbacks": [getattr(self, "_langfuse_handler", None)]
+                    if getattr(self, "_langfuse_handler", None)
+                    else [],
+                    "tags": tags,
+                    "metadata": self._build_metadata(
+                        tags, extra={"paper_id": state["paper_id"]}
+                    ),
+                    "run_name": "extraction.mappings",
+                },
             )
 
             extraction = MappingsExtraction(**result)
@@ -214,12 +301,32 @@ class ExtractionWorkflow:
             for intervention in state["interventions"]:
                 try:
                     one_intervention_json = json.dumps(intervention.model_dump())
+                    tags = [
+                        "component:extraction",
+                        "component:extraction.results",
+                        f"paper:{state['paper_id']}",
+                    ]
+                    tags.append(f"model:{self.model_name}")
 
                     result = await chain.ainvoke(
                         {
                             "full_text": state["full_text"],
                             "one_intervention_json": one_intervention_json,
-                        }
+                        },
+                        config={
+                            "callbacks": [getattr(self, "_langfuse_handler", None)]
+                            if getattr(self, "_langfuse_handler", None)
+                            else [],
+                            "tags": tags,
+                            "metadata": self._build_metadata(
+                                tags,
+                                extra={
+                                    "paper_id": state["paper_id"],
+                                    "intervention_idx": intervention.idx,
+                                },
+                            ),
+                            "run_name": "extraction.results",
+                        },
                     )
 
                     extraction = ResultsExtraction(**result)
@@ -262,11 +369,27 @@ class ExtractionWorkflow:
             )
 
             chain = CONCLUSIONS_PROMPT | self.llm | self.json_parser
+            tags = [
+                "component:extraction",
+                "component:extraction.conclusions",
+                f"paper:{state['paper_id']}",
+            ]
+            tags.append(f"model:{self.model_name}")
             result = await chain.ainvoke(
                 {
                     "full_text": state["full_text"],
                     "interventions_json": interventions_json,
-                }
+                },
+                config={
+                    "callbacks": [getattr(self, "_langfuse_handler", None)]
+                    if getattr(self, "_langfuse_handler", None)
+                    else [],
+                    "tags": tags,
+                    "metadata": self._build_metadata(
+                        tags, extra={"paper_id": state["paper_id"]}
+                    ),
+                    "run_name": "extraction.conclusions",
+                },
             )
 
             extraction = ConclusionsExtraction(**result)
