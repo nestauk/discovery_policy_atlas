@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import date
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import pandas as pd
 
@@ -12,6 +12,8 @@ from app.core.config import settings
 from app.services.analysis.prompts import (
     BOOLEAN_QUERY_SYSTEM_PROMPT,
     BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT,
+    BOOLEAN_QUERY_FROM_CONTEXT_SYSTEM_PROMPT,
+    SEMANTIC_QUERY_FROM_CONTEXT_SYSTEM_PROMPT,
 )
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -183,6 +185,238 @@ class ReferencesService:
             logger.info("🔄 Falling back to single query with original text")
             return [natural_query]
 
+    def _build_context_message(
+        self,
+        research_question: str,
+        population_selected: List[str],
+        outcome_selected: List[str],
+        screening_factors: List[str],
+    ) -> str:
+        """Build context message from search context components."""
+        context_parts = [f"User query: {research_question}"]
+        if population_selected:
+            context_parts.append(
+                f"Population interests: {', '.join(population_selected)}"
+            )
+        if outcome_selected:
+            context_parts.append(f"Outcome interests: {', '.join(outcome_selected)}")
+        # skipping screening factors for now
+        # if screening_factors:
+        # context_parts.append(f"Screening factors: {', '.join(screening_factors)}")
+        return "\n".join(context_parts)
+
+    async def generate_boolean_query_from_context(
+        self,
+        research_question: str,
+        population_selected: List[str],
+        outcome_selected: List[str],
+        screening_factors: List[str],
+        langfuse_handler=None,
+        session_id: str = None,
+        project_id: str = None,
+        user_id: str = None,
+    ) -> str:
+        """Generate a boolean query from search context."""
+        logger.info("🔍 Generating boolean query from search context")
+
+        try:
+            llm = ChatOpenAI(
+                model=settings.BOOLEAN_QUERY_MODEL,
+                temperature=settings.BOOLEAN_QUERY_TEMPERATURE,
+                openai_api_key=settings.OPENAI_API_KEY,
+                max_tokens=1000,
+            )
+
+            messages = [
+                SystemMessage(content=BOOLEAN_QUERY_FROM_CONTEXT_SYSTEM_PROMPT),
+                HumanMessage(
+                    content=self._build_context_message(
+                        research_question,
+                        population_selected,
+                        outcome_selected,
+                        screening_factors,
+                    )
+                ),
+            ]
+
+            config = {}
+            if langfuse_handler:
+                config["callbacks"] = [langfuse_handler]
+                config["metadata"] = build_langfuse_metadata(
+                    tags=[
+                        "component:references",
+                        "component:references.boolean_query_from_context",
+                    ],
+                    session_id=session_id,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                config["run_name"] = "references.boolean_query_from_context"
+
+            resp = await llm.ainvoke(messages, config=config)
+            boolean_query = (resp.content or research_question).strip()
+
+            logger.info("✅ Generated boolean query from context: '%s'", boolean_query)
+            return boolean_query
+
+        except Exception as e:
+            logger.warning("❌ Boolean query generation from context failed: %s", e)
+            logger.info("🔄 Falling back to original query: '%s'", research_question)
+            return research_question
+
+    async def generate_boolean_queries_multi_from_context(
+        self,
+        research_question: str,
+        population_selected: List[str],
+        outcome_selected: List[str],
+        screening_factors: List[str],
+        n_runs: int = 5,
+        temperature: float = 1.0,
+        langfuse_handler=None,
+        session_id: str = None,
+        project_id: str = None,
+        user_id: str = None,
+    ) -> List[str]:
+        """Generate multiple boolean queries from search context with temperature for diversity."""
+        logger.info(
+            "🔍 Generating %d boolean queries from context (temp=%.1f)",
+            n_runs,
+            temperature,
+        )
+
+        queries = []
+
+        try:
+            llm = ChatOpenAI(
+                model=settings.BOOLEAN_QUERY_MODEL,
+                temperature=temperature,
+                openai_api_key=settings.OPENAI_API_KEY,
+                max_tokens=1000,
+            )
+
+            messages = [
+                SystemMessage(content=BOOLEAN_QUERY_FROM_CONTEXT_SYSTEM_PROMPT),
+                HumanMessage(
+                    content=self._build_context_message(
+                        research_question,
+                        population_selected,
+                        outcome_selected,
+                        screening_factors,
+                    )
+                ),
+            ]
+
+            for i in range(n_runs):
+                config = {}
+                if langfuse_handler:
+                    config["callbacks"] = [langfuse_handler]
+                    config["metadata"] = build_langfuse_metadata(
+                        tags=[
+                            "component:references",
+                            "component:references.boolean_query_from_context",
+                            "mode:multi",
+                            f"iteration:{i+1}",
+                        ],
+                        session_id=session_id,
+                        user_id=user_id,
+                        project_id=project_id,
+                        extra={"iteration": i + 1, "total_runs": n_runs},
+                    )
+                    config["run_name"] = "references.boolean_query_from_context"
+
+                resp = await llm.ainvoke(messages, config=config)
+                boolean_query = (resp.content or "").strip()
+
+                if boolean_query:
+                    queries.append(boolean_query)
+                    logger.debug("Query %d/%d: '%s'", i + 1, n_runs, boolean_query)
+
+            # Remove exact duplicates while preserving order
+            unique_queries = list(dict.fromkeys(queries))
+            logger.info(
+                "✅ Generated %d queries (%d unique) from context for multi-query search",
+                len(queries),
+                len(unique_queries),
+            )
+
+            return unique_queries
+
+        except Exception as e:
+            logger.warning("❌ Multi-query generation from context failed: %s", e)
+            logger.info("🔄 Falling back to single query with original text")
+            return [research_question]
+
+    async def generate_semantic_query_from_context(
+        self,
+        research_question: str,
+        population_selected: List[str],
+        outcome_selected: List[str],
+        screening_factors: List[str],
+        langfuse_handler=None,
+        session_id: str = None,
+        project_id: str = None,
+        user_id: str = None,
+    ) -> str:
+        """Generate a semantic query from search context."""
+        logger.info("🔍 Generating semantic query from search context")
+
+        try:
+            model = settings.LLM_MODEL
+
+            # Build context message
+            context_parts = [f"Research question: {research_question}"]
+            if population_selected:
+                context_parts.append(
+                    f"Population interests: {', '.join(population_selected)}"
+                )
+            if outcome_selected:
+                context_parts.append(
+                    f"Outcome interests: {', '.join(outcome_selected)}"
+                )
+            if screening_factors:
+                context_parts.append(
+                    f"Screening factors: {', '.join(screening_factors)}"
+                )
+
+            llm = ChatOpenAI(
+                model=model,
+                temperature=0.3,
+                openai_api_key=settings.OPENAI_API_KEY,
+                max_tokens=500,
+            )
+
+            messages = [
+                SystemMessage(content=SEMANTIC_QUERY_FROM_CONTEXT_SYSTEM_PROMPT),
+                HumanMessage(content="\n".join(context_parts)),
+            ]
+
+            config = {}
+            if langfuse_handler:
+                config["callbacks"] = [langfuse_handler]
+                config["metadata"] = build_langfuse_metadata(
+                    tags=[
+                        "component:references",
+                        "component:references.semantic_query_from_context",
+                    ],
+                    session_id=session_id,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                config["run_name"] = "references.semantic_query_from_context"
+
+            resp = await llm.ainvoke(messages, config=config)
+            semantic_query = (resp.content or research_question).strip()
+
+            logger.info(
+                "✅ Generated semantic query from context: '%s'", semantic_query
+            )
+            return semantic_query
+
+        except Exception as e:
+            logger.warning("❌ Semantic query generation from context failed: %s", e)
+            logger.info("🔄 Falling back to original query: '%s'", research_question)
+            return research_question
+
     async def build_references(
         self,
         query: str,
@@ -198,7 +432,8 @@ class ReferencesService:
         query_temperature: Optional[float] = None,
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
-    ) -> tuple[Path, str]:
+        search_context: Optional[Dict] = None,
+    ) -> tuple[Path, str, Optional[str]]:
         """Fetch and normalize references, write references.csv, and return its path.
 
         New multi-query mode generates multiple diverse queries and combines results
@@ -242,10 +477,81 @@ class ReferencesService:
         # Determine OpenAlex query string(s) and track the final boolean query
         openalex_queries = []  # List of queries to execute
         final_boolean_query = None
+        final_semantic_query = None
         logger.info("🔎 Building references with mode: '%s'", mode)
         logger.debug("Original query: '%s'", query)
 
-        if mode == "boolean":
+        # Check if we have search context to use
+        if search_context:
+            logger.info("📋 Using search context for query generation")
+            research_question = search_context.get("research_question", query)
+            population_selected = search_context.get("population", {}).get(
+                "selected", []
+            )
+            outcome_selected = search_context.get("outcome", {}).get("selected", [])
+            screening_factors = search_context.get("screening_factors", [])
+
+            # Generate boolean queries for OpenAlex from context
+            if "openalex" in sources:
+                if use_multi_query:
+                    # Multi-query mode: generate multiple diverse queries
+                    logger.info(
+                        "🔄 Multi-query mode: generating %d queries from context (temp=%.1f)",
+                        n_runs,
+                        temperature,
+                    )
+                    openalex_queries = (
+                        await self.generate_boolean_queries_multi_from_context(
+                            research_question=research_question,
+                            population_selected=population_selected,
+                            outcome_selected=outcome_selected,
+                            screening_factors=screening_factors,
+                            n_runs=n_runs,
+                            temperature=temperature,
+                            langfuse_handler=langfuse_handler,
+                            session_id=session_id,
+                            project_id=project_id,
+                            user_id=user_id,
+                        )
+                    )
+                    # Store all queries for debugging
+                    final_boolean_query = " | ".join(openalex_queries)
+                    logger.info(
+                        "✅ Generated %d unique queries from context",
+                        len(openalex_queries),
+                    )
+                else:
+                    # Single-query mode: generate one deterministic query
+                    logger.info(
+                        "🎯 Single-query mode: generating deterministic query from context (temp=0)"
+                    )
+                    single_query = await self.generate_boolean_query_from_context(
+                        research_question=research_question,
+                        population_selected=population_selected,
+                        outcome_selected=outcome_selected,
+                        screening_factors=screening_factors,
+                        langfuse_handler=langfuse_handler,
+                        session_id=session_id,
+                        project_id=project_id,
+                        user_id=user_id,
+                    )
+                    openalex_queries = [single_query]
+                    final_boolean_query = single_query
+
+            # Generate semantic query for Overton from context
+            if "overton" in sources:
+                final_semantic_query = await self.generate_semantic_query_from_context(
+                    research_question=research_question,
+                    population_selected=population_selected,
+                    outcome_selected=outcome_selected,
+                    screening_factors=screening_factors,
+                    langfuse_handler=langfuse_handler,
+                    session_id=session_id,
+                    project_id=project_id,
+                    user_id=user_id,
+                )
+
+        elif mode == "boolean":
             # Boolean mode: use provided query directly
             openalex_queries = [boolean_query or query]
             final_boolean_query = openalex_queries[0]
@@ -598,4 +904,4 @@ class ReferencesService:
             )
 
         logger.info("Wrote references.csv with %d rows to %s", len(df), references_csv)
-        return references_csv, final_boolean_query or query
+        return references_csv, final_boolean_query or query, final_semantic_query

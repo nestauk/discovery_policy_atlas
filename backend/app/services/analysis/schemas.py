@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 
 class UnifiedReference(BaseModel):
@@ -48,6 +48,18 @@ class UnifiedReference(BaseModel):
     ] = None  # "full_text" | "abstract" - what was used for extraction
 
 
+class SearchContext(BaseModel):
+    """Search context from the new wizard interface."""
+
+    research_question: str
+    population: Dict  # {selected: List[str], keepBroad: bool}
+    outcome: Dict  # {selected: List[str], keepBroad: bool}
+    parameters: Dict  # {sources, access, geography, timePreset, customFrom, customTo}
+    screening_factors: List[str]
+    additional_questions: List[str]
+    max_results: int
+
+
 class RunConfig(BaseModel):
     query: str
     sources: List[str] = Field(default_factory=lambda: ["openalex", "overton"])
@@ -66,12 +78,8 @@ class RunConfig(BaseModel):
         List[str]
     ] = None  # Additional questions to include in screening
     use_interim_storage: bool = True
-    # Chat interface specific parameters
-    geography_filter: Optional[List[str]] = None  # Countries/regions to filter by
-    access_types: Optional[List[str]] = None  # ["academic", "thinkTank", "government"]
-    sub_questions: Optional[
-        List[str]
-    ] = None  # Additional questions to include in screening
+    # New search wizard context
+    search_context: Optional[SearchContext] = None
 
 
 class RunResult(BaseModel):
@@ -85,3 +93,4 @@ class RunResult(BaseModel):
         str
     ] = None  # Single consolidated extractions JSON file
     boolean_query: Optional[str] = None  # Generated boolean query used for search
+    semantic_query: Optional[str] = None  # Generated semantic query used for Overton

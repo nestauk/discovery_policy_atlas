@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import logging
 from datetime import datetime
 import uuid
@@ -8,6 +9,7 @@ import pandas as pd
 import asyncio
 
 from app.core.auth import get_current_user, CurrentUser
+from app.services.search_wizard import SearchWizardService
 from app.services.vectorization import vectorization_service
 from app.services.chatbot import ChatRequest, ChatResponse
 from app.services.chatbot.chat_service import chatbot_service
@@ -25,6 +27,39 @@ from app.services.download import download_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
+
+
+# Search wizard schemas
+class PopulationOptionsRequest(BaseModel):
+    research_question: str
+    max_options: int = 3
+
+
+class PopulationOptionsResponse(BaseModel):
+    research_question: str
+    population_options: List[str]  # Ordered from broad to narrow
+
+
+class OutcomeOptionsRequest(BaseModel):
+    research_question: str
+    max_options: int = 3
+
+
+class OutcomeOptionsResponse(BaseModel):
+    research_question: str
+    outcome_options: List[str]  # Ordered from broad to narrow
+
+
+class AdditionalQuestionsRequest(BaseModel):
+    research_question: str
+    population_selected: List[str] = []
+    outcome_selected: List[str] = []
+    max_questions: int = 2
+
+
+class AdditionalQuestionsResponse(BaseModel):
+    research_question: str
+    additional_questions: List[str]
 
 
 # END-I - INFO REGION END
@@ -570,6 +605,16 @@ async def run_analysis_for_project(
         if not sources:
             sources = request.get("sources", ["openalex", "overton"])
 
+        # Extract search_context if provided (from new wizard)
+        search_context = None
+        if request.get("search_context"):
+            from app.services.analysis.schemas import SearchContext
+
+            try:
+                search_context = SearchContext(**request["search_context"])
+            except Exception as e:
+                logger.warning(f"Failed to parse search_context: {e}")
+
         config = RunConfig(
             query=query,
             sources=sources,
@@ -586,6 +631,8 @@ async def run_analysis_for_project(
             geography_filter=request.get("geography_filter"),
             access_types=access_types,
             sub_questions=request.get("sub_questions"),
+            # New search wizard context
+            search_context=search_context,
         )
 
         # Prepare search query metadata to save with the project
@@ -607,7 +654,15 @@ async def run_analysis_for_project(
             "relevance_enabled": config.relevance_enabled,
             "use_abstracts_only": config.use_abstracts_only,
             "boolean_query": None,  # Will be filled in after generation
+            "semantic_query": None,  # Will be filled in after generation
         }
+
+        # If search_context is provided, include it in the search_query_data
+        if search_context:
+            if hasattr(search_context, "dict"):
+                search_query_data["search_context"] = search_context.dict()
+            else:
+                search_query_data["search_context"] = search_context
 
         # Update project status to running (async to avoid blocking)
         loop = asyncio.get_event_loop()
@@ -628,8 +683,9 @@ async def run_analysis_for_project(
             user_name=current_user.name,
         )
 
-        # Update search query data with the generated boolean query
+        # Update search query data with the generated queries
         search_query_data["boolean_query"] = result.boolean_query
+        search_query_data["semantic_query"] = result.semantic_query
 
         # Update project with analysis results but keep status as "running" (async to avoid blocking)
         await loop.run_in_executor(
@@ -2252,3 +2308,78 @@ async def save_project_feedback(
     except Exception as e:
         logger.error(f"Error saving feedback for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to save project feedback")
+
+
+@router.post("/generate-population-options", response_model=PopulationOptionsResponse)
+async def generate_population_options(
+    request: PopulationOptionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate population options for a research question using AI, ordered from broad to narrow"""
+    service = SearchWizardService()
+    population_options = await service.generate_population_options(
+        research_question=request.research_question,
+        max_options=request.max_options,
+        user_id=current_user.user_id,
+    )
+
+    if not population_options:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate population options"
+        )
+
+    return PopulationOptionsResponse(
+        research_question=request.research_question,
+        population_options=population_options,
+    )
+
+
+@router.post("/generate-outcome-options", response_model=OutcomeOptionsResponse)
+async def generate_outcome_options(
+    request: OutcomeOptionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate outcome options for a research question using AI, ordered from broad to narrow"""
+    service = SearchWizardService()
+    outcome_options = await service.generate_outcome_options(
+        research_question=request.research_question,
+        max_options=request.max_options,
+        user_id=current_user.user_id,
+    )
+
+    if not outcome_options:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate outcome options"
+        )
+
+    return OutcomeOptionsResponse(
+        research_question=request.research_question, outcome_options=outcome_options
+    )
+
+
+@router.post(
+    "/generate-additional-questions", response_model=AdditionalQuestionsResponse
+)
+async def generate_additional_questions(
+    request: AdditionalQuestionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate additional research questions based on the main question, population, and outcome"""
+    service = SearchWizardService()
+    additional_questions = await service.generate_additional_questions(
+        research_question=request.research_question,
+        population_selected=request.population_selected,
+        outcome_selected=request.outcome_selected,
+        max_questions=request.max_questions,
+        user_id=current_user.user_id,
+    )
+
+    if not additional_questions:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate additional questions"
+        )
+
+    return AdditionalQuestionsResponse(
+        research_question=request.research_question,
+        additional_questions=additional_questions,
+    )

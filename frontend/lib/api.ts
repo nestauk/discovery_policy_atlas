@@ -252,6 +252,36 @@ export function useAPI() {
     });
   };
 
+  const generatePopulationOptions = async (researchQuestion: string): Promise<{ research_question: string; population_options: string[] }> => {
+    return fetchWithAuth('api/analysis-projects/generate-population-options', {
+      method: 'POST',
+      body: JSON.stringify({ research_question: researchQuestion, max_options: 3 }),
+    });
+  };
+
+  const generateOutcomeOptions = async (researchQuestion: string): Promise<{ research_question: string; outcome_options: string[] }> => {
+    return fetchWithAuth('api/analysis-projects/generate-outcome-options', {
+      method: 'POST',
+      body: JSON.stringify({ research_question: researchQuestion, max_options: 3 }),
+    });
+  };
+
+  const generateAdditionalQuestions = async (
+    researchQuestion: string,
+    populationSelected: string[],
+    outcomeSelected: string[]
+  ): Promise<{ research_question: string; additional_questions: string[] }> => {
+    return fetchWithAuth('api/analysis-projects/generate-additional-questions', {
+      method: 'POST',
+      body: JSON.stringify({
+        research_question: researchQuestion,
+        population_selected: populationSelected,
+        outcome_selected: outcomeSelected,
+        max_questions: 2,
+      }),
+    });
+  };
+
   const getAnalysisFindings = async (
     projectId: string,
     params: { intervention_name?: string; issue_theme?: string }
@@ -267,7 +297,11 @@ export function useAPI() {
   return { 
     fetchWithAuth, 
     getProjects, 
-    createProject, 
+    createProject,
+    generateSubQuestions,
+    generatePopulationOptions,
+    generateOutcomeOptions,
+    generateAdditionalQuestions, 
     updateProject, 
     deleteProject, 
     getProject, 

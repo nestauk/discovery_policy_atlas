@@ -66,9 +66,18 @@ class AnalysisService:
         # Step 1: build references
         with StageTimer(monitor, "references"):
             references_service = ReferencesService(export_dir=str(run_export_dir))
+            # Convert search_context to dict if it's a Pydantic model
+            search_context_dict = None
+            if config.search_context:
+                if hasattr(config.search_context, "dict"):
+                    search_context_dict = config.search_context.dict()
+                else:
+                    search_context_dict = config.search_context
+
             (
                 references_csv,
                 generated_boolean_query,
+                generated_semantic_query,
             ) = await references_service.build_references(
                 query=config.query,
                 sources=config.sources,
@@ -80,6 +89,7 @@ class AnalysisService:
                 geography_filter=config.geography_filter,
                 project_id=project_id,
                 user_id=user_id,
+                search_context=search_context_dict,
             )
 
         # Count rows
@@ -227,6 +237,7 @@ class AnalysisService:
             references_csv_path=str(references_csv),
             extractions_json_path=consolidated_json_path,
             boolean_query=generated_boolean_query,
+            semantic_query=generated_semantic_query,
         )
 
         # Store results in Supabase and optionally clean up files

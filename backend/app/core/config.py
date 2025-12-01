@@ -110,7 +110,7 @@ class Settings(BaseSettings):
 
     # LLM Model Settings
     LLM_PROVIDER: str = "OpenAI"
-    LLM_MODEL: str = "gpt-4o-mini"
+    LLM_MODEL: str = "gpt-4.1-mini"
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4000
 
