@@ -39,8 +39,8 @@ try:
     import config
     import adapter
 except ImportError:
-    from test.evals.screening import config
-    from test.evals.screening import adapter
+    from testing.evals.screening import config
+    from testing.evals.screening import adapter
 
 
 async def evaluate_target(target: dict, output_dir: Path) -> dict:
