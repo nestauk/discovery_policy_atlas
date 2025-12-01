@@ -116,6 +116,7 @@ class AnalysisService:
                     export_dir=str(run_export_dir),
                     project_id=project_id,
                     user_id=user_id,
+                    search_context=search_context_dict,
                 )
                 references_csv = await relevance_service.check_relevance(
                     str(references_csv)

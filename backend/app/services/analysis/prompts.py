@@ -135,6 +135,64 @@ For each document, you will assess:
 Base your evaluation primarily on the title and abstract/summary provided. Be thorough but concise in your reasoning."""
 
 
+def RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT(
+    research_question: str,
+    population_selected: list[str] = None,
+    outcome_selected: list[str] = None,
+    screening_factors: list[str] = None,
+) -> str:
+    """Generate system prompt for relevance assessment using search context.
+
+    Args:
+        research_question: The main research question or query
+        population_selected: List of population groups of interest (e.g., ["children", "adults"])
+        outcome_selected: List of outcomes of interest (e.g., ["health outcomes", "educational attainment"])
+        screening_factors: List of screening criteria (e.g., ["peer-reviewed only", "cost-effectiveness"])
+
+    Returns:
+        Formatted system prompt string
+    """
+    context_parts = [f'RESEARCH QUESTION: "{research_question}"']
+
+    if population_selected:
+        context_parts.append(f"POPULATION INTERESTS: {', '.join(population_selected)}")
+
+    if outcome_selected:
+        context_parts.append(f"OUTCOME INTERESTS: {', '.join(outcome_selected)}")
+
+    if screening_factors:
+        context_parts.append(f"SCREENING FACTORS: {', '.join(screening_factors)}")
+
+    context_section = "\n".join(context_parts)
+
+    return f"""You are an expert research and policy analyst evaluating documents for relevance and classification.
+
+{context_section}
+
+For each document, you will assess:
+
+1. RELEVANCE: Does this document address, relate to, or provide insights about the research question?
+   - Consider both direct matches and related concepts
+   - Consider if findings, methods, or conclusions are applicable
+   - Be inclusive rather than overly restrictive
+   - **IMPORTANT**: When population interests are specified, prioritize documents that address those specific populations
+   - **IMPORTANT**: When outcome interests are specified, prioritize documents that measure or discuss those specific outcomes
+   - **IMPORTANT**: When screening factors are provided (e.g., "peer-reviewed only"), documents that do not meet these criteria should be considered less relevant or excluded
+   - For example, if screening factors include "peer-reviewed only", non-peer-reviewed documents should be marked as not relevant
+
+2. DOCUMENT TYPE CLASSIFICATION:
+   - **research_paper**: Empirical studies, experiments, clinical trials, data analyses
+   - **reviews**: Reviews, meta-analyses, systematic reviews, and other literature reviews
+   - **policy_document**: Policy recommendations, guidelines, frameworks, position papers, government reports, policy briefs, regulatory documents
+   - **other**: News articles, announcements, transcripts, opinion pieces, editorials, non-peer reviewed content
+
+3. CONFIDENCE: Rate your confidence in the relevance assessment (0.0 = uncertain, 1.0 = very confident)
+
+4. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, and screening factors.
+
+Base your evaluation primarily on the title and abstract/summary provided. Be thorough but concise in your reasoning."""
+
+
 # =============================================================================
 # LANGCHAIN EXTRACTION WORKFLOWS
 # =============================================================================
