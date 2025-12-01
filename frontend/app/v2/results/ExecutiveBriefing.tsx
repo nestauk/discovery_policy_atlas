@@ -1,12 +1,21 @@
 'use client'
 
 import { useMemo, useCallback } from "react";
+import { useMemo, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
-import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, AlertTriangle, ChevronRight, Download } from "lucide-react";
+import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, AlertTriangle, ChevronRight } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import type { 
+  CitationInfo, 
+  EvidenceCoverageSnapshot, 
+  StructuredBriefing,
+  InterventionTableRow,
+  RecommendationItem,
+  TopCitationItem,
+  BackgroundSection,
+} from "@/types/search";
 import type { 
   CitationInfo, 
   EvidenceCoverageSnapshot, 
@@ -306,23 +315,21 @@ function BackgroundSectionComponent({ background, renderCitations }: {
   );
 }
 
-function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations }: { 
+function InterventionsTable({ interventions, lookupCitation, onCitationClick }: { 
   interventions: InterventionTableRow[];
   lookupCitation: CitationLookupFn;
   onCitationClick?: (docId: string) => void;
-  renderCitations: (text: string, prefix: string) => React.ReactNode[];
 }) {
   if (!interventions.length) return null;
 
-  const effectBadgeClass = (direction: string) => {
-    const palette: Record<string, string> = {
-      increase: 'bg-green-50 text-green-700 border-green-200',
-      decrease: 'bg-purple-50 text-purple-700 border-purple-200',
-      mixed: 'bg-amber-50 text-amber-700 border-amber-200',
-      'no change': 'bg-slate-50 text-slate-600 border-slate-200',
-      insufficient: 'bg-slate-50 text-slate-600 border-slate-200',
-    };
-    return palette[direction] || 'bg-slate-50 text-slate-600 border-slate-200';
+  const effectBadgeColor = (direction: string) => {
+    switch (direction) {
+      case 'positive': return 'bg-green-100 text-green-800';
+      case 'negative': return 'bg-red-100 text-red-800';
+      case 'mixed': return 'bg-amber-100 text-amber-800';
+      case 'null': return 'bg-slate-100 text-slate-600';
+      default: return 'bg-slate-50 text-slate-500';
+    }
   };
 
   const formatEffectCounts = (pos: number, neg: number, nul: number) => {
@@ -333,23 +340,6 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
     return parts.join(' ') || '—';
   };
 
-  // Render markdown-style bold in context/impact text
-  const renderFormattedText = (text: string, prefix: string) => {
-    // First render citations, then handle bold
-    const parts = renderCitations(text, prefix);
-    return parts.map((part, i) => {
-      if (typeof part !== 'string') return part;
-      // Handle **bold** markdown
-      const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
-      return boldParts.map((bp, j) => {
-        if (bp.startsWith('**') && bp.endsWith('**')) {
-          return <strong key={`${i}-${j}`} className="font-semibold text-slate-800">{bp.slice(2, -2)}</strong>;
-        }
-        return bp;
-      });
-    });
-  };
-
   return (
     <div className="mb-6">
       <h3 className="text-lg font-semibold text-slate-800 mb-3">Key Interventions</h3>
@@ -357,10 +347,10 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '18%'}}>Intervention</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '22%'}}>Context</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '45%'}}>Impact & Outcomes</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '15%'}}>Sources</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/5">Intervention</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/5">Context</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-2/5">Effects by Outcome</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/5">Sources</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-slate-200">
@@ -370,56 +360,43 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                   {row.intervention_name}
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-600">
-                  <div className="space-y-1">
-                    {renderFormattedText(row.context || 'Various settings', `ctx-${idx}`)}
-                  </div>
+                  {row.context || 'Various settings'}
                 </td>
                 <td className="px-4 py-3">
-                  {/* Impact narrative */}
-                  {row.impact_narrative && (
-                    <div className="text-sm text-slate-700 mb-2">
-                      {renderFormattedText(row.impact_narrative, `imp-${idx}`)}
-                    </div>
-                  )}
-                  {/* Outcome effects */}
-                  {row.outcome_effects && row.outcome_effects.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-1">
-                      {[...row.outcome_effects]
-                        .sort((a, b) => (b.positive_count + b.negative_count + b.null_count) - (a.positive_count + a.negative_count + a.null_count))
-                        .slice(0, 3)
-                        .map((effect, effIdx) => (
-                        <div key={effIdx} className="inline-flex items-start gap-1 text-xs whitespace-normal break-words max-w-full">
-                          <Badge
-                            variant="outline"
-                            className={`${effectBadgeClass(effect.direction)} text-xs px-1.5 py-0.5`}
-                          >
+                  {row.outcome_effects && row.outcome_effects.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {row.outcome_effects.map((effect, effIdx) => (
+                        <div key={effIdx} className="flex items-center gap-2 text-sm">
+                          <Badge className={`${effectBadgeColor(effect.direction)} text-xs px-1.5 py-0.5`}>
                             {effect.direction}
                           </Badge>
-                          <span className="text-slate-600 whitespace-normal break-words" title={effect.outcome_theme}>
+                          <span className="text-slate-700 font-medium truncate max-w-[200px]" title={effect.outcome_theme}>
                             {effect.outcome_theme}
                           </span>
-                          <span className="text-slate-400">
+                          <span className="text-xs text-slate-400">
                             {formatEffectCounts(effect.positive_count, effect.negative_count, effect.null_count)}
                           </span>
                         </div>
                       ))}
                     </div>
-                  )}
-                  {!row.impact_narrative && (!row.outcome_effects || row.outcome_effects.length === 0) && (
-                    <span className="text-sm text-slate-400 italic">No impact data</span>
+                  ) : (
+                    <span className="text-sm text-slate-400 italic">No outcome data</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <div className="flex flex-wrap gap-1">
-                    {row.citation_numbers.map((num, citationIdx) => (
+                    {row.citation_numbers.slice(0, 4).map((num) => (
                       <CitationLink
-                        key={`int-${idx}-${citationIdx}-${num}`}
+                        key={`int-${idx}-${num}`}
                         citationKey={`[${num}]`}
                         citationNumber={num}
                         citationInfo={lookupCitation(num)}
                         onCitationClick={onCitationClick}
                       />
                     ))}
+                    {row.citation_numbers.length > 4 && (
+                      <span className="text-xs text-slate-500">+{row.citation_numbers.length - 4}</span>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -513,282 +490,6 @@ export function ExecutiveBriefing({
   const lookupCitation = useMemo(() => buildCitationLookup(citationMap), [citationMap]);
   const renderCitations = useRenderCitations(lookupCitation, onCitationClick);
 
-  const handleDownloadPdf = useCallback(() => {
-    const sanitize = (text?: string) =>
-      (text || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-    // Allow basic bold markdown and convert [N] to clickable citations
-    const linkCitations = (text: string) =>
-      text.replace(/\[(\d+)\]/g, (_m, g1) => {
-        const num = parseInt(g1, 10);
-        const citInfo = lookupCitation(num);
-        const href = citInfo?.url ? sanitize(citInfo.url) : `#cite-${num}`;
-        return `<a class="pill-inline" href="${href}" target="_blank" rel="noopener">[${num}]</a>`;
-      });
-
-    const rich = (text?: string) => {
-      const safe = sanitize(text);
-      const withBold = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-      return linkCitations(withBold);
-    };
-
-    const badgeForDirection = (direction: string) => {
-      const colors: Record<string, string> = {
-        increase: "#047857", // deep green
-        decrease: "#6b21a8", // deep purple
-        mixed: "#d97706", // amber
-        "no change": "#6b7280", // grey
-        default: "#6b7280",
-      };
-      return `<span style="display:inline-block;padding:2px 6px;border-radius:6px;font-size:11px;font-weight:600;color:#fff;background:${colors[direction] || colors.default};">${direction}</span>`;
-    };
-
-    const renderInterventions = () => {
-      if (!structuredBriefing?.interventions_table?.length) return "";
-
-      const cards = structuredBriefing.interventions_table
-        .map((row) => {
-          const citations = (row.citation_numbers || [])
-            .map((c) => {
-              const citInfo = lookupCitation(c);
-              const href = citInfo?.url ? sanitize(citInfo.url) : `#cite-${c}`;
-              const title = citInfo?.title ? sanitize(citInfo.title) : "";
-              return `<a class="pill" href="${href}" target="_blank" rel="noopener" title="${title}">[${c}]</a>`;
-            })
-            .join("");
-          const outcomes = (row.outcome_effects || [])
-            .sort(
-              (a, b) =>
-                b.positive_count +
-                b.negative_count +
-                b.null_count -
-                (a.positive_count + a.negative_count + a.null_count)
-            )
-            .slice(0, 3)
-            .map(
-              (o) =>
-                `<div class="outcome-chip">
-                   ${badgeForDirection(o.direction)}
-                   <div class="outcome-text">
-                     <div class="outcome-name">${sanitize(o.outcome_theme)}</div>
-                     <div class="outcome-counts">${o.positive_count}↑ ${o.negative_count}↓ ${o.null_count}—</div>
-                   </div>
-                 </div>`
-            )
-            .join("");
-
-          return `
-            <div class="card card-tight">
-              <div class="card-heading">${sanitize(row.intervention_name)}</div>
-              <div class="card-row">
-                <div class="card-label">Context</div>
-              <div class="card-value">${rich(row.context)}</div>
-              </div>
-              ${
-                row.impact_narrative
-                  ? `<div class="card-row">
-                      <div class="card-label">Impact</div>
-                      <div class="card-value">${rich(row.impact_narrative)}</div>
-                    </div>`
-                  : ""
-              }
-              ${
-                outcomes
-                  ? `<div class="card-row">
-                      <div class="card-label">Outcomes</div>
-                      <div class="card-value outcome-wrap">${outcomes}</div>
-                    </div>`
-                  : ""
-              }
-              ${
-                citations
-                  ? `<div class="card-row">
-                      <div class="card-label">Sources</div>
-                      <div class="card-value citations">${citations}</div>
-                    </div>`
-                  : ""
-              }
-            </div>
-          `;
-        })
-        .join("");
-
-      return `
-        <div class="card">
-          <div class="card-title">Key Interventions</div>
-          <div class="card-grid">
-            ${cards}
-          </div>
-        </div>
-      `;
-    };
-
-    const renderRecommendations = () => {
-      if (!structuredBriefing?.recommendations?.length) return "";
-      const items = structuredBriefing.recommendations
-            .map(
-              (r) =>
-                `<div class="chip-row">
-              <div class="chip-num">${r.number}</div>
-              <div>
-                <div class="chip-title">${rich(r.title)}</div>
-                <div class="chip-body">${rich(r.description)}</div>
-              </div>
-            </div>`
-            )
-        .join("");
-      return `
-        <div class="card">
-          <div class="card-title">Recommendations</div>
-          ${items}
-        </div>
-      `;
-    };
-
-    const renderEvidenceSnapshot = () => {
-      if (!evidenceCoverage) return "";
-      const strengths: Record<string, string> = {
-        High: "#bbf7d0",
-        Moderate: "#fef3c7",
-        Low: "#fecdd3",
-        Unknown: "#e5e7eb",
-      };
-      const strengthColor = strengths[evidenceCoverage.overall_strength] || strengths.Unknown;
-      const studyTypes = Object.entries(evidenceCoverage.study_types || {})
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([k, v]) => `${v} ${sanitize(k)}`)
-        .join(", ") || "Various";
-      const countryEntries = Object.entries(evidenceCoverage.countries || {}).sort((a, b) => b[1] - a[1]);
-      const topCountries = countryEntries.slice(0, 3).map(([c]) => sanitize(c)).join(", ") || "Unknown";
-      return `
-        <div class="card">
-          <div class="card-title">Evidence Base</div>
-          <div class="badge" style="background:${strengthColor};color:#0f172a;">${evidenceCoverage.overall_strength} confidence</div>
-          <div class="snapshot-grid">
-            <div>
-              <div class="label">Sources</div>
-              <div class="value">${evidenceCoverage.total_sources} documents</div>
-            </div>
-            <div>
-              <div class="label">Study Types</div>
-              <div class="value">${studyTypes}</div>
-            </div>
-            <div>
-              <div class="label">Geographic Coverage</div>
-              <div class="value">${topCountries}</div>
-            </div>
-          </div>
-        </div>
-      `;
-    };
-
-    const renderBackground = () => {
-      if (!structuredBriefing?.background_section) return "";
-      const paras =
-        structuredBriefing.background_section.paragraphs
-          .map((p) => `<p>${rich(p)}</p>`)
-          .join("") || "";
-      return `
-        <div class="card">
-          <div class="card-title">${sanitize(structuredBriefing.background_section.title)}</div>
-          ${paras}
-        </div>
-      `;
-    };
-
-    const renderQuestion = () => {
-      const q = structuredBriefing?.core_answer?.query || "";
-      if (!q) return "";
-      return `
-        <div class="card">
-          <div class="card-title">Research Question</div>
-          <p class="question-text">${rich(q)}</p>
-        </div>
-      `;
-    };
-
-    const structuredHtml = structuredBriefing
-      ? `
-        ${renderQuestion()}
-        <div class="hero">
-          <div class="hero-icon">✦</div>
-          <div>
-            <div class="hero-label">Core Answer</div>
-            <div class="hero-answer">${rich(structuredBriefing?.core_answer?.answer)}</div>
-            ${
-              structuredBriefing?.core_answer?.directive
-                ? `<div class="hero-directive">${rich(structuredBriefing.core_answer.directive)}</div>`
-                : ""
-            }
-          </div>
-        </div>
-        ${renderEvidenceSnapshot()}
-        ${renderBackground()}
-        ${renderInterventions()}
-        ${renderRecommendations()}
-      `
-      : `<div style="white-space: pre-wrap;">${sanitize(briefing)}</div>`;
-
-    const html = `
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Executive Summary</title>
-          <style>
-            body { font-family: "Inter", Arial, sans-serif; line-height: 1.65; padding: 28px; color: #0f172a; background: #f8fafc; }
-            h1 { font-size: 24px; margin-bottom: 16px; }
-            .card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 16px 18px; margin-bottom: 18px; box-shadow: 0 2px 4px rgba(15,23,42,0.06); }
-            .card-tight { padding: 14px 16px; }
-            .card-title { font-size: 16px; font-weight: 700; margin-bottom: 10px; display:flex; align-items:center; gap:8px; color:#0f172a; }
-            .card-heading { font-size: 15px; font-weight: 700; margin-bottom: 10px; color:#0f172a; }
-            .card-row { display:flex; gap:10px; margin-bottom:8px; }
-            .card-label { width: 90px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.02em; color:#6b7280; flex-shrink:0; }
-            .card-value { font-size: 13px; color:#111827; }
-            .outcome-wrap { display:flex; flex-wrap:wrap; gap:8px; }
-            .outcome-chip { display:flex; align-items:center; gap:6px; padding:6px 8px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; }
-            .outcome-text { display:flex; flex-direction:column; gap:2px; }
-            .outcome-name { font-weight:600; color:#0f172a; }
-            .outcome-counts { font-size:11px; color:#6b7280; }
-            .pill { display:inline-block; padding:4px 8px; margin:2px; background:#e0e7ff; color:#1d4ed8; border-radius:9999px; font-weight:600; font-size:11px; }
-            .citations { display:flex; flex-wrap:wrap; gap:4px; }
-            .card-grid { display:flex; flex-direction:column; gap:12px; }
-            p { margin: 8px 0; color: #1f2937; font-size: 14px; }
-            .hero { display:flex; gap:14px; padding:14px 16px; background: linear-gradient(135deg, #e0f2fe, #eef2ff); border:1px solid #bfdbfe; border-radius:14px; margin-bottom:16px; box-shadow:0 1px 3px rgba(59,130,246,0.2); }
-            .hero-icon { width:32px; height:32px; border-radius:10px; background:#2563eb; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; }
-            .hero-label { font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color:#2563eb; font-weight:700; }
-            .hero-answer { font-size:15px; font-weight:700; color:#0f172a; margin-top:4px; }
-            .hero-directive { margin-top:6px; font-size:13px; color:#1f2937; border-top:1px solid #bfdbfe; padding-top:6px; }
-            .snapshot-grid { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:12px; margin-top:10px; }
-            .label { font-size:11px; text-transform:uppercase; letter-spacing:0.03em; color:#6b7280; margin-bottom:2px; }
-            .value { font-size:13px; color:#0f172a; font-weight:600; }
-            .badge { display:inline-block; padding:6px 10px; border-radius:9999px; font-size:12px; font-weight:700; margin-bottom:8px; border:1px solid #d1d5db; }
-            .chip-row { display:flex; gap:10px; padding:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; margin-bottom:8px; }
-            .chip-num { width:24px; height:24px; border-radius:9999px; background:#2563eb; color:#fff; font-weight:700; display:flex; align-items:center; justify-content:center; font-size:12px; }
-            .chip-title { font-weight:700; color:#0f172a; }
-            .chip-body { color:#1f2937; font-size:14px; margin-top:4px; }
-            .pill { text-decoration:none; background:#e0f2fe; color:#1d4ed8; }
-            .pill-inline { text-decoration:none; color:#1d4ed8; font-weight:600; }
-            .question-text { font-size:14px; color:#0f172a; font-weight:600; }
-          </style>
-        </head>
-        <body>
-          <h1>Executive Summary</h1>
-          ${structuredHtml}
-        </body>
-      </html>
-    `;
-
-    const w = window.open("", "_blank", "width=960,height=720");
-    if (!w) return;
-    w.document.write(html);
-    w.document.close();
-    w.focus();
-    setTimeout(() => {
-      w.print();
-    }, 300);
-  }, [structuredBriefing, briefing]);
-
   // Legacy markdown components (simplified)
   const processText = useCallback((text: string, prefix: string): React.ReactNode => {
     const parts = renderCitations(text, prefix);
@@ -828,21 +529,11 @@ export function ExecutiveBriefing({
 
   return (
     <Card className="shadow-sm">
-      <CardHeader className="pb-2 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-slate-500" />
           Executive Briefing
         </CardTitle>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleDownloadPdf}
-          disabled={!structuredBriefing && !briefing}
-          className="gap-2"
-        >
-          <Download className="h-4 w-4" />
-          Download PDF
-        </Button>
       </CardHeader>
       <CardContent>
         {evidenceCoverage && <EvidenceCoverageBadge coverage={evidenceCoverage} />}
@@ -862,7 +553,6 @@ export function ExecutiveBriefing({
               interventions={structuredBriefing.interventions_table}
               lookupCitation={lookupCitation}
               onCitationClick={onCitationClick}
-              renderCitations={renderCitations}
             />
             
             <RecommendationsList 
@@ -893,8 +583,12 @@ export function ExecutiveBriefing({
         ) : briefing ? (
           <div className="prose prose-slate max-w-none">
             <ReactMarkdown skipHtml components={markdownComponents}>{briefing}</ReactMarkdown>
+            <ReactMarkdown skipHtml components={markdownComponents}>{briefing}</ReactMarkdown>
           </div>
         ) : (
+          <div className="text-center py-8 text-slate-500">
+            <FileText className="h-12 w-12 mx-auto mb-3 text-slate-300" />
+            <p>We are preparing the executive briefing. Please come back a bit later.</p>
           <div className="text-center py-8 text-slate-500">
             <FileText className="h-12 w-12 mx-auto mb-3 text-slate-300" />
             <p>We are preparing the executive briefing. Please come back a bit later.</p>

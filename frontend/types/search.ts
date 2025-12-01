@@ -62,6 +62,7 @@ export interface SearchParams {
   }
 
   // Synthesis summary types (Enhanced)
+  // Synthesis summary types (Enhanced)
   export interface KeyIssue {
     issue_theme: string
     summary_description: string
@@ -75,7 +76,7 @@ export interface SearchParams {
     impact_summary: string
     supporting_doc_ids: string[]
     frequency?: number
-    effect_consensus?: 'increase' | 'decrease' | 'mixed' | 'no change' | 'insufficient'
+    effect_consensus?: 'positive' | 'negative' | 'mixed' | 'null' | 'insufficient'
     positive_count?: number
     negative_count?: number
     null_count?: number
@@ -111,7 +112,7 @@ export interface SearchParams {
   export interface OutcomeTheme {
     outcome_name: string
     outcome_description: string
-    effect_consensus: 'increase' | 'decrease' | 'mixed' | 'no change' | 'insufficient'
+    effect_consensus: 'positive' | 'negative' | 'mixed' | 'null' | 'insufficient'
     positive_count: number
     negative_count: number
     null_count: number
@@ -128,7 +129,7 @@ export interface SearchParams {
 
   export interface OutcomeEffect {
     outcome_theme: string
-    direction: 'increase' | 'decrease' | 'no change' | 'mixed' | 'insufficient'
+    direction: 'positive' | 'negative' | 'null' | 'mixed' | 'insufficient'
     positive_count: number
     negative_count: number
     null_count: number
@@ -138,7 +139,6 @@ export interface SearchParams {
     intervention_name: string
     citation_numbers: number[]
     context: string
-    impact_narrative: string
     outcome_effects: OutcomeEffect[]
   }
 
@@ -183,8 +183,13 @@ export interface SearchParams {
   export interface SynthesisSummary {
     executive_briefing: string
     structured_briefing?: StructuredBriefing  // New structured output
+    structured_briefing?: StructuredBriefing  // New structured output
     key_issues: KeyIssue[]
     interventions: PolicyIntervention[]
+    // Enhanced fields
+    outcome_themes?: OutcomeTheme[]
+    evidence_coverage?: EvidenceCoverageSnapshot
+    citation_map?: Record<string, CitationInfo>
     // Enhanced fields
     outcome_themes?: OutcomeTheme[]
     evidence_coverage?: EvidenceCoverageSnapshot

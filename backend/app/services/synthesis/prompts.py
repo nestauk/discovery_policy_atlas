@@ -524,44 +524,6 @@ def build_recommendations_prompt() -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
 
 
-def build_impact_narrative_prompt() -> ChatPromptTemplate:
-    """Prompt for generating a concise impact narrative for an intervention.
-
-    Returns:
-        ChatPromptTemplate: Template expecting variables:
-            intervention_name, effect_consensus, evidence_context
-    """
-    system = (
-        "You are a research analyst writing concise impact summaries for policymakers. "
-        "Your summaries are specific, quantified where possible, and evidence-grounded."
-    )
-    user = (
-        "<task>\n"
-        "Write a 1-2 sentence impact summary for the intervention below. "
-        "Include specific effect sizes, percentages, or outcomes where the evidence provides them. "
-        "Use bold markdown for key metrics.\n"
-        "</task>\n\n"
-        "<intervention>\n"
-        "{intervention_name}\n"
-        "</intervention>\n\n"
-        "<overall_effect>\n"
-        "{effect_consensus}\n"
-        "</overall_effect>\n\n"
-        "<evidence>\n"
-        "{evidence_context}\n"
-        "</evidence>\n\n"
-        "<requirements>\n"
-        "- Maximum 2 sentences\n"
-        "- Include at least one specific metric if available in evidence\n"
-        "- Use **bold** for key numbers or effect sizes\n"
-        "- Include [N] citation numbers from the evidence\n"
-        "- Be direct: do not hedge or use phrases like 'the evidence suggests'\n"
-        "</requirements>\n\n"
-        "Write the impact summary:"
-    )
-    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
-
-
 def build_core_answer_prompt() -> ChatPromptTemplate:
     """Prompt for generating the core answer at the top of the briefing.
 

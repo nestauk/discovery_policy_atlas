@@ -5,18 +5,14 @@ into executive summaries, key issues, interventions, and detailed
 findings.
 """
 
-from app.services.synthesis.schemas import (
+from .schemas import (
     KeyIssue,
     PolicyIntervention,
     SynthesisSummary,
     Finding,
     ThematicGroup,
     EvidenceItem,
-    StructuredBriefing,
-    CitationInfo,
 )
-from app.services.synthesis.agent import SynthesisAgent
-from app.services.synthesis.findings import get_findings
 
 __all__ = [
     # Schemas
@@ -26,10 +22,4 @@ __all__ = [
     "Finding",
     "ThematicGroup",
     "EvidenceItem",
-    "StructuredBriefing",
-    "CitationInfo",
-    # Agent
-    "SynthesisAgent",
-    # Functions
-    "get_findings",
 ]

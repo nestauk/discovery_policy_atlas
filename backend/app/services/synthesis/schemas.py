@@ -8,8 +8,19 @@ These models define the data structures for:
 - Aggregated themes (issues, interventions, outcomes)
 """
 
+"""
+Pydantic schemas for synthesis agent.
+
+These models define the data structures for:
+- RAG retrieval (chunks, citations)
+- Structured briefing output (for frontend rendering)
+- Evidence coverage statistics
+- Aggregated themes (issues, interventions, outcomes)
+"""
+
 from __future__ import annotations
 
+from typing import List, Optional, Dict, Literal
 from typing import List, Optional, Dict, Literal
 from pydantic import BaseModel, Field
 
@@ -67,7 +78,7 @@ class OutcomeEffect(BaseModel):
 
     outcome_theme: str = Field(..., description="Name of the outcome theme")
     direction: str = Field(
-        ..., description="Dominant effect: increase, decrease, no change, mixed"
+        ..., description="Dominant effect: positive, negative, null, mixed"
     )
     positive_count: int = Field(0, description="Count of positive effects")
     negative_count: int = Field(0, description="Count of negative effects")
@@ -81,12 +92,7 @@ class InterventionTableRow(BaseModel):
     citation_numbers: List[int] = Field(
         default_factory=list, description="Citation numbers"
     )
-    context: str = Field(
-        "", description="Structured context: Location, Setting, Study types"
-    )
-    impact_narrative: str = Field(
-        "", description="1-2 sentence RAG-grounded summary of key effects"
-    )
+    context: str = Field("", description="Location, setting, population, study design")
     outcome_effects: List[OutcomeEffect] = Field(
         default_factory=list, description="Effects grouped by outcome theme"
     )
@@ -107,6 +113,27 @@ class RecommendationItem(BaseModel):
     citation_numbers: List[int] = Field(
         default_factory=list, description="List of citation numbers used in description"
     )
+
+
+class RecommendationsOutput(BaseModel):
+    """Structured output for recommendations generation."""
+
+    recommendations: List[RecommendationItem] = Field(
+        ...,
+        description="List of 3-4 policy recommendations",
+        min_length=1,
+        max_length=5,
+    )
+
+
+class TopCitationItem(BaseModel):
+    """A top citation for the reading list."""
+
+    citation_number: int = Field(..., description="Citation number")
+    title: str = Field(..., description="Document title")
+    author_year: str = Field(..., description="Author, Year string")
+    reason: str = Field("", description="Recommendation reason")
+    url: Optional[str] = Field(None, description="Document URL")
 
 
 class RecommendationsOutput(BaseModel):
@@ -193,7 +220,7 @@ class OutcomeTheme(BaseModel):
     outcome_name: str = Field(..., description="Canonical outcome name")
     outcome_description: str = Field("")
     effect_consensus: Literal[
-        "increase", "decrease", "mixed", "no change", "insufficient"
+        "positive", "negative", "mixed", "null", "insufficient"
     ] = Field("insufficient")
     positive_count: int = Field(0)
     negative_count: int = Field(0)
@@ -223,7 +250,7 @@ class PolicyIntervention(BaseModel):
     frequency: int = Field(..., description="Number of documents")
     supporting_doc_ids: List[str] = Field(..., description="Supporting document IDs")
     effect_consensus: Optional[
-        Literal["increase", "decrease", "mixed", "no change", "insufficient"]
+        Literal["positive", "negative", "mixed", "null", "insufficient"]
     ] = Field(None)
     positive_count: int = Field(0)
     negative_count: int = Field(0)
@@ -244,9 +271,19 @@ class SynthesisSummary(BaseModel):
     outcome_themes: List[OutcomeTheme] = Field(default_factory=list)
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = Field(None)
     citation_map: Dict[str, CitationInfo] = Field(default_factory=dict)
+    """Container for the executive briefing and aggregated tables."""
+
+    executive_briefing: str = Field("", description="Legacy markdown (deprecated)")
+    structured_briefing: Optional[StructuredBriefing] = Field(None)
+    key_issues: List[KeyIssue] = Field(default_factory=list)
+    interventions: List[PolicyIntervention] = Field(default_factory=list)
+    outcome_themes: List[OutcomeTheme] = Field(default_factory=list)
+    evidence_coverage: Optional[EvidenceCoverageSnapshot] = Field(None)
+    citation_map: Dict[str, CitationInfo] = Field(default_factory=dict)
 
 
 class Finding(BaseModel):
+    """Drill-down finding for intervention/issue detail views."""
     """Drill-down finding for intervention/issue detail views."""
 
     SourceTitle: str
@@ -268,9 +305,16 @@ class Finding(BaseModel):
 # =============================================================================
 # EVIDENCE VIEW (Used by frontend Evidence tab)
 # =============================================================================
+    Evidence: List[str] = Field(default_factory=list)
+
+
+# =============================================================================
+# EVIDENCE VIEW (Used by frontend Evidence tab)
+# =============================================================================
 
 
 class ThematicGroup(BaseModel):
+    """Level-1 thematic grouping for the Evidence view."""
     """Level-1 thematic grouping for the Evidence view."""
 
     id: str
@@ -279,6 +323,8 @@ class ThematicGroup(BaseModel):
     item_count: int
 
 
+class OutcomeItem(BaseModel):
+    """A single outcome within an intervention item."""
 class OutcomeItem(BaseModel):
     """A single outcome within an intervention item."""
 
@@ -295,6 +341,9 @@ class EvidenceItem(BaseModel):
     title: str
     brief_description: Optional[str] = None
     frequency: Optional[int] = None
+    outcomes: List[OutcomeItem] = Field(default_factory=list)
+    supporting_evidence: List[str] = Field(default_factory=list)
+    countries: List[str] = Field(default_factory=list)
     outcomes: List[OutcomeItem] = Field(default_factory=list)
     supporting_evidence: List[str] = Field(default_factory=list)
     countries: List[str] = Field(default_factory=list)
