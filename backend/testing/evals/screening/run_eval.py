@@ -1,3 +1,31 @@
+"""Evaluation script for screening/relevance models.
+
+Usage:
+    1. Download datasets first (if not already present):
+       uv run python backend/testing/evals/screening/download_datasets.py
+
+    2. Ensure environment variables are configured:
+       - Create/update .env file in backend/ directory
+       - Required: OPENAI_API_KEY, SUPABASE_URL, SUPABASE_KEY
+       - See backend/app/core/config.py for full list
+
+    3. Run the evaluation:
+       cd backend
+       uv run python testing/evals/screening/run_eval.py
+
+What it does:
+    - Evaluates RelevanceService on multiple targets from config.ALL_EVAL_TARGETS
+    - Sources: CSMeD (Cochrane), SYNERGY, 3ie datasets
+    - Calculates metrics: Recall, Precision, F_beta, average confidence by outcome
+    - Saves results to results/{timestamp}/ directory
+
+Output:
+    - results/{timestamp}/eval_results_{timestamp}.json - aggregated metrics
+    - results/{timestamp}/result_{target_name}.csv - per-target detailed results
+    - results/{timestamp}/temp_input_{target_name}.csv - input data for each target
+    - Summary tables printed to console
+"""
+
 import asyncio
 import json
 import logging
