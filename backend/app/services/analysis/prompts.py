@@ -51,7 +51,7 @@ IMPORTANT GUIDELINES:
 2. If population interests are specified, naturally incorporate them (e.g., "for children", "targeting low-income households")
 3. If outcome interests are specified, naturally incorporate them (e.g., "to improve health outcomes", "aiming for better educational attainment")
 4. If geography is specified, naturally include the geography using multiple name variants and demonyms when helpful (e.g., "UK", "United Kingdom", "England", "Scotland", "Wales", "Northern Ireland", "English", "Scottish", "Welsh")
-5. If screening factors are provided, focus on POSITIVE/INCLUSION factors and naturally incorporate them (e.g., "peer-reviewed research", "cost-effectiveness studies"). IGNORE exclusionary factors
+5. If screening factors are provided, focus on POSITIVE/INCLUSION factors and naturally incorporate them (e.g., "cost-effectiveness studies"). IGNORE exclusionary factors
 6. Write as a natural, coherent sentence or short paragraph that captures the full research intent
 7. Make it suitable for semantic search (natural language, not boolean operators)
 
@@ -59,8 +59,8 @@ Example:
 - Research question: "What interventions improve home learning environment?"
 - Population: ["Children under 5", "Low-income families"]
 - Outcome: ["Better educational outcomes", "School readiness"]
-- Screening factors: ["Peer-reviewed studies", "Cost-effectiveness"]
-- Semantic query: "What interventions improve home learning environment for children under 5 and low-income families, focusing on peer-reviewed research and cost-effectiveness studies that measure educational outcomes and school readiness?"
+- Screening factors: ["Cost-effectiveness"]
+- Semantic query: "What interventions improve home learning environment for children under 5 and low-income families, focusing on cost-effectiveness studies that measure educational outcomes and school readiness?"
 
 Return ONLY the semantic query string, nothing else."""
 
@@ -78,7 +78,7 @@ def RELEVANCE_SYSTEM_PROMPT(
         research_question: The main research question or query
         population_selected: List of population groups of interest (e.g., ["children", "adults"])
         outcome_selected: List of outcomes of interest (e.g., ["health outcomes", "educational attainment"])
-        screening_factors: List of screening criteria (e.g., ["peer-reviewed only", "cost-effectiveness"])
+        screening_factors: List of screening criteria (e.g., ["cost-effectiveness"])
 
     Returns:
         Formatted system prompt string
@@ -111,7 +111,7 @@ For each document, you will assess:
    - Be inclusive rather than overly restrictive
    - **IMPORTANT**: When population interests are specified, prioritize documents that address those specific populations
    - **IMPORTANT**: When outcome interests are specified, prioritize documents that measure or discuss those specific outcomes
-   - **IMPORTANT**: When screening factors are provided (e.g., "peer-reviewed only"), documents that do not meet these criteria should be considered less relevant or excluded
+   - **IMPORTANT**: When screening factors are provided (e.g., "studies with children below 5 years old only"), documents that do not meet these criteria should be considered less relevant or excluded
    - **IMPORTANT**: When geography is specified, prefer documents from the listed countries/regions and mark documents outside those geographies as not relevant unless the abstract/title clearly states findings are directly transferable to the target geography
    - For example, if geography includes "UK", prioritize UK studies and exclude documents from other regions unless they explicitly claim applicability to the UK context.
    - Consider different ways of expressing the same geography (e.g., "UK" and "United Kingdom" is equivalent, as is "England" part of the UK, etc)

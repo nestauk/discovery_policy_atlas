@@ -781,7 +781,7 @@ function ScreenScreening() {
         <div className="flex gap-3">
           <Input
             value={customInput}
-            placeholder="Add a screening factor (e.g., 'Only peer-reviewed studies', 'Focus on cost-effectiveness')"
+            placeholder="Add a screening factor (eg, 'Only studies with children below 5 years old')"
             onChange={(e) => setCustomInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addFactor()}
           />
