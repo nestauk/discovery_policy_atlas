@@ -48,11 +48,10 @@ class RelevanceService:
         # System message for relevance and document type assessment
         # Use context-aware prompt if search_context is provided
         if search_context:
+            # Expect flat structure: population and outcome are direct lists
             research_question = search_context.get("research_question", query)
-            population_selected = search_context.get("population", {}).get(
-                "selected", []
-            )
-            outcome_selected = search_context.get("outcome", {}).get("selected", [])
+            population_selected = search_context.get("population", [])
+            outcome_selected = search_context.get("outcome", [])
             screening_factors = search_context.get("screening_factors", [])
 
             self.system_message = RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT(

@@ -154,18 +154,32 @@ export const useWizard = create<WizardState>((set, get) => ({
   set: (p) => set(p),
   next: () => {
     const s = get();
+    // Skip ADDITIONAL_QUESTIONS step - go directly from SCREENING to SUMMARY
     const steps: Step[] = ["ASK", "POPULATION", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
     const currentIdx = steps.indexOf(s.step);
     if (currentIdx < steps.length - 1) {
-      set({ step: steps[currentIdx + 1] });
+      const nextStep = steps[currentIdx + 1];
+      // Skip ADDITIONAL_QUESTIONS - go directly to SUMMARY
+      if (nextStep === "ADDITIONAL_QUESTIONS") {
+        set({ step: "SUMMARY" });
+      } else {
+        set({ step: nextStep });
+      }
     }
   },
   back: () => {
     const s = get();
+    // Skip ADDITIONAL_QUESTIONS step - go directly from SUMMARY to SCREENING
     const steps: Step[] = ["ASK", "POPULATION", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
     const currentIdx = steps.indexOf(s.step);
     if (currentIdx > 0) {
-      set({ step: steps[currentIdx - 1] });
+      const prevStep = steps[currentIdx - 1];
+      // Skip ADDITIONAL_QUESTIONS - go directly to SCREENING
+      if (prevStep === "ADDITIONAL_QUESTIONS") {
+        set({ step: "SCREENING" });
+      } else {
+        set({ step: prevStep });
+      }
     }
   },
   buildContext: () => {
@@ -184,7 +198,8 @@ export const useWizard = create<WizardState>((set, get) => ({
 
 // ---------------- HELPERS ----------------
 function ProgressBar({ step }: { step: Step }) {
-  const steps: Step[] = ["ASK", "POPULATION", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+  // Skip ADDITIONAL_QUESTIONS in progress calculation
+  const steps: Step[] = ["ASK", "POPULATION", "OUTCOME", "PARAMETERS", "SCREENING", "SUMMARY"];
   const currentIdx = steps.indexOf(step);
   const pct = Math.round(((currentIdx + 1) / steps.length) * 100);
   return (
@@ -353,7 +368,7 @@ function ScreenPopulation() {
 
       <div className="space-y-6 max-w-2xl mx-auto">
         {/* Options in single column */}
-        <div>
+        <div className="flex flex-col gap-3">
           {exampleOptions.map((pop) => {
             const isSelected = s.population.selected.includes(pop);
             return (
@@ -362,7 +377,7 @@ function ScreenPopulation() {
                 type="button"
                 onClick={() => togglePopulation(pop)}
                 className={cx(
-                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 mb-3",
+                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
                   isSelected
                     ? "bg-blue-600 !text-white ring-blue-600"
                     : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
@@ -378,7 +393,7 @@ function ScreenPopulation() {
             <button
               key={pop}
               type="button"
-              className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between mb-3"
+              className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
             >
               <span>{pop}</span>
               <button
@@ -460,7 +475,7 @@ function ScreenOutcome() {
 
       <div className="space-y-6 max-w-2xl mx-auto">
         {/* Options in single column */}
-        <div>
+        <div className="flex flex-col gap-3">
           {exampleOptions.map((outcome) => {
             const isSelected = s.outcome.selected.includes(outcome);
             return (
@@ -469,7 +484,7 @@ function ScreenOutcome() {
                 type="button"
                 onClick={() => toggleOutcome(outcome)}
                 className={cx(
-                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 mb-3",
+                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
                   isSelected
                     ? "bg-blue-600 !text-white ring-blue-600"
                     : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
@@ -485,7 +500,7 @@ function ScreenOutcome() {
             <button
               key={outcome}
               type="button"
-              className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between mb-3"
+              className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
             >
               <span>{outcome}</span>
               <button
@@ -618,7 +633,7 @@ function ScreenParameters() {
             return (
               <div>
                 {/* Quick options in single column */}
-                <div>
+                <div className="flex flex-col gap-3">
                   {quickOptions.map((geo) => {
                     const isSelected = s.parameters.geography.includes(geo);
                     return (
@@ -633,7 +648,7 @@ function ScreenParameters() {
                           }
                         }}
                         className={cx(
-                          "w-full text-left px-4 py-4 rounded-xl transition ring-1 mb-3",
+                          "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
                           isSelected
                             ? "bg-blue-600 !text-white ring-blue-600"
                             : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
@@ -649,7 +664,7 @@ function ScreenParameters() {
                     <button
                       key={geo}
                       type="button"
-                      className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between mb-3"
+                      className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
                     >
                       <span>{geo}</span>
                       <button
@@ -700,7 +715,6 @@ function ScreenParameters() {
 
 function ScreenScreening() {
   const s = useWizard();
-  const { generateAdditionalQuestions } = useAPI();
   const [customInput, setCustomInput] = useState("");
 
   const addFactor = () => {
@@ -715,34 +729,38 @@ function ScreenScreening() {
   };
 
   const handleNext = async () => {
-    // Generate additional questions before moving to next step
-    s.set({ isGeneratingOptions: true });
+    // Skip ADDITIONAL_QUESTIONS step - go directly to SUMMARY
+    // (Keeping generation code commented out for future use)
+    // s.set({ isGeneratingOptions: true });
+    // 
+    // try {
+    //   const response = await generateAdditionalQuestions(
+    //     s.researchQuestion,
+    //     s.population.selected,
+    //     s.outcome.selected
+    //   ).catch(() => ({ additional_questions: [] }));
+    //
+    //   const generatedQuestions = response?.additional_questions || [];
+    //   
+    //   // Preselect generated questions
+    //   s.set({ 
+    //     generatedAdditionalQuestions: generatedQuestions,
+    //     additionalQuestions: generatedQuestions,
+    //     step: "ADDITIONAL_QUESTIONS"
+    //   });
+    // } catch (error) {
+    //   console.error('Failed to generate additional questions:', error);
+    //   // Continue with empty questions if generation fails
+    //   s.set({ 
+    //     generatedAdditionalQuestions: [],
+    //     step: "ADDITIONAL_QUESTIONS" 
+    //   });
+    // } finally {
+    //   s.set({ isGeneratingOptions: false });
+    // }
     
-    try {
-      const response = await generateAdditionalQuestions(
-        s.researchQuestion,
-        s.population.selected,
-        s.outcome.selected
-      ).catch(() => ({ additional_questions: [] }));
-
-      const generatedQuestions = response?.additional_questions || [];
-      
-      // Preselect generated questions
-      s.set({ 
-        generatedAdditionalQuestions: generatedQuestions,
-        additionalQuestions: generatedQuestions,
-        step: "ADDITIONAL_QUESTIONS"
-      });
-    } catch (error) {
-      console.error('Failed to generate additional questions:', error);
-      // Continue with empty questions if generation fails
-      s.set({ 
-        generatedAdditionalQuestions: [],
-        step: "ADDITIONAL_QUESTIONS" 
-      });
-    } finally {
-      s.set({ isGeneratingOptions: false });
-    }
+    // Go directly to SUMMARY
+    s.set({ step: "SUMMARY" });
   };
 
   return (
@@ -964,7 +982,28 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
               <span>{context.screeningFactors.join(", ")}</span>
             </div>
           )}
-          {context.additionalQuestions.length > 0 && (
+          <div>
+            <span className="font-medium">Max results: </span>
+            <div className="inline-flex items-center gap-2 mt-1">
+              <button
+                type="button"
+                className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
+                disabled={isRunning}
+                aria-label="Decrease results"
+              >–</button>
+              <span className="min-w-[2ch] text-center">{s.maxResults}</span>
+              <button
+                type="button"
+                className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
+                disabled={isRunning}
+                aria-label="Increase results"
+              >+</button>
+            </div>
+          </div>
+          {/* Additional questions step is currently skipped */}
+          {/* {context.additionalQuestions.length > 0 && (
             <div>
               <span className="font-medium">Questions: </span>
               <ul className="list-disc pl-6 mt-2 space-y-1">
@@ -973,7 +1012,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
                 ))}
               </ul>
             </div>
-          )}
+          )} */}
         </CardContent>
       </Card>
     </div>

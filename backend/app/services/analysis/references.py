@@ -433,7 +433,7 @@ class ReferencesService:
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
         search_context: Optional[Dict] = None,
-    ) -> tuple[Path, str, Optional[str]]:
+    ) -> tuple[Path, List[str], Optional[str]]:
         """Fetch and normalize references, write references.csv, and return its path.
 
         New multi-query mode generates multiple diverse queries and combines results
@@ -474,9 +474,9 @@ class ReferencesService:
         df_val = date.fromisoformat(date_from) if date_from else None
         dt_val = date.fromisoformat(date_to) if date_to else None
 
-        # Determine OpenAlex query string(s) and track the final boolean query
+        # Determine OpenAlex query string(s) and track the boolean queries
         openalex_queries = []  # List of queries to execute
-        final_boolean_query = None
+        boolean_queries_list = []  # List of all boolean queries (for storage)
         final_semantic_query = None
         logger.info("🔎 Building references with mode: '%s'", mode)
         logger.debug("Original query: '%s'", query)
@@ -484,11 +484,10 @@ class ReferencesService:
         # Check if we have search context to use
         if search_context:
             logger.info("📋 Using search context for query generation")
+            # Expect flat structure: population and outcome are direct lists
             research_question = search_context.get("research_question", query)
-            population_selected = search_context.get("population", {}).get(
-                "selected", []
-            )
-            outcome_selected = search_context.get("outcome", {}).get("selected", [])
+            population_selected = search_context.get("population", [])
+            outcome_selected = search_context.get("outcome", [])
             screening_factors = search_context.get("screening_factors", [])
 
             # Generate boolean queries for OpenAlex from context
@@ -514,8 +513,8 @@ class ReferencesService:
                             user_id=user_id,
                         )
                     )
-                    # Store all queries for debugging
-                    final_boolean_query = " | ".join(openalex_queries)
+                    # Store all queries as a list
+                    boolean_queries_list = openalex_queries
                     logger.info(
                         "✅ Generated %d unique queries from context",
                         len(openalex_queries),
@@ -536,7 +535,7 @@ class ReferencesService:
                         user_id=user_id,
                     )
                     openalex_queries = [single_query]
-                    final_boolean_query = single_query
+                    boolean_queries_list = [single_query]
 
             # Generate semantic query for Overton from context
             if "overton" in sources:
@@ -551,11 +550,13 @@ class ReferencesService:
                     user_id=user_id,
                 )
 
-        elif mode == "boolean":
-            # Boolean mode: use provided query directly
-            openalex_queries = [boolean_query or query]
-            final_boolean_query = openalex_queries[0]
-            logger.info("📋 Using provided boolean query: '%s'", final_boolean_query)
+            elif mode == "boolean":
+                # Boolean mode: use provided query directly
+                openalex_queries = [boolean_query or query]
+                boolean_queries_list = openalex_queries
+                logger.info(
+                    "📋 Using provided boolean query: '%s'", boolean_queries_list[0]
+                )
 
         elif mode == "semantic":
             logger.info(
@@ -578,8 +579,8 @@ class ReferencesService:
                     project_id=project_id,
                     user_id=user_id,
                 )
-                # Store all queries for debugging
-                final_boolean_query = " | ".join(openalex_queries)
+                # Store all queries as a list
+                boolean_queries_list = openalex_queries
                 logger.info("✅ Generated %d unique queries", len(openalex_queries))
             else:
                 # Single-query mode: generate one deterministic query
@@ -594,7 +595,7 @@ class ReferencesService:
                     user_id=user_id,
                 )
                 openalex_queries = [single_query]
-                final_boolean_query = single_query
+                boolean_queries_list = [single_query]
 
         # Execute OpenAlex queries
         if openalex_service:
@@ -904,4 +905,8 @@ class ReferencesService:
             )
 
         logger.info("Wrote references.csv with %d rows to %s", len(df), references_csv)
-        return references_csv, final_boolean_query or query, final_semantic_query
+        # Return list of boolean queries (or single query as list if none generated)
+        if not boolean_queries_list:
+            boolean_queries_list = [query]
+
+        return references_csv, boolean_queries_list, final_semantic_query

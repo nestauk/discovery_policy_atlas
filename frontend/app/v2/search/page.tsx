@@ -21,9 +21,10 @@ export default function SearchPage() {
       // Create analysis project from search context
       const project = await createAnalysisProject({
         title: context.researchQuestion || 'New Analysis Project',
-        description: context.additionalQuestions.length > 0 
-          ? `Additional questions: ${context.additionalQuestions.join('; ')}` 
-          : undefined
+        // Additional questions step is currently skipped
+        // description: context.additionalQuestions.length > 0 
+        //   ? `Additional questions: ${context.additionalQuestions.join('; ')}` 
+        //   : undefined
       })
 
       // Set as active project
@@ -71,7 +72,7 @@ export default function SearchPage() {
         access_types: Object.entries(context.parameters.access)
           .filter(([, enabled]) => enabled)
           .map(([key]) => key),
-        sub_questions: context.additionalQuestions,
+        sub_questions: [], // Additional questions step is currently skipped
         // Time parameters
         date_from: dateFrom,
         date_to: dateTo,
@@ -82,7 +83,7 @@ export default function SearchPage() {
           outcome: context.outcome,
           parameters: context.parameters,
           screening_factors: context.screeningFactors,
-          additional_questions: context.additionalQuestions,
+          additional_questions: [], // Additional questions step is currently skipped
           max_results: context.maxResults,
         },
       }

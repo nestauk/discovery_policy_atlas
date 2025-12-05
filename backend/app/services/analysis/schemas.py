@@ -73,10 +73,9 @@ class RunConfig(BaseModel):
     use_abstracts_only: bool = False
     # Chat interface specific parameters
     geography_filter: Optional[List[str]] = None  # Countries/regions to filter by
-    access_types: Optional[List[str]] = None  # ["academic", "thinkTank", "government"]
     sub_questions: Optional[
         List[str]
-    ] = None  # Additional questions to include in screening
+    ] = None  # Additional questions to include in screening (deprecated - step skipped)
     use_interim_storage: bool = True
     # New search wizard context
     search_context: Optional[SearchContext] = None
@@ -92,5 +91,7 @@ class RunResult(BaseModel):
     extractions_json_path: Optional[
         str
     ] = None  # Single consolidated extractions JSON file
-    boolean_query: Optional[str] = None  # Generated boolean query used for search
+    boolean_queries: Optional[
+        List[str]
+    ] = None  # Generated boolean queries used for search (list for multi-query support)
     semantic_query: Optional[str] = None  # Generated semantic query used for Overton

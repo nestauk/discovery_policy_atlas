@@ -593,18 +593,6 @@ async def run_analysis_for_project(
                 status_code=400, detail="Query is required for analysis"
             )
 
-        # Map access_types to appropriate sources
-        access_types = request.get("access_types", [])
-        sources = []
-        if "academic" in access_types:
-            sources.append("openalex")
-        if "policy" in access_types:
-            sources.append("overton")
-
-        # Fallback to default sources if none specified
-        if not sources:
-            sources = request.get("sources", ["openalex", "overton"])
-
         # Extract search_context if provided (from new wizard)
         search_context = None
         if request.get("search_context"):
@@ -614,6 +602,17 @@ async def run_analysis_for_project(
                 search_context = SearchContext(**request["search_context"])
             except Exception as e:
                 logger.warning(f"Failed to parse search_context: {e}")
+
+        # Get sources - prefer from search_context, fallback to request
+        sources = []
+        if search_context:
+            # Extract sources from search_context.parameters (parameters is a Dict)
+            params = search_context.parameters
+            sources = params.get("sources", []) if isinstance(params, dict) else []
+
+        # Fallback to request sources if not in search_context
+        if not sources:
+            sources = request.get("sources", ["openalex", "overton"])
 
         config = RunConfig(
             query=query,
@@ -629,40 +628,63 @@ async def run_analysis_for_project(
             use_abstracts_only=bool(request.get("use_abstracts_only", False)),
             # Chat interface parameters
             geography_filter=request.get("geography_filter"),
-            access_types=access_types,
             sub_questions=request.get("sub_questions"),
             # New search wizard context
             search_context=search_context,
         )
 
         # Prepare search query metadata to save with the project
-        search_query_data = {
-            "original_query": query,
-            "sub_questions": request.get("sub_questions", []),
-            "sources": sources,
-            "access_types": access_types,
-            "geography_filter": request.get("geography_filter", []),
-            "time_preset": request.get("time_preset"),
-            "time_from": config.date_from,
-            "time_to": config.date_to,
-            "limit": config.limit,
-            "mode": config.retrieval_mode,
-            "scope": request.get("scope", []),
-            "custom_focus": request.get("custom_focus", []),
-            "excludes": request.get("excludes", []),
-            "custom_excludes": request.get("custom_excludes", []),
-            "relevance_enabled": config.relevance_enabled,
-            "use_abstracts_only": config.use_abstracts_only,
-            "boolean_query": None,  # Will be filled in after generation
-            "semantic_query": None,  # Will be filled in after generation
-        }
-
-        # If search_context is provided, include it in the search_query_data
+        # Flatten structure - extract from search_context if available, otherwise use request
         if search_context:
-            if hasattr(search_context, "dict"):
-                search_query_data["search_context"] = search_context.dict()
-            else:
-                search_query_data["search_context"] = search_context
+            # Flatten search_context structure for cleaner storage
+            search_context_dict = (
+                search_context.dict()
+                if hasattr(search_context, "dict")
+                else search_context
+            )
+            params = search_context_dict.get("parameters", {})
+            search_query_data = {
+                "research_question": search_context_dict.get(
+                    "research_question", query
+                ),
+                "population": search_context_dict.get("population", {}).get(
+                    "selected", []
+                ),
+                "outcome": search_context_dict.get("outcome", {}).get("selected", []),
+                "screening_factors": search_context_dict.get("screening_factors", []),
+                "sources": params.get("sources", sources),
+                "geography": params.get(
+                    "geography", request.get("geography_filter", [])
+                ),
+                "time_preset": params.get("timePreset"),
+                "time_from": config.date_from,
+                "time_to": config.date_to,
+                "limit": search_context_dict.get("max_results", config.limit),
+                "mode": config.retrieval_mode,
+                "relevance_enabled": config.relevance_enabled,
+                "use_abstracts_only": config.use_abstracts_only,
+                "boolean_queries": None,  # Will be filled in after generation (list of queries)
+                "semantic_query": None,  # Will be filled in after generation
+            }
+        else:
+            # Fallback for legacy requests without search_context
+            search_query_data = {
+                "research_question": query,
+                "population": [],
+                "outcome": [],
+                "screening_factors": [],
+                "sources": sources,
+                "geography": request.get("geography_filter", []),
+                "time_preset": request.get("time_preset"),
+                "time_from": config.date_from,
+                "time_to": config.date_to,
+                "limit": config.limit,
+                "mode": config.retrieval_mode,
+                "relevance_enabled": config.relevance_enabled,
+                "use_abstracts_only": config.use_abstracts_only,
+                "boolean_queries": None,  # Will be filled in after generation (list of queries)
+                "semantic_query": None,  # Will be filled in after generation
+            }
 
         # Update project status to running (async to avoid blocking)
         loop = asyncio.get_event_loop()
@@ -684,7 +706,7 @@ async def run_analysis_for_project(
         )
 
         # Update search query data with the generated queries
-        search_query_data["boolean_query"] = result.boolean_query
+        search_query_data["boolean_queries"] = result.boolean_queries
         search_query_data["semantic_query"] = result.semantic_query
 
         # Update project with analysis results but keep status as "running" (async to avoid blocking)

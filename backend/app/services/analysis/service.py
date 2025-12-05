@@ -66,17 +66,45 @@ class AnalysisService:
         # Step 1: build references
         with StageTimer(monitor, "references"):
             references_service = ReferencesService(export_dir=str(run_export_dir))
-            # Convert search_context to dict if it's a Pydantic model
-            search_context_dict = None
+            # Convert search_context to flat dict format for consistency
+            search_context_flat = None
             if config.search_context:
+                # Convert nested structure to flat structure
                 if hasattr(config.search_context, "dict"):
                     search_context_dict = config.search_context.dict()
                 else:
                     search_context_dict = config.search_context
 
+                # Flatten the structure
+                params = search_context_dict.get("parameters", {})
+                search_context_flat = {
+                    "research_question": search_context_dict.get(
+                        "research_question", config.query
+                    ),
+                    "population": search_context_dict.get("population", {}).get(
+                        "selected", []
+                    ),
+                    "outcome": search_context_dict.get("outcome", {}).get(
+                        "selected", []
+                    ),
+                    "screening_factors": search_context_dict.get(
+                        "screening_factors", []
+                    ),
+                    "sources": params.get("sources", config.sources)
+                    if isinstance(params, dict)
+                    else config.sources,
+                    "geography": params.get("geography", config.geography_filter or [])
+                    if isinstance(params, dict)
+                    else (config.geography_filter or []),
+                    "time_preset": params.get("timePreset")
+                    if isinstance(params, dict)
+                    else None,
+                    "limit": search_context_dict.get("max_results", config.limit),
+                }
+
             (
                 references_csv,
-                generated_boolean_query,
+                generated_boolean_queries,
                 generated_semantic_query,
             ) = await references_service.build_references(
                 query=config.query,
@@ -89,7 +117,7 @@ class AnalysisService:
                 geography_filter=config.geography_filter,
                 project_id=project_id,
                 user_id=user_id,
-                search_context=search_context_dict,
+                search_context=search_context_flat,
             )
 
         # Count rows
@@ -111,12 +139,49 @@ class AnalysisService:
         if config.relevance_enabled:
             with StageTimer(monitor, "relevance"):
                 logger.info("Run %s starting relevance checking", run_id)
+                # Convert search_context to flat dict format for consistency
+                search_context_flat = None
+                if config.search_context:
+                    if hasattr(config.search_context, "dict"):
+                        search_context_dict = config.search_context.dict()
+                    else:
+                        search_context_dict = config.search_context
+
+                    # Flatten the structure
+                    params = search_context_dict.get("parameters", {})
+                    search_context_flat = {
+                        "research_question": search_context_dict.get(
+                            "research_question", config.query
+                        ),
+                        "population": search_context_dict.get("population", {}).get(
+                            "selected", []
+                        ),
+                        "outcome": search_context_dict.get("outcome", {}).get(
+                            "selected", []
+                        ),
+                        "screening_factors": search_context_dict.get(
+                            "screening_factors", []
+                        ),
+                        "sources": params.get("sources", config.sources)
+                        if isinstance(params, dict)
+                        else config.sources,
+                        "geography": params.get(
+                            "geography", config.geography_filter or []
+                        )
+                        if isinstance(params, dict)
+                        else (config.geography_filter or []),
+                        "time_preset": params.get("timePreset")
+                        if isinstance(params, dict)
+                        else None,
+                        "limit": search_context_dict.get("max_results", config.limit),
+                    }
+
                 relevance_service = RelevanceService(
                     query=config.query,
                     export_dir=str(run_export_dir),
                     project_id=project_id,
                     user_id=user_id,
-                    search_context=search_context_dict,
+                    search_context=search_context_flat,
                 )
                 references_csv = await relevance_service.check_relevance(
                     str(references_csv)
@@ -237,7 +302,7 @@ class AnalysisService:
             relevant_references=relevant_references,
             references_csv_path=str(references_csv),
             extractions_json_path=consolidated_json_path,
-            boolean_query=generated_boolean_query,
+            boolean_queries=generated_boolean_queries,
             semantic_query=generated_semantic_query,
         )
 
