@@ -1,4 +1,4 @@
-"""Evidence categorization script - classifies documents into 7 evidence categories."""
+"""Evidence categorization script - classifies documents into 8 evidence categories."""
 
 import asyncio
 import logging
@@ -35,7 +35,7 @@ class EvidenceClassification(BaseModel):
         description="One of: 'Systematic Review and Meta-Analysis', 'RCTs and Quasi-Experimental Studies', "
         "'Observational Research Studies', 'Modelling & Simulation', "
         "'Policy Syntheses & Guidance Documents', 'Qualitative & Contextual Evidence', "
-        "'Expert Opinion and Commentary'"
+        "'Expert Opinion and Commentary', 'Other (Non-evidence documents)'"
     )
     confidence: float = Field(
         description="Confidence score between 0.0 and 1.0", ge=0.0, le=1.0

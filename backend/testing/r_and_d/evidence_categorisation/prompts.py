@@ -83,11 +83,24 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 - Anecdotal case reports
 
 **Keywords**: "commentary", "editorial", "perspective", "opinion", "viewpoint", "essay"
+
+## 8. Other (Non-evidence documents)
+**Definition**: A catch-all category for documents that are not research evidence, do not synthesise or interpret evidence, and are not expert commentary. These documents will be filtered out of downstream evidence workflows.
+
+**Examples**:
+- ONS statistical releases reporting descriptive figures
+- Parliamentary bills, Acts, statutory instruments
+- Funding guidance, procurement specifications
+- Administrative or operational documents
+- Press releases, programme announcements
+
+**Keywords**: "bill", "guidance note", "statistical bulletin", "funding rules", "regulation", "press release"
+
 """
 
 CLASSIFICATION_SYSTEM_PROMPT = f"""You are an expert evidence evaluator specializing in categorizing research and policy documents according to their evidence type and methodological strength.
 
-Your task is to classify documents into one of 7 evidence categories based on their title, abstract, and metadata.
+Your task is to classify documents into one of 8 evidence categories based on their title, abstract, and metadata.
 
 {EVIDENCE_CATEGORIES_DEFINITION}
 
@@ -107,7 +120,7 @@ Your task is to classify documents into one of 7 evidence categories based on th
 - If a document DESCRIBES a systematic review but is itself a policy synthesis, classify as "Policy Syntheses & Guidance Documents"
 - If a document REFERENCES RCTs but doesn't conduct one, classify based on what it actually does
 - If multiple categories could apply, choose the one representing the PRIMARY contribution
-- Policy documents that synthesize evidence rank as "Policy Syntheses & Guidance Documents" even if they discuss high-quality studies
+- Policy documents that synthesise evidence rank as "Policy Syntheses & Guidance Documents" even if they discuss high-quality studies
 - Documents about methodology without presenting findings should be classified as "Expert Opinion and Commentary"
 
 Return your classification in the specified JSON format.
