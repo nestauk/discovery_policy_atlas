@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 
 class UnifiedReference(BaseModel):
@@ -49,15 +49,19 @@ class UnifiedReference(BaseModel):
 
 
 class SearchContext(BaseModel):
-    """Search context from the new wizard interface."""
+    """Flat search context payload sent by the search wizard."""
 
     research_question: str
-    population: Dict  # {selected: List[str], keepBroad: bool}
-    outcome: Dict  # {selected: List[str], keepBroad: bool}
-    parameters: Dict  # {sources, access, geography, timePreset, customFrom, customTo}
-    screening_factors: List[str]
-    additional_questions: List[str]
-    max_results: int
+    population: List[str] = Field(default_factory=list)
+    outcome: List[str] = Field(default_factory=list)
+    screening_factors: List[str] = Field(default_factory=list)
+    sources: List[str] = Field(default_factory=list)
+    geography: List[str] = Field(default_factory=list)
+    time_preset: Optional[str] = None
+    time_from: Optional[str] = None
+    time_to: Optional[str] = None
+    max_results: Optional[int] = None
+    additional_questions: List[str] = Field(default_factory=list)
 
 
 class RunConfig(BaseModel):

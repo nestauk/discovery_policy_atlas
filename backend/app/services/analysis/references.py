@@ -10,8 +10,6 @@ import pandas as pd
 
 from app.core.config import settings
 from app.services.analysis.prompts import (
-    BOOLEAN_QUERY_SYSTEM_PROMPT,
-    BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT,
     BOOLEAN_QUERY_FROM_CONTEXT_SYSTEM_PROMPT,
     SEMANTIC_QUERY_FROM_CONTEXT_SYSTEM_PROMPT,
 )
@@ -46,49 +44,16 @@ class ReferencesService:
     ) -> str:
         """Generate a boolean query deterministically (temperature 0)."""
         logger.info("🔍 Generating boolean query for: '%s'", natural_query)
-
-        try:
-            model = settings.BOOLEAN_QUERY_MODEL
-
-            # Create LLM instance
-            llm = ChatOpenAI(
-                model=model,
-                temperature=settings.BOOLEAN_QUERY_TEMPERATURE,
-                openai_api_key=settings.OPENAI_API_KEY,
-                max_tokens=1000,
-            )
-
-            messages = [
-                SystemMessage(content=BOOLEAN_QUERY_SYSTEM_PROMPT),
-                HumanMessage(content=natural_query),
-            ]
-
-            # Build config with callbacks and metadata
-            config = {}
-            if langfuse_handler:
-                config["callbacks"] = [langfuse_handler]
-                config["metadata"] = build_langfuse_metadata(
-                    tags=[
-                        "component:references",
-                        "component:references.boolean_query",
-                        "mode:single",
-                    ],
-                    session_id=session_id,
-                    user_id=user_id,
-                    project_id=project_id,
-                )
-                config["run_name"] = "references.boolean_query"
-
-            resp = await llm.ainvoke(messages, config=config)
-            boolean_query = (resp.content or natural_query).strip()
-
-            logger.info("✅ Generated boolean query: '%s'", boolean_query)
-            return boolean_query
-
-        except Exception as e:
-            logger.warning("❌ Boolean query generation failed: %s", e)
-            logger.info("🔄 Falling back to original query: '%s'", natural_query)
-            return natural_query
+        return await self.generate_boolean_query_from_context(
+            research_question=natural_query,
+            population_selected=[],
+            outcome_selected=[],
+            screening_factors=[],
+            langfuse_handler=langfuse_handler,
+            session_id=session_id,
+            project_id=project_id,
+            user_id=user_id,
+        )
 
     async def generate_boolean_queries_multi(
         self,
@@ -127,63 +92,18 @@ class ReferencesService:
             natural_query,
         )
 
-        model = model or settings.BOOLEAN_QUERY_MODEL
-        queries = []
-
-        try:
-            # Create LLM instance
-            llm = ChatOpenAI(
-                model=model,
-                temperature=temperature,
-                openai_api_key=settings.OPENAI_API_KEY,
-                max_tokens=1000,
-            )
-
-            messages = [
-                SystemMessage(content=BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT),
-                HumanMessage(content=natural_query),
-            ]
-
-            for i in range(n_runs):
-                # Build config with callbacks and metadata
-                config = {}
-                if langfuse_handler:
-                    config["callbacks"] = [langfuse_handler]
-                    config["metadata"] = build_langfuse_metadata(
-                        tags=[
-                            "component:references",
-                            "component:references.boolean_query",
-                            "mode:multi",
-                            f"iteration:{i+1}",
-                        ],
-                        session_id=session_id,
-                        user_id=user_id,
-                        project_id=project_id,
-                        extra={"iteration": i + 1, "total_runs": n_runs},
-                    )
-                    config["run_name"] = "references.boolean_query"
-
-                resp = await llm.ainvoke(messages, config=config)
-                boolean_query = (resp.content or "").strip()
-
-                if boolean_query:
-                    queries.append(boolean_query)
-                    logger.debug("Query %d/%d: '%s'", i + 1, n_runs, boolean_query)
-
-            # Remove exact duplicates while preserving order
-            unique_queries = list(dict.fromkeys(queries))
-            logger.info(
-                "✅ Generated %d queries (%d unique) for multi-query search",
-                len(queries),
-                len(unique_queries),
-            )
-
-            return unique_queries
-
-        except Exception as e:
-            logger.warning("❌ Multi-query generation failed: %s", e)
-            logger.info("🔄 Falling back to single query with original text")
-            return [natural_query]
+        return await self.generate_boolean_queries_multi_from_context(
+            research_question=natural_query,
+            population_selected=[],
+            outcome_selected=[],
+            screening_factors=[],
+            n_runs=n_runs,
+            temperature=temperature,
+            langfuse_handler=langfuse_handler,
+            session_id=session_id,
+            project_id=project_id,
+            user_id=user_id,
+        )
 
     def _build_context_message(
         self,
@@ -481,65 +401,58 @@ class ReferencesService:
         logger.info("🔎 Building references with mode: '%s'", mode)
         logger.debug("Original query: '%s'", query)
 
-        # Check if we have search context to use
-        if search_context:
-            logger.info("📋 Using search context for query generation")
-            # Expect flat structure: population and outcome are direct lists
-            research_question = search_context.get("research_question", query)
-            population_selected = search_context.get("population", [])
-            outcome_selected = search_context.get("outcome", [])
-            screening_factors = search_context.get("screening_factors", [])
+        context = (
+            search_context.model_dump()
+            if hasattr(search_context, "model_dump")
+            else (search_context or {})
+        )
 
-            # Generate boolean queries for OpenAlex from context
-            if "openalex" in sources:
-                if use_multi_query:
-                    # Multi-query mode: generate multiple diverse queries
-                    logger.info(
-                        "🔄 Multi-query mode: generating %d queries from context (temp=%.1f)",
-                        n_runs,
-                        temperature,
-                    )
-                    openalex_queries = (
-                        await self.generate_boolean_queries_multi_from_context(
-                            research_question=research_question,
-                            population_selected=population_selected,
-                            outcome_selected=outcome_selected,
-                            screening_factors=screening_factors,
-                            n_runs=n_runs,
-                            temperature=temperature,
-                            langfuse_handler=langfuse_handler,
-                            session_id=session_id,
-                            project_id=project_id,
-                            user_id=user_id,
-                        )
-                    )
-                    # Store all queries as a list
-                    boolean_queries_list = openalex_queries
-                    logger.info(
-                        "✅ Generated %d unique queries from context",
-                        len(openalex_queries),
-                    )
-                else:
-                    # Single-query mode: generate one deterministic query
-                    logger.info(
-                        "🎯 Single-query mode: generating deterministic query from context (temp=0)"
-                    )
-                    single_query = await self.generate_boolean_query_from_context(
+        research_question = context.get("research_question", query)
+        population_selected = context.get("population", [])
+        outcome_selected = context.get("outcome", [])
+        screening_factors = context.get("screening_factors", [])
+
+        if context:
+            logger.info("📋 Using search context for query generation")
+        else:
+            logger.info("📋 No search context provided; using query text only")
+
+        # Generate boolean queries for OpenAlex
+        if "openalex" in sources:
+            if mode == "boolean" and boolean_query:
+                openalex_queries = [boolean_query]
+                boolean_queries_list = openalex_queries
+                logger.info("📋 Using provided boolean query: '%s'", boolean_query)
+            elif use_multi_query:
+                logger.info(
+                    "🔄 Multi-query mode: generating %d queries from context (temp=%.1f)",
+                    n_runs,
+                    temperature,
+                )
+                openalex_queries = (
+                    await self.generate_boolean_queries_multi_from_context(
                         research_question=research_question,
                         population_selected=population_selected,
                         outcome_selected=outcome_selected,
                         screening_factors=screening_factors,
+                        n_runs=n_runs,
+                        temperature=temperature,
                         langfuse_handler=langfuse_handler,
                         session_id=session_id,
                         project_id=project_id,
                         user_id=user_id,
                     )
-                    openalex_queries = [single_query]
-                    boolean_queries_list = [single_query]
-
-            # Generate semantic query for Overton from context
-            if "overton" in sources:
-                final_semantic_query = await self.generate_semantic_query_from_context(
+                )
+                boolean_queries_list = openalex_queries
+                logger.info(
+                    "✅ Generated %d unique queries from context",
+                    len(openalex_queries),
+                )
+            else:
+                logger.info(
+                    "🎯 Single-query mode: generating deterministic query from context (temp=0)"
+                )
+                single_query = await self.generate_boolean_query_from_context(
                     research_question=research_question,
                     population_selected=population_selected,
                     outcome_selected=outcome_selected,
@@ -549,53 +462,21 @@ class ReferencesService:
                     project_id=project_id,
                     user_id=user_id,
                 )
-
-            elif mode == "boolean":
-                # Boolean mode: use provided query directly
-                openalex_queries = [boolean_query or query]
-                boolean_queries_list = openalex_queries
-                logger.info(
-                    "📋 Using provided boolean query: '%s'", boolean_queries_list[0]
-                )
-
-        elif mode == "semantic":
-            logger.info(
-                "🧠 Semantic mode: generating boolean query from natural language"
-            )
-
-            if use_multi_query:
-                # Multi-query mode: generate multiple diverse queries
-                logger.info(
-                    "🔄 Multi-query mode: generating %d queries (temp=%.1f)",
-                    n_runs,
-                    temperature,
-                )
-                openalex_queries = await self.generate_boolean_queries_multi(
-                    natural_query=query,
-                    n_runs=n_runs,
-                    temperature=temperature,
-                    langfuse_handler=langfuse_handler,
-                    session_id=session_id,
-                    project_id=project_id,
-                    user_id=user_id,
-                )
-                # Store all queries as a list
-                boolean_queries_list = openalex_queries
-                logger.info("✅ Generated %d unique queries", len(openalex_queries))
-            else:
-                # Single-query mode: generate one deterministic query
-                logger.info(
-                    "🎯 Single-query mode: generating deterministic query (temp=0)"
-                )
-                single_query = await self.generate_boolean_query(
-                    natural_query=query,
-                    langfuse_handler=langfuse_handler,
-                    session_id=session_id,
-                    project_id=project_id,
-                    user_id=user_id,
-                )
                 openalex_queries = [single_query]
                 boolean_queries_list = [single_query]
+
+        # Generate semantic query for Overton from context (skip if boolean-only)
+        if "overton" in sources and mode != "boolean":
+            final_semantic_query = await self.generate_semantic_query_from_context(
+                research_question=research_question,
+                population_selected=population_selected,
+                outcome_selected=outcome_selected,
+                screening_factors=screening_factors,
+                langfuse_handler=langfuse_handler,
+                session_id=session_id,
+                project_id=project_id,
+                user_id=user_id,
+            )
 
         # Execute OpenAlex queries
         if openalex_service:
@@ -637,17 +518,22 @@ class ReferencesService:
                 else None
             )
 
+            overton_semantic_query = final_semantic_query or research_question
+            overton_boolean_query = boolean_query or (
+                openalex_queries[0] if openalex_queries else research_question
+            )
+
             # Overton supports semantic search directly; when boolean mode is requested,
             # pass the boolean query via query= and disable semantic.
             if mode == "semantic":
                 logger.info(
-                    "🔍 Overton semantic search with original query: '%s', geography: %s",
-                    query,
+                    "🔍 Overton semantic search with query: '%s', geography: %s",
+                    overton_semantic_query,
                     source_country,
                 )
                 tasks.append(
                     overton_service.search(
-                        query=query,
+                        query=overton_semantic_query,
                         max_results=limit,
                         semantic_search=True,
                         source_country=source_country,
@@ -656,7 +542,6 @@ class ReferencesService:
                     )
                 )
             else:
-                overton_boolean_query = boolean_query or query
                 logger.info(
                     "📋 Overton boolean search with query: '%s', geography: %s",
                     overton_boolean_query,
@@ -677,7 +562,7 @@ class ReferencesService:
             tasks.append(
                 overton_service.fetch_raw(
                     **(
-                        {"squery": query}
+                        {"squery": overton_semantic_query}
                         if mode == "semantic"
                         else {"query": overton_boolean_query}
                     ),

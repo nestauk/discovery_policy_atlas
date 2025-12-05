@@ -133,7 +133,7 @@ async def _discover_themes_for_concepts(
             prompt.format(
                 critique_instruction=instructions,
                 rq=_escape_braces(rq),
-                concepts=_escape_braces(json.dumps([c.dict() for c in concepts])),
+                concepts=_escape_braces(json.dumps([c.model_dump() for c in concepts])),
             ),
             config={
                 "callbacks": [handler] if handler else [],
@@ -296,7 +296,7 @@ async def define_intervention_themes(state: SynthesisState) -> SynthesisState:
 async def critique_issue_themes(state: SynthesisState) -> SynthesisState:
     print("--- Critiquing Issue Themes ---")
     themes_payload = _escape_braces(
-        json.dumps([t.dict() for t in state.get("discovered_issue_themes", [])])
+        json.dumps([t.model_dump() for t in state.get("discovered_issue_themes", [])])
     )
     prompt = build_theme_critique_prompt("issue")
     llm = get_llm(THEME_MODEL, temperature=0.0)
@@ -331,7 +331,9 @@ async def critique_issue_themes(state: SynthesisState) -> SynthesisState:
 async def critique_intervention_themes(state: SynthesisState) -> SynthesisState:
     print("--- Critiquing Intervention Themes ---")
     themes_payload = _escape_braces(
-        json.dumps([t.dict() for t in state.get("discovered_intervention_themes", [])])
+        json.dumps(
+            [t.model_dump() for t in state.get("discovered_intervention_themes", [])]
+        )
     )
     prompt = build_theme_critique_prompt("intervention")
     llm = get_llm(THEME_MODEL, temperature=0.0)

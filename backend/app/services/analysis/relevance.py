@@ -16,7 +16,7 @@ from datetime import datetime
 from app.utils.llm import batch_check
 import logging
 from pathlib import Path
-from .prompts import RELEVANCE_SYSTEM_PROMPT, RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT
+from .prompts import RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT
 
 logger = logging.getLogger(__name__)
 
@@ -43,27 +43,24 @@ class RelevanceService:
         self.export_dir.mkdir(parents=True, exist_ok=True)
         self.project_id = project_id
         self.user_id = user_id
-        self.search_context = search_context
 
-        # System message for relevance and document type assessment
-        # Use context-aware prompt if search_context is provided
-        if search_context:
-            # Expect flat structure: population and outcome are direct lists
-            research_question = search_context.get("research_question", query)
-            population_selected = search_context.get("population", [])
-            outcome_selected = search_context.get("outcome", [])
-            screening_factors = search_context.get("screening_factors", [])
+        ctx = (
+            search_context.model_dump()
+            if hasattr(search_context, "model_dump")
+            else (search_context or {})
+        )
 
-            self.system_message = RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT(
-                research_question=research_question,
-                population_selected=population_selected
-                if population_selected
-                else None,
-                outcome_selected=outcome_selected if outcome_selected else None,
-                screening_factors=screening_factors if screening_factors else None,
-            )
-        else:
-            self.system_message = RELEVANCE_SYSTEM_PROMPT(query)
+        research_question = ctx.get("research_question", query)
+        population_selected = ctx.get("population", [])
+        outcome_selected = ctx.get("outcome", [])
+        screening_factors = ctx.get("screening_factors", [])
+
+        self.system_message = RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT(
+            research_question=research_question,
+            population_selected=population_selected or None,
+            outcome_selected=outcome_selected or None,
+            screening_factors=screening_factors or None,
+        )
 
         # Output fields for LLM processing
         self.fields = [

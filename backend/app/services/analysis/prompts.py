@@ -7,49 +7,6 @@ from langchain_core.prompts import ChatPromptTemplate
 
 
 # =============================================================================
-# BOOLEAN QUERY GENERATION
-# =============================================================================
-
-
-BOOLEAN_QUERY_SYSTEM_PROMPT = """You are an expert at creating boolean search queries for academic literature databases like OpenAlex and Overton.
-
-Given a research question, extract the key concepts and create a targeted boolean search query. DO NOT use the entire research question as a search term.
-
-IMPORTANT: Break down the research question into its core components and search terms. For example:
-- Research question: "What is the biggest interventions for decarbonising home heating?"
-- Key concepts: decarbonisation, home heating, interventions, residential heating, carbon reduction
-- Boolean query: (decarbonis* OR "carbon reduction" OR "emissions reduction") AND ("home heating" OR "residential heating" OR "domestic heating") AND (intervention* OR program* OR policy OR measure*)
-
-For policy-specific queries, focus on the underlying research topics rather than specific policy names:
-- Research question: "Which UK home-heating incentives have reduced gas?"
-- Key concepts: heating policy evaluation, residential gas consumption, energy efficiency programs
-- Boolean query: ("residential heating" OR "home heating" OR "domestic heating") AND ("gas consumption" OR "natural gas" OR "gas demand") AND (policy OR program* OR incentive* OR intervention*) AND (reduc* OR efficiency OR savings)
-
-For queries with multiple sub-questions, use OR to connect the concepts and terms of each sub-question.
-- Research question: "What is the biggest interventions for decarbonising home heating? OR what is the biggest interventions for decarbonising transport?"
-- Key concepts: decarbonisation, home heating, transport, interventions, residential heating, carbon reduction
-- Boolean query: ((decarbonis* OR "carbon reduction" OR "emissions reduction") AND (("home heating" OR "residential heating" OR "domestic heating") OR ("transport" OR "vehicle" OR "electricity" OR "hybrid" OR "fuel cell")) AND (intervention* OR program* OR policy* OR measure*))
-
-Guidelines:
-1. Extract 2-4 main concepts from the research question
-2. Use AND to connect different concepts that all should be present in the documents
-3. Use OR to include synonyms and related terms within each concept, or alternative concepts that expand the search scope
-4. You can use nested parentheses to group concepts and terms that should be treated as a single concept or term, and then use OR to connect the groups of concepts
-5. Use wildcards (*) for word variations (e.g., intervention*)
-6. Use quotes for exact phrases when beneficial
-7. Include both technical and common language terms
-8. Focus on terms that would realistically appear in academic paper titles and abstracts
-9. For policy queries, focus on research about the underlying phenomena rather than specific policy names
-10. Consider broader academic terminology (evaluation, effectiveness, impact, outcomes)
-11. Prioritize nouns and key descriptive terms over question words (what, how, why)
-12. Include related research terms like "evaluation", "impact", "effectiveness" for policy questions
-
-Most importantly, keep the query sufficiently general so that we get more results, but roughly in the right ballpark.
-
-Return ONLY the boolean query string, nothing else."""
-
-
-# =============================================================================
 # BOOLEAN QUERY GENERATION FROM SEARCH CONTEXT
 # =============================================================================
 
@@ -102,37 +59,6 @@ Example:
 - Semantic query: "What interventions improve home learning environment for children under 5 and low-income families, focusing on peer-reviewed research and cost-effectiveness studies that measure educational outcomes and school readiness?"
 
 Return ONLY the semantic query string, nothing else."""
-
-
-# =============================================================================
-# RELEVANCE AND DOCUMENT TYPE CLASSIFICATION
-# =============================================================================
-
-
-def RELEVANCE_SYSTEM_PROMPT(query: str) -> str:
-    """Generate system prompt for relevance and document type assessment."""
-    return f"""You are an expert research and policy analyst evaluating documents for relevance and classification.
-
-QUERY: "{query}"
-
-For each document, you will assess:
-
-1. RELEVANCE: Does this document address, relate to, or provide insights about the query topic?
-   - Consider both direct matches and related concepts
-   - Consider if findings, methods, or conclusions are applicable
-   - Be inclusive rather than overly restrictive
-
-2. DOCUMENT TYPE CLASSIFICATION:
-   - **research_paper**: Empirical studies, experiments, clinical trials, data analyses
-   - **reviews**: Reviews, meta-analyses, systematic reviews, and other literature reviews
-   - **policy_document**: Policy recommendations, guidelines, frameworks, position papers, government reports, policy briefs, regulatory documents
-   - **other**: News articles, announcements, transcripts, opinion pieces, editorials, non-peer reviewed content
-
-3. CONFIDENCE: Rate your confidence in the relevance assessment (0.0 = uncertain, 1.0 = very confident)
-
-4. REASONING: Provide clear, concise explanations for your assessments.
-
-Base your evaluation primarily on the title and abstract/summary provided. Be thorough but concise in your reasoning."""
 
 
 def RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT(
@@ -377,32 +303,6 @@ Interventions context (if available):
         ),
     ]
 )
-
-
-# =============================================================================
-# MULTI-QUERY BOOLEAN GENERATION
-# =============================================================================
-
-# Based on R&D findings using Wang et al. Q3 prompt
-# This prompt is used when generating multiple diverse queries with temperature > 0
-BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT = """Transform user input into a high quality boolean query 
-for querying the OpenAlex academic research database.
-
-# Guidance
-Imagine you are an expert systematic review information specialist; now you are given a systematic review
-research topic, with the topic title provided by the user below. Your task is to generate a highly effective systematic
-review Boolean query to search on OpenAlex (refer to the professionally made ones); the query needs to be
-as inclusive as possible so that it can retrieve all the relevant studies that can be included in the research
-topic; on the other hand, the query needs to retrieve fewer irrelevant studies so that researchers can spend
-less time judging the retrieved documents.
-
-# Important instructions
-
-DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. 
-For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad.
-
-Return ONLY the boolean query string, nothing else.
-"""
 
 
 # =============================================================================

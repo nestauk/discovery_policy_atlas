@@ -604,15 +604,16 @@ async def run_analysis_for_project(
                 logger.warning(f"Failed to parse search_context: {e}")
 
         # Get sources - prefer from search_context, fallback to request
-        sources = []
-        if search_context:
-            # Extract sources from search_context.parameters (parameters is a Dict)
-            params = search_context.parameters
-            sources = params.get("sources", []) if isinstance(params, dict) else []
-
-        # Fallback to request sources if not in search_context
+        sources = search_context.sources if search_context else []
         if not sources:
             sources = request.get("sources", ["openalex", "overton"])
+
+        limit_value = request.get(
+            "limit",
+            search_context.max_results if search_context else 200,
+        )
+        if limit_value is None:
+            limit_value = 200
 
         config = RunConfig(
             query=query,
@@ -620,7 +621,7 @@ async def run_analysis_for_project(
             date_from=request.get("date_from")
             or request.get("since"),  # Support both chat and legacy formats
             date_to=request.get("date_to") or request.get("until"),
-            limit=int(request.get("limit", 200)),
+            limit=int(limit_value),
             screening_enabled=bool(request.get("screening", False)),
             relevance_enabled=bool(request.get("relevance_enabled", True)),
             retrieval_mode=request.get("mode", "semantic"),
@@ -634,38 +635,24 @@ async def run_analysis_for_project(
         )
 
         # Prepare search query metadata to save with the project
-        # Flatten structure - extract from search_context if available, otherwise use request
         if search_context:
-            # Flatten search_context structure for cleaner storage
-            search_context_dict = (
-                search_context.dict()
-                if hasattr(search_context, "dict")
-                else search_context
-            )
-            params = search_context_dict.get("parameters", {})
+            ctx = search_context.model_dump()
             search_query_data = {
-                "research_question": search_context_dict.get(
-                    "research_question", query
-                ),
-                "population": search_context_dict.get("population", {}).get(
-                    "selected", []
-                ),
-                "outcome": search_context_dict.get("outcome", {}).get("selected", []),
-                "screening_factors": search_context_dict.get("screening_factors", []),
-                "sources": params.get("sources", sources),
-                "geography": params.get(
-                    "geography", request.get("geography_filter", [])
-                ),
-                "time_preset": params.get("timePreset"),
-                "time_from": config.date_from,
-                "time_to": config.date_to,
-                "limit": search_context_dict.get("max_results", config.limit),
+                **ctx,
+                "limit": ctx.get("max_results", config.limit),
                 "mode": config.retrieval_mode,
                 "relevance_enabled": config.relevance_enabled,
                 "use_abstracts_only": config.use_abstracts_only,
-                "boolean_queries": None,  # Will be filled in after generation (list of queries)
-                "semantic_query": None,  # Will be filled in after generation
+                "boolean_queries": None,
+                "semantic_query": None,
             }
+            # Ensure optional fields are populated for storage consistency
+            search_query_data.setdefault("sources", sources)
+            search_query_data.setdefault(
+                "geography", request.get("geography_filter", [])
+            )
+            search_query_data.setdefault("time_from", config.date_from)
+            search_query_data.setdefault("time_to", config.date_to)
         else:
             # Fallback for legacy requests without search_context
             search_query_data = {
@@ -682,8 +669,8 @@ async def run_analysis_for_project(
                 "mode": config.retrieval_mode,
                 "relevance_enabled": config.relevance_enabled,
                 "use_abstracts_only": config.use_abstracts_only,
-                "boolean_queries": None,  # Will be filled in after generation (list of queries)
-                "semantic_query": None,  # Will be filled in after generation
+                "boolean_queries": None,
+                "semantic_query": None,
             }
 
         # Update project status to running (async to avoid blocking)

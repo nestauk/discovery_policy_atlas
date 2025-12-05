@@ -57,35 +57,35 @@ export default function SearchPage() {
         }
       }
 
-      // TODO: Backend needs to be updated to handle SearchContext directly
-      // For now, convert to old format - backend will generate query from context
-      // The query here is just a placeholder - backend should use the full context
+      const searchContext = {
+        research_question: context.researchQuestion,
+        population: context.population.selected,
+        outcome: context.outcome.selected,
+        screening_factors: context.screeningFactors,
+        sources: context.parameters.sources,
+        geography: context.parameters.geography,
+        time_preset: context.parameters.timePreset,
+        time_from: dateFrom,
+        time_to: dateTo,
+        max_results: context.maxResults,
+        additional_questions: context.additionalQuestions,
+      }
+
       const analysisConfig = {
-        query: context.researchQuestion, // Backend will use this + context to generate proper query
+        query: context.researchQuestion,
         sources: context.parameters.sources,
         limit: context.maxResults,
         relevance_enabled: true,
         use_abstracts_only: false,
         mode: "semantic", // Always semantic for now
-        // Pass the full context as metadata
         geography_filter: context.parameters.geography,
         access_types: Object.entries(context.parameters.access)
           .filter(([, enabled]) => enabled)
           .map(([key]) => key),
         sub_questions: [], // Additional questions step is currently skipped
-        // Time parameters
         date_from: dateFrom,
         date_to: dateTo,
-        // New SearchContext fields - pass as metadata
-        search_context: {
-          research_question: context.researchQuestion,
-          population: context.population,
-          outcome: context.outcome,
-          parameters: context.parameters,
-          screening_factors: context.screeningFactors,
-          additional_questions: [], // Additional questions step is currently skipped
-          max_results: context.maxResults,
-        },
+        search_context: searchContext,
       }
 
       // Start analysis (don't wait for completion)
