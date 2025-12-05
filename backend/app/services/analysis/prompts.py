@@ -186,7 +186,9 @@ For each document, you will assess:
    - **policy_document**: Policy recommendations, guidelines, frameworks, position papers, government reports, policy briefs, regulatory documents
    - **other**: News articles, announcements, transcripts, opinion pieces, editorials, non-peer reviewed content
 
-3. CONFIDENCE: Rate your confidence in the relevance assessment (0.0 = uncertain, 1.0 = very confident)
+3. CONFIDENCE: Rate your confidence that the document is relevant (0.0 = not relevant, 1.0 = relevant). 
+    Consider whether the document is relevent to the research question (+0.25), the population interests (+0.25), the outcome interests (+0.25), and the screening factors (+0.25).
+    If some of these are not specified, do not penalize the confidence score, and instead use only the specified factors to calculate the confidence score.
 
 4. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, and screening factors.
 
