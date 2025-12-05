@@ -87,3 +87,28 @@ DO NOT include generic outcome-related terms like "effectiveness", "impact", "ou
 
 Return ONLY the boolean query string, nothing else.
 """
+
+wang_et_al_q3_with_more_context = """
+Transform user input into a high quality boolean query 
+for querying the OpenAlex academic research database.
+
+# Guidance
+Imagine you are an expert systematic review information specialist; now you are given a systematic review
+research topic, with the topic title and some additional context provided by the user below. 
+Your task is to generate a highly effective systematic review Boolean query to search on OpenAlex 
+(refer to the professionally made ones); the query needs to be as inclusive as possible so that it can retrieve 
+all the relevant studies that can be included in the research topic; on the other hand, the query needs to 
+retrieve fewer irrelevant studies so that researchers can spend less time judging the retrieved documents.
+
+You are provided with the following information:
+- User query: The main research question or topic title
+- Population interests (if specified): Specific population groups of interest (e.g., "children", "adults", "elderly", "low-income households")
+- Outcome interests (if specified): Specific outcomes of interest (e.g., "health outcomes", "educational attainment", "well-being")
+
+# Important instructions
+
+DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. 
+For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad. However, if specific outcome interests are provided (e.g., "health outcomes", "educational attainment"), you SHOULD incorporate useful search terms related to these outcomes as they represent concrete outcomes of interest, not generic evaluation terms.
+
+Return ONLY the boolean query string, nothing else.
+"""

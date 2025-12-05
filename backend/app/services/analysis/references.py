@@ -10,8 +10,8 @@ import pandas as pd
 
 from app.core.config import settings
 from app.services.analysis.prompts import (
-    BOOLEAN_QUERY_FROM_CONTEXT_SYSTEM_PROMPT,
-    SEMANTIC_QUERY_FROM_CONTEXT_SYSTEM_PROMPT,
+    BOOLEAN_QUERY_SYSTEM_PROMPT,
+    SEMANTIC_QUERY_SYSTEM_PROMPT,
 )
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -44,11 +44,12 @@ class ReferencesService:
     ) -> str:
         """Generate a boolean query deterministically (temperature 0)."""
         logger.info("🔍 Generating boolean query for: '%s'", natural_query)
-        return await self.generate_boolean_query_from_context(
+        return await self._generate_boolean_query(
             research_question=natural_query,
             population_selected=[],
             outcome_selected=[],
             screening_factors=[],
+            geography=[],
             langfuse_handler=langfuse_handler,
             session_id=session_id,
             project_id=project_id,
@@ -92,11 +93,12 @@ class ReferencesService:
             natural_query,
         )
 
-        return await self.generate_boolean_queries_multi_from_context(
+        return await self._generate_boolean_queries_multi(
             research_question=natural_query,
             population_selected=[],
             outcome_selected=[],
             screening_factors=[],
+            geography=[],
             n_runs=n_runs,
             temperature=temperature,
             langfuse_handler=langfuse_handler,
@@ -111,6 +113,7 @@ class ReferencesService:
         population_selected: List[str],
         outcome_selected: List[str],
         screening_factors: List[str],
+        geography: List[str],
     ) -> str:
         """Build context message from search context components."""
         context_parts = [f"User query: {research_question}"]
@@ -120,17 +123,20 @@ class ReferencesService:
             )
         if outcome_selected:
             context_parts.append(f"Outcome interests: {', '.join(outcome_selected)}")
+        if geography:
+            context_parts.append(f"Geography: {', '.join(geography)}")
         # skipping screening factors for now
         # if screening_factors:
         # context_parts.append(f"Screening factors: {', '.join(screening_factors)}")
         return "\n".join(context_parts)
 
-    async def generate_boolean_query_from_context(
+    async def _generate_boolean_query(
         self,
         research_question: str,
         population_selected: List[str],
         outcome_selected: List[str],
         screening_factors: List[str],
+        geography: List[str],
         langfuse_handler=None,
         session_id: str = None,
         project_id: str = None,
@@ -148,13 +154,14 @@ class ReferencesService:
             )
 
             messages = [
-                SystemMessage(content=BOOLEAN_QUERY_FROM_CONTEXT_SYSTEM_PROMPT),
+                SystemMessage(content=BOOLEAN_QUERY_SYSTEM_PROMPT),
                 HumanMessage(
                     content=self._build_context_message(
                         research_question,
                         population_selected,
                         outcome_selected,
                         screening_factors,
+                        geography,
                     )
                 ),
             ]
@@ -184,12 +191,13 @@ class ReferencesService:
             logger.info("🔄 Falling back to original query: '%s'", research_question)
             return research_question
 
-    async def generate_boolean_queries_multi_from_context(
+    async def _generate_boolean_queries_multi(
         self,
         research_question: str,
         population_selected: List[str],
         outcome_selected: List[str],
         screening_factors: List[str],
+        geography: List[str],
         n_runs: int = 5,
         temperature: float = 1.0,
         langfuse_handler=None,
@@ -215,13 +223,14 @@ class ReferencesService:
             )
 
             messages = [
-                SystemMessage(content=BOOLEAN_QUERY_FROM_CONTEXT_SYSTEM_PROMPT),
+                SystemMessage(content=BOOLEAN_QUERY_SYSTEM_PROMPT),
                 HumanMessage(
                     content=self._build_context_message(
                         research_question,
                         population_selected,
                         outcome_selected,
                         screening_factors,
+                        geography,
                     )
                 ),
             ]
@@ -266,12 +275,13 @@ class ReferencesService:
             logger.info("🔄 Falling back to single query with original text")
             return [research_question]
 
-    async def generate_semantic_query_from_context(
+    async def _generate_semantic_query(
         self,
         research_question: str,
         population_selected: List[str],
         outcome_selected: List[str],
         screening_factors: List[str],
+        geography: List[str],
         langfuse_handler=None,
         session_id: str = None,
         project_id: str = None,
@@ -297,6 +307,8 @@ class ReferencesService:
                 context_parts.append(
                     f"Screening factors: {', '.join(screening_factors)}"
                 )
+            if geography:
+                context_parts.append(f"Geography: {', '.join(geography)}")
 
             llm = ChatOpenAI(
                 model=model,
@@ -306,7 +318,7 @@ class ReferencesService:
             )
 
             messages = [
-                SystemMessage(content=SEMANTIC_QUERY_FROM_CONTEXT_SYSTEM_PROMPT),
+                SystemMessage(content=SEMANTIC_QUERY_SYSTEM_PROMPT),
                 HumanMessage(content="\n".join(context_parts)),
             ]
 
@@ -412,6 +424,8 @@ class ReferencesService:
         outcome_selected = context.get("outcome", [])
         screening_factors = context.get("screening_factors", [])
 
+        geography_selected = context.get("geography", [])
+
         if context:
             logger.info("📋 Using search context for query generation")
         else:
@@ -429,19 +443,18 @@ class ReferencesService:
                     n_runs,
                     temperature,
                 )
-                openalex_queries = (
-                    await self.generate_boolean_queries_multi_from_context(
-                        research_question=research_question,
-                        population_selected=population_selected,
-                        outcome_selected=outcome_selected,
-                        screening_factors=screening_factors,
-                        n_runs=n_runs,
-                        temperature=temperature,
-                        langfuse_handler=langfuse_handler,
-                        session_id=session_id,
-                        project_id=project_id,
-                        user_id=user_id,
-                    )
+                openalex_queries = await self._generate_boolean_queries_multi(
+                    research_question=research_question,
+                    population_selected=population_selected,
+                    outcome_selected=outcome_selected,
+                    screening_factors=screening_factors,
+                    geography=geography_selected,
+                    n_runs=n_runs,
+                    temperature=temperature,
+                    langfuse_handler=langfuse_handler,
+                    session_id=session_id,
+                    project_id=project_id,
+                    user_id=user_id,
                 )
                 boolean_queries_list = openalex_queries
                 logger.info(
@@ -452,11 +465,12 @@ class ReferencesService:
                 logger.info(
                     "🎯 Single-query mode: generating deterministic query from context (temp=0)"
                 )
-                single_query = await self.generate_boolean_query_from_context(
+                single_query = await self._generate_boolean_query(
                     research_question=research_question,
                     population_selected=population_selected,
                     outcome_selected=outcome_selected,
                     screening_factors=screening_factors,
+                    geography=geography_selected,
                     langfuse_handler=langfuse_handler,
                     session_id=session_id,
                     project_id=project_id,
@@ -467,11 +481,12 @@ class ReferencesService:
 
         # Generate semantic query for Overton from context (skip if boolean-only)
         if "overton" in sources and mode != "boolean":
-            final_semantic_query = await self.generate_semantic_query_from_context(
+            final_semantic_query = await self._generate_semantic_query(
                 research_question=research_question,
                 population_selected=population_selected,
                 outcome_selected=outcome_selected,
                 screening_factors=screening_factors,
+                geography=geography_selected,
                 langfuse_handler=langfuse_handler,
                 session_id=session_id,
                 project_id=project_id,

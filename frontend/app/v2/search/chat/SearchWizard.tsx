@@ -55,7 +55,6 @@ const FALLBACK_OUTCOME_EXAMPLES = [
 
 // Geography constants (reused from ChatInterface)
 const SPECIAL_REGIONS = [
-  'All',
   'UK',
   'All but UK',
   'OECD members',
@@ -74,11 +73,12 @@ const COUNTRY_LIST = [
   'USA', 'Spain', 'Japan', 'Canada', 'Germany', 'Sweden', 'Australia', 'France', 'Brazil', 'Netherlands', 'Italy', 'Portugal', 'Peru', 'Mexico', 'Turkey', 'Austria', 'Singapore', 'China', 'Switzerland', 'Belgium', 'Philippines', 'South Africa', 'Ireland', 'Denmark', 'Taiwan', 'Uruguay', 'Colombia', 'Romania', 'Finland', 'Thailand', 'Norway', 'Czech Republic', 'Chile', 'Indonesia', 'New Zealand', 'India', 'Argentina', 'Tanzania', 'Latvia', 'Slovakia', 'Lithuania', 'Slovenia', 'Bulgaria', 'Iceland', 'Greece', 'Paraguay', 'Hungary', 'Luxembourg', 'Estonia', 'Ukraine', 'Morocco', 'Serbia', 'Trinidad and Tobago', 'Cyprus', 'Ecuador', 'Georgia', 'Moldova', 'South Korea', 'Sri Lanka', 'Malaysia', 'Uganda', 'Kosovo', 'North Macedonia', 'Lebanon', 'El Salvador', 'Honduras', 'Belarus', 'Micronesia', 'Russia', 'Panama', 'Israel', 'Kenya', 'Maldives', 'Iran', 'Bosnia and Herzegovina', 'Afghanistan', 'Egypt', 'Croatia', 'Barbados', 'Bolivia', 'Tunisia', 'Vietnam', 'Costa Rica', 'Mauritius', 'Oman', 'Jamaica', 'Nigeria', 'Montenegro', 'Bahamas', 'Iraq', 'Cambodia', 'Bangladesh', 'Azerbaijan', 'Nepal', 'Ghana', 'Mongolia', 'Timor Leste', 'Bhutan', 'Cameroon', 'Brunei', 'Liberia', 'Saudi Arabia', 'Ethiopia', 'Pakistan', 'Papua New Guinea', 'Venezuela', 'Namibia', 'Albania', 'Guyana', 'Syria', 'Nicaragua', 'Kyrgyzstan', 'Malta', 'Haiti', 'Cape Verde', 'Samoa', 'Uzbekistan', 'Qatar', 'Myanmar', 'Benin', 'Mauritania', 'Mozambique', 'Algeria', 'Zambia', 'Solomon Islands', 'Kiribati', 'Kuwait', 'Armenia', 'Jordan', 'Burkina Faso', 'Andorra', 'Palau', 'Botswana', 'Mali', 'Bahrain', 'Rwanda', 'Senegal', 'Belize', 'United Arab Emirates', 'Fiji', 'Vanuatu', 'Libya', 'Suriname', 'Cuba', 'Laos', 'Togo', 'Tonga', 'Eswatini', 'Angola', 'Tajikistan', 'Ivory Coast', 'Guinea', 'Zimbabwe', 'Malawi', 'Marshall Islands', 'Burundi', 'Niger', 'Madagascar', 'Sudan', 'Somalia', 'Turkmenistan', 'Tuvalu', 'Seychelles', 'South Sudan', 'Sao Tome and Principe', 'Central African Republic', 'Sierra Leone', 'Yemen', 'Democratic Republic Of The Congo', 'San Marino', 'Chad', 'Palestine', 'Vatican City', 'Nauru', 'Kazakhstan', 'Equatorial Guinea', 'Lesotho', 'Monaco', 'North Korea', 'Saint Kitts and Nevis', 'Liechtenstein', 'Djibouti', 'Comoros', 'Gambia', 'Gabon', 'Eritrea', 'Guinea-Bissau'
 ];
 
-const COUNTRIES = [
-  "UK",
-  "Europe",
-  "OECD"
-];
+const ANYWHERE_VALUE = "All";
+const ANYWHERE_LABEL = "Anywhere";
+const GEO_LABELS: Record<string, string> = {
+  [ANYWHERE_VALUE]: ANYWHERE_LABEL,
+  "All but UK": "Anywhere but UK",
+};
 
 // Search context type - stores all the structured data
 export type SearchContext = {
@@ -143,7 +143,7 @@ export const useWizard = create<WizardState>((set, get) => ({
   parameters: {
     sources: [],
     access: { academic: true, policy: true },
-    geography: [],
+    geography: [ANYWHERE_VALUE],
     timePreset: "LAST_10_YEARS",
     customFrom: undefined,
     customTo: undefined,
@@ -334,9 +334,9 @@ function ScreenPopulation() {
   const addCustom = () => {
     const trimmed = customInput.trim();
     // Use generated options or fallback to defaults
-    const exampleOptions = s.generatedPopulationOptions.length > 0 
-      ? [...s.generatedPopulationOptions, "Anyone"] as string[]
-      : [...FALLBACK_POPULATION_EXAMPLES] as string[];
+    const exampleOptions = s.generatedPopulationOptions.length > 0
+      ? ["Anyone", ...s.generatedPopulationOptions] as string[]
+      : ["Anyone", ...FALLBACK_POPULATION_EXAMPLES] as string[];
     if (trimmed && !s.population.selected.includes(trimmed) && !exampleOptions.includes(trimmed)) {
       s.set({ population: { ...s.population, selected: [...s.population.selected, trimmed] } });
       setCustomInput("");
@@ -348,9 +348,9 @@ function ScreenPopulation() {
   };
 
   // Use generated options or fallback to defaults
-  const exampleOptions = s.generatedPopulationOptions.length > 0 
-    ? [...s.generatedPopulationOptions, "Anyone"] as string[]
-    : [...FALLBACK_POPULATION_EXAMPLES] as string[];
+  const exampleOptions = s.generatedPopulationOptions.length > 0
+    ? ["Anyone", ...s.generatedPopulationOptions] as string[]
+    : ["Anyone", ...FALLBACK_POPULATION_EXAMPLES] as string[];
   const customOptions = s.population.selected.filter(pop => !exampleOptions.includes(pop));
 
   return (
@@ -442,8 +442,8 @@ function ScreenOutcome() {
     const trimmed = customInput.trim();
     // Use generated options or fallback to defaults
     const exampleOptions = s.generatedOutcomeOptions.length > 0
-      ? [...s.generatedOutcomeOptions, "I don't have a particular outcome in mind"] as string[]
-      : [...FALLBACK_OUTCOME_EXAMPLES, "I don't have a particular outcome in mind"] as string[];
+      ? ["I don't have a particular outcome in mind", ...s.generatedOutcomeOptions] as string[]
+      : ["I don't have a particular outcome in mind", ...FALLBACK_OUTCOME_EXAMPLES] as string[];
     if (trimmed && !s.outcome.selected.includes(trimmed) && !exampleOptions.includes(trimmed)) {
       s.set({ outcome: { ...s.outcome, selected: [...s.outcome.selected, trimmed] } });
       setCustomInput("");
@@ -456,8 +456,8 @@ function ScreenOutcome() {
 
   // Use generated options or fallback to defaults
   const exampleOptions = s.generatedOutcomeOptions.length > 0
-    ? [...s.generatedOutcomeOptions, "I don't have a particular outcome in mind"] as string[]
-    : [...FALLBACK_OUTCOME_EXAMPLES, "I don't have a particular outcome in mind"] as string[];
+    ? ["I don't have a particular outcome in mind", ...s.generatedOutcomeOptions] as string[]
+    : ["I don't have a particular outcome in mind", ...FALLBACK_OUTCOME_EXAMPLES] as string[];
   const customOptions = s.outcome.selected.filter(outcome => !exampleOptions.includes(outcome));
 
   return (
@@ -541,8 +541,14 @@ function ScreenParameters() {
   };
 
   const addGeo = (g: string) => {
-    if (!s.parameters.geography.includes(g)) {
-      s.set({ parameters: { ...s.parameters, geography: [...s.parameters.geography, g] } });
+    if (g === ANYWHERE_VALUE) {
+      s.set({ parameters: { ...s.parameters, geography: [ANYWHERE_VALUE] } });
+      return;
+    }
+
+    const existing = s.parameters.geography.filter((x) => x !== ANYWHERE_VALUE);
+    if (!existing.includes(g)) {
+      s.set({ parameters: { ...s.parameters, geography: [...existing, g] } });
     }
   };
 
@@ -568,27 +574,27 @@ function ScreenParameters() {
       </div>
 
       <div className="text-center space-y-3">
-        <h2 className="text-2xl font-semibold">Sources, geography and time window</h2>
+        <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
         <p className="text-gray-600 text-lg">We will use this filter only the most relevant information</p>
       </div>
 
       <div className="space-y-8">
         {/* Sources */}
         <div className="space-y-4">
-          <h3 className="font-semibold text-lg">Sources</h3>
+          <h3 className="font-semibold text-lg">Which sources should we use?</h3>
           <div className="flex flex-wrap gap-3">
             <Chip active={s.parameters.access.academic} onClick={() => toggleAccess("academic")}>
-              Academic (OpenAlex)
+              Academic literature
             </Chip>
             <Chip active={s.parameters.access.policy} onClick={() => toggleAccess("policy")}>
-              Policy (think tanks and government)
+              Grey literature (think tanks and governments)
             </Chip>
           </div>
         </div>
 
         {/* Time window */}
         <div className="space-y-4">
-          <h3 className="font-semibold text-lg">Time window</h3>
+          <h3 className="font-semibold text-lg">When should the evidence be published?</h3>
           <div className="flex flex-wrap gap-3">
             {["LAST_YEAR", "LAST_5_YEARS", "LAST_10_YEARS", "SINCE_2000", "ANY", "CUSTOM"].map((p) => (
               <Chip
@@ -624,89 +630,56 @@ function ScreenParameters() {
 
         {/* Geography */}
         <div className="space-y-4 max-w-2xl">
-          <h3 className="font-semibold text-lg">Geography</h3>
-          {/* Separate quick options from custom added ones */}
-          {(() => {
-            const quickOptions = COUNTRIES;
-            const customOptions = s.parameters.geography.filter(geo => !quickOptions.includes(geo));
-            
-            return (
-              <div>
-                {/* Quick options in single column */}
-                <div className="flex flex-col gap-3">
-                  {quickOptions.map((geo) => {
-                    const isSelected = s.parameters.geography.includes(geo);
-                    return (
-                      <button
-                        key={geo}
-                        type="button"
-                        onClick={() => {
-                          if (isSelected) {
-                            removeGeo(geo);
-                          } else {
-                            addGeo(geo);
-                          }
-                        }}
-                        className={cx(
-                          "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
-                          isSelected
-                            ? "bg-blue-600 !text-white ring-blue-600"
-                            : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
-                        )}
-                      >
-                        {geo}
-                      </button>
-                    );
-                  })}
-                  
-                  {/* Custom added options */}
-                  {customOptions.map((geo) => (
-                    <button
-                      key={geo}
-                      type="button"
-                      className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
-                    >
-                      <span>{geo}</span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeGeo(geo);
-                        }}
-                        className="ml-2 text-white hover:text-blue-100"
-                        aria-label="Remove"
-                      >
-                        ×
-                      </button>
-                    </button>
-                  ))}
-                </div>
-                
-                {/* Custom input */}
-                <div className="flex gap-3 mt-4">
-                  <select
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    value={selectedCountry}
-                    onChange={(e) => setSelectedCountry(e.target.value)}
+          <h3 className="font-semibold text-lg">In which countries should we look for evidence?</h3>
+          <div>
+            {/* Selected options */}
+            <div className="flex flex-col gap-3">
+              {s.parameters.geography.map((geo) => (
+                <button
+                  key={geo}
+                  type="button"
+                  className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
+                >
+                  <span>{GEO_LABELS[geo] || geo}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeGeo(geo);
+                    }}
+                    className="ml-2 text-white hover:text-blue-100"
+                    aria-label="Remove"
                   >
-                    <option value="">Select a country or region</option>
-                    <optgroup label="Regions & Groups">
-                      {SPECIAL_REGIONS.map((region) => (
-                        <option key={region} value={region}>{region}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Countries">
-                      {COUNTRY_LIST.sort().map((country) => (
-                        <option key={country} value={country}>{country}</option>
-                      ))}
-                    </optgroup>
-                  </select>
-                  <Button onClick={() => { if (selectedCountry && !s.parameters.geography.includes(selectedCountry)) { addGeo(selectedCountry); setSelectedCountry(""); } }}>
-                    + Add
-                  </Button>
-                </div>
-              </div>
-            );
-          })()}
+                    ×
+                  </button>
+                </button>
+              ))}
+            </div>
+
+            {/* Dropdown input */}
+            <div className="flex gap-3 mt-4">
+              <select
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                value={selectedCountry}
+                onChange={(e) => setSelectedCountry(e.target.value)}
+              >
+                <option value="">{`Select a country or region`}</option>
+                <option value={ANYWHERE_VALUE}>{ANYWHERE_LABEL}</option>
+                <optgroup label="Regions & Groups">
+                  {SPECIAL_REGIONS.map((region) => (
+                    <option key={region} value={region}>{GEO_LABELS[region] || region}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Countries">
+                  {COUNTRY_LIST.sort().map((country) => (
+                    <option key={country} value={country}>{country}</option>
+                  ))}
+                </optgroup>
+              </select>
+              <Button onClick={() => { if (selectedCountry && !s.parameters.geography.includes(selectedCountry)) { addGeo(selectedCountry); setSelectedCountry(""); } }}>
+                + Add
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -968,7 +941,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
           </div>
           {context.parameters.geography.length > 0 && (
             <div>
-              <span className="font-medium">Geography: </span>
+              <span className="font-medium">Where should we look for evidence? (options): </span>
               <span>{context.parameters.geography.join(", ")}</span>
             </div>
           )}

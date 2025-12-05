@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 # BOOLEAN QUERY GENERATION FROM SEARCH CONTEXT
 # =============================================================================
 
-BOOLEAN_QUERY_FROM_CONTEXT_SYSTEM_PROMPT = """
+BOOLEAN_QUERY_SYSTEM_PROMPT = """
 Transform user input into a high quality boolean query 
 for querying the OpenAlex academic research database.
 
@@ -26,11 +26,14 @@ You are provided with the following information:
 - User query: The main research question or topic title
 - Population interests (if specified): Specific population groups of interest (e.g., "children", "adults", "elderly", "low-income households")
 - Outcome interests (if specified): Specific outcomes of interest (e.g., "health outcomes", "educational attainment", "well-being")
+- Geography (if specified): Countries/regions to prioritize; include synonyms and sub-regions (e.g., "UK", "United Kingdom", "England", "Scotland", "Wales", "Northern Ireland", "English", "Scottish", "Welsh")
 
 # Important instructions
 
 DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. 
 For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad. However, if specific outcome interests are provided (e.g., "health outcomes", "educational attainment"), you SHOULD incorporate useful search terms related to these outcomes as they represent concrete outcomes of interest, not generic evaluation terms.
+
+When geography is provided, add geography constraints using multiple name variants and demonyms to maximize recall (e.g., for "UK": "United Kingdom" OR "UK" OR "England" OR "Scotland" OR "Wales" OR "Northern Ireland" OR English OR Scottish OR Welsh). Do the same pattern for other specified countries/regions (e.g., "USA" | "United States" | "United States of America" | "US" | American).
 
 Return ONLY the boolean query string, nothing else.
 """
@@ -39,17 +42,18 @@ Return ONLY the boolean query string, nothing else.
 # SEMANTIC QUERY GENERATION FROM SEARCH CONTEXT
 # =============================================================================
 
-SEMANTIC_QUERY_FROM_CONTEXT_SYSTEM_PROMPT = """You are an expert at creating natural language semantic search queries for policy research databases like Overton.
+SEMANTIC_QUERY_SYSTEM_PROMPT = """You are an expert at creating natural language semantic search queries for policy research databases like Overton.
 
-Given a research question, population interests, outcome interests, and screening factors, create a comprehensive natural language query that incorporates all relevant information for semantic search.
+Given a research question, population interests, outcome interests, geography, and screening factors, create a comprehensive natural language query that incorporates all relevant information for semantic search.
 
 IMPORTANT GUIDELINES:
 1. Start with the core research question
 2. If population interests are specified, naturally incorporate them (e.g., "for children", "targeting low-income households")
 3. If outcome interests are specified, naturally incorporate them (e.g., "to improve health outcomes", "aiming for better educational attainment")
-4. If screening factors are provided, focus on POSITIVE/INCLUSION factors and naturally incorporate them (e.g., "peer-reviewed research", "cost-effectiveness studies"). IGNORE exclusionary factors
-5. Write as a natural, coherent sentence or short paragraph that captures the full research intent
-6. Make it suitable for semantic search (natural language, not boolean operators)
+4. If geography is specified, naturally include the geography using multiple name variants and demonyms when helpful (e.g., "UK", "United Kingdom", "England", "Scotland", "Wales", "Northern Ireland", "English", "Scottish", "Welsh")
+5. If screening factors are provided, focus on POSITIVE/INCLUSION factors and naturally incorporate them (e.g., "peer-reviewed research", "cost-effectiveness studies"). IGNORE exclusionary factors
+6. Write as a natural, coherent sentence or short paragraph that captures the full research intent
+7. Make it suitable for semantic search (natural language, not boolean operators)
 
 Example:
 - Research question: "What interventions improve home learning environment?"
@@ -61,11 +65,12 @@ Example:
 Return ONLY the semantic query string, nothing else."""
 
 
-def RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT(
+def RELEVANCE_SYSTEM_PROMPT(
     research_question: str,
     population_selected: list[str] = None,
     outcome_selected: list[str] = None,
     screening_factors: list[str] = None,
+    geography: list[str] = None,
 ) -> str:
     """Generate system prompt for relevance assessment using search context.
 
@@ -89,6 +94,9 @@ def RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT(
     if screening_factors:
         context_parts.append(f"SCREENING FACTORS: {', '.join(screening_factors)}")
 
+    if geography:
+        context_parts.append(f"GEOGRAPHY: {', '.join(geography)}")
+
     context_section = "\n".join(context_parts)
 
     return f"""You are an expert research and policy analyst evaluating documents for relevance and classification.
@@ -104,7 +112,9 @@ For each document, you will assess:
    - **IMPORTANT**: When population interests are specified, prioritize documents that address those specific populations
    - **IMPORTANT**: When outcome interests are specified, prioritize documents that measure or discuss those specific outcomes
    - **IMPORTANT**: When screening factors are provided (e.g., "peer-reviewed only"), documents that do not meet these criteria should be considered less relevant or excluded
-   - For example, if screening factors include "peer-reviewed only", non-peer-reviewed documents should be marked as not relevant
+   - **IMPORTANT**: When geography is specified, prefer documents from the listed countries/regions and mark documents outside those geographies as not relevant unless the abstract/title clearly states findings are directly transferable to the target geography
+   - For example, if geography includes "UK", prioritize UK studies and exclude documents from other regions unless they explicitly claim applicability to the UK context.
+   - Consider different ways of expressing the same geography (e.g., "UK" and "United Kingdom" is equivalent, as is "England" part of the UK, etc)
 
 2. DOCUMENT TYPE CLASSIFICATION:
    - **research_paper**: Empirical studies, experiments, clinical trials, data analyses
@@ -113,10 +123,10 @@ For each document, you will assess:
    - **other**: News articles, announcements, transcripts, opinion pieces, editorials, non-peer reviewed content
 
 3. CONFIDENCE: Rate your confidence that the document is relevant (0.0 = not relevant, 1.0 = relevant). 
-    Consider whether the document is relevent to the research question (+0.25), the population interests (+0.25), the outcome interests (+0.25), and the screening factors (+0.25).
+    Consider whether the document is relevant to the research question (+0.2), the population interests (+0.2), the outcome interests (+0.2), the screening factors (+0.2), and the geography alignment (+0.2).
     If some of these are not specified, do not penalize the confidence score, and instead use only the specified factors to calculate the confidence score.
 
-4. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, and screening factors.
+4. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, screening factors, and geography.
 
 Base your evaluation primarily on the title and abstract/summary provided. Be thorough but concise in your reasoning."""
 

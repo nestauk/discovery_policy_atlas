@@ -16,7 +16,7 @@ from datetime import datetime
 from app.utils.llm import batch_check
 import logging
 from pathlib import Path
-from .prompts import RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT
+from .prompts import RELEVANCE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +54,14 @@ class RelevanceService:
         population_selected = ctx.get("population", [])
         outcome_selected = ctx.get("outcome", [])
         screening_factors = ctx.get("screening_factors", [])
+        geography = ctx.get("geography", [])
 
-        self.system_message = RELEVANCE_SYSTEM_PROMPT_FROM_CONTEXT(
+        self.system_message = RELEVANCE_SYSTEM_PROMPT(
             research_question=research_question,
             population_selected=population_selected or None,
             outcome_selected=outcome_selected or None,
             screening_factors=screening_factors or None,
+            geography=geography or None,
         )
 
         # Output fields for LLM processing
