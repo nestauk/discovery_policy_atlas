@@ -37,6 +37,10 @@ const Chip = ({ active, children, onClick }: { active?: boolean; children: React
 type Step = "ASK" | "POPULATION" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
 type TimePreset = "LAST_YEAR" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
+const SOURCE_LABELS: Record<"openalex" | "overton", string> = {
+  openalex: "Academic literature",
+  overton: "Grey literature",
+};
 
 // Fallback population examples (used if LLM generation fails)
 const FALLBACK_POPULATION_EXAMPLES = [
@@ -937,7 +941,11 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
           </div>
           <div>
             <span className="font-medium">Sources: </span>
-            <span>{context.parameters.sources.join(", ")}</span>
+            <span>
+              {context.parameters.sources.length > 0
+                ? context.parameters.sources.map((src) => SOURCE_LABELS[src] ?? src).join(", ")
+                : "Not specified"}
+            </span>
           </div>
           {context.parameters.geography.length > 0 && (
             <div>
