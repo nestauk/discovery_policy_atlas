@@ -315,10 +315,11 @@ function BackgroundSectionComponent({ background, renderCitations }: {
   );
 }
 
-function InterventionsTable({ interventions, lookupCitation, onCitationClick }: { 
+function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations }: { 
   interventions: InterventionTableRow[];
   lookupCitation: CitationLookupFn;
   onCitationClick?: (docId: string) => void;
+  renderCitations: (text: string, prefix: string) => React.ReactNode[];
 }) {
   if (!interventions.length) return null;
 
@@ -340,6 +341,23 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick }: 
     return parts.join(' ') || '—';
   };
 
+  // Render markdown-style bold in context/impact text
+  const renderFormattedText = (text: string, prefix: string) => {
+    // First render citations, then handle bold
+    const parts = renderCitations(text, prefix);
+    return parts.map((part, i) => {
+      if (typeof part !== 'string') return part;
+      // Handle **bold** markdown
+      const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
+      return boldParts.map((bp, j) => {
+        if (bp.startsWith('**') && bp.endsWith('**')) {
+          return <strong key={`${i}-${j}`} className="font-semibold text-slate-800">{bp.slice(2, -2)}</strong>;
+        }
+        return bp;
+      });
+    });
+  };
+
   return (
     <div className="mb-6">
       <h3 className="text-lg font-semibold text-slate-800 mb-3">Key Interventions</h3>
@@ -347,10 +365,10 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick }: 
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/5">Intervention</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/5">Context</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-2/5">Effects by Outcome</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider w-1/5">Sources</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '18%'}}>Intervention</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '22%'}}>Context</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '45%'}}>Impact & Outcomes</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '15%'}}>Sources</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-slate-200">
@@ -360,27 +378,40 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick }: 
                   {row.intervention_name}
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-600">
-                  {row.context || 'Various settings'}
+                  <div className="space-y-1">
+                    {renderFormattedText(row.context || 'Various settings', `ctx-${idx}`)}
+                  </div>
                 </td>
                 <td className="px-4 py-3">
-                  {row.outcome_effects && row.outcome_effects.length > 0 ? (
-                    <div className="space-y-1.5">
-                      {row.outcome_effects.map((effect, effIdx) => (
-                        <div key={effIdx} className="flex items-center gap-2 text-sm">
+                  {/* Impact narrative */}
+                  {row.impact_narrative && (
+                    <div className="text-sm text-slate-700 mb-2">
+                      {renderFormattedText(row.impact_narrative, `imp-${idx}`)}
+                    </div>
+                  )}
+                  {/* Outcome effects */}
+                  {row.outcome_effects && row.outcome_effects.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {row.outcome_effects.slice(0, 3).map((effect, effIdx) => (
+                        <div key={effIdx} className="inline-flex items-center gap-1 text-xs">
                           <Badge className={`${effectBadgeColor(effect.direction)} text-xs px-1.5 py-0.5`}>
                             {effect.direction}
                           </Badge>
-                          <span className="text-slate-700 font-medium truncate max-w-[200px]" title={effect.outcome_theme}>
-                            {effect.outcome_theme}
+                          <span className="text-slate-600 truncate max-w-[120px]" title={effect.outcome_theme}>
+                            {effect.outcome_theme.split(' ').slice(0, 3).join(' ')}
                           </span>
-                          <span className="text-xs text-slate-400">
+                          <span className="text-slate-400">
                             {formatEffectCounts(effect.positive_count, effect.negative_count, effect.null_count)}
                           </span>
                         </div>
                       ))}
+                      {row.outcome_effects.length > 3 && (
+                        <span className="text-xs text-slate-400">+{row.outcome_effects.length - 3}</span>
+                      )}
                     </div>
-                  ) : (
-                    <span className="text-sm text-slate-400 italic">No outcome data</span>
+                  )}
+                  {!row.impact_narrative && (!row.outcome_effects || row.outcome_effects.length === 0) && (
+                    <span className="text-sm text-slate-400 italic">No impact data</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-sm">
@@ -553,6 +584,7 @@ export function ExecutiveBriefing({
               interventions={structuredBriefing.interventions_table}
               lookupCitation={lookupCitation}
               onCitationClick={onCitationClick}
+              renderCitations={renderCitations}
             />
             
             <RecommendationsList 

@@ -139,6 +139,7 @@ export interface SearchParams {
     intervention_name: string
     citation_numbers: number[]
     context: string
+    impact_narrative: string
     outcome_effects: OutcomeEffect[]
   }
 
