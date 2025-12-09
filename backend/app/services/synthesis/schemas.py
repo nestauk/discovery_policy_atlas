@@ -81,7 +81,12 @@ class InterventionTableRow(BaseModel):
     citation_numbers: List[int] = Field(
         default_factory=list, description="Citation numbers"
     )
-    context: str = Field("", description="Location, setting, population, study design")
+    context: str = Field(
+        "", description="Structured context: Location, Setting, Study types"
+    )
+    impact_narrative: str = Field(
+        "", description="1-2 sentence RAG-grounded summary of key effects"
+    )
     outcome_effects: List[OutcomeEffect] = Field(
         default_factory=list, description="Effects grouped by outcome theme"
     )

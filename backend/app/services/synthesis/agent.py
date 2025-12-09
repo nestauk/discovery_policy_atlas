@@ -43,6 +43,7 @@ from app.services.synthesis.prompts import (
     build_theme_critique_prompt,
     build_classify_concept_prompt,
     build_background_section_prompt,
+    build_impact_narrative_prompt,
     build_recommendations_prompt,
     build_core_answer_prompt,
 )
@@ -166,6 +167,9 @@ class SynthesisState(TypedDict):
     aggregated_interventions: List[PolicyIntervention]
     aggregated_outcomes: List[OutcomeTheme]
     extraction_quotes: Dict[str, List[str]]  # doc_uuid -> list of extraction quotes
+    outcome_doc_effects: Dict[
+        str, Dict[str, List[str]]
+    ]  # outcome_name -> {doc_id -> [effects]}
 
     # RAG retrieval
     theme_evidence: Dict[str, List[RetrievedChunk]]
@@ -755,24 +759,35 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             )
         )
 
-    # Build outcomes
+    # Build outcomes and per-doc effect mapping
     outcomes: List[OutcomeTheme] = []
+    # Mapping: (outcome_name, doc_id) -> list of effect directions
+    outcome_doc_effects: Dict[str, Dict[str, List[str]]] = {}
+
     for t in final_outcome_themes:
         doc_ids = set()
         pos, neg, null = 0, 0, 0
+        doc_effect_list: Dict[str, List[str]] = {}
 
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             raw_ext = raw_ext_by_id.get(c.id, {})
-            if meta.get("doc_id"):
-                doc_ids.add(meta["doc_id"])
+            doc_id = meta.get("doc_id")
+            if doc_id:
+                doc_ids.add(doc_id)
             effect_dir = raw_ext.get("effect_direction")
             if effect_dir == "increase":
                 pos += 1
+                if doc_id:
+                    doc_effect_list.setdefault(doc_id, []).append("positive")
             elif effect_dir == "decrease":
                 neg += 1
+                if doc_id:
+                    doc_effect_list.setdefault(doc_id, []).append("negative")
             elif effect_dir == "null":
                 null += 1
+                if doc_id:
+                    doc_effect_list.setdefault(doc_id, []).append("null")
 
         if not doc_ids:
             continue
@@ -799,6 +814,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 source_doc_ids=sorted(doc_ids),
             )
         )
+        outcome_doc_effects[t.name] = doc_effect_list
 
     # Build extraction quotes mapping (doc_uuid -> list of quotes from extractions)
     extraction_quotes: Dict[str, List[str]] = {}
@@ -820,6 +836,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         "aggregated_interventions": interventions,
         "aggregated_outcomes": outcomes,
         "extraction_quotes": extraction_quotes,
+        "outcome_doc_effects": outcome_doc_effects,
     }
 
 
@@ -1254,24 +1271,12 @@ async def _generate_interventions_table(
     theme_evidence: Dict[str, List[RetrievedChunk]],
     chunk_to_citation: Dict[str, int],
 ) -> List[InterventionTableRow]:
-    """Generate interventions table rows with effects grouped by outcome theme."""
+    """Generate interventions table rows with structured context and impact narratives."""
     rows: List[InterventionTableRow] = []
+    null_values = {"null", "none", "", "unknown", "n/a"}
 
-    # Fetch outcome themes for this synthesis run
-    synthesis_run_id = state.get("synthesis_run_id")
-    outcome_themes = []
-    if synthesis_run_id:
-        try:
-            supabase = vectorization_service.supabase
-            resp = (
-                supabase.table("synthesis_outcome_themes")
-                .select("*")
-                .eq("synthesis_run_id", synthesis_run_id)
-                .execute()
-            )
-            outcome_themes = resp.data or []
-        except Exception as e:
-            logger.warning(f"Failed to fetch outcome themes: {e}")
+    # Use outcome themes from state (computed earlier in the workflow)
+    aggregated_outcomes: List[OutcomeTheme] = state.get("aggregated_outcomes") or []
 
     for intervention in interventions[:10]:
         chunks = theme_evidence.get(intervention.intervention_name, [])
@@ -1285,53 +1290,88 @@ async def _generate_interventions_table(
         ][:5]
         intervention_doc_ids = set(intervention.supporting_doc_ids)
 
-        # Build context string: location, setting, population, study design
+        # Build structured context with labels
         context_parts = []
-        null_values = {"null", "none", "", "unknown", "n/a"}
 
         valid_countries = [
             c for c in intervention.countries if c.lower() not in null_values
         ]
         if valid_countries:
-            context_parts.append(", ".join(valid_countries[:3]))
+            context_parts.append(f"**Location**: {', '.join(valid_countries[:4])}")
+
+        # Extract setting from brief_description if available
+        desc = intervention.brief_description.lower()
+        if "school" in desc:
+            context_parts.append("**Setting**: School-based")
+        elif "community" in desc:
+            context_parts.append("**Setting**: Community-based")
+        elif "clinic" in desc or "hospital" in desc or "health" in desc:
+            context_parts.append("**Setting**: Clinical/health facility")
+        elif "workplace" in desc or "employer" in desc:
+            context_parts.append("**Setting**: Workplace")
 
         valid_studies = [
             s for s in intervention.study_types.keys() if s.lower() not in null_values
         ]
         if valid_studies:
-            context_parts.append(", ".join(valid_studies[:3]))
+            study_counts = [
+                f"{s} ({intervention.study_types[s]})" for s in valid_studies[:3]
+            ]
+            context_parts.append(f"**Studies**: {', '.join(study_counts)}")
+
+        context = " ".join(context_parts) if context_parts else "Various settings"
+
+        # Generate impact narrative using LLM
+        impact_narrative = await _generate_impact_narrative(
+            state, intervention, chunks, chunk_to_citation
+        )
 
         # Match intervention to outcome themes by doc_id overlap
+        # Get per-doc effect mapping
+        outcome_doc_effects: Dict[str, Dict[str, List[str]]] = (
+            state.get("outcome_doc_effects") or {}
+        )
+
         outcome_effects: List[OutcomeEffect] = []
-        for theme in outcome_themes:
-            theme_doc_ids = set(theme.get("source_doc_ids", []))
+        for outcome in aggregated_outcomes:
+            theme_doc_ids = set(outcome.source_doc_ids)
             overlap = intervention_doc_ids & theme_doc_ids
 
             if overlap:
-                pos = theme.get("positive_count", 0)
-                neg = theme.get("negative_count", 0)
-                null = theme.get("null_count", 0)
+                # Calculate counts filtered to overlapping docs only
+                doc_effects = outcome_doc_effects.get(outcome.outcome_name, {})
+                pos, neg, nul = 0, 0, 0
+                for doc_id in overlap:
+                    for effect in doc_effects.get(doc_id, []):
+                        if effect == "positive":
+                            pos += 1
+                        elif effect == "negative":
+                            neg += 1
+                        elif effect == "null":
+                            nul += 1
 
-                # Determine direction
-                total = pos + neg + null
+                # Skip if no effects from overlapping docs
+                total = pos + neg + nul
                 if total == 0:
-                    direction = "insufficient"
-                elif pos > neg * 2 and pos > null:
+                    continue
+
+                # Determine direction from filtered counts
+                if pos > neg * 2 and pos > nul:
                     direction = "positive"
-                elif neg > pos * 2 and neg > null:
+                elif neg > pos * 2 and neg > nul:
                     direction = "negative"
-                elif null > pos and null > neg:
+                elif nul > pos and nul > neg:
                     direction = "null"
                 else:
                     direction = "mixed"
 
                 outcome_effects.append(
                     OutcomeEffect(
-                        outcome_theme=theme.get("outcome_name", "Unknown outcome"),
+                        outcome_theme=outcome.outcome_name,
                         direction=direction,
                         positive_count=pos,
                         negative_count=neg,
-                        null_count=null,
+                        null_count=nul,
                     )
                 )
 
@@ -1344,14 +1384,60 @@ async def _generate_interventions_table(
             InterventionTableRow(
                 intervention_name=intervention.intervention_name,
                 citation_numbers=[n for n in cit_nums if n > 0],
-                context="; ".join(context_parts)
-                if context_parts
-                else "Various settings",
+                context=context,
+                impact_narrative=impact_narrative,
                 outcome_effects=outcome_effects[:5],  # Top 5 outcome themes
             )
         )
 
     return rows
+
+
+async def _generate_impact_narrative(
+    state: SynthesisState,
+    intervention: PolicyIntervention,
+    chunks: List[RetrievedChunk],
+    chunk_to_citation: Dict[str, int],
+) -> str:
+    """Generate a concise impact narrative for an intervention using RAG evidence."""
+    if not chunks:
+        return intervention.impact_summary or "Impact data not available."
+
+    # Build evidence context with citations
+    evidence_lines = []
+    for chunk in chunks[:5]:
+        cit_num = chunk_to_citation.get(chunk.chunk_id, 0)
+        if cit_num > 0:
+            evidence_lines.append(f'[{cit_num}] "{chunk.content[:250]}..."')
+
+    if not evidence_lines:
+        return intervention.impact_summary or "Impact data not available."
+
+    try:
+        prompt = build_impact_narrative_prompt()
+        llm = get_llm(MAPPING_MODEL, temperature=0)
+        tags = [
+            "component:synthesis",
+            "component:synthesis.impact_narrative",
+            f"model:{MAPPING_MODEL}",
+        ]
+
+        resp = await llm.ainvoke(
+            prompt.format(
+                intervention_name=intervention.intervention_name,
+                effect_consensus=intervention.effect_consensus or "mixed",
+                evidence_context=_escape_braces("\n".join(evidence_lines)),
+            ),
+            config={
+                **_langfuse_config(state, tags),
+                "run_name": "synthesis.impact_narrative",
+            },
+        )
+        return (resp.content if hasattr(resp, "content") else str(resp)).strip()
+
+    except Exception as e:
+        logger.warning(f"Impact narrative generation failed: {e}")
+        return intervention.impact_summary or "Impact data not available."
 
 
 async def _generate_core_answer(
