@@ -8,7 +8,7 @@ from typing import Dict, List
 import pandas as pd
 from datetime import datetime
 
-from .schemas import RunConfig, RunResult
+from .schemas import RunConfig, RunResult, SearchContext
 from .references import ReferencesService
 from .relevance import RelevanceService
 from .acquire import AcquisitionService
@@ -59,9 +59,13 @@ class AnalysisService:
         monitor.log_snapshot("Pipeline start")
 
         # Create unique subfolder for this run
-        run_export_dir = self.export_dir / f"run_{run_id}"
+        folder_slug = (
+            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:4]}"
+        )
+        run_export_dir = self.export_dir / f"run_{folder_slug}"
         run_export_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Created run directory: %s", run_export_dir)
+        relevance_cache_path = run_export_dir / "relevance_cache.jsonl"
 
         # Step 1: build references
         with StageTimer(monitor, "references"):
@@ -74,6 +78,7 @@ class AnalysisService:
                 references_csv,
                 generated_boolean_queries,
                 generated_semantic_query,
+                updated_context,
             ) = await references_service.build_references(
                 query=config.query,
                 sources=config.sources,
@@ -86,7 +91,22 @@ class AnalysisService:
                 project_id=project_id,
                 user_id=user_id,
                 search_context=search_context_dict,
+                relevance_cache_path=str(relevance_cache_path),
+                enable_query_enrichment=config.enable_query_enrichment,
+                enable_sampling_stopping=config.enable_sampling_stopping,
+                sampling_pages=config.sampling_pages,
+                sampling_stop_threshold=config.sampling_stop_threshold,
+                sampling_max_depth=config.sampling_max_depth,
+                sampling_page_size=config.sampling_page_size,
             )
+
+            if updated_context and config.search_context:
+                try:
+                    config.search_context = SearchContext(**updated_context)
+                    search_context_dict = updated_context
+                except Exception:
+                    # Keep existing context if update fails
+                    pass
 
         # Count rows
         try:
@@ -119,6 +139,8 @@ class AnalysisService:
                     project_id=project_id,
                     user_id=user_id,
                     search_context=search_context_dict,
+                    relevance_output_path=str(relevance_cache_path),
+                    keep_relevance_output=True,
                 )
                 references_csv = await relevance_service.check_relevance(
                     str(references_csv)
