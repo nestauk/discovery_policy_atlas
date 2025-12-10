@@ -37,18 +37,12 @@ class RelevanceService:
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
         search_context: Optional[Dict] = None,
-        relevance_output_path: Optional[str] = None,
-        keep_relevance_output: bool = True,
     ):
         self.query = query
         self.export_dir = Path(export_dir) if export_dir else Path("./temp")
         self.export_dir.mkdir(parents=True, exist_ok=True)
         self.project_id = project_id
         self.user_id = user_id
-        self.relevance_output_path = (
-            Path(relevance_output_path) if relevance_output_path else None
-        )
-        self.keep_relevance_output = keep_relevance_output
 
         ctx = (
             search_context.model_dump()
@@ -145,12 +139,7 @@ class RelevanceService:
         # Run relevance assessment
         session_name = f"relevance_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
-            results_df = await self._screen_batch(
-                documents=documents,
-                session_name=session_name,
-                output_path=self.relevance_output_path,
-                keep_file=self.keep_relevance_output,
-            )
+            results_df = await self._screen_batch(documents, session_name)
 
             if results_df.empty:
                 logger.warning("Relevance assessment returned no results")
@@ -222,24 +211,14 @@ class RelevanceService:
         return references_df
 
     async def _screen_batch(
-        self,
-        documents: Dict[str, str],
-        session_name: str,
-        output_path: Optional[Path] = None,
-        keep_file: bool = False,
+        self, documents: Dict[str, str], session_name: str
     ) -> pd.DataFrame:
         """Screen a batch of documents using the LLM processor."""
         if not documents:
             return pd.DataFrame()
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        if output_path is None:
-            output_path = (
-                self.export_dir / f"relevance_{session_name}_{timestamp}.jsonl"
-            )
-        else:
-            output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path = self.export_dir / f"relevance_{session_name}_{timestamp}.jsonl"
 
         try:
             # Run the batch processor
@@ -309,7 +288,7 @@ class RelevanceService:
 
         finally:
             # Clean up
-            if output_path.exists() and not keep_file:
+            if output_path.exists():
                 try:
                     output_path.unlink()
                 except Exception as e:

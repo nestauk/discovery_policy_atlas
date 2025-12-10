@@ -62,7 +62,6 @@ class SearchContext(BaseModel):
     time_to: Optional[str] = None
     max_results: Optional[int] = None
     additional_questions: List[str] = Field(default_factory=list)
-    comprehensiveness_estimate: Optional[dict] = None
 
 
 class RunConfig(BaseModel):
@@ -84,13 +83,6 @@ class RunConfig(BaseModel):
     use_interim_storage: bool = True
     # New search wizard context
     search_context: Optional[SearchContext] = None
-    # Retrieval enrichment and sampling controls (override settings when provided)
-    enable_query_enrichment: Optional[bool] = None
-    enable_sampling_stopping: Optional[bool] = None
-    sampling_pages: Optional[List[int]] = None
-    sampling_stop_threshold: Optional[float] = None
-    sampling_max_depth: Optional[int] = None
-    sampling_page_size: Optional[int] = None
 
 
 class RunResult(BaseModel):

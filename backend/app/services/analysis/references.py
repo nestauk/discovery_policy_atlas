@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from datetime import date
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple, Any
+from typing import List, Optional, Dict
 
 import pandas as pd
 
@@ -25,7 +24,6 @@ from app.utils.llm.llm_utils import (
     build_langfuse_metadata,
 )
 from .utils_doc_ids import stable_doc_id
-from .relevance import RelevanceService
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +31,11 @@ logger = logging.getLogger(__name__)
 SYSTEMATIC_REVIEW_CLAUSE = (
     '("systematic review" OR "meta-analysis" OR "narrative synthesis")'
 )
-RCT_CLAUSE = '("randomised control trial" OR "randomized control trial" OR "randomised controlled trial" OR "randomized controlled trial" OR "randomised control trials" OR "randomized control trials")'
+RCT_CLAUSE = (
+    '("randomized controlled trial" OR "randomised controlled trial" '
+    'OR "randomized control trial" OR "randomised control trial")'
+)
+VARIANT_PRIORITY = {"systematic_review": 0, "rct": 1, "base": 2}
 
 
 class ReferencesService:
@@ -372,14 +374,8 @@ class ReferencesService:
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
         search_context: Optional[Dict] = None,
-        relevance_cache_path: Optional[str] = None,
-        enable_query_enrichment: Optional[bool] = None,
-        enable_sampling_stopping: Optional[bool] = None,
-        sampling_pages: Optional[List[int]] = None,
-        sampling_stop_threshold: Optional[float] = None,
-        sampling_max_depth: Optional[int] = None,
-        sampling_page_size: Optional[int] = None,
-    ) -> tuple[Path, List[str], Optional[str], Optional[Dict[str, Any]]]:
+        enable_rct_sysrev_fanout: Optional[bool] = None,
+    ) -> tuple[Path, List[str], Optional[str]]:
         """Fetch and normalize references, write references.csv, and return its path.
 
         New multi-query mode generates multiple diverse queries and combines results
@@ -399,13 +395,7 @@ class ReferencesService:
             query_temperature: Temperature for query generation diversity
             project_id: Project ID for langfuse tracking
             user_id: User ID for langfuse tracking
-            relevance_cache_path: Path to reuse/store LLM relevance checks (JSONL)
-            enable_query_enrichment: Toggle to add SR/RCT variants (default from settings)
-            enable_sampling_stopping: Toggle to run sampling + early stop (default from settings)
-            sampling_pages: Pages to sample for early stopping
-            sampling_stop_threshold: Non-relevance threshold to stop (e.g., 0.75)
-            sampling_max_depth: Max bisection depth for sampling refinement
-            sampling_page_size: Page size for sampling and retrieval
+            enable_rct_sysrev_fanout: Override to enable/disable RCT/systematic review fanout
         """
 
         # Initialize Langfuse handler for tracking
@@ -418,139 +408,9 @@ class ReferencesService:
 
         n_runs = n_query_runs or settings.BOOLEAN_QUERY_N_RUNS
         temperature = query_temperature or settings.BOOLEAN_QUERY_TEMPERATURE
-        enrichment_enabled = (
-            enable_query_enrichment
-            if enable_query_enrichment is not None
-            else settings.QUERY_ENRICHMENT_ENABLED
-        )
-        sampling_enabled = (
-            enable_sampling_stopping
-            if enable_sampling_stopping is not None
-            else settings.SAMPLING_STOP_ENABLED
-        )
-        sampling_page_size = (
-            sampling_page_size
-            if sampling_page_size is not None
-            else settings.SAMPLING_PAGE_SIZE
-        )
-        # Derive sampling pages:
-        # - If caller passes an explicit list, use it.
-        # - Otherwise, build from interval up to max samples or MAX_SEARCH_RESULTS/page_size.
-        if sampling_pages:
-            sampling_pages_cfg = sampling_pages
-        else:
-            interval = settings.SAMPLING_PAGE_INTERVAL
-            max_samples = settings.SAMPLING_MAX_SAMPLES
-            max_pages_possible = max(
-                1, (settings.MAX_SEARCH_RESULTS // sampling_page_size)
-            )
-            sampling_pages_cfg = [1]
-            current = interval
-            while (
-                len(sampling_pages_cfg) < max_samples and current <= max_pages_possible
-            ):
-                sampling_pages_cfg.append(current)
-                current += interval
-        sampling_threshold = (
-            sampling_stop_threshold
-            if sampling_stop_threshold is not None
-            else settings.SAMPLING_STOP_THRESHOLD
-        )
-        sampling_max_depth = (
-            sampling_max_depth
-            if sampling_max_depth is not None
-            else settings.SAMPLING_MAX_DEPTH
-        )
-        sampling_metadata: List[Dict[str, Any]] = []
-        relevance_cache = (
-            Path(relevance_cache_path)
-            if relevance_cache_path
-            else self.export_dir / "relevance_cache.jsonl"
-        )
-
-        def _estimate_relevant_from_samples(
-            samples: List[Dict[str, Any]],
-            page_size: int,
-            total_available: Optional[int],
-        ) -> Optional[int]:
-            """Estimate total relevant docs using trapezoidal interpolation + tail extrapolation.
-            Caps the final estimate at total_available when known.
-            """
-            if not samples:
-                return None
-            samples = sorted(samples, key=lambda x: x.get("page", 0))
-            max_pages = (
-                math.ceil(total_available / page_size)
-                if total_available
-                else samples[-1]["page"]
-            )
-            relevant_est = 0.0
-
-            # Include the first sampled page
-            first_rate = max(0.0, min(1.0, samples[0].get("relevant_rate", 0.0)))
-            relevant_est += page_size * first_rate
-
-            # Trapezoid between consecutive samples
-            for i in range(len(samples) - 1):
-                p1 = samples[i].get("page", 0)
-                p2 = samples[i + 1].get("page", 0)
-                if p2 <= p1:
-                    continue
-                r1 = max(0.0, min(1.0, samples[i].get("relevant_rate", 0.0)))
-                r2 = max(0.0, min(1.0, samples[i + 1].get("relevant_rate", 0.0)))
-                pages_range = min(p2, max_pages) - p1
-                if pages_range <= 0:
-                    continue
-                items = pages_range * page_size
-                avg_rate = (r1 + r2) / 2
-                relevant_est += items * avg_rate
-
-            last_sample = samples[-1]
-            last_page = min(last_sample.get("page", 0), max_pages)
-            last_rate = max(0.0, min(1.0, last_sample.get("relevant_rate", 0.0)))
-
-            if max_pages <= last_page:
-                return int(round(min(relevant_est, total_available or relevant_est)))
-
-            # Tail extrapolation using linear fit over last up to 3 points
-            tail_points = samples[-3:] if len(samples) >= 3 else samples[-2:]
-            xs = [min(p.get("page", 0), max_pages) for p in tail_points]
-            ys = [max(0.0, min(1.0, p.get("relevant_rate", 0.0))) for p in tail_points]
-            mean_x = sum(xs) / len(xs)
-            mean_y = sum(ys) / len(ys)
-            denom = sum((x - mean_x) ** 2 for x in xs)
-            slope = (
-                sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / denom
-                if denom > 0
-                else 0.0
-            )
-            intercept = mean_y - slope * mean_x
-
-            end_page = max_pages
-            remaining_items = (
-                max(0, total_available - last_page * page_size)
-                if total_available is not None
-                else (end_page - last_page) * page_size
-            )
-            if remaining_items <= 0:
-                return int(round(min(relevant_est, total_available or relevant_est)))
-
-            if slope >= 0:
-                tail_rate_end = last_rate
-                tail_items = remaining_items
-                relevant_est += tail_items * tail_rate_end
-            else:
-                rate_at_end = max(0.0, intercept + slope * end_page)
-                tail_items = remaining_items
-                avg_rate = max(0.0, (last_rate + rate_at_end) / 2)
-                relevant_est += tail_items * avg_rate
-
-            if total_available is not None:
-                relevant_est = min(relevant_est, total_available)
-
-            return int(round(relevant_est))
 
         tasks = []
+        task_meta = []  # Track task types and variants for gathered results
         openalex_service = OpenAlexService() if "openalex" in sources else None
         overton_service = OvertonService() if "overton" in sources else None
 
@@ -583,13 +443,12 @@ class ReferencesService:
         else:
             logger.info("📋 No search context provided; using query text only")
 
-        # Generate boolean queries for OpenAlex and enrich with SR/RCT variants
-        enriched_openalex_queries: List[Dict[str, Any]] = []
-        priority_map = {"systematic_review": 0, "rct": 1, "base": 2}
-
+        # Generate boolean queries for OpenAlex
+        openalex_query_variants = []  # {"query": str, "variant": str}
         if "openalex" in sources:
             if mode == "boolean" and boolean_query:
                 openalex_queries = [boolean_query]
+                boolean_queries_list = openalex_queries
                 logger.info("📋 Using provided boolean query: '%s'", boolean_query)
             elif use_multi_query:
                 logger.info(
@@ -610,6 +469,7 @@ class ReferencesService:
                     project_id=project_id,
                     user_id=user_id,
                 )
+                boolean_queries_list = openalex_queries
                 logger.info(
                     "✅ Generated %d unique queries from context",
                     len(openalex_queries),
@@ -630,36 +490,32 @@ class ReferencesService:
                     user_id=user_id,
                 )
                 openalex_queries = [single_query]
+                boolean_queries_list = [single_query]
 
-            # Enrich with SR / RCT variants (enabled by default)
-            for idx, base_q in enumerate(openalex_queries):
-                enriched_openalex_queries.append(
-                    {
-                        "query": base_q,
-                        "variant": "base",
-                        "priority": priority_map["base"],
-                        "base_index": idx,
-                    }
-                )
-                if enrichment_enabled:
-                    enriched_openalex_queries.append(
-                        {
-                            "query": f"({base_q}) AND {SYSTEMATIC_REVIEW_CLAUSE}",
-                            "variant": "systematic_review",
-                            "priority": priority_map["systematic_review"],
-                            "base_index": idx,
-                        }
-                    )
-                    enriched_openalex_queries.append(
-                        {
-                            "query": f"({base_q}) AND {RCT_CLAUSE}",
-                            "variant": "rct",
-                            "priority": priority_map["rct"],
-                            "base_index": idx,
-                        }
-                    )
+            # Fan out each boolean query with systematic review and RCT variants
+            fanout_enabled = (
+                enable_rct_sysrev_fanout
+                if enable_rct_sysrev_fanout is not None
+                else settings.OPENALEX_ENABLE_RCT_SYSREV_FANOUT
+            )
 
-            boolean_queries_list = [item["query"] for item in enriched_openalex_queries]
+            seen_queries = set()
+
+            def _add_variant(q: str, variant: str):
+                if q not in seen_queries:
+                    openalex_query_variants.append({"query": q, "variant": variant})
+                    seen_queries.add(q)
+
+            for base_query in openalex_queries:
+                _add_variant(base_query, "base")
+                if fanout_enabled:
+                    _add_variant(
+                        f"({base_query}) AND {SYSTEMATIC_REVIEW_CLAUSE}",
+                        "systematic_review",
+                    )
+                    _add_variant(f"({base_query}) AND {RCT_CLAUSE}", "rct")
+
+            boolean_queries_list = [item["query"] for item in openalex_query_variants]
 
         # Generate semantic query for Overton from context (skip if boolean-only)
         if "overton" in sources and mode != "boolean":
@@ -675,260 +531,42 @@ class ReferencesService:
                 user_id=user_id,
             )
 
-        openalex_results: List[pd.DataFrame] = []
-        raw_openalex: list = []
-
-        # Execute OpenAlex queries with sampling and enrichment
-        if openalex_service and enriched_openalex_queries:
-            sampling_relevance = RelevanceService(
-                query=research_question,
-                export_dir=str(self.export_dir),
-                project_id=project_id,
-                user_id=user_id,
-                search_context=context,
-                relevance_output_path=str(relevance_cache),
-                keep_relevance_output=True,
-            )
-
-            async def _sample_query(
-                query_str: str, variant: str, total_available: Optional[int]
-            ) -> Tuple[int, float, Dict[str, Any]]:
-                """Sample pages, run LLM relevance, and decide cutoff."""
-
-                def _build_documents(df_slice: pd.DataFrame) -> Dict[str, str]:
-                    docs: Dict[str, str] = {}
-                    for _, row in df_slice.iterrows():
-                        doc_id = stable_doc_id(
-                            doi=row.get("doi"),
-                            source_id=row.get("id"),
-                            title=row.get("title"),
-                            year=row.get("publication_year"),
-                        )
-                        content = f"Title: {row.get('title', '')}\n\nAbstract: {row.get('abstract', '')}"
-                        docs[doc_id] = content
-                    return docs
-
-                async def _get_page_slice(page_number: int) -> pd.DataFrame:
-                    if max_pages_cap and page_number > max_pages_cap:
-                        return pd.DataFrame()
-                    df_page = await openalex_service.search(
-                        query=query_str,
-                        max_results=None,
-                        min_citations=settings.DEFAULT_MIN_CITATIONS,
-                        date_from=df_val,
-                        date_to=dt_val,
-                        page=page_number,
-                        per_page=sampling_page_size,
-                    )
-                    if df_page is None or df_page.empty:
-                        return pd.DataFrame()
-                    return df_page.copy()
-
-                # Cap sampling pages to available pages if we know total_available
-                max_pages_cap = (
-                    math.ceil(total_available / sampling_page_size)
-                    if total_available
-                    else None
-                )
-                pages_to_check = [
-                    p
-                    for p in sampling_pages_cfg
-                    if not max_pages_cap or p <= max_pages_cap
-                ] or [1]
-
-                pages_checked: List[Dict[str, Any]] = []
-                last_good: Tuple[int, float] | None = None
-                last_bad: Tuple[int, float] | None = None
-
-                for page in pages_to_check:
-                    df_slice = await _get_page_slice(page)
-                    if df_slice.empty:
-                        pages_checked.append(
-                            {"page": page, "total": 0, "relevant_rate": 0.0}
-                        )
-                        # If we know total_available and exceeded it, stop sampling
-                        if max_pages_cap and page >= max_pages_cap:
-                            break
-                        continue
-                    docs = _build_documents(df_slice)
-                    results_df = await sampling_relevance._screen_batch(
-                        documents=docs,
-                        session_name=f"sampling_p{page}",
-                        output_path=relevance_cache,
-                        keep_file=True,
-                    )
-                    rel_rate = (
-                        results_df["is_relevant"].mean()
-                        if not results_df.empty
-                        else 0.0
-                    )
-                    pages_checked.append(
-                        {
-                            "page": page,
-                            "total": len(df_slice),
-                            "relevant_rate": rel_rate,
-                        }
-                    )
-                    non_rel_rate = 1 - rel_rate
-                    if non_rel_rate > sampling_threshold:
-                        last_bad = (page, rel_rate)
-                    else:
-                        last_good = (page, rel_rate)
-
-                    # Early exit if we already have a bad page
-                    if last_bad:
-                        break
-
-                # Bisection refinement
-                depth = 0
-                while (
-                    sampling_max_depth > 0
-                    and depth < sampling_max_depth
-                    and last_good
-                    and last_bad
-                    and abs(last_good[0] - last_bad[0]) > 1
-                ):
-                    mid_page = int((last_good[0] + last_bad[0]) / 2)
-                    df_slice = await _get_page_slice(mid_page)
-                    if df_slice.empty:
-                        pages_checked.append(
-                            {"page": mid_page, "total": 0, "relevant_rate": 0.0}
-                        )
-                        break
-                    docs = _build_documents(df_slice)
-                    results_df = await sampling_relevance._screen_batch(
-                        documents=docs,
-                        session_name=f"sampling_p{mid_page}",
-                        output_path=relevance_cache,
-                        keep_file=True,
-                    )
-                    rel_rate = (
-                        results_df["is_relevant"].mean()
-                        if not results_df.empty
-                        else 0.0
-                    )
-                    pages_checked.append(
-                        {
-                            "page": mid_page,
-                            "total": len(df_slice),
-                            "relevant_rate": rel_rate,
-                        }
-                    )
-                    non_rel_rate = 1 - rel_rate
-                    if non_rel_rate > sampling_threshold:
-                        last_bad = (mid_page, rel_rate)
-                    else:
-                        last_good = (mid_page, rel_rate)
-                    depth += 1
-
-                cutoff_page = (
-                    last_good[0] if last_good else (last_bad[0] if last_bad else 1)
-                )
-                if max_pages_cap:
-                    cutoff_page = min(cutoff_page, max_pages_cap)
-                rate_at_cutoff = (
-                    last_good[1] if last_good else (last_bad[1] if last_bad else 0.0)
-                )
-
-                sampling_metadata.append(
-                    {
-                        "query": query_str,
-                        "variant": variant,
-                        "pages_checked": sorted(pages_checked, key=lambda x: x["page"]),
-                        "cutoff_page": cutoff_page,
-                        "threshold": sampling_threshold,
-                        "rate_at_cutoff": rate_at_cutoff,
-                        "max_pages_cap": max_pages_cap,
-                    }
-                )
-
-                return cutoff_page, rate_at_cutoff, sampling_metadata[-1]
-
-            for idx, meta in enumerate(enriched_openalex_queries):
-                query_str = meta["query"]
-                variant = meta["variant"]
-                priority = meta["priority"]
-
+        # Execute OpenAlex queries
+        if openalex_service:
+            for idx, query_info in enumerate(openalex_query_variants):
+                query_str = query_info["query"]
+                query_variant = query_info["variant"]
                 logger.info(
-                    "🔍 Executing OpenAlex query %d/%d [%s]: '%s'",
+                    "🔍 Executing OpenAlex query %d/%d (%s): '%s'",
                     idx + 1,
-                    len(enriched_openalex_queries),
-                    variant,
+                    len(openalex_query_variants),
+                    query_variant,
                     query_str[:100] + ("..." if len(query_str) > 100 else ""),
                 )
 
-                cutoff_page = None
-                rate_at_cutoff = None
-                total_available = None
-
-                if sampling_enabled:
-                    try:
-                        total_available = await openalex_service.search_minimal(
-                            query=query_str,
-                            min_citations=settings.DEFAULT_MIN_CITATIONS,
-                            date_from=df_val,
-                            date_to=dt_val,
-                            count_only=True,
-                        )
-                    except Exception as e:
-                        logger.warning("Count fetch failed for sampling: %s", e)
-                        total_available = None
-                    cutoff_page, rate_at_cutoff, _ = await _sample_query(
-                        query_str, variant, total_available
-                    )
-                    if sampling_metadata:
-                        sampling_metadata[-1]["total_available"] = total_available
-                        sampling_metadata[-1][
-                            "estimated_relevant"
-                        ] = _estimate_relevant_from_samples(
-                            sampling_metadata[-1]["pages_checked"],
-                            sampling_page_size,
-                            total_available,
-                        )
-
-                fetch_limit = limit if len(enriched_openalex_queries) == 1 else limit
-                if sampling_enabled and cutoff_page:
-                    fetch_limit = min(fetch_limit, cutoff_page * sampling_page_size)
-                if total_available:
-                    fetch_limit = min(fetch_limit, total_available)
-
-                df_res = await openalex_service.search(
-                    query=query_str,
-                    max_results=fetch_limit,
-                    min_citations=settings.DEFAULT_MIN_CITATIONS,
-                    date_from=df_val,
-                    date_to=dt_val,
-                )
-
-                if isinstance(df_res, pd.DataFrame) and not df_res.empty:
-                    df_res["retrieval_query_type"] = variant
-                    df_res["retrieval_priority"] = priority
-                    df_res["sampling_cutoff_page"] = cutoff_page
-                    df_res["sampling_total_available"] = total_available
-                    df_res["sampling_rate_at_cutoff"] = rate_at_cutoff
-                    openalex_results.append(df_res)
-
-                if sampling_metadata:
-                    sm = sampling_metadata[-1]
-                    logger.info(
-                        "Sampling summary [%s]: total_available=%s, pages_checked=%s, "
-                        "cutoff_page=%s, est_relevant=%s",
-                        variant,
-                        total_available,
-                        [p.get("page") for p in sm.get("pages_checked", [])],
-                        sm.get("cutoff_page"),
-                        sm.get("estimated_relevant"),
-                    )
-
-                # Collect raw responses for first query only (to avoid too much data)
-                if idx == 0:
-                    raw_openalex = await openalex_service.fetch_raw(
+                tasks.append(
+                    openalex_service.search(
                         query=query_str,
-                        max_results=fetch_limit,
+                        max_results=limit,
                         min_citations=settings.DEFAULT_MIN_CITATIONS,
                         date_from=df_val,
                         date_to=dt_val,
                     )
+                )
+                task_meta.append(("openalex_search", query_variant))
+
+                # Also collect raw responses for first query only (to avoid too much data)
+                if idx == 0:
+                    tasks.append(
+                        openalex_service.fetch_raw(
+                            query=query_str,
+                            max_results=limit,
+                            min_citations=settings.DEFAULT_MIN_CITATIONS,
+                            date_from=df_val,
+                            date_to=dt_val,
+                        )
+                    )
+                    task_meta.append(("openalex_raw", query_variant))
 
         if overton_service:
             # Determine source_country parameter from geography_filter
@@ -961,6 +599,7 @@ class ReferencesService:
                         published_before=dt_val,
                     )
                 )
+                task_meta.append(("overton_search", None))
             else:
                 logger.info(
                     "📋 Overton boolean search with query: '%s', geography: %s",
@@ -977,6 +616,7 @@ class ReferencesService:
                         published_before=dt_val,
                     )
                 )
+                task_meta.append(("overton_search", None))
             # Add raw Overton first-page JSON for debugging
             # Use the same query parameters as the search() call above
             tasks.append(
@@ -993,20 +633,34 @@ class ReferencesService:
                     published_before=dt_val,
                 )
             )
+            task_meta.append(("overton_raw", None))
 
-        results: List[pd.DataFrame] = list(openalex_results)
+        results: List[pd.DataFrame] = []
+        raw_openalex: list = []
         raw_overton: dict | list | None = None
         if tasks:
             gathered = await asyncio.gather(*tasks, return_exceptions=True)
-            for g in gathered:
+            for meta, g in zip(task_meta, gathered):
+                task_kind, task_variant = meta
+
                 if isinstance(g, Exception):
-                    logger.error("Reference fetch error: %s", g)
+                    logger.error("Reference fetch error (%s): %s", task_kind, g)
+                    continue
+
+                if task_kind == "openalex_search" and isinstance(g, pd.DataFrame):
+                    df_tagged = g.copy()
+                    df_tagged["query_variant"] = task_variant
+                    results.append(df_tagged)
+                elif task_kind == "openalex_raw" and isinstance(g, list):
+                    raw_openalex.append({"variant": task_variant, "data": g})
+                elif task_kind == "overton_search" and isinstance(g, pd.DataFrame):
+                    results.append(g)
+                elif task_kind == "overton_raw" and (
+                    isinstance(g, dict) or isinstance(g, list)
+                ):
+                    raw_overton = g
                 elif isinstance(g, pd.DataFrame):
                     results.append(g)
-                elif isinstance(g, list) and openalex_service:
-                    raw_openalex = g
-                elif isinstance(g, dict) or isinstance(g, list):
-                    raw_overton = g
 
         if not results:
             df = pd.DataFrame(
@@ -1027,6 +681,8 @@ class ReferencesService:
                     "relevance_score",
                     "source_country",
                     "author_institution_countries",
+                    "query_variant",
+                    "variant_priority",
                 ]
             )
         else:
@@ -1043,6 +699,7 @@ class ReferencesService:
                     pdf_col = "pdf_url"
                     type_value = df.get("source_type", pd.Series([None] * len(df)))
                     authors_col = "authors"
+                    variant_col = pd.Series([None] * len(df))
                 else:
                     source = "openalex"
                     source_id_col = "id"
@@ -1054,6 +711,7 @@ class ReferencesService:
                     pdf_col = "pdf_url"
                     type_value = df.get("work_type", pd.Series([None] * len(df)))
                     authors_col = "authors"
+                    variant_col = df.get("query_variant", pd.Series([None] * len(df)))
 
                 normalized = pd.DataFrame(
                     {
@@ -1080,15 +738,9 @@ class ReferencesService:
                         "relevance_score": df.get(
                             "relevance_score", pd.Series([0] * len(df))
                         ),
-                        "retrieval_query_type": df.get(
-                            "retrieval_query_type",
-                            pd.Series(
-                                ["overton" if source == "overton" else "base"] * len(df)
-                            ),
-                        ),
-                        "retrieval_priority": df.get(
-                            "retrieval_priority",
-                            pd.Series([3 if source == "overton" else 2] * len(df)),
+                        "query_variant": variant_col,
+                        "variant_priority": pd.Series(
+                            [VARIANT_PRIORITY.get(v, 99) for v in variant_col]
                         ),
                     }
                 )
@@ -1156,16 +808,20 @@ class ReferencesService:
                             "cited_by_count",
                             "source_country",
                             "relevance_score",
-                            "retrieval_query_type",
-                            "retrieval_priority",
+                            "query_variant",
+                            "variant_priority",
                         ]
                     ]
                 )
 
             df = pd.concat(frames, ignore_index=True)
+
+            if "variant_priority" not in df.columns:
+                df["variant_priority"] = 99
+
             df = df.sort_values(
-                ["retrieval_priority", "relevance_score", "cited_by_count"],
-                ascending=[True, False, False],
+                ["relevance_score", "variant_priority"],
+                ascending=[False, True],
             ).drop_duplicates(subset=["doc_id"])
 
             # Log combination statistics
@@ -1176,9 +832,14 @@ class ReferencesService:
                     len(df),
                 )
 
-        # If we got more results than limit due to multi-query, trim them
+        # If we got more results than limit due to multiple queries, trim them
         # BUT: trim OpenAlex and Overton separately to preserve Overton results
-        if use_multi_query and len(df) > limit:
+        should_trim = (
+            limit
+            and len(df) > limit
+            and (use_multi_query or len(openalex_query_variants) > 1)
+        )
+        if should_trim:
             logger.info(
                 "✂️ Trimming results from %d to %d (limit)",
                 len(df),
@@ -1191,34 +852,25 @@ class ReferencesService:
 
             # Trim OpenAlex results by relevance_score, keep all Overton results
             if len(openalex_df) > 0 and "relevance_score" in openalex_df.columns:
+                if "variant_priority" not in openalex_df.columns:
+                    openalex_df["variant_priority"] = 99
+
+                openalex_df["variant_priority"] = pd.to_numeric(
+                    openalex_df["variant_priority"], errors="coerce"
+                ).fillna(99)
+
                 openalex_df = openalex_df.sort_values(
-                    ["retrieval_priority", "relevance_score"],
-                    ascending=[True, False],
+                    ["relevance_score", "variant_priority"],
+                    ascending=[False, True],
                 ).head(limit)
                 logger.info(
-                    "  📊 Kept top %d OpenAlex results (sorted by relevance), all %d Overton results",
+                    "  📊 Kept top %d OpenAlex results (priority then relevance), all %d Overton results",
                     len(openalex_df),
                     len(overton_df),
                 )
 
             # Recombine
             df = pd.concat([openalex_df, overton_df], ignore_index=True)
-
-        # Update search context with sampling/comprehensiveness info
-        if context is not None and sampling_metadata:
-            estimated_total = sum(
-                item["estimated_relevant"]
-                for item in sampling_metadata
-                if item.get("estimated_relevant") is not None
-            )
-            context["comprehensiveness_estimate"] = {
-                "sampling": sampling_metadata,
-                "estimated_relevant_total": estimated_total or None,
-                "retrieved_count": len(df),
-                "coverage_ratio": (
-                    len(df) / estimated_total if estimated_total else None
-                ),
-            }
 
         # Ensure export directory exists
         self.export_dir.mkdir(parents=True, exist_ok=True)
@@ -1244,4 +896,4 @@ class ReferencesService:
         if not boolean_queries_list:
             boolean_queries_list = [query]
 
-        return references_csv, boolean_queries_list, final_semantic_query, context
+        return references_csv, boolean_queries_list, final_semantic_query

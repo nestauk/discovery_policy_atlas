@@ -119,14 +119,9 @@ class Settings(BaseSettings):
     BOOLEAN_QUERY_TEMPERATURE: float = 1.0  # Temperature for query generation
     BOOLEAN_QUERY_N_RUNS: int = 5  # Number of queries to generate in multi mode
     BOOLEAN_QUERY_MODEL: str = "gpt-4.1"  # Model for query generation
-    # Query enrichment and sampling (enabled by default while prototyping)
-    QUERY_ENRICHMENT_ENABLED: bool = True
-    SAMPLING_STOP_ENABLED: bool = True
-    SAMPLING_STOP_THRESHOLD: float = 0.75
-    SAMPLING_PAGE_INTERVAL: int = 10
-    SAMPLING_MAX_SAMPLES: int = 5
-    SAMPLING_MAX_DEPTH: int = 2  # Bisection depth for sampling refinement
-    SAMPLING_PAGE_SIZE: int = 25
+    OPENALEX_ENABLE_RCT_SYSREV_FANOUT: (
+        bool
+    ) = True  # Fan out RCT/systematic review variants
 
     # Batch Processing Settings
     BATCH_SIZE_SCREENING: int = 5

@@ -63,10 +63,8 @@ class OpenAlexService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         return_n_total: bool = False,
-        page: Optional[int] = None,
-        per_page: Optional[int] = None,
     ) -> pd.DataFrame:
-        """Search OpenAlex for papers using PyAlex (supports single-page fetch).
+        """Search OpenAlex for papers using PyAlex
 
         Args:
             query: The search query to use
@@ -80,7 +78,6 @@ class OpenAlexService:
             pd.DataFrame: A DataFrame of the results (up to max_results)
             If return_n_total is True, returns tuple (pd.DataFrame, int) where int is the
             total count of all results matching the query (from meta.count in OpenAlex API)
-            If page is provided, only that page is fetched with size per_page (or default)
         """
 
         # Build query with PyAlex
@@ -105,33 +102,16 @@ class OpenAlexService:
 
         # Get results directly into DataFrame
         results = []
-        per_page_val = per_page or (min(200, max_results) if max_results else 200)
-
-        if page:
-            target_start = (page - 1) * per_page_val
-            target_end = target_start + per_page_val
-            fetched = 0
-            # Pull up to the page we need, but only keep rows in that page window
-            for pg in works_query.paginate(per_page=per_page_val, n_max=target_end):
-                for row in pg:
-                    if fetched >= target_end:
-                        break
-                    if fetched >= target_start:
-                        results.append(row)
-                    fetched += 1
-                if fetched >= target_end:
-                    break
+        if max_results is None:
+            # Fetch all results
+            for page in works_query.paginate(per_page=200):
+                results.extend(page)
         else:
-            if max_results is None:
-                # Fetch all results
-                for pg in works_query.paginate(per_page=per_page_val):
-                    results.extend(pg)
-            else:
-                # Fetch up to max_results
-                for pg in works_query.paginate(
-                    per_page=per_page_val, n_max=max_results
-                ):
-                    results.extend(pg)
+            # Fetch up to max_results
+            for page in works_query.paginate(
+                per_page=min(200, max_results), n_max=max_results
+            ):
+                results.extend(page)
 
         # Apply pyalex trick to reinvert abstracts
         for page in results:

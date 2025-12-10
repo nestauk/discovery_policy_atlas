@@ -30,8 +30,10 @@ You are provided with the following information:
 
 # Important instructions
 
+DO NOT use wildcards (*) in the query as OpenAlex does not support them. Instead, use specific terms in various forms and synonyms.
+
 DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. 
-For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad. However, if specific outcome interests are provided (e.g., "health outcomes", "educational attainment"), you SHOULD incorporate useful search terms related to these outcomes as they represent concrete outcomes of interest, not generic evaluation terms.
+For example adding things like "(effect OR impact OR outcome OR evaluation OR association)" is bad. However, if specific outcome interests are provided (e.g., "health outcomes", "educational attainment"), you SHOULD incorporate useful search terms related to these outcomes as they represent concrete outcomes of interest, not generic evaluation terms.
 
 When geography is provided, add geography constraints using multiple name variants and demonyms to maximize recall (e.g., for "UK": "United Kingdom" OR "UK" OR "England" OR "Scotland" OR "Wales" OR "Northern Ireland" OR English OR Scottish OR Welsh). Do the same pattern for other specified countries/regions (e.g., "USA" | "United States" | "United States of America" | "US" | American).
 
