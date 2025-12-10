@@ -428,6 +428,11 @@ class ReferencesService:
             if enable_sampling_stopping is not None
             else settings.SAMPLING_STOP_ENABLED
         )
+        sampling_page_size = (
+            sampling_page_size
+            if sampling_page_size is not None
+            else settings.SAMPLING_PAGE_SIZE
+        )
         # Derive sampling pages:
         # - If caller passes an explicit list, use it.
         # - Otherwise, build from interval up to max samples or MAX_SEARCH_RESULTS/page_size.
@@ -456,11 +461,6 @@ class ReferencesService:
             if sampling_max_depth is not None
             else settings.SAMPLING_MAX_DEPTH
         )
-        sampling_page_size = (
-            sampling_page_size
-            if sampling_page_size is not None
-            else settings.SAMPLING_PAGE_SIZE
-        )
         sampling_metadata: List[Dict[str, Any]] = []
         relevance_cache = (
             Path(relevance_cache_path)
@@ -473,7 +473,9 @@ class ReferencesService:
             page_size: int,
             total_available: Optional[int],
         ) -> Optional[int]:
-            """Estimate total relevant docs using trapezoidal interpolation + tail extrapolation."""
+            """Estimate total relevant docs using trapezoidal interpolation + tail extrapolation.
+            Caps the final estimate at total_available when known.
+            """
             if not samples:
                 return None
             samples = sorted(samples, key=lambda x: x.get("page", 0))
@@ -496,21 +498,23 @@ class ReferencesService:
                     continue
                 r1 = max(0.0, min(1.0, samples[i].get("relevant_rate", 0.0)))
                 r2 = max(0.0, min(1.0, samples[i + 1].get("relevant_rate", 0.0)))
-                pages_range = p2 - p1
+                pages_range = min(p2, max_pages) - p1
+                if pages_range <= 0:
+                    continue
                 items = pages_range * page_size
                 avg_rate = (r1 + r2) / 2
                 relevant_est += items * avg_rate
 
             last_sample = samples[-1]
-            last_page = last_sample.get("page", 0)
+            last_page = min(last_sample.get("page", 0), max_pages)
             last_rate = max(0.0, min(1.0, last_sample.get("relevant_rate", 0.0)))
 
             if max_pages <= last_page:
-                return int(round(relevant_est))
+                return int(round(min(relevant_est, total_available or relevant_est)))
 
             # Tail extrapolation using linear fit over last up to 3 points
             tail_points = samples[-3:] if len(samples) >= 3 else samples[-2:]
-            xs = [p.get("page", 0) for p in tail_points]
+            xs = [min(p.get("page", 0), max_pages) for p in tail_points]
             ys = [max(0.0, min(1.0, p.get("relevant_rate", 0.0))) for p in tail_points]
             mean_x = sum(xs) / len(xs)
             mean_y = sum(ys) / len(ys)
@@ -529,7 +533,7 @@ class ReferencesService:
                 else (end_page - last_page) * page_size
             )
             if remaining_items <= 0:
-                return int(round(relevant_est))
+                return int(round(min(relevant_est, total_available or relevant_est)))
 
             if slope >= 0:
                 tail_rate_end = last_rate
@@ -540,6 +544,9 @@ class ReferencesService:
                 tail_items = remaining_items
                 avg_rate = max(0.0, (last_rate + rate_at_end) / 2)
                 relevant_est += tail_items * avg_rate
+
+            if total_available is not None:
+                relevant_est = min(relevant_est, total_available)
 
             return int(round(relevant_est))
 
@@ -684,7 +691,7 @@ class ReferencesService:
             )
 
             async def _sample_query(
-                query_str: str, variant: str
+                query_str: str, variant: str, total_available: Optional[int]
             ) -> Tuple[int, float, Dict[str, Any]]:
                 """Sample pages, run LLM relevance, and decide cutoff."""
 
@@ -702,6 +709,8 @@ class ReferencesService:
                     return docs
 
                 async def _get_page_slice(page_number: int) -> pd.DataFrame:
+                    if max_pages_cap and page_number > max_pages_cap:
+                        return pd.DataFrame()
                     df_page = await openalex_service.search(
                         query=query_str,
                         max_results=None,
@@ -715,16 +724,31 @@ class ReferencesService:
                         return pd.DataFrame()
                     return df_page.copy()
 
+                # Cap sampling pages to available pages if we know total_available
+                max_pages_cap = (
+                    math.ceil(total_available / sampling_page_size)
+                    if total_available
+                    else None
+                )
+                pages_to_check = [
+                    p
+                    for p in sampling_pages_cfg
+                    if not max_pages_cap or p <= max_pages_cap
+                ] or [1]
+
                 pages_checked: List[Dict[str, Any]] = []
                 last_good: Tuple[int, float] | None = None
                 last_bad: Tuple[int, float] | None = None
 
-                for page in sampling_pages_cfg:
+                for page in pages_to_check:
                     df_slice = await _get_page_slice(page)
                     if df_slice.empty:
                         pages_checked.append(
                             {"page": page, "total": 0, "relevant_rate": 0.0}
                         )
+                        # If we know total_available and exceeded it, stop sampling
+                        if max_pages_cap and page >= max_pages_cap:
+                            break
                         continue
                     docs = _build_documents(df_slice)
                     results_df = await sampling_relevance._screen_batch(
@@ -800,6 +824,8 @@ class ReferencesService:
                 cutoff_page = (
                     last_good[0] if last_good else (last_bad[0] if last_bad else 1)
                 )
+                if max_pages_cap:
+                    cutoff_page = min(cutoff_page, max_pages_cap)
                 rate_at_cutoff = (
                     last_good[1] if last_good else (last_bad[1] if last_bad else 0.0)
                 )
@@ -812,6 +838,7 @@ class ReferencesService:
                         "cutoff_page": cutoff_page,
                         "threshold": sampling_threshold,
                         "rate_at_cutoff": rate_at_cutoff,
+                        "max_pages_cap": max_pages_cap,
                     }
                 )
 
@@ -847,7 +874,7 @@ class ReferencesService:
                         logger.warning("Count fetch failed for sampling: %s", e)
                         total_available = None
                     cutoff_page, rate_at_cutoff, _ = await _sample_query(
-                        query_str, variant
+                        query_str, variant, total_available
                     )
                     if sampling_metadata:
                         sampling_metadata[-1]["total_available"] = total_available
@@ -862,6 +889,8 @@ class ReferencesService:
                 fetch_limit = limit if len(enriched_openalex_queries) == 1 else limit
                 if sampling_enabled and cutoff_page:
                     fetch_limit = min(fetch_limit, cutoff_page * sampling_page_size)
+                if total_available:
+                    fetch_limit = min(fetch_limit, total_available)
 
                 df_res = await openalex_service.search(
                     query=query_str,
@@ -878,6 +907,18 @@ class ReferencesService:
                     df_res["sampling_total_available"] = total_available
                     df_res["sampling_rate_at_cutoff"] = rate_at_cutoff
                     openalex_results.append(df_res)
+
+                if sampling_metadata:
+                    sm = sampling_metadata[-1]
+                    logger.info(
+                        "Sampling summary [%s]: total_available=%s, pages_checked=%s, "
+                        "cutoff_page=%s, est_relevant=%s",
+                        variant,
+                        total_available,
+                        [p.get("page") for p in sm.get("pages_checked", [])],
+                        sm.get("cutoff_page"),
+                        sm.get("estimated_relevant"),
+                    )
 
                 # Collect raw responses for first query only (to avoid too much data)
                 if idx == 0:

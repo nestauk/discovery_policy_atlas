@@ -108,10 +108,19 @@ class OpenAlexService:
         per_page_val = per_page or (min(200, max_results) if max_results else 200)
 
         if page:
-            # Fetch a specific page only
-            for pg in works_query.paginate(per_page=per_page_val, page=page):
-                results.extend(pg)
-                break
+            target_start = (page - 1) * per_page_val
+            target_end = target_start + per_page_val
+            fetched = 0
+            # Pull up to the page we need, but only keep rows in that page window
+            for pg in works_query.paginate(per_page=per_page_val, n_max=target_end):
+                for row in pg:
+                    if fetched >= target_end:
+                        break
+                    if fetched >= target_start:
+                        results.append(row)
+                    fetched += 1
+                if fetched >= target_end:
+                    break
         else:
             if max_results is None:
                 # Fetch all results
