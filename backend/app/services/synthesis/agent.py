@@ -736,9 +736,11 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         if total == 0:
             consensus = "insufficient"
         elif pos > neg * 2:
-            consensus = "positive"
+            consensus = "increase"
         elif neg > pos * 2:
-            consensus = "negative"
+            consensus = "decrease"
+        elif null > pos and null > neg:
+            consensus = "no change"
         else:
             consensus = "mixed"
 
@@ -797,9 +799,11 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         if total == 0:
             consensus = "insufficient"
         elif pos > neg * 2:
-            consensus = "positive"
+            consensus = "increase"
         elif neg > pos * 2:
-            consensus = "negative"
+            consensus = "decrease"
+        elif null > pos and null > neg:
+            consensus = "no change"
         else:
             consensus = "mixed"
 
@@ -1279,7 +1283,21 @@ async def _generate_interventions_table(
     # Use outcome themes from state (computed earlier in the workflow)
     aggregated_outcomes: List[OutcomeTheme] = state.get("aggregated_outcomes") or []
 
-    for intervention in interventions[:10]:
+    # Enforce ordering by evidence strength (frequency)
+    sorted_interventions = sorted(
+        interventions,
+        key=lambda i: i.frequency if hasattr(i, "frequency") else 0,
+        reverse=True,
+    )
+
+    rows_added = 0
+    for intervention in sorted_interventions:
+        if rows_added >= 5:
+            break
+
+        # Require at least 3 supporting documents
+        if len(intervention.supporting_doc_ids or []) < 3:
+            continue
         chunks = theme_evidence.get(intervention.intervention_name, [])
         if not chunks:
             continue
@@ -1288,7 +1306,11 @@ async def _generate_interventions_table(
             chunk_to_citation.get(c.chunk_id, 0)
             for c in chunks
             if c.chunk_id in chunk_to_citation
-        ][:5]
+        ][:8]
+
+        # Require at least one citation
+        if not cit_nums:
+            continue
         intervention_doc_ids = set(intervention.supporting_doc_ids)
 
         # Build structured context with labels
@@ -1358,11 +1380,11 @@ async def _generate_interventions_table(
 
                 # Determine direction from filtered counts
                 if pos > neg * 2 and pos > nul:
-                    direction = "positive"
+                    direction = "increase"
                 elif neg > pos * 2 and neg > nul:
-                    direction = "negative"
+                    direction = "decrease"
                 elif nul > pos and nul > neg:
-                    direction = "null"
+                    direction = "no change"
                 else:
                     direction = "mixed"
 
@@ -1390,6 +1412,7 @@ async def _generate_interventions_table(
                 outcome_effects=outcome_effects[:5],  # Top 5 outcome themes
             )
         )
+        rows_added += 1
 
     return rows
 

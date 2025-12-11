@@ -76,7 +76,7 @@ export interface SearchParams {
     impact_summary: string
     supporting_doc_ids: string[]
     frequency?: number
-    effect_consensus?: 'positive' | 'negative' | 'mixed' | 'null' | 'insufficient'
+    effect_consensus?: 'increase' | 'decrease' | 'mixed' | 'no change' | 'insufficient'
     positive_count?: number
     negative_count?: number
     null_count?: number
@@ -112,7 +112,7 @@ export interface SearchParams {
   export interface OutcomeTheme {
     outcome_name: string
     outcome_description: string
-    effect_consensus: 'positive' | 'negative' | 'mixed' | 'null' | 'insufficient'
+    effect_consensus: 'increase' | 'decrease' | 'mixed' | 'no change' | 'insufficient'
     positive_count: number
     negative_count: number
     null_count: number
@@ -129,7 +129,7 @@ export interface SearchParams {
 
   export interface OutcomeEffect {
     outcome_theme: string
-    direction: 'positive' | 'negative' | 'null' | 'mixed' | 'insufficient'
+    direction: 'increase' | 'decrease' | 'no change' | 'mixed' | 'insufficient'
     positive_count: number
     negative_count: number
     null_count: number

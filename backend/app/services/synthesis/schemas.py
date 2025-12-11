@@ -78,7 +78,7 @@ class OutcomeEffect(BaseModel):
 
     outcome_theme: str = Field(..., description="Name of the outcome theme")
     direction: str = Field(
-        ..., description="Dominant effect: positive, negative, null, mixed"
+        ..., description="Dominant effect: increase, decrease, no change, mixed"
     )
     positive_count: int = Field(0, description="Count of positive effects")
     negative_count: int = Field(0, description="Count of negative effects")
@@ -225,7 +225,7 @@ class OutcomeTheme(BaseModel):
     outcome_name: str = Field(..., description="Canonical outcome name")
     outcome_description: str = Field("")
     effect_consensus: Literal[
-        "positive", "negative", "mixed", "null", "insufficient"
+        "increase", "decrease", "mixed", "no change", "insufficient"
     ] = Field("insufficient")
     positive_count: int = Field(0)
     negative_count: int = Field(0)
@@ -255,7 +255,7 @@ class PolicyIntervention(BaseModel):
     frequency: int = Field(..., description="Number of documents")
     supporting_doc_ids: List[str] = Field(..., description="Supporting document IDs")
     effect_consensus: Optional[
-        Literal["positive", "negative", "mixed", "null", "insufficient"]
+        Literal["increase", "decrease", "mixed", "no change", "insufficient"]
     ] = Field(None)
     positive_count: int = Field(0)
     negative_count: int = Field(0)
