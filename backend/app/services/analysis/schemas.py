@@ -64,6 +64,39 @@ class SearchContext(BaseModel):
     additional_questions: List[str] = Field(default_factory=list)
 
 
+# Search wizard API request/response schemas
+class PopulationOptionsRequest(BaseModel):
+    research_question: str
+    max_options: int = 3
+
+
+class PopulationOptionsResponse(BaseModel):
+    research_question: str
+    population_options: List[str]  # Ordered from broad to narrow
+
+
+class OutcomeOptionsRequest(BaseModel):
+    research_question: str
+    max_options: int = 3
+
+
+class OutcomeOptionsResponse(BaseModel):
+    research_question: str
+    outcome_options: List[str]  # Ordered from broad to narrow
+
+
+class AdditionalQuestionsRequest(BaseModel):
+    research_question: str
+    population_selected: List[str] = []
+    outcome_selected: List[str] = []
+    max_questions: int = 2
+
+
+class AdditionalQuestionsResponse(BaseModel):
+    research_question: str
+    additional_questions: List[str]
+
+
 class RunConfig(BaseModel):
     query: str
     sources: List[str] = Field(default_factory=lambda: ["openalex", "overton"])

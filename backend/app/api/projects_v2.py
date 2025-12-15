@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 import logging
 from datetime import datetime
 import uuid
@@ -23,46 +22,18 @@ from app.services.synthesis.service import SynthesisService
 from app.services.synthesis.logbook import read_cached_summary
 from app.utils.geography import COUNTRY_NAME_TO_CODE, COUNTRY_CODE_TO_NAME
 from app.services.download import download_service
+from app.services.analysis.schemas import (
+    PopulationOptionsRequest,
+    PopulationOptionsResponse,
+    OutcomeOptionsRequest,
+    OutcomeOptionsResponse,
+    AdditionalQuestionsRequest,
+    AdditionalQuestionsResponse,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
-
-
-# Search wizard schemas
-class PopulationOptionsRequest(BaseModel):
-    research_question: str
-    max_options: int = 3
-
-
-class PopulationOptionsResponse(BaseModel):
-    research_question: str
-    population_options: List[str]  # Ordered from broad to narrow
-
-
-class OutcomeOptionsRequest(BaseModel):
-    research_question: str
-    max_options: int = 3
-
-
-class OutcomeOptionsResponse(BaseModel):
-    research_question: str
-    outcome_options: List[str]  # Ordered from broad to narrow
-
-
-class AdditionalQuestionsRequest(BaseModel):
-    research_question: str
-    population_selected: List[str] = []
-    outcome_selected: List[str] = []
-    max_questions: int = 2
-
-
-class AdditionalQuestionsResponse(BaseModel):
-    research_question: str
-    additional_questions: List[str]
-
-
-# END-I - INFO REGION END
 
 
 # END-I - INFO REGION END

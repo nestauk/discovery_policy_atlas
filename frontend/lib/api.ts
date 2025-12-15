@@ -321,7 +321,6 @@ export function useAPI() {
     getThematicGroups: getThematicGroupsInHook,
     getThematicGroupItems: getThematicGroupItemsInHook,
     // Agent features
-    generateSubQuestions,
     getAnalysisFindings
   };
 }
