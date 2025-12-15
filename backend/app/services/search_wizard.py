@@ -65,7 +65,7 @@ class SearchWizardService:
 
             # Create LLM instance
             llm = ChatOpenAI(
-                model=settings.LLM_MODEL,
+                model=settings.SEARCH_WIZARD_MODEL,
                 temperature=0.3,
                 openai_api_key=settings.OPENAI_API_KEY,
                 max_tokens=300,
@@ -151,7 +151,7 @@ class SearchWizardService:
 
             # Create LLM instance
             llm = ChatOpenAI(
-                model=settings.LLM_MODEL,
+                model=settings.SEARCH_WIZARD_MODEL,
                 temperature=0.3,
                 openai_api_key=settings.OPENAI_API_KEY,
                 max_tokens=300,
@@ -239,7 +239,7 @@ class SearchWizardService:
 
             # Create LLM instance
             llm = ChatOpenAI(
-                model=settings.LLM_MODEL,
+                model=settings.SEARCH_WIZARD_MODEL,
                 temperature=0.3,
                 openai_api_key=settings.OPENAI_API_KEY,
                 max_tokens=300,

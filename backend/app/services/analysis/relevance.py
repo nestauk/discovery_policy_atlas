@@ -17,6 +17,7 @@ from app.utils.llm import batch_check
 import logging
 from pathlib import Path
 from .prompts import RELEVANCE_SYSTEM_PROMPT
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +300,7 @@ class RelevanceService:
     ):
         """Run the batch processor synchronously."""
         processor = batch_check.LLMProcessor(
+            model_name=settings.SCREENING_MODEL,
             output_path=output_path,
             system_message=self.system_message,
             session_name=None,

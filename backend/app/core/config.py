@@ -110,7 +110,7 @@ class Settings(BaseSettings):
 
     # LLM Model Settings
     LLM_PROVIDER: str = "OpenAI"
-    LLM_MODEL: str = "gpt-4.1-mini"
+    LLM_MODEL: str = "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4000
 
@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     BOOLEAN_QUERY_TEMPERATURE: float = 1.0  # Temperature for query generation
     BOOLEAN_QUERY_N_RUNS: int = 5  # Number of queries to generate in multi mode
     BOOLEAN_QUERY_MODEL: str = "gpt-4.1"  # Model for query generation
+
+    # Search Wizard Settings
+    SEARCH_WIZARD_MODEL: str = (
+        "gpt-4.1-mini"
+    )  # Model for search wizard (population/outcome options, additional questions)
+
+    # Screening/Relevance Settings
+    SCREENING_MODEL: str = "gpt-4.1-mini"  # Model for screening and relevance checking
     OPENALEX_ENABLE_RCT_SYSREV_FANOUT: (
         bool
     ) = True  # Fan out RCT/systematic review variants
