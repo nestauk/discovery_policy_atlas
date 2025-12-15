@@ -18,7 +18,7 @@ from app.services.synthesis.schemas import (
     ThematicGroup,
     EvidenceItem,
 )
-from app.services.synthesis.service import SynthesisService
+from app.services.synthesis.findings import get_findings
 from app.services.synthesis.logbook import read_cached_summary
 from app.utils.geography import COUNTRY_NAME_TO_CODE, COUNTRY_CODE_TO_NAME
 from app.services.download import download_service
@@ -1359,10 +1359,9 @@ async def get_detailed_findings(
     ),
     issue_theme: Optional[str] = Query(None, description="Filter by issue label/theme"),
 ):
-    """Get flattened findings via service layer."""
+    """Get flattened findings for an intervention or issue."""
     try:
-        service = SynthesisService()
-        return await service.get_findings(
+        return await get_findings(
             project_id,
             intervention_name=intervention_name,
             issue_theme=issue_theme,
