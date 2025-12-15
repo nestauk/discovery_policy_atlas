@@ -217,16 +217,31 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       width: '8%',
       sorter: (a, b) => (a.confidence || 0) - (b.confidence || 0),
       defaultSortOrder: 'descend',
-      render: (text, record) => (
-        <div className="flex items-center gap-1">
-          <span>{record.confidence ? (record.confidence * 100).toFixed(1) : 'N/A'}</span>
-          {record.is_relevant ? (
-            <Check className="h-3 w-3 text-green-600" />
-          ) : (
-            <X className="h-3 w-3 text-red-500" />
-          )}
-        </div>
-      ),
+      render: (text, record) => {
+        const relevanceContent = (
+          <div className="flex items-center gap-1">
+            <span>{record.confidence ? (record.confidence * 100).toFixed(1) : 'N/A'}</span>
+            {record.is_relevant ? (
+              <Check className="h-3 w-3 text-green-600" />
+            ) : (
+              <X className="h-3 w-3 text-red-500" />
+            )}
+          </div>
+        )
+
+        // Show tooltip with relevance_reason if available
+        if (record.relevance_reason) {
+          return (
+            <Tooltip content={record.relevance_reason}>
+              <div className="cursor-help">
+                {relevanceContent}
+              </div>
+            </Tooltip>
+          )
+        }
+
+        return relevanceContent
+      },
     },
   ];
 
