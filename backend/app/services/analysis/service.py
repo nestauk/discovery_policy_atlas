@@ -58,8 +58,14 @@ class AnalysisService:
         monitor.start()
         monitor.log_snapshot("Pipeline start")
 
-        # Create unique subfolder for this run
-        run_export_dir = self.export_dir / f"run_{run_id}"
+        # Create unique subfolder for this run with readable date/time format
+        # Extract uuid_part from run_id to ensure they match
+        uuid_part_from_run_id = run_id[-4:]  # Last 4 chars are the uuid_part
+        now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H-%M-%S")
+        run_folder_name = f"run_{date_str}_{time_str}_{uuid_part_from_run_id}"
+        run_export_dir = self.export_dir / run_folder_name
         run_export_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Created run directory: %s", run_export_dir)
 
