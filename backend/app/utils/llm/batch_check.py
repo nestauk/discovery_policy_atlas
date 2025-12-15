@@ -149,7 +149,7 @@ class LLMProcessor:
                 "run_name": self.run_name,
             },
         )
-        response = response.dict()
+        response = response.model_dump()
         response["id"] = _id
         response["timestamp"] = start_time
         response["model"] = self.model_name

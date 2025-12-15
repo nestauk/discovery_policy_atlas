@@ -4,14 +4,14 @@ import asyncio
 import logging
 from datetime import date
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import pandas as pd
 
 from app.core.config import settings
 from app.services.analysis.prompts import (
     BOOLEAN_QUERY_SYSTEM_PROMPT,
-    BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT,
+    SEMANTIC_QUERY_SYSTEM_PROMPT,
 )
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -27,6 +27,15 @@ from .utils_doc_ids import stable_doc_id
 
 
 logger = logging.getLogger(__name__)
+
+SYSTEMATIC_REVIEW_CLAUSE = (
+    '("systematic review" OR "meta-analysis" OR "narrative synthesis")'
+)
+RCT_CLAUSE = (
+    '("randomized controlled trial" OR "randomised controlled trial" '
+    'OR "randomized control trial" OR "randomised control trial")'
+)
+VARIANT_PRIORITY = {"systematic_review": 0, "rct": 1, "base": 2}
 
 
 class ReferencesService:
@@ -44,49 +53,17 @@ class ReferencesService:
     ) -> str:
         """Generate a boolean query deterministically (temperature 0)."""
         logger.info("🔍 Generating boolean query for: '%s'", natural_query)
-
-        try:
-            model = settings.BOOLEAN_QUERY_MODEL
-
-            # Create LLM instance
-            llm = ChatOpenAI(
-                model=model,
-                temperature=settings.BOOLEAN_QUERY_TEMPERATURE,
-                openai_api_key=settings.OPENAI_API_KEY,
-                max_tokens=1000,
-            )
-
-            messages = [
-                SystemMessage(content=BOOLEAN_QUERY_SYSTEM_PROMPT),
-                HumanMessage(content=natural_query),
-            ]
-
-            # Build config with callbacks and metadata
-            config = {}
-            if langfuse_handler:
-                config["callbacks"] = [langfuse_handler]
-                config["metadata"] = build_langfuse_metadata(
-                    tags=[
-                        "component:references",
-                        "component:references.boolean_query",
-                        "mode:single",
-                    ],
-                    session_id=session_id,
-                    user_id=user_id,
-                    project_id=project_id,
-                )
-                config["run_name"] = "references.boolean_query"
-
-            resp = await llm.ainvoke(messages, config=config)
-            boolean_query = (resp.content or natural_query).strip()
-
-            logger.info("✅ Generated boolean query: '%s'", boolean_query)
-            return boolean_query
-
-        except Exception as e:
-            logger.warning("❌ Boolean query generation failed: %s", e)
-            logger.info("🔄 Falling back to original query: '%s'", natural_query)
-            return natural_query
+        return await self._generate_boolean_query(
+            research_question=natural_query,
+            population_selected=[],
+            outcome_selected=[],
+            screening_factors=[],
+            geography=[],
+            langfuse_handler=langfuse_handler,
+            session_id=session_id,
+            project_id=project_id,
+            user_id=user_id,
+        )
 
     async def generate_boolean_queries_multi(
         self,
@@ -125,32 +102,156 @@ class ReferencesService:
             natural_query,
         )
 
-        model = model or settings.BOOLEAN_QUERY_MODEL
+        return await self._generate_boolean_queries_multi(
+            research_question=natural_query,
+            population_selected=[],
+            outcome_selected=[],
+            screening_factors=[],
+            geography=[],
+            n_runs=n_runs,
+            temperature=temperature,
+            langfuse_handler=langfuse_handler,
+            session_id=session_id,
+            project_id=project_id,
+            user_id=user_id,
+        )
+
+    def _build_context_message(
+        self,
+        research_question: str,
+        population_selected: List[str],
+        outcome_selected: List[str],
+        screening_factors: List[str],
+        geography: List[str],
+    ) -> str:
+        """Build context message from search context components."""
+        context_parts = [f"User query: {research_question}"]
+        if population_selected:
+            context_parts.append(
+                f"Population interests: {', '.join(population_selected)}"
+            )
+        if outcome_selected:
+            context_parts.append(f"Outcome interests: {', '.join(outcome_selected)}")
+        if geography:
+            context_parts.append(f"Geography: {', '.join(geography)}")
+        # skipping screening factors for now
+        # if screening_factors:
+        # context_parts.append(f"Screening factors: {', '.join(screening_factors)}")
+        return "\n".join(context_parts)
+
+    async def _generate_boolean_query(
+        self,
+        research_question: str,
+        population_selected: List[str],
+        outcome_selected: List[str],
+        screening_factors: List[str],
+        geography: List[str],
+        langfuse_handler=None,
+        session_id: str = None,
+        project_id: str = None,
+        user_id: str = None,
+    ) -> str:
+        """Generate a boolean query from search context."""
+        logger.info("🔍 Generating boolean query from search context")
+
+        try:
+            llm = ChatOpenAI(
+                model=settings.BOOLEAN_QUERY_MODEL,
+                temperature=settings.BOOLEAN_QUERY_TEMPERATURE,
+                openai_api_key=settings.OPENAI_API_KEY,
+                max_tokens=1000,
+            )
+
+            messages = [
+                SystemMessage(content=BOOLEAN_QUERY_SYSTEM_PROMPT),
+                HumanMessage(
+                    content=self._build_context_message(
+                        research_question,
+                        population_selected,
+                        outcome_selected,
+                        screening_factors,
+                        geography,
+                    )
+                ),
+            ]
+
+            config = {}
+            if langfuse_handler:
+                config["callbacks"] = [langfuse_handler]
+                config["metadata"] = build_langfuse_metadata(
+                    tags=[
+                        "component:references",
+                        "component:references.boolean_query_from_context",
+                    ],
+                    session_id=session_id,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                config["run_name"] = "references.boolean_query_from_context"
+
+            resp = await llm.ainvoke(messages, config=config)
+            boolean_query = (resp.content or research_question).strip()
+
+            logger.info("✅ Generated boolean query from context: '%s'", boolean_query)
+            return boolean_query
+
+        except Exception as e:
+            logger.warning("❌ Boolean query generation from context failed: %s", e)
+            logger.info("🔄 Falling back to original query: '%s'", research_question)
+            return research_question
+
+    async def _generate_boolean_queries_multi(
+        self,
+        research_question: str,
+        population_selected: List[str],
+        outcome_selected: List[str],
+        screening_factors: List[str],
+        geography: List[str],
+        n_runs: int = 5,
+        temperature: float = 1.0,
+        langfuse_handler=None,
+        session_id: str = None,
+        project_id: str = None,
+        user_id: str = None,
+    ) -> List[str]:
+        """Generate multiple boolean queries from search context with temperature for diversity."""
+        logger.info(
+            "🔍 Generating %d boolean queries from context (temp=%.1f)",
+            n_runs,
+            temperature,
+        )
+
         queries = []
 
         try:
-            # Create LLM instance
             llm = ChatOpenAI(
-                model=model,
+                model=settings.BOOLEAN_QUERY_MODEL,
                 temperature=temperature,
                 openai_api_key=settings.OPENAI_API_KEY,
                 max_tokens=1000,
             )
 
             messages = [
-                SystemMessage(content=BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT),
-                HumanMessage(content=natural_query),
+                SystemMessage(content=BOOLEAN_QUERY_SYSTEM_PROMPT),
+                HumanMessage(
+                    content=self._build_context_message(
+                        research_question,
+                        population_selected,
+                        outcome_selected,
+                        screening_factors,
+                        geography,
+                    )
+                ),
             ]
 
             for i in range(n_runs):
-                # Build config with callbacks and metadata
                 config = {}
                 if langfuse_handler:
                     config["callbacks"] = [langfuse_handler]
                     config["metadata"] = build_langfuse_metadata(
                         tags=[
                             "component:references",
-                            "component:references.boolean_query",
+                            "component:references.boolean_query_from_context",
                             "mode:multi",
                             f"iteration:{i+1}",
                         ],
@@ -159,7 +260,7 @@ class ReferencesService:
                         project_id=project_id,
                         extra={"iteration": i + 1, "total_runs": n_runs},
                     )
-                    config["run_name"] = "references.boolean_query"
+                    config["run_name"] = "references.boolean_query_from_context"
 
                 resp = await llm.ainvoke(messages, config=config)
                 boolean_query = (resp.content or "").strip()
@@ -171,7 +272,7 @@ class ReferencesService:
             # Remove exact duplicates while preserving order
             unique_queries = list(dict.fromkeys(queries))
             logger.info(
-                "✅ Generated %d queries (%d unique) for multi-query search",
+                "✅ Generated %d queries (%d unique) from context for multi-query search",
                 len(queries),
                 len(unique_queries),
             )
@@ -179,9 +280,83 @@ class ReferencesService:
             return unique_queries
 
         except Exception as e:
-            logger.warning("❌ Multi-query generation failed: %s", e)
+            logger.warning("❌ Multi-query generation from context failed: %s", e)
             logger.info("🔄 Falling back to single query with original text")
-            return [natural_query]
+            return [research_question]
+
+    async def _generate_semantic_query(
+        self,
+        research_question: str,
+        population_selected: List[str],
+        outcome_selected: List[str],
+        screening_factors: List[str],
+        geography: List[str],
+        langfuse_handler=None,
+        session_id: str = None,
+        project_id: str = None,
+        user_id: str = None,
+    ) -> str:
+        """Generate a semantic query from search context."""
+        logger.info("🔍 Generating semantic query from search context")
+
+        try:
+            model = settings.LLM_MODEL
+
+            # Build context message
+            context_parts = [f"Research question: {research_question}"]
+            if population_selected:
+                context_parts.append(
+                    f"Population interests: {', '.join(population_selected)}"
+                )
+            if outcome_selected:
+                context_parts.append(
+                    f"Outcome interests: {', '.join(outcome_selected)}"
+                )
+            if screening_factors:
+                context_parts.append(
+                    f"Screening factors: {', '.join(screening_factors)}"
+                )
+            if geography:
+                context_parts.append(f"Geography: {', '.join(geography)}")
+
+            llm = ChatOpenAI(
+                model=model,
+                temperature=0.3,
+                openai_api_key=settings.OPENAI_API_KEY,
+                max_tokens=500,
+            )
+
+            messages = [
+                SystemMessage(content=SEMANTIC_QUERY_SYSTEM_PROMPT),
+                HumanMessage(content="\n".join(context_parts)),
+            ]
+
+            config = {}
+            if langfuse_handler:
+                config["callbacks"] = [langfuse_handler]
+                config["metadata"] = build_langfuse_metadata(
+                    tags=[
+                        "component:references",
+                        "component:references.semantic_query_from_context",
+                    ],
+                    session_id=session_id,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                config["run_name"] = "references.semantic_query_from_context"
+
+            resp = await llm.ainvoke(messages, config=config)
+            semantic_query = (resp.content or research_question).strip()
+
+            logger.info(
+                "✅ Generated semantic query from context: '%s'", semantic_query
+            )
+            return semantic_query
+
+        except Exception as e:
+            logger.warning("❌ Semantic query generation from context failed: %s", e)
+            logger.info("🔄 Falling back to original query: '%s'", research_question)
+            return research_question
 
     async def build_references(
         self,
@@ -198,7 +373,9 @@ class ReferencesService:
         query_temperature: Optional[float] = None,
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
-    ) -> tuple[Path, str]:
+        search_context: Optional[Dict] = None,
+        enable_rct_sysrev_fanout: Optional[bool] = None,
+    ) -> tuple[Path, List[str], Optional[str]]:
         """Fetch and normalize references, write references.csv, and return its path.
 
         New multi-query mode generates multiple diverse queries and combines results
@@ -218,6 +395,7 @@ class ReferencesService:
             query_temperature: Temperature for query generation diversity
             project_id: Project ID for langfuse tracking
             user_id: User ID for langfuse tracking
+            enable_rct_sysrev_fanout: Override to enable/disable RCT/systematic review fanout
         """
 
         # Initialize Langfuse handler for tracking
@@ -232,6 +410,7 @@ class ReferencesService:
         temperature = query_temperature or settings.BOOLEAN_QUERY_TEMPERATURE
 
         tasks = []
+        task_meta = []  # Track task types and variants for gathered results
         openalex_service = OpenAlexService() if "openalex" in sources else None
         overton_service = OvertonService() if "overton" in sources else None
 
@@ -239,32 +418,50 @@ class ReferencesService:
         df_val = date.fromisoformat(date_from) if date_from else None
         dt_val = date.fromisoformat(date_to) if date_to else None
 
-        # Determine OpenAlex query string(s) and track the final boolean query
+        # Determine OpenAlex query string(s) and track the boolean queries
         openalex_queries = []  # List of queries to execute
-        final_boolean_query = None
+        boolean_queries_list = []  # List of all boolean queries (for storage)
+        final_semantic_query = None
         logger.info("🔎 Building references with mode: '%s'", mode)
         logger.debug("Original query: '%s'", query)
 
-        if mode == "boolean":
-            # Boolean mode: use provided query directly
-            openalex_queries = [boolean_query or query]
-            final_boolean_query = openalex_queries[0]
-            logger.info("📋 Using provided boolean query: '%s'", final_boolean_query)
+        context = (
+            search_context.model_dump()
+            if hasattr(search_context, "model_dump")
+            else (search_context or {})
+        )
 
-        elif mode == "semantic":
-            logger.info(
-                "🧠 Semantic mode: generating boolean query from natural language"
-            )
+        research_question = context.get("research_question", query)
+        population_selected = context.get("population", [])
+        outcome_selected = context.get("outcome", [])
+        screening_factors = context.get("screening_factors", [])
 
-            if use_multi_query:
-                # Multi-query mode: generate multiple diverse queries
+        geography_selected = context.get("geography", [])
+
+        if context:
+            logger.info("📋 Using search context for query generation")
+        else:
+            logger.info("📋 No search context provided; using query text only")
+
+        # Generate boolean queries for OpenAlex
+        openalex_query_variants = []  # {"query": str, "variant": str}
+        if "openalex" in sources:
+            if mode == "boolean" and boolean_query:
+                openalex_queries = [boolean_query]
+                boolean_queries_list = openalex_queries
+                logger.info("📋 Using provided boolean query: '%s'", boolean_query)
+            elif use_multi_query:
                 logger.info(
-                    "🔄 Multi-query mode: generating %d queries (temp=%.1f)",
+                    "🔄 Multi-query mode: generating %d queries from context (temp=%.1f)",
                     n_runs,
                     temperature,
                 )
-                openalex_queries = await self.generate_boolean_queries_multi(
-                    natural_query=query,
+                openalex_queries = await self._generate_boolean_queries_multi(
+                    research_question=research_question,
+                    population_selected=population_selected,
+                    outcome_selected=outcome_selected,
+                    screening_factors=screening_factors,
+                    geography=geography_selected,
                     n_runs=n_runs,
                     temperature=temperature,
                     langfuse_handler=langfuse_handler,
@@ -272,43 +469,91 @@ class ReferencesService:
                     project_id=project_id,
                     user_id=user_id,
                 )
-                # Store all queries for debugging
-                final_boolean_query = " | ".join(openalex_queries)
-                logger.info("✅ Generated %d unique queries", len(openalex_queries))
-            else:
-                # Single-query mode: generate one deterministic query
+                boolean_queries_list = openalex_queries
                 logger.info(
-                    "🎯 Single-query mode: generating deterministic query (temp=0)"
+                    "✅ Generated %d unique queries from context",
+                    len(openalex_queries),
                 )
-                single_query = await self.generate_boolean_query(
-                    natural_query=query,
+            else:
+                logger.info(
+                    "🎯 Single-query mode: generating deterministic query from context (temp=0)"
+                )
+                single_query = await self._generate_boolean_query(
+                    research_question=research_question,
+                    population_selected=population_selected,
+                    outcome_selected=outcome_selected,
+                    screening_factors=screening_factors,
+                    geography=geography_selected,
                     langfuse_handler=langfuse_handler,
                     session_id=session_id,
                     project_id=project_id,
                     user_id=user_id,
                 )
                 openalex_queries = [single_query]
-                final_boolean_query = single_query
+                boolean_queries_list = [single_query]
+
+            # Fan out each boolean query with systematic review and RCT variants
+            fanout_enabled = (
+                enable_rct_sysrev_fanout
+                if enable_rct_sysrev_fanout is not None
+                else settings.OPENALEX_ENABLE_RCT_SYSREV_FANOUT
+            )
+
+            seen_queries = set()
+
+            def _add_variant(q: str, variant: str):
+                if q not in seen_queries:
+                    openalex_query_variants.append({"query": q, "variant": variant})
+                    seen_queries.add(q)
+
+            for base_query in openalex_queries:
+                _add_variant(base_query, "base")
+                if fanout_enabled:
+                    _add_variant(
+                        f"({base_query}) AND {SYSTEMATIC_REVIEW_CLAUSE}",
+                        "systematic_review",
+                    )
+                    _add_variant(f"({base_query}) AND {RCT_CLAUSE}", "rct")
+
+            boolean_queries_list = [item["query"] for item in openalex_query_variants]
+
+        # Generate semantic query for Overton from context (skip if boolean-only)
+        if "overton" in sources and mode != "boolean":
+            final_semantic_query = await self._generate_semantic_query(
+                research_question=research_question,
+                population_selected=population_selected,
+                outcome_selected=outcome_selected,
+                screening_factors=screening_factors,
+                geography=geography_selected,
+                langfuse_handler=langfuse_handler,
+                session_id=session_id,
+                project_id=project_id,
+                user_id=user_id,
+            )
 
         # Execute OpenAlex queries
         if openalex_service:
-            for idx, query_str in enumerate(openalex_queries):
+            for idx, query_info in enumerate(openalex_query_variants):
+                query_str = query_info["query"]
+                query_variant = query_info["variant"]
                 logger.info(
-                    "🔍 Executing OpenAlex query %d/%d: '%s'",
+                    "🔍 Executing OpenAlex query %d/%d (%s): '%s'",
                     idx + 1,
-                    len(openalex_queries),
+                    len(openalex_query_variants),
+                    query_variant,
                     query_str[:100] + ("..." if len(query_str) > 100 else ""),
                 )
 
                 tasks.append(
                     openalex_service.search(
                         query=query_str,
-                        max_results=limit if len(openalex_queries) == 1 else None,
+                        max_results=limit,
                         min_citations=settings.DEFAULT_MIN_CITATIONS,
                         date_from=df_val,
                         date_to=dt_val,
                     )
                 )
+                task_meta.append(("openalex_search", query_variant))
 
                 # Also collect raw responses for first query only (to avoid too much data)
                 if idx == 0:
@@ -321,6 +566,7 @@ class ReferencesService:
                             date_to=dt_val,
                         )
                     )
+                    task_meta.append(("openalex_raw", query_variant))
 
         if overton_service:
             # Determine source_country parameter from geography_filter
@@ -330,17 +576,22 @@ class ReferencesService:
                 else None
             )
 
+            overton_semantic_query = final_semantic_query or research_question
+            overton_boolean_query = boolean_query or (
+                openalex_queries[0] if openalex_queries else research_question
+            )
+
             # Overton supports semantic search directly; when boolean mode is requested,
             # pass the boolean query via query= and disable semantic.
             if mode == "semantic":
                 logger.info(
-                    "🔍 Overton semantic search with original query: '%s', geography: %s",
-                    query,
+                    "🔍 Overton semantic search with query: '%s', geography: %s",
+                    overton_semantic_query,
                     source_country,
                 )
                 tasks.append(
                     overton_service.search(
-                        query=query,
+                        query=overton_semantic_query,
                         max_results=limit,
                         semantic_search=True,
                         source_country=source_country,
@@ -348,8 +599,8 @@ class ReferencesService:
                         published_before=dt_val,
                     )
                 )
+                task_meta.append(("overton_search", None))
             else:
-                overton_boolean_query = boolean_query or query
                 logger.info(
                     "📋 Overton boolean search with query: '%s', geography: %s",
                     overton_boolean_query,
@@ -365,12 +616,13 @@ class ReferencesService:
                         published_before=dt_val,
                     )
                 )
+                task_meta.append(("overton_search", None))
             # Add raw Overton first-page JSON for debugging
             # Use the same query parameters as the search() call above
             tasks.append(
                 overton_service.fetch_raw(
                     **(
-                        {"squery": query}
+                        {"squery": overton_semantic_query}
                         if mode == "semantic"
                         else {"query": overton_boolean_query}
                     ),
@@ -381,21 +633,34 @@ class ReferencesService:
                     published_before=dt_val,
                 )
             )
+            task_meta.append(("overton_raw", None))
 
         results: List[pd.DataFrame] = []
         raw_openalex: list = []
         raw_overton: dict | list | None = None
         if tasks:
             gathered = await asyncio.gather(*tasks, return_exceptions=True)
-            for g in gathered:
+            for meta, g in zip(task_meta, gathered):
+                task_kind, task_variant = meta
+
                 if isinstance(g, Exception):
-                    logger.error("Reference fetch error: %s", g)
+                    logger.error("Reference fetch error (%s): %s", task_kind, g)
+                    continue
+
+                if task_kind == "openalex_search" and isinstance(g, pd.DataFrame):
+                    df_tagged = g.copy()
+                    df_tagged["query_variant"] = task_variant
+                    results.append(df_tagged)
+                elif task_kind == "openalex_raw" and isinstance(g, list):
+                    raw_openalex.append({"variant": task_variant, "data": g})
+                elif task_kind == "overton_search" and isinstance(g, pd.DataFrame):
+                    results.append(g)
+                elif task_kind == "overton_raw" and (
+                    isinstance(g, dict) or isinstance(g, list)
+                ):
+                    raw_overton = g
                 elif isinstance(g, pd.DataFrame):
                     results.append(g)
-                elif isinstance(g, list) and openalex_service:
-                    raw_openalex = g
-                elif isinstance(g, dict) or isinstance(g, list):
-                    raw_overton = g
 
         if not results:
             df = pd.DataFrame(
@@ -416,6 +681,8 @@ class ReferencesService:
                     "relevance_score",
                     "source_country",
                     "author_institution_countries",
+                    "query_variant",
+                    "variant_priority",
                 ]
             )
         else:
@@ -432,6 +699,7 @@ class ReferencesService:
                     pdf_col = "pdf_url"
                     type_value = df.get("source_type", pd.Series([None] * len(df)))
                     authors_col = "authors"
+                    variant_col = pd.Series([None] * len(df))
                 else:
                     source = "openalex"
                     source_id_col = "id"
@@ -443,6 +711,7 @@ class ReferencesService:
                     pdf_col = "pdf_url"
                     type_value = df.get("work_type", pd.Series([None] * len(df)))
                     authors_col = "authors"
+                    variant_col = df.get("query_variant", pd.Series([None] * len(df)))
 
                 normalized = pd.DataFrame(
                     {
@@ -468,6 +737,10 @@ class ReferencesService:
                         ),
                         "relevance_score": df.get(
                             "relevance_score", pd.Series([0] * len(df))
+                        ),
+                        "query_variant": variant_col,
+                        "variant_priority": pd.Series(
+                            [VARIANT_PRIORITY.get(v, 99) for v in variant_col]
                         ),
                     }
                 )
@@ -535,13 +808,21 @@ class ReferencesService:
                             "cited_by_count",
                             "source_country",
                             "relevance_score",
+                            "query_variant",
+                            "variant_priority",
                         ]
                     ]
                 )
 
-            df = pd.concat(frames, ignore_index=True).drop_duplicates(
-                subset=["doc_id"]
-            )  # de-dupe by doc_id
+            df = pd.concat(frames, ignore_index=True)
+
+            if "variant_priority" not in df.columns:
+                df["variant_priority"] = 99
+
+            df = df.sort_values(
+                ["relevance_score", "variant_priority"],
+                ascending=[False, True],
+            ).drop_duplicates(subset=["doc_id"])
 
             # Log combination statistics
             if len(frames) > 1:
@@ -551,9 +832,14 @@ class ReferencesService:
                     len(df),
                 )
 
-        # If we got more results than limit due to multi-query, trim them
+        # If we got more results than limit due to multiple queries, trim them
         # BUT: trim OpenAlex and Overton separately to preserve Overton results
-        if use_multi_query and len(df) > limit:
+        should_trim = (
+            limit
+            and len(df) > limit
+            and (use_multi_query or len(openalex_query_variants) > 1)
+        )
+        if should_trim:
             logger.info(
                 "✂️ Trimming results from %d to %d (limit)",
                 len(df),
@@ -566,11 +852,19 @@ class ReferencesService:
 
             # Trim OpenAlex results by relevance_score, keep all Overton results
             if len(openalex_df) > 0 and "relevance_score" in openalex_df.columns:
+                if "variant_priority" not in openalex_df.columns:
+                    openalex_df["variant_priority"] = 99
+
+                openalex_df["variant_priority"] = pd.to_numeric(
+                    openalex_df["variant_priority"], errors="coerce"
+                ).fillna(99)
+
                 openalex_df = openalex_df.sort_values(
-                    "relevance_score", ascending=False
+                    ["relevance_score", "variant_priority"],
+                    ascending=[False, True],
                 ).head(limit)
                 logger.info(
-                    "  📊 Kept top %d OpenAlex results (sorted by relevance), all %d Overton results",
+                    "  📊 Kept top %d OpenAlex results (priority then relevance), all %d Overton results",
                     len(openalex_df),
                     len(overton_df),
                 )
@@ -598,4 +892,8 @@ class ReferencesService:
             )
 
         logger.info("Wrote references.csv with %d rows to %s", len(df), references_csv)
-        return references_csv, final_boolean_query or query
+        # Return list of boolean queries (or single query as list if none generated)
+        if not boolean_queries_list:
+            boolean_queries_list = [query]
+
+        return references_csv, boolean_queries_list, final_semantic_query
