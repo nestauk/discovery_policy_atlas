@@ -28,6 +28,15 @@ from .utils_doc_ids import stable_doc_id
 
 logger = logging.getLogger(__name__)
 
+SYSTEMATIC_REVIEW_CLAUSE = (
+    '("systematic review" OR "meta-analysis" OR "narrative synthesis")'
+)
+RCT_CLAUSE = (
+    '("randomized controlled trial" OR "randomised controlled trial" '
+    'OR "randomized control trial" OR "randomised control trial")'
+)
+VARIANT_PRIORITY = {"systematic_review": 0, "rct": 1, "base": 2}
+
 
 class ReferencesService:
     def __init__(self, export_dir: Optional[str] = None):
@@ -365,6 +374,7 @@ class ReferencesService:
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
         search_context: Optional[Dict] = None,
+        enable_rct_sysrev_fanout: Optional[bool] = None,
     ) -> tuple[Path, List[str], Optional[str]]:
         """Fetch and normalize references, write references.csv, and return its path.
 
@@ -385,6 +395,7 @@ class ReferencesService:
             query_temperature: Temperature for query generation diversity
             project_id: Project ID for langfuse tracking
             user_id: User ID for langfuse tracking
+            enable_rct_sysrev_fanout: Override to enable/disable RCT/systematic review fanout
         """
 
         # Initialize Langfuse handler for tracking
@@ -399,6 +410,7 @@ class ReferencesService:
         temperature = query_temperature or settings.BOOLEAN_QUERY_TEMPERATURE
 
         tasks = []
+        task_meta = []  # Track task types and variants for gathered results
         openalex_service = OpenAlexService() if "openalex" in sources else None
         overton_service = OvertonService() if "overton" in sources else None
 
@@ -432,6 +444,7 @@ class ReferencesService:
             logger.info("📋 No search context provided; using query text only")
 
         # Generate boolean queries for OpenAlex
+        openalex_query_variants = []  # {"query": str, "variant": str}
         if "openalex" in sources:
             if mode == "boolean" and boolean_query:
                 openalex_queries = [boolean_query]
@@ -479,6 +492,31 @@ class ReferencesService:
                 openalex_queries = [single_query]
                 boolean_queries_list = [single_query]
 
+            # Fan out each boolean query with systematic review and RCT variants
+            fanout_enabled = (
+                enable_rct_sysrev_fanout
+                if enable_rct_sysrev_fanout is not None
+                else settings.OPENALEX_ENABLE_RCT_SYSREV_FANOUT
+            )
+
+            seen_queries = set()
+
+            def _add_variant(q: str, variant: str):
+                if q not in seen_queries:
+                    openalex_query_variants.append({"query": q, "variant": variant})
+                    seen_queries.add(q)
+
+            for base_query in openalex_queries:
+                _add_variant(base_query, "base")
+                if fanout_enabled:
+                    _add_variant(
+                        f"({base_query}) AND {SYSTEMATIC_REVIEW_CLAUSE}",
+                        "systematic_review",
+                    )
+                    _add_variant(f"({base_query}) AND {RCT_CLAUSE}", "rct")
+
+            boolean_queries_list = [item["query"] for item in openalex_query_variants]
+
         # Generate semantic query for Overton from context (skip if boolean-only)
         if "overton" in sources and mode != "boolean":
             final_semantic_query = await self._generate_semantic_query(
@@ -495,23 +533,27 @@ class ReferencesService:
 
         # Execute OpenAlex queries
         if openalex_service:
-            for idx, query_str in enumerate(openalex_queries):
+            for idx, query_info in enumerate(openalex_query_variants):
+                query_str = query_info["query"]
+                query_variant = query_info["variant"]
                 logger.info(
-                    "🔍 Executing OpenAlex query %d/%d: '%s'",
+                    "🔍 Executing OpenAlex query %d/%d (%s): '%s'",
                     idx + 1,
-                    len(openalex_queries),
+                    len(openalex_query_variants),
+                    query_variant,
                     query_str[:100] + ("..." if len(query_str) > 100 else ""),
                 )
 
                 tasks.append(
                     openalex_service.search(
                         query=query_str,
-                        max_results=limit if len(openalex_queries) == 1 else None,
+                        max_results=limit,
                         min_citations=settings.DEFAULT_MIN_CITATIONS,
                         date_from=df_val,
                         date_to=dt_val,
                     )
                 )
+                task_meta.append(("openalex_search", query_variant))
 
                 # Also collect raw responses for first query only (to avoid too much data)
                 if idx == 0:
@@ -524,6 +566,7 @@ class ReferencesService:
                             date_to=dt_val,
                         )
                     )
+                    task_meta.append(("openalex_raw", query_variant))
 
         if overton_service:
             # Determine source_country parameter from geography_filter
@@ -556,6 +599,7 @@ class ReferencesService:
                         published_before=dt_val,
                     )
                 )
+                task_meta.append(("overton_search", None))
             else:
                 logger.info(
                     "📋 Overton boolean search with query: '%s', geography: %s",
@@ -572,6 +616,7 @@ class ReferencesService:
                         published_before=dt_val,
                     )
                 )
+                task_meta.append(("overton_search", None))
             # Add raw Overton first-page JSON for debugging
             # Use the same query parameters as the search() call above
             tasks.append(
@@ -588,21 +633,34 @@ class ReferencesService:
                     published_before=dt_val,
                 )
             )
+            task_meta.append(("overton_raw", None))
 
         results: List[pd.DataFrame] = []
         raw_openalex: list = []
         raw_overton: dict | list | None = None
         if tasks:
             gathered = await asyncio.gather(*tasks, return_exceptions=True)
-            for g in gathered:
+            for meta, g in zip(task_meta, gathered):
+                task_kind, task_variant = meta
+
                 if isinstance(g, Exception):
-                    logger.error("Reference fetch error: %s", g)
+                    logger.error("Reference fetch error (%s): %s", task_kind, g)
+                    continue
+
+                if task_kind == "openalex_search" and isinstance(g, pd.DataFrame):
+                    df_tagged = g.copy()
+                    df_tagged["query_variant"] = task_variant
+                    results.append(df_tagged)
+                elif task_kind == "openalex_raw" and isinstance(g, list):
+                    raw_openalex.append({"variant": task_variant, "data": g})
+                elif task_kind == "overton_search" and isinstance(g, pd.DataFrame):
+                    results.append(g)
+                elif task_kind == "overton_raw" and (
+                    isinstance(g, dict) or isinstance(g, list)
+                ):
+                    raw_overton = g
                 elif isinstance(g, pd.DataFrame):
                     results.append(g)
-                elif isinstance(g, list) and openalex_service:
-                    raw_openalex = g
-                elif isinstance(g, dict) or isinstance(g, list):
-                    raw_overton = g
 
         if not results:
             df = pd.DataFrame(
@@ -623,6 +681,8 @@ class ReferencesService:
                     "relevance_score",
                     "source_country",
                     "author_institution_countries",
+                    "query_variant",
+                    "variant_priority",
                 ]
             )
         else:
@@ -639,6 +699,7 @@ class ReferencesService:
                     pdf_col = "pdf_url"
                     type_value = df.get("source_type", pd.Series([None] * len(df)))
                     authors_col = "authors"
+                    variant_col = pd.Series([None] * len(df))
                 else:
                     source = "openalex"
                     source_id_col = "id"
@@ -650,6 +711,7 @@ class ReferencesService:
                     pdf_col = "pdf_url"
                     type_value = df.get("work_type", pd.Series([None] * len(df)))
                     authors_col = "authors"
+                    variant_col = df.get("query_variant", pd.Series([None] * len(df)))
 
                 normalized = pd.DataFrame(
                     {
@@ -675,6 +737,10 @@ class ReferencesService:
                         ),
                         "relevance_score": df.get(
                             "relevance_score", pd.Series([0] * len(df))
+                        ),
+                        "query_variant": variant_col,
+                        "variant_priority": pd.Series(
+                            [VARIANT_PRIORITY.get(v, 99) for v in variant_col]
                         ),
                     }
                 )
@@ -742,13 +808,21 @@ class ReferencesService:
                             "cited_by_count",
                             "source_country",
                             "relevance_score",
+                            "query_variant",
+                            "variant_priority",
                         ]
                     ]
                 )
 
-            df = pd.concat(frames, ignore_index=True).drop_duplicates(
-                subset=["doc_id"]
-            )  # de-dupe by doc_id
+            df = pd.concat(frames, ignore_index=True)
+
+            if "variant_priority" not in df.columns:
+                df["variant_priority"] = 99
+
+            df = df.sort_values(
+                ["relevance_score", "variant_priority"],
+                ascending=[False, True],
+            ).drop_duplicates(subset=["doc_id"])
 
             # Log combination statistics
             if len(frames) > 1:
@@ -758,9 +832,14 @@ class ReferencesService:
                     len(df),
                 )
 
-        # If we got more results than limit due to multi-query, trim them
+        # If we got more results than limit due to multiple queries, trim them
         # BUT: trim OpenAlex and Overton separately to preserve Overton results
-        if use_multi_query and len(df) > limit:
+        should_trim = (
+            limit
+            and len(df) > limit
+            and (use_multi_query or len(openalex_query_variants) > 1)
+        )
+        if should_trim:
             logger.info(
                 "✂️ Trimming results from %d to %d (limit)",
                 len(df),
@@ -773,11 +852,19 @@ class ReferencesService:
 
             # Trim OpenAlex results by relevance_score, keep all Overton results
             if len(openalex_df) > 0 and "relevance_score" in openalex_df.columns:
+                if "variant_priority" not in openalex_df.columns:
+                    openalex_df["variant_priority"] = 99
+
+                openalex_df["variant_priority"] = pd.to_numeric(
+                    openalex_df["variant_priority"], errors="coerce"
+                ).fillna(99)
+
                 openalex_df = openalex_df.sort_values(
-                    "relevance_score", ascending=False
+                    ["relevance_score", "variant_priority"],
+                    ascending=[False, True],
                 ).head(limit)
                 logger.info(
-                    "  📊 Kept top %d OpenAlex results (sorted by relevance), all %d Overton results",
+                    "  📊 Kept top %d OpenAlex results (priority then relevance), all %d Overton results",
                     len(openalex_df),
                     len(overton_df),
                 )

@@ -119,6 +119,9 @@ class Settings(BaseSettings):
     BOOLEAN_QUERY_TEMPERATURE: float = 1.0  # Temperature for query generation
     BOOLEAN_QUERY_N_RUNS: int = 5  # Number of queries to generate in multi mode
     BOOLEAN_QUERY_MODEL: str = "gpt-4.1"  # Model for query generation
+    OPENALEX_ENABLE_RCT_SYSREV_FANOUT: (
+        bool
+    ) = True  # Fan out RCT/systematic review variants
 
     # Batch Processing Settings
     BATCH_SIZE_SCREENING: int = 5

@@ -30,8 +30,10 @@ You are provided with the following information:
 
 # Important instructions
 
+DO NOT use wildcards (*) in the query as OpenAlex does not support them. Instead, use specific terms in various forms and synonyms.
+
 DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. 
-For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad. However, if specific outcome interests are provided (e.g., "health outcomes", "educational attainment"), you SHOULD incorporate useful search terms related to these outcomes as they represent concrete outcomes of interest, not generic evaluation terms.
+For example adding things like "(effect OR impact OR outcome OR evaluation OR association)" is bad. However, if specific outcome interests are provided (e.g., "health outcomes", "educational attainment"), you SHOULD incorporate useful search terms related to these outcomes as they represent concrete outcomes of interest, not generic evaluation terms.
 
 When geography is provided, add geography constraints using multiple name variants and demonyms to maximize recall (e.g., for "UK": "United Kingdom" OR "UK" OR "England" OR "Scotland" OR "Wales" OR "Northern Ireland" OR English OR Scottish OR Welsh). Do the same pattern for other specified countries/regions (e.g., "USA" | "United States" | "United States of America" | "US" | American).
 
@@ -109,12 +111,13 @@ For each document, you will assess:
    - Consider both direct matches and related concepts
    - Consider if findings, methods, or conclusions are applicable
    - Be inclusive rather than overly restrictive
-   - **IMPORTANT**: When population interests are specified, prioritize documents that address those specific populations
-   - **IMPORTANT**: When outcome interests are specified, prioritize documents that measure or discuss those specific outcomes
-   - **IMPORTANT**: When screening factors are provided (e.g., "studies with children below 5 years old only"), documents that do not meet these criteria should be considered less relevant or excluded
-   - **IMPORTANT**: When geography is specified, prefer documents from the listed countries/regions and mark documents outside those geographies as not relevant unless the abstract/title clearly states findings are directly transferable to the target geography
+   - When population interests are specified, prioritize documents that address those specific populations
+   - When outcome interests are specified, prioritize documents that measure or discuss those specific outcomes
+   - When screening factors are provided (e.g., "studies with children below 5 years old only"), documents that do not meet these criteria should be considered less relevant or excluded
+   - When the geography parameter is specified explicity, prefer documents from the listed countries/regions and mark documents outside those geographies as not relevant unless the abstract/title clearly states findings are directly transferable to the target geography
    - For example, if geography includes "UK", prioritize UK studies and exclude documents from other regions unless they explicitly claim applicability to the UK context.
    - Consider different ways of expressing the same geography (e.g., "UK" and "United Kingdom" is equivalent, as is "England" part of the UK, etc)
+   - However, DO NOT use any other geographical information (besides the explicitly specified geography parameter) provided in the other parameter fields (such as in the user question, population or outcomes) for screening purposes. This is to allow the user learning from examples across the world (unless they explicitly specify a specific evidence source geography with the geography parameter).
 
 2. DOCUMENT TYPE CLASSIFICATION:
    - **research_paper**: Empirical studies, experiments, clinical trials, data analyses
