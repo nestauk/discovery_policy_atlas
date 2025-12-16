@@ -6,9 +6,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.api.routes import router
-from app.api.projects import router as projects_router
 from app.api.projects_v2 import router as projects_v2_router
-from app.api.agent import router as agent_router
 from app.api.test_extraction import router as test_extraction_router
 from app.services.download import download_service
 
@@ -78,9 +76,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(router)
-app.include_router(projects_router)
 app.include_router(projects_v2_router)
-app.include_router(agent_router)
 app.include_router(test_extraction_router)
 
 
