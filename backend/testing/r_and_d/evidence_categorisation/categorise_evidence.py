@@ -1,4 +1,4 @@
-"""Evidence categorization script - classifies documents into 8 evidence categories."""
+"""Evidence categorization script - classifies documents into 9 evidence categories."""
 
 import asyncio
 import logging
@@ -35,7 +35,8 @@ class EvidenceClassification(BaseModel):
         description="One of: 'Systematic Review and Meta-Analysis', 'RCTs and Quasi-Experimental Studies', "
         "'Observational Research Studies', 'Modelling & Simulation', "
         "'Policy Syntheses & Guidance Documents', 'Qualitative & Contextual Evidence', "
-        "'Expert Opinion and Commentary', 'Other (Non-evidence documents)'"
+        "'Expert Opinion and Commentary', 'Other (Non-evidence documents)', "
+        "'Unknown / Insufficient information'"
     )
     confidence: float = Field(
         description="Confidence score between 0.0 and 1.0", ge=0.0, le=1.0
@@ -49,7 +50,12 @@ class EvidenceCategorizer:
     """Service for categorizing documents into evidence hierarchy"""
 
     def __init__(
-        self, model: str = "gpt-5-mini", temperature: float = 0.0, batch_size: int = 10
+        self,
+        model: str = "gpt-5-mini",
+        temperature: float = 0.0,
+        batch_size: int = 10,
+        system_prompt: Optional[str] = None,
+        user_prompt: Optional[str] = None,
     ):
         self.model = model
         self.temperature = temperature
@@ -64,11 +70,17 @@ class EvidenceCategorizer:
             EvidenceClassification, method="json_schema"
         )
 
+        # Use custom prompts if provided, otherwise use defaults
+        system = (
+            system_prompt if system_prompt is not None else CLASSIFICATION_SYSTEM_PROMPT
+        )
+        user = user_prompt if user_prompt is not None else CLASSIFICATION_USER_PROMPT
+
         # Create prompt template
         self.prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", CLASSIFICATION_SYSTEM_PROMPT),
-                ("user", CLASSIFICATION_USER_PROMPT),
+                ("system", system),
+                ("user", user),
             ]
         )
 
@@ -212,7 +224,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Categorize evidence documents into 7 hierarchical categories"
+        description="Categorize evidence documents into 9 hierarchical categories"
     )
     parser.add_argument(
         "--input", required=True, help="Path to input references.csv file"

@@ -27,6 +27,7 @@ EVIDENCE_CATEGORIES = [
     "Qualitative & Contextual Evidence",
     "Expert Opinion and Commentary",
     "Other (Non-evidence documents)",
+    "Unknown / Insufficient information",
 ]
 
 DIFFICULTY_LEVELS = ["Easy", "Medium", "Hard"]
@@ -54,7 +55,7 @@ def create_and_load_dataset(
     settings = rg.Settings(
         guidelines=f"""# Evidence Categorization Task
 
-You will classify research and policy documents into one of 8 evidence categories based on their methodological strength and type.
+You will classify research and policy documents into one of 9 evidence categories based on their methodological strength and type.
 
 {EVIDENCE_CATEGORIES_DEFINITION}
 

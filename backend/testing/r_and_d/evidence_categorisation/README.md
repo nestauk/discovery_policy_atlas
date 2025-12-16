@@ -1,6 +1,6 @@
 # Evidence Categorisation
 
-Automated classification of research and policy documents into 7 hierarchical evidence categories using LLM-based analysis.
+Automated classification of research and policy documents into 8 hierarchical evidence categories using LLM-based analysis.
 
 ## Evidence Categories (Highest → Lowest)
 
@@ -11,6 +11,7 @@ Automated classification of research and policy documents into 7 hierarchical ev
 5. **Policy Syntheses & Guidance Documents** - White papers, policy briefs, guidance reports
 6. **Qualitative & Contextual Evidence** - Interviews, focus groups, case studies, lived experience
 7. **Expert Opinion and Commentary** - Editorials, commentaries, thought leadership
+8. **Other (Non-evidence documents)** - Statistical bulletins, bills, administrative documents
 
 ## Quick Start
 
@@ -39,7 +40,7 @@ uv run python testing/r_and_d/evidence_categorisation/categorise_evidence.py \
 uv run python testing/r_and_d/evidence_categorisation/categorise_evidence.py \
   --input testing/r_and_d/evidence_categorisation/inputs/references.csv \
   --output testing/r_and_d/evidence_categorisation/outputs/categorised_evidence.csv \
-  --model gpt-4o-mini \
+  --model gpt-5-mini \
   --temperature 0.0 \
   --batch-size 10 \
   --max-concurrent 5
@@ -134,34 +135,19 @@ pip install argilla
 
 Access Argilla UI at http://localhost:6900 (default credentials: `admin` / `12345678`)
 
-### Step 2: Sample Documents for Labeling
+### Step 2: Load Documents to Argilla
 
 ```bash
 cd /Users/aidan.kelly/nesta/discovery/discovery_policy_atlas/backend
 
-# Create a stratified sample of 100 documents
-uv run python testing/r_and_d/evidence_categorisation/sample_for_labeling.py \
-  --input testing/r_and_d/evidence_categorisation/inputs/references.csv \
-  --output testing/r_and_d/evidence_categorisation/inputs/labeling_sample.csv \
-  --n-samples 100
+# Load all documents into Argilla for labeling
+uv run python testing/r_and_d/evidence_categorisation/setup_argilla_v2.py \
+  --csv testing/r_and_d/evidence_categorisation/inputs/references.csv \
+  --dataset-name evidence-categorization \
+  --api-key admin.apikey
 ```
 
-This creates a diverse sample across sources, document types, and years.
-
-### Step 3: Load to Argilla
-
-```bash
-# Load sampled documents into Argilla for labeling
-uv run python testing/r_and_d/evidence_categorisation/setup_argilla.py \
-  --csv testing/r_and_d/evidence_categorisation/inputs/labeling_sample.csv \
-  --dataset-name evidence-categorization
-
-# Optional: Set custom API URL/key
-export ARGILLA_API_URL="http://localhost:6900"
-export ARGILLA_API_KEY="argilla.apikey"
-```
-
-### Step 4: Label in Argilla UI
+### Step 3: Label in Argilla UI
 
 1. Open http://localhost:6900
 2. Navigate to the `evidence-categorization` dataset
@@ -178,22 +164,17 @@ export ARGILLA_API_KEY="argilla.apikey"
 - Flag ambiguous cases in notes
 - Use the evidence definitions in the guidelines panel
 
-### Step 5: Export Labeled Data
+### Step 4: Export Labeled Data
 
 ```bash
 # Export all submitted labels
-uv run python testing/r_and_d/evidence_categorisation/export_from_argilla.py \
-  --dataset-name evidence-categorization \
-  --output testing/r_and_d/evidence_categorisation/inputs/validation_set.csv
-
-# Optional: Check inter-annotator agreement (if multiple annotators)
-uv run python testing/r_and_d/evidence_categorisation/export_from_argilla.py \
+uv run python testing/r_and_d/evidence_categorisation/export_from_argilla_v2.py \
   --dataset-name evidence-categorization \
   --output testing/r_and_d/evidence_categorisation/inputs/validation_set.csv \
-  --check-agreement
+  --api-key admin.apikey
 ```
 
-### Step 6: Validate Classifier Performance
+### Step 5: Validate Classifier Performance
 
 ```bash
 # Run classifier on validation set
@@ -228,10 +209,10 @@ print(f"\nDisagreement rate: {len(disagreements)/len(df):.2%}")
 ## Files
 
 - `categorise_evidence.py` - Main classification script
-- `prompts.py` - Classification prompts and category definitions
-- `sample_for_labeling.py` - Create stratified sample for validation
-- `setup_argilla.py` - Load documents into Argilla for labeling
-- `export_from_argilla.py` - Export labeled data from Argilla
+- `prompts.py` - Classification prompts and category definitions (8 categories)
+- `setup_argilla_v2.py` - Load documents into Argilla for labeling
+- `export_from_argilla_v2.py` - Export labeled data from Argilla
+- `test_categorisation.py` - Test examples
 - `DESIGN.md` - Design documentation
 - `inputs/` - Input data directory
 - `outputs/` - Classification results directory

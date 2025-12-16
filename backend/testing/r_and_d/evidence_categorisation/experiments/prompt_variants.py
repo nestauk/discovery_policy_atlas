@@ -1,8 +1,24 @@
 """
-Prompts for evidence categorization
+Prompt variants for evidence categorisation experiments.
+
+Variant A: Current baseline (from prompts.py)
+Variant B: Strengthened Unknown category definition
 """
 
-EVIDENCE_CATEGORIES_DEFINITION = """
+import sys
+from pathlib import Path
+
+# Add parent directory to path to import from prompts.py
+parent_dir = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(parent_dir))
+
+from prompts import (  # noqa: E402
+    CLASSIFICATION_SYSTEM_PROMPT as PROMPT_A_SYSTEM,
+    CLASSIFICATION_USER_PROMPT as PROMPT_A_USER,
+)
+
+# Modified evidence categories with strengthened Unknown definition
+EVIDENCE_CATEGORIES_DEFINITION_B = """
 # Evidence Categories (Hierarchical - Highest to Lowest Evidence Strength)
 
 ## 1. Systematic Review and Meta-Analysis
@@ -57,7 +73,7 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 - Government white papers
 - Policy proposals
 - Think tank policy reports
-- Sectoral guidance documents for practitioners (e.g., “MCS Guidelines on Heat Pump Installation Standards”)
+- Sectoral guidance documents for practitioners (e.g., "MCS Guidelines on Heat Pump Installation Standards")
 
 **Keywords**: "policy brief", "white paper", "guidance", "recommendations", "policy framework"
 
@@ -97,7 +113,12 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 **Keywords**: "bill", "guidance note", "statistical bulletin", "funding rules", "regulation", "press release"
 
 ## 9. Unknown / Insufficient information
-**Definition**: Use this category when there is not enough information in the title, abstract/summary, and metadata to make a reasonable judgement about the document’s evidence type. This typically occurs when the abstract is missing and the title is too vague to infer the methodology or document type.
+**Definition**: Use this category when there is not enough information to confidently determine the evidence type. This includes:
+- Abstract/summary is missing or very brief (<50 words)
+- Title is generic without clear methodological indicators
+- Cannot distinguish between multiple possible categories
+
+If you are uncertain, use this category rather than guessing.
 
 **Examples**:
 - Title only, with generic wording (e.g. "Childhood obesity in Europe") and no abstract or methods hints
@@ -107,11 +128,12 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 
 """
 
-CLASSIFICATION_SYSTEM_PROMPT = f"""You are an expert evidence evaluator specializing in categorizing research and policy documents according to their evidence type and methodological strength.
+# Variant B system prompt with strengthened Unknown definition
+PROMPT_B_SYSTEM = f"""You are an expert evidence evaluator specializing in categorizing research and policy documents according to their evidence type and methodological strength.
 
 Your task is to classify documents into one of 9 evidence categories based on their title, abstract, and metadata.
 
-{EVIDENCE_CATEGORIES_DEFINITION}
+{EVIDENCE_CATEGORIES_DEFINITION_B}
 
 ## Classification Instructions:
 
@@ -141,16 +163,33 @@ Your task is to classify documents into one of 9 evidence categories based on th
 Return your classification in the specified JSON format.
 """
 
-CLASSIFICATION_USER_PROMPT = """Classify the following document:
+PROMPT_B_USER = PROMPT_A_USER  # Same user prompt
 
-**Title**: {title}
 
-**Abstract/Summary**: {abstract}
+def get_prompt_variant(variant_name: str) -> tuple[str, str]:
+    """
+    Get system and user prompts for a given variant.
 
-**Metadata**:
-- Source: {source}
-- Type: {doc_type}
-- Year: {year}
+    Args:
+        variant_name: Either "variant_a" or "variant_b"
 
-Provide your classification following the system instructions.
-"""
+    Returns:
+        Tuple of (system_prompt, user_prompt)
+    """
+    if variant_name == "variant_a":
+        return PROMPT_A_SYSTEM, PROMPT_A_USER
+    elif variant_name == "variant_b":
+        return PROMPT_B_SYSTEM, PROMPT_B_USER
+    else:
+        raise ValueError(
+            f"Unknown variant: {variant_name}. Use 'variant_a' or 'variant_b'"
+        )
+
+
+# Available variants for reference
+VARIANTS = ["variant_a", "variant_b"]
+
+VARIANT_DESCRIPTIONS = {
+    "variant_a": "Baseline prompt (current production)",
+    "variant_b": "Strengthened Unknown category definition",
+}
