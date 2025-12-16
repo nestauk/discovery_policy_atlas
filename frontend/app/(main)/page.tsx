@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ArrowRight } from 'lucide-react'
 
-export default function V2HomePage() {
+export default function Home() {
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 pt-32">
       {/* Welcome Section */}
@@ -34,13 +34,13 @@ export default function V2HomePage() {
             Find evidence on policy interventions, or browse already existing projects
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link href="/v2/search">
+            <Link href="/search">
               <Button size="lg" className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700">
                 Search
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
-            <Link href="/v2/projects">
+            <Link href="/projects">
               <Button size="lg" variant="outline" className="flex items-center gap-2">
                 Projects
                 <ArrowRight className="h-4 w-4" />

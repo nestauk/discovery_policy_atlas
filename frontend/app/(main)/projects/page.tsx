@@ -81,7 +81,7 @@ export default function ProjectsPage() {
       setShowCreateDialog(false)
       
       // Redirect to search page
-      router.push(`/v2/search`)
+      router.push(`/search`)
       
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create analysis project')
@@ -306,7 +306,7 @@ export default function ProjectsPage() {
                   <Button 
                     onClick={() => {
                       setShowInfoDialog(false)
-                      router.push('/v2/search')
+                      router.push('/search')
                     }}
                     className="bg-blue-600 hover:bg-blue-700"
                   >

@@ -13,15 +13,15 @@ import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
 
 const sidebarItems = [
-  { name: 'Projects', href: '/v2/projects', icon: FolderOpen },
-  { name: 'Search', href: '/v2/search', icon: Search },
-  { name: 'Results', href: '/v2/results', icon: FileText },
-  { name: 'FAQ', href: '/v2/faq', icon: HelpCircle },
+  { name: 'Projects', href: '/projects', icon: FolderOpen },
+  { name: 'Search', href: '/search', icon: Search },
+  { name: 'Results', href: '/results', icon: FileText },
+  { name: 'FAQ', href: '/faq', icon: HelpCircle },
 ]
 
 const testItems = [
-  { name: 'Test extraction', href: '/v2/test_extraction', icon: Zap },
-  { name: 'Extractions', href: '/v2/text_extractions', icon: FileText },
+  { name: 'Test extraction', href: '/test_extraction', icon: Zap },
+  { name: 'Extractions', href: '/text_extractions', icon: FileText },
 ]
 
 // const quickStats = [
@@ -107,7 +107,7 @@ export default function AgentLayout({
         <div className="p-6 pb-4">
           <div className="flex items-center gap-3">
             <div>
-              <Link href="/v2">
+              <Link href="/">
                 <h1 className="text-2xl font-bold cursor-pointer">🌐 Policy Atlas</h1>
               </Link>
             </div>

@@ -416,7 +416,7 @@ export default function ExtractionsPage() {
   }
 
   const goBackToResults = () => {
-    router.push('/v2/results')
+    router.push('/results')
   }
 
   return (
@@ -462,7 +462,7 @@ export default function ExtractionsPage() {
                 <p className="text-slate-600 mb-6">
                   Please select a project to view document extractions.
                 </p>
-                <Button onClick={() => router.push('/v2/projects')} variant="outline">
+                <Button onClick={() => router.push('/projects')} variant="outline">
                   <FileText className="h-4 w-4 mr-2" />
                   View Projects
                 </Button>

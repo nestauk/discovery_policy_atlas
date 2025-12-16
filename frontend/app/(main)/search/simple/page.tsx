@@ -98,7 +98,7 @@ export default function SimpleSearchPage() {
       })
     
     // Navigate to results page immediately (analysis will continue in background)
-    router.push(`/v2/results?${searchParams.toString()}`)
+    router.push(`/results?${searchParams.toString()}`)
   }
 
   return (

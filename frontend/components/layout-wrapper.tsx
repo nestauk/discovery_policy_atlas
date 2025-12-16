@@ -6,10 +6,13 @@ import { Header } from "@/components/header";
 export function ConditionalHeader() {
   const pathname = usePathname();
   const isLoginPage = pathname === '/login';
-  const isAgentPage = pathname?.startsWith('/agent');
-  const isV2Page = pathname?.startsWith('/v2');
+  const isHomePage = pathname === '/';
+  
+  // Routes that use the (main) layout with sidebar - don't show header
+  const mainAppRoutes = ['/projects', '/search', '/results', '/faq', '/test_extraction', '/text_extractions'];
+  const isMainAppPage = mainAppRoutes.some(route => pathname?.startsWith(route));
 
-  if (isLoginPage || isAgentPage || isV2Page) {
+  if (isLoginPage || isHomePage || isMainAppPage) {
     return null;
   }
 

@@ -106,7 +106,7 @@ export default function SearchPage() {
         })
 
       // Navigate to results immediately
-      router.push(`/v2/results?project_id=${project.id}`)
+      router.push(`/results?project_id=${project.id}`)
       
     } catch (error) {
       console.error('Failed to start search analysis:', error)
