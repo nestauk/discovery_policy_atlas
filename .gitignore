@@ -17,6 +17,7 @@
 # ========================================
 **/coverage/
 **/results/
+!frontend/app/**/results/
 **/bibliographies/
 **/bibliographies_standardized/
 **/datasets/
