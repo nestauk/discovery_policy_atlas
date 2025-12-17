@@ -161,10 +161,19 @@ class OvertonService:
         # Create DataFrame
         df = pd.DataFrame(results)
 
+        # Handle empty results
+        if df.empty:
+            return df
+
         # Clean up the data
-        df["abstract"] = df["abstract"].fillna("No abstract available")
-        df["content"] = df["content"].fillna("No content available")
-        df["authors"] = df["authors"].apply(lambda x: x if isinstance(x, list) else [])
+        if "abstract" in df.columns:
+            df["abstract"] = df["abstract"].fillna("No abstract available")
+        if "content" in df.columns:
+            df["content"] = df["content"].fillna("No content available")
+        if "authors" in df.columns:
+            df["authors"] = df["authors"].apply(
+                lambda x: x if isinstance(x, list) else []
+            )
 
         return df
 
