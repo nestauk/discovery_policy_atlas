@@ -62,6 +62,121 @@ class CitationInfo(BaseModel):
 
 
 # =============================================================================
+# CONTEXTUAL SUMMARISATION (RCS) - paper-qa inspired
+# =============================================================================
+
+
+class ScoredContext(BaseModel):
+    """A document chunk summarised in context of a specific question/theme.
+
+    Implements paper-qa's Ranking and Contextual Summarisation (RCS) pattern:
+    - Each chunk is summarised in context of a question
+    - Assigned a relevance score (0-10)
+    - Used for quality-based filtering and ranking
+    """
+
+    context_id: str = Field(..., description="Unique identifier for this context")
+    summary: str = Field(
+        ..., description="Contextual summary of the chunk (max ~100 words)"
+    )
+    relevance_score: int = Field(
+        ..., ge=0, le=10, description="Relevance to question (0-10)"
+    )
+    question: str = Field(..., description="Question/theme used for summarisation")
+
+    # Source traceability
+    chunk_id: str = Field(..., description="Reference to source document chunk")
+    document_id: str = Field(..., description="Reference to source document UUID")
+    document_title: str = Field("", description="Document title for citation")
+    chunk_text: str = Field("", description="Original chunk text (truncated)")
+
+    # Citation metadata
+    citation_key: str = Field(..., description="Short citation key e.g., 'pqa-abc123'")
+    full_citation: str = Field("", description="Full citation for bibliography")
+
+    # Theme linkage (for structured output)
+    theme_id: Optional[str] = Field(
+        None, description="Associated theme ID if applicable"
+    )
+    theme_name: Optional[str] = Field(
+        None, description="Associated theme name if applicable"
+    )
+
+
+class ThemeEvidence(BaseModel):
+    """Evidence gathered for a specific theme via RCS.
+
+    Groups scored contexts by theme for structured briefing generation.
+    """
+
+    theme_id: str = Field(..., description="Theme identifier")
+    theme_name: str = Field(..., description="Theme display name")
+    theme_description: str = Field("", description="Theme summary/description")
+    theme_question: str = Field(..., description="Question used for RCS scoring")
+
+    # Scored contexts for this theme
+    scored_contexts: List["ScoredContext"] = Field(
+        default_factory=list, description="Contexts scored for this theme"
+    )
+
+    # Quality metrics
+    total_chunks_retrieved: int = Field(
+        0, description="Total chunks retrieved before scoring"
+    )
+    total_chunks_scored: int = Field(
+        0, description="Total chunks that received RCS scoring"
+    )
+    high_quality_count: int = Field(0, description="Count of contexts with score >= 6")
+    evidence_sufficient: bool = Field(
+        False, description="Whether theme has sufficient evidence"
+    )
+
+
+class EvidenceGatheringResult(BaseModel):
+    """Output of the theme-driven evidence gathering phase."""
+
+    theme_evidence: List[ThemeEvidence] = Field(
+        default_factory=list, description="Evidence grouped by theme"
+    )
+
+    # Cross-theme metrics
+    total_contexts: int = Field(
+        0, description="Total scored contexts across all themes"
+    )
+    themes_with_sufficient_evidence: int = Field(
+        0, description="Count of themes with sufficient evidence"
+    )
+    themes_with_gaps: List[str] = Field(
+        default_factory=list, description="Theme names lacking evidence"
+    )
+    iterations_run: int = Field(1, description="Number of retrieval iterations")
+
+
+class RCSConfig(BaseModel):
+    """Configuration for Contextual Summarisation (RCS) process."""
+
+    score_threshold: int = Field(
+        3, ge=0, le=10, description="Minimum score to include context"
+    )
+    high_quality_threshold: int = Field(
+        6, ge=0, le=10, description="Score threshold for high-quality evidence"
+    )
+    max_contexts_per_theme: int = Field(
+        10, description="Maximum contexts to keep per theme"
+    )
+    max_total_contexts: int = Field(
+        50, description="Maximum total contexts for briefing"
+    )
+    min_high_quality_per_theme: int = Field(
+        2, description="Minimum high-quality contexts for theme sufficiency"
+    )
+    chunks_to_retrieve: int = Field(
+        15, description="Number of chunks to retrieve per theme"
+    )
+    rcs_concurrency: int = Field(10, description="Max parallel RCS calls")
+
+
+# =============================================================================
 # STRUCTURED BRIEFING (JSON for Frontend Rendering)
 # =============================================================================
 

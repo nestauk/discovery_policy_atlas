@@ -22,8 +22,15 @@ from app.services.synthesis.nodes.rag_retrieval import (
     retrieve_evidence_for_themes,
     retrieve_evidence_for_issues,
 )
+from app.services.synthesis.nodes.contextual_summarisation import (
+    apply_rcs_to_theme_evidence,
+    apply_rcs_to_issue_evidence,
+    contextual_summarise_batch,
+    generate_theme_question,
+)
 from app.services.synthesis.nodes.briefing import (
-    synthesize_executive_briefing,
+    generate_briefing,
+    BriefingConfig,
 )
 
 __all__ = [
@@ -40,6 +47,12 @@ __all__ = [
     # RAG retrieval
     "retrieve_evidence_for_themes",
     "retrieve_evidence_for_issues",
-    # Briefing generation
-    "synthesize_executive_briefing",
+    # Contextual Summarisation (RCS)
+    "apply_rcs_to_theme_evidence",
+    "apply_rcs_to_issue_evidence",
+    "contextual_summarise_batch",
+    "generate_theme_question",
+    # Briefing generation (tool-augmented with mandatory verification)
+    "generate_briefing",
+    "BriefingConfig",
 ]
