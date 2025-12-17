@@ -314,14 +314,15 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
 }) {
   if (!interventions.length) return null;
 
-  const effectBadgeColor = (direction: string) => {
-    switch (direction) {
-      case 'increase': return 'bg-emerald-700 text-white';
-      case 'decrease': return 'bg-purple-700 text-white';
-      case 'mixed': return 'bg-amber-600 text-white';
-      case 'no change': return 'bg-slate-500 text-white';
-      default: return 'bg-slate-400 text-white';
-    }
+  const effectBadgeClass = (direction: string) => {
+    const palette: Record<string, string> = {
+      increase: 'bg-green-50 text-green-700 border-green-200',
+      decrease: 'bg-purple-50 text-purple-700 border-purple-200',
+      mixed: 'bg-amber-50 text-amber-700 border-amber-200',
+      'no change': 'bg-slate-50 text-slate-600 border-slate-200',
+      insufficient: 'bg-slate-50 text-slate-600 border-slate-200',
+    };
+    return palette[direction] || 'bg-slate-50 text-slate-600 border-slate-200';
   };
 
   const formatEffectCounts = (pos: number, neg: number, nul: number) => {
@@ -388,7 +389,10 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                         .slice(0, 3)
                         .map((effect, effIdx) => (
                         <div key={effIdx} className="inline-flex items-start gap-1 text-xs whitespace-normal break-words max-w-full">
-                          <Badge variant="outline" className={`${effectBadgeColor(effect.direction)} text-xs px-1.5 py-0.5 border-transparent`}>
+                          <Badge
+                            variant="outline"
+                            className={`${effectBadgeClass(effect.direction)} text-xs px-1.5 py-0.5`}
+                          >
                             {effect.direction}
                           </Badge>
                           <span className="text-slate-600 whitespace-normal break-words" title={effect.outcome_theme}>
@@ -407,9 +411,9 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <div className="flex flex-wrap gap-1">
-                    {row.citation_numbers.map((num) => (
+                    {row.citation_numbers.map((num, citationIdx) => (
                       <CitationLink
-                        key={`int-${idx}-${num}`}
+                        key={`int-${idx}-${citationIdx}-${num}`}
                         citationKey={`[${num}]`}
                         citationNumber={num}
                         citationInfo={lookupCitation(num)}
