@@ -19,6 +19,7 @@ from app.services.synthesis.utils import (
     BRIEFING_MODEL,
     escape_braces,
     build_langfuse_config,
+    normalize_study_type,
 )
 from app.services.synthesis.schemas import (
     CitationInfo,
@@ -331,7 +332,8 @@ async def _generate_interventions_table(
         ]
         if valid_studies:
             study_counts = [
-                f"{s} ({intervention.study_types[s]})" for s in valid_studies[:3]
+                f"{normalize_study_type(s)} ({intervention.study_types[s]})"
+                for s in valid_studies[:3]
             ]
             context_parts.append(f"**Studies**: {', '.join(study_counts)}")
 
