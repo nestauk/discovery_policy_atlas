@@ -211,3 +211,390 @@ def build_executive_briefing_prompt() -> ChatPromptTemplate:
         "STRUCTURED DATA:\n{payload}"
     )
     return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+
+
+def build_outcome_themes_prompt() -> ChatPromptTemplate:
+    """Prompt for discovering outcome themes from result/outcome concepts.
+
+    This is a specialised version of the theme discovery prompt focused on
+    clustering outcomes that are semantically similar (e.g., "obesity reduction",
+    "lower BMI", "weight loss" → "Obesity Reduction").
+
+    Returns:
+        ChatPromptTemplate: Template expecting variables: rq, concepts
+    """
+    system = (
+        "You are an expert in outcome clustering and meta-analysis. Your core skill is "
+        "identifying when different outcome measures are conceptually measuring the same thing."
+    )
+    user = (
+        "<role>\n"
+        "You are an expert in outcome clustering and meta-analysis. Your core skill is "
+        "identifying when different outcome measures are conceptually measuring the same thing.\n"
+        "</role>\n"
+        "<task>\n"
+        "Analyse the provided OUTCOME CONCEPTS and group them into canonical outcome themes. "
+        "Different studies may measure similar outcomes using different terminology or metrics. "
+        "Your goal is to identify which outcomes are conceptually the same.\n"
+        "</task>\n"
+        "<examples>\n"
+        "- 'BMI reduction', 'weight loss', 'lower body mass' → 'Weight/BMI Reduction'\n"
+        "- 'reduced calorie intake', 'lower energy consumption', 'dietary improvement' → 'Caloric Intake'\n"
+        "- 'increased physical activity', 'more exercise', 'higher step count' → 'Physical Activity Levels'\n"
+        "</examples>\n"
+        "<constraints>\n\n"
+        "Semantic Equivalence: Group outcomes that measure conceptually the same thing, even if "
+        "the specific metric or terminology differs.\n\n"
+        "Canonical Naming: Use clear, standardised names for outcome themes (e.g., 'Obesity Prevalence' "
+        "rather than 'people being less fat').\n\n"
+        "Effect Direction Preservation: Do not conflate outcomes with opposite directions "
+        "(e.g., 'weight gain' and 'weight loss' measure the same thing but in opposite directions).\n\n"
+        "Evidence Grounding: Base themes only on the provided concepts.\n"
+        "</constraints>\n"
+        "<output_format>\n"
+        'Return a single JSON object with a key "themes" containing a list of objects. '
+        'Each object must have "theme_name" (canonical outcome name) and "theme_description" '
+        "(brief explanation of what this outcome measures).\n"
+        "</output_format>\n\n"
+        "RESEARCH QUESTION:\n{rq}\n\n"
+        "OUTCOME CONCEPTS:\n{concepts}"
+    )
+    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+
+
+def build_impact_snapshot_prompt() -> ChatPromptTemplate:
+    """Prompt for generating a quantitative impact snapshot for an intervention.
+
+    Returns:
+        ChatPromptTemplate: Template expecting variables: intervention_name, effect_data
+    """
+    system = (
+        "You are a research synthesis specialist. Your expertise is distilling quantitative "
+        "findings into concise, accurate impact statements."
+    )
+    user = (
+        "<role>\n"
+        "You are a research synthesis specialist. Your expertise is distilling quantitative "
+        "findings into concise, accurate impact statements for policymakers.\n"
+        "</role>\n"
+        "<task>\n"
+        "Generate a single-sentence impact snapshot summarising the quantitative effects "
+        "of the intervention based on the provided effect data.\n"
+        "</task>\n"
+        "<examples>\n"
+        "Good: '~2% reduction in obesity prevalence over 5 years'\n"
+        "Good: '15-20% increase in fruit/vegetable consumption'\n"
+        "Good: 'Mixed effects; 3 studies positive, 2 null'\n"
+        "Bad: 'Studies show varying results on outcomes' (too vague)\n"
+        "</examples>\n"
+        "<constraints>\n\n"
+        "Quantitative Focus: Include specific numbers, ranges, or effect sizes where available.\n\n"
+        "Brevity: Maximum 15 words.\n\n"
+        "Accuracy: Only state what the evidence supports. Use '~' for approximations.\n\n"
+        "Uncertainty: If evidence is mixed or insufficient, say so clearly.\n"
+        "</constraints>\n"
+        "<output_format>\n"
+        "Return a single sentence only. No markdown, no explanation.\n"
+        "</output_format>\n\n"
+        "INTERVENTION:\n{intervention_name}\n\n"
+        "EFFECT DATA:\n{effect_data}"
+    )
+    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+
+
+def build_enhanced_executive_briefing_prompt() -> ChatPromptTemplate:
+    """Enhanced prompt for executive briefing with citations and structured evidence.
+
+    This prompt produces briefings matching the ideal format with:
+    - Core Answer & Directive
+    - Evidence Coverage Snapshot
+    - Key Interventions Table with citations
+    - Actionable Takeaways
+    - Top Citations for Review
+
+    Returns:
+        ChatPromptTemplate: Template expecting variables:
+            research_question, evidence_coverage_json, interventions_json,
+            issues_json, citation_mapping_json
+    """
+    system = (
+        "You are a Principal Private Secretary in the UK Civil Service. Your primary responsibility "
+        "is to synthesise complex research evidence into authoritative, citation-backed executive "
+        "briefings for cabinet ministers. Every factual claim must be traceable to a source."
+    )
+    user = (
+        "<role>\n"
+        "You are a Principal Private Secretary in the UK Civil Service. Your primary responsibility "
+        "is to synthesise complex research evidence into authoritative, citation-backed executive "
+        "briefings for cabinet ministers.\n"
+        "</role>\n\n"
+        "<task>\n"
+        "Synthesise the provided STRUCTURED DATA into a formal executive briefing that directly "
+        "answers the RESEARCH QUESTION. The briefing must include inline citations using the "
+        "provided citation keys.\n"
+        "</task>\n\n"
+        "<briefing_structure>\n"
+        "Your briefing MUST follow this precise structure:\n\n"
+        "## 1. Core Answer & Directive\n"
+        "A single, authoritative paragraph (3-5 sentences) that:\n"
+        "- Opens with a direct answer to the research question\n"
+        "- Provides key qualifying context\n"
+        "- Ends with a clear directive or recommendation\n"
+        "- Includes 2-3 inline citations to key sources\n\n"
+        "## 2. Evidence Base\n"
+        "A brief snapshot (2-3 sentences) covering:\n"
+        "- Total number of sources reviewed\n"
+        "- Breakdown by study type (systematic reviews, RCTs, case studies)\n"
+        "- Geographic coverage\n"
+        "- Overall evidence strength assessment\n"
+        "- Any notable gaps\n\n"
+        "## 3. Key Interventions\n"
+        "For the top 3-5 interventions, provide a markdown table with columns:\n"
+        "| Intervention | Impact Snapshot | Evidence | Key Sources |\n"
+        "Where:\n"
+        "- Impact Snapshot: Quantitative summary (e.g., '~2% reduction over 5 years')\n"
+        "- Evidence: Effect consensus (↑ positive, ↓ negative, ⟷ mixed)\n"
+        "- Key Sources: 1-2 citation keys in brackets\n\n"
+        "## 4. Key Challenges\n"
+        "2-4 bullet points on barriers or issues, each with at least one citation.\n\n"
+        "## 5. Actionable Takeaways\n"
+        "2-3 bullet points with specific, implementable recommendations.\n\n"
+        "## 6. Top Sources for Review\n"
+        "List 3-5 key sources with their citation keys, titles, and brief relevance notes.\n"
+        "</briefing_structure>\n\n"
+        "<citation_rules>\n"
+        "CRITICAL: You MUST use inline citations throughout the briefing.\n\n"
+        "- Use citation keys exactly as provided (e.g., [Smith, 2023] or [Source 1])\n"
+        "- Every factual claim about effects or findings MUST have a citation\n"
+        "- Place citations immediately after the claim they support\n"
+        "- Multiple sources can be cited together: [Smith, 2023; Jones, 2022]\n"
+        "- If data is from your aggregated analysis, cite multiple supporting sources\n"
+        "</citation_rules>\n\n"
+        "<constraints>\n"
+        "- Audience: Time-poor cabinet minister (5-minute read maximum)\n"
+        "- Tone: Formal, objective, confident, politically neutral\n"
+        "- Evidence Grounding: ONLY use information from the provided data\n"
+        "- British English throughout\n"
+        "- Do not restate the research question\n"
+        "</constraints>\n\n"
+        "<output_format>\n"
+        "Return markdown text with the sections as H2 headings (##). Use tables, bullets, "
+        "and bold text for scannability. Include a horizontal rule (---) between major sections.\n"
+        "</output_format>\n\n"
+        "---\n\n"
+        "RESEARCH QUESTION:\n{research_question}\n\n"
+        "---\n\n"
+        "EVIDENCE COVERAGE:\n{evidence_coverage_json}\n\n"
+        "---\n\n"
+        "INTERVENTIONS:\n{interventions_json}\n\n"
+        "---\n\n"
+        "KEY ISSUES:\n{issues_json}\n\n"
+        "---\n\n"
+        "CITATION MAPPING:\n{citation_mapping_json}"
+    )
+    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+
+
+# =============================================================================
+# RAG-GROUNDED STRUCTURED BRIEFING PROMPTS
+# =============================================================================
+
+
+def build_background_section_prompt() -> ChatPromptTemplate:
+    """Prompt for generating the background/context section using RAG evidence.
+
+    Returns:
+        ChatPromptTemplate: Template expecting variables:
+            research_question, issues_summary, evidence_context
+    """
+    system = (
+        "You are a policy research analyst. Your task is to write a concise background "
+        "section that contextualises a policy issue using evidence from retrieved documents."
+    )
+    user = (
+        "<role>\n"
+        "You are a policy research analyst writing for senior UK government officials.\n"
+        "</role>\n\n"
+        "<task>\n"
+        "Write a background section (2-3 paragraphs) that contextualises the policy issue. "
+        "Use the retrieved evidence excerpts to support your points with inline citations.\n"
+        "</task>\n\n"
+        "<key_issues>\n"
+        "{issues_summary}\n"
+        "</key_issues>\n\n"
+        "<retrieved_evidence>\n"
+        "Use [N] citations exactly as shown:\n\n"
+        "{evidence_context}\n"
+        "</retrieved_evidence>\n\n"
+        "<constraints>\n"
+        "- Write 2-3 short paragraphs (150-250 words total)\n"
+        "- Include inline citations [N] for claims from the evidence\n"
+        "- Focus on the policy context, challenges, and why this matters\n"
+        "- Do not introduce external information\n"
+        "- British English\n"
+        "</constraints>\n\n"
+        "<output_format>\n"
+        "Return plain paragraphs with [N] citations inline. No headings, no bullets.\n"
+        "</output_format>\n\n"
+        "RESEARCH QUESTION:\n{research_question}"
+    )
+    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+
+
+def build_intervention_impact_prompt() -> ChatPromptTemplate:
+    """Prompt for generating a RAG-grounded impact snapshot for an intervention.
+
+    Returns:
+        ChatPromptTemplate: Template expecting variables:
+            intervention_name, effect_consensus, positive_count, negative_count,
+            null_count, evidence_context
+    """
+    system = (
+        "You are a research synthesis specialist. Your task is to write a concise "
+        "impact statement grounded in specific evidence excerpts."
+    )
+    user = (
+        "<role>\n"
+        "You are a research synthesis specialist writing impact summaries for policymakers.\n"
+        "</role>\n\n"
+        "<task>\n"
+        "Write a 2-3 sentence impact snapshot for the intervention below. "
+        "Ground your statement in the retrieved evidence using [N] citations.\n"
+        "</task>\n\n"
+        "<intervention>\n"
+        "Name: {intervention_name}\n"
+        "Overall effect: {effect_consensus}\n"
+        "Studies: {positive_count} positive, {negative_count} negative, {null_count} null\n"
+        "</intervention>\n\n"
+        "<retrieved_evidence>\n"
+        "{evidence_context}\n"
+        "</retrieved_evidence>\n\n"
+        "<constraints>\n"
+        "- Maximum 3 sentences (50-80 words)\n"
+        "- Include specific quantitative findings where available\n"
+        "- Use [N] citations for specific claims\n"
+        "- Format: **Impact:** [quantified effect with citation]. **Mechanism:** [explanation]\n"
+        "</constraints>\n\n"
+        "<output_format>\n"
+        "Return a single statement with inline [N] citations. No markdown headers.\n"
+        "</output_format>"
+    )
+    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+
+
+def build_recommendations_prompt() -> ChatPromptTemplate:
+    """Prompt for generating RAG-grounded policy recommendations.
+
+    Returns:
+        ChatPromptTemplate: Template expecting variables:
+            research_question, top_interventions, evidence_context
+    """
+    system = (
+        "You are a senior policy advisor. Your task is to write actionable, "
+        "evidence-based recommendations for government ministers. "
+        "You will output structured JSON with exactly 3-4 recommendations."
+    )
+    user = (
+        "<role>\n"
+        "You are a senior policy advisor writing recommendations for UK cabinet ministers.\n"
+        "</role>\n\n"
+        "<task>\n"
+        "Write exactly 3-4 policy recommendations based on the evidence below.\n"
+        "</task>\n\n"
+        "<top_interventions>\n"
+        "{top_interventions}\n"
+        "</top_interventions>\n\n"
+        "<retrieved_evidence>\n"
+        "{evidence_context}\n"
+        "</retrieved_evidence>\n\n"
+        "<requirements>\n"
+        "For each recommendation provide:\n"
+        "1. number: Sequential number (1, 2, 3, 4)\n"
+        "2. title: Short action phrase of 3-6 words (e.g. 'Fund multicomponent school programmes')\n"
+        "3. description: Detailed recommendation with specific evidence and [N] citations\n"
+        "4. citation_numbers: List of integers for citations used (e.g. [3, 20, 7])\n\n"
+        "Title examples:\n"
+        "- 'Fund multicomponent school programmes'\n"
+        "- 'Mandate behavioural components'\n"
+        "- 'Prioritise whole-school approaches'\n"
+        "- 'Expand parental engagement'\n"
+        "</requirements>\n\n"
+        "RESEARCH QUESTION:\n{research_question}"
+    )
+    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+
+
+def build_impact_narrative_prompt() -> ChatPromptTemplate:
+    """Prompt for generating a concise impact narrative for an intervention.
+
+    Returns:
+        ChatPromptTemplate: Template expecting variables:
+            intervention_name, effect_consensus, evidence_context
+    """
+    system = (
+        "You are a research analyst writing concise impact summaries for policymakers. "
+        "Your summaries are specific, quantified where possible, and evidence-grounded."
+    )
+    user = (
+        "<task>\n"
+        "Write a 1-2 sentence impact summary for the intervention below. "
+        "Include specific effect sizes, percentages, or outcomes where the evidence provides them. "
+        "Use bold markdown for key metrics.\n"
+        "</task>\n\n"
+        "<intervention>\n"
+        "{intervention_name}\n"
+        "</intervention>\n\n"
+        "<overall_effect>\n"
+        "{effect_consensus}\n"
+        "</overall_effect>\n\n"
+        "<evidence>\n"
+        "{evidence_context}\n"
+        "</evidence>\n\n"
+        "<requirements>\n"
+        "- Maximum 2 sentences\n"
+        "- Include at least one specific metric if available in evidence\n"
+        "- Use **bold** for key numbers or effect sizes\n"
+        "- Include [N] citation numbers from the evidence\n"
+        "- Be direct: do not hedge or use phrases like 'the evidence suggests'\n"
+        "</requirements>\n\n"
+        "Write the impact summary:"
+    )
+    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
+
+
+def build_core_answer_prompt() -> ChatPromptTemplate:
+    """Prompt for generating the core answer at the top of the briefing.
+
+    Returns:
+        ChatPromptTemplate: Template expecting variables:
+            research_question, top_interventions, intervention_count, background_context
+    """
+    system = (
+        "You are a Principal Private Secretary. Your task is to write a headline "
+        "answer that directly addresses a minister's research question."
+    )
+    user = (
+        "<role>\n"
+        "You are a Principal Private Secretary writing executive summaries for UK ministers.\n"
+        "</role>\n\n"
+        "<task>\n"
+        "Write a headline answer (2-3 sentences) that directly addresses the research question. "
+        "Follow it with a clear directive or key recommendation.\n"
+        "</task>\n\n"
+        "<context>\n"
+        "Number of interventions reviewed: {intervention_count}\n"
+        "Top interventions: {top_interventions}\n"
+        "Background: {background_context}\n"
+        "</context>\n\n"
+        "<constraints>\n"
+        "- Answer must be direct and authoritative (no hedging)\n"
+        "- Maximum 3 sentences for the answer\n"
+        "- Include a clear directive sentence\n"
+        "- Do not restate the question\n"
+        "</constraints>\n\n"
+        "<output_format>\n"
+        'Return JSON: {{"answer": "...", "directive": "..."}}\n'
+        "</output_format>\n\n"
+        "RESEARCH QUESTION:\n{research_question}"
+    )
+    return ChatPromptTemplate.from_messages([("system", system), ("user", user)])

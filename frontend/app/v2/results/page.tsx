@@ -949,7 +949,17 @@ export default function AnalysisResultsPage() {
                   )}
                   {summaryData && (
                     <div className="space-y-8">
-                      <ExecutiveBriefing briefing={summaryData.executive_briefing} />
+                      <ExecutiveBriefing 
+                        briefing={summaryData.executive_briefing}
+                        structuredBriefing={summaryData.structured_briefing}
+                        citationMap={summaryData.citation_map}
+                        evidenceCoverage={summaryData.evidence_coverage}
+                        onCitationClick={() => {
+                          // Navigate to evidence tab and highlight the document
+                          setActiveTab('evidence');
+                          setEvidenceSubTab('documents');
+                        }}
+                      />
                       <ProjectCharts projectId={effectiveProjectId} projectTitle={activeProject?.title} />
                     </div>
                   )}
