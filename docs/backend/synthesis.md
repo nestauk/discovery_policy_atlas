@@ -1,345 +1,311 @@
 # Synthesis Module
 
-The synthesis module generates executive briefings from extracted policy evidence. It orchestrates a multi-phase workflow using LangGraph, combining LLM-driven theme discovery with RAG-grounded citation building.
+The synthesis module transforms document extractions into structured executive briefings. It uses LangGraph to orchestrate a multi-phase workflow that discovers themes, retrieves evidence, scores relevance, and generates verified briefing sections.
 
 ## Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           SYNTHESIS WORKFLOW                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  Phase 1: LOAD                                                              │
-│  ┌─────────────────────┐    ┌─────────────────────────┐                    │
-│  │ load_raw_extractions│───▶│ create_canonical_concepts│                    │
-│  └─────────────────────┘    └───────────┬─────────────┘                    │
-│                                         │                                   │
-│  Phase 2: THEME DISCOVERY (parallel)    ▼                                   │
-│  ┌──────────────────────────────────────┴──────────────────────────────┐   │
-│  │    ┌─────────────────┐  ┌─────────────────────┐  ┌────────────────┐ │   │
-│  │    │ process_issue   │  │ process_intervention│  │ process_outcome│ │   │
-│  │    │ _themes         │  │ _themes             │  │ _themes        │ │   │
-│  │    └────────┬────────┘  └─────────┬───────────┘  └───────┬────────┘ │   │
-│  └─────────────┼────────────────────┼───────────────────────┼──────────┘   │
-│                └────────────────────┼───────────────────────┘              │
-│                                     ▼                                       │
-│  Phase 3: AGGREGATION                                                       │
-│  ┌──────────────────────────┐    ┌─────────────────────────┐               │
-│  │ compute_evidence_coverage│───▶│ build_aggregated_tables │               │
-│  └──────────────────────────┘    └───────────┬─────────────┘               │
-│                                              │                              │
-│  Phase 4: RAG RETRIEVAL                      ▼                              │
-│  ┌──────────────────────────────┐    ┌─────────────────────────────┐       │
-│  │ retrieve_evidence_for_themes │───▶│ retrieve_evidence_for_issues│       │
-│  └──────────────────────────────┘    └───────────┬─────────────────┘       │
-│                                                  │                          │
-│  Phase 5: BRIEFING                               ▼                          │
-│  ┌────────────────────────────────┐                                        │
-│  │ synthesize_executive_briefing  │───▶ StructuredBriefing                 │
-│  └────────────────────────────────┘                                        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+The synthesis process takes a project's extracted data and generates:
+- **Executive Briefing**: A structured document with background, core findings, intervention analysis, and recommendations
+- **Theme Analysis**: Discovered themes for issues, interventions, and outcomes
+- **Citation Database**: Grounded citations with source traceability
 
-## Module Structure
+## Architecture
 
-```
-backend/app/services/synthesis/
-├── agent.py           # SynthesisAgent facade + workflow definition
-├── state.py           # SynthesisState TypedDict + internal models
-├── schemas.py         # Pydantic output schemas (StructuredBriefing, etc.)
-├── prompts.py         # LLM prompt templates
-├── utils.py           # Helper functions and constants
-├── findings.py        # get_findings() for drill-down views
-├── logbook.py         # Database caching for synthesis runs
-└── nodes/
-    ├── data_loading.py    # Phase 1: Load extractions
-    ├── theme_discovery.py # Phase 2: Theme clustering
-    ├── aggregation.py     # Phase 3: Evidence statistics
-    ├── rag_retrieval.py   # Phase 4: Vector search
-    └── briefing.py        # Phase 5: Briefing generation
-```
+### Technology Stack
 
----
+| Component | Technology |
+|-----------|------------|
+| Workflow Orchestration | LangGraph StateGraph |
+| LLM Models | GPT-5.2 (orchestration), GPT-5-mini (generation, verification), GPT-4.1-mini (RCS) |
+| Vector Search | Supabase pgvector |
+| Observability | Langfuse tracing |
 
-## Phase 1: Data Loading
-
-**Files:** `nodes/data_loading.py`
-
-### `load_raw_extractions`
-
-Fetches all extractions and document metadata from Supabase for the project.
-
-**Inputs:**
-- `project_id` from state
-
-**Outputs:**
-- `raw_extractions`: List of normalised extraction dicts (issues, interventions, results)
-- `doc_metadata`: `{doc_uuid: {title, year, author_short, url, ...}}`
-- `doc_scores`: `{doc_uuid: {evidence_score, impact_score}}` — from `extraction_results.conclusion`
-- `extraction_to_doc`: `{extraction_id: doc_uuid}` mapping
-- `research_question`: From project title/query
-
-### `create_canonical_concepts`
-
-Transforms raw extractions into `Concept` objects for theme clustering.
-
-**Outputs:**
-- `issue_concepts`: Concepts from issue extractions
-- `intervention_concepts`: Concepts from intervention extractions
-- `outcome_concepts`: Concepts from result extractions
-
----
-
-## Phase 2: Theme Discovery
-
-**Files:** `nodes/theme_discovery.py`
-
-For each branch (issues, interventions, outcomes), performs:
-
-### 1. Discover Themes (`_discover_themes`)
-
-Uses LLM to cluster concepts into coherent themes.
-
-- **Model:** `gpt-5-mini` (THEME_MODEL)
-- **Input:** List of concepts + research question
-- **Output:** `List[DiscoveredTheme]` with `theme_name` and `theme_description`
-
-### 2. Critique Themes (`_critique_themes`)
-
-Quality assurance pass — LLM reviews themes for clarity and distinctiveness.
-
-### 3. Map Concepts (`_map_concepts_to_themes`)
-
-Classifies each concept to its best-fit theme using parallel LLM calls.
-
-- **Model:** `gpt-5-nano` (MAPPING_MODEL)
-- **Concurrency:** 32 parallel requests
-- **Output:** `List[FinalTheme]` with assigned concepts and frequency counts
-
-**State Updates:**
-```python
-{
-    "discovered_issue_themes": [...],
-    "final_issue_themes": [...],
-    "discovered_intervention_themes": [...],
-    "final_intervention_themes": [...],
-    "discovered_outcome_themes": [...],
-    "final_outcome_themes": [...],
-}
-```
-
----
-
-## Phase 3: Aggregation
-
-**Files:** `nodes/aggregation.py`
-
-### `compute_evidence_coverage`
-
-Deterministically computes evidence statistics (no LLM).
-
-**Output:** `EvidenceCoverageSnapshot`
-```python
-{
-    "total_sources": 42,
-    "study_types": {"RCT": 5, "Quasi-experimental": 12, ...},
-    "source_types": {"Academic": 30, "Government": 8, ...},
-    "countries": {"USA": 15, "UK": 10, ...},
-    "years": {2020: 5, 2021: 8, ...},
-    "overall_strength": "Moderate",  # High | Moderate | Low
-    "gaps": ["No meta-analyses found"]
-}
-```
-
-### `build_aggregated_tables`
-
-Builds structured tables from final themes.
-
-**Outputs:**
-- `aggregated_issues`: `List[KeyIssue]`
-- `aggregated_interventions`: `List[PolicyIntervention]`
-- `aggregated_outcomes`: `List[OutcomeTheme]`
-- `extraction_quotes`: `{doc_uuid: [quote, ...]}` for RAG fallback
-- `outcome_doc_effects`: `{outcome_name: {doc_id: [effects]}}` for effect tracking
-- `theme_to_doc_uuids`: `{theme_name: [doc_uuid, ...]}` for constrained RAG
-
----
-
-## Phase 4: RAG Retrieval
-
-**Files:** `nodes/rag_retrieval.py`
-
-### Constrained Retrieval
-
-Only retrieves chunks from documents that **contributed to the theme** via extractions. This ensures citations are directly relevant.
-
-```
-Theme "School-based interventions"
-    ↓
-Lookup theme_to_doc_uuids → [doc_1, doc_2, doc_3]
-    ↓
-Vector search → filter to chunks from [doc_1, doc_2, doc_3]
-    ↓
-Rerank by quality score
-```
-
-### Quality-Weighted Reranking
-
-Documents are scored by their evidence strength and predicted impact:
+### LLM Model Configuration
 
 ```python
-quality_score = 0.6 × evidence_score_norm + 0.4 × impact_score_norm
-final_score = 0.7 × similarity + 0.3 × quality_score
+# tools/models.py
+ORCHESTRATOR_MODEL = "gpt-5.2"      # Tool selection reasoning
+VERIFICATION_MODEL = "gpt-5-mini"   # Claim verification
+GENERATION_MODEL = "gpt-5-mini"     # Section content generation
+RCS_MODEL = "gpt-4.1-mini"          # Contextual summarisation (cost-optimised)
 ```
 
-Where:
-- `evidence_score_norm` = `(stars - 1) / 4` (converts 1-5 to 0-1)
-- Documents without scores receive `quality_score = 0`
+## Workflow Phases
 
-### `retrieve_evidence_for_themes`
+The synthesis workflow consists of 6 phases:
 
-Retrieves chunks for intervention themes.
+```
+Phase 1: DATA LOADING
+         └── load_raw_extractions, create_canonical_concepts
 
-- **Match count:** 30 candidates
-- **Final kept:** Top 8 per theme
+Phase 2: THEME DISCOVERY (parallel)
+         ├── process_issue_themes
+         ├── process_intervention_themes
+         └── process_outcome_themes
 
-### `retrieve_evidence_for_issues`
+Phase 3: AGGREGATION
+         ├── compute_evidence_coverage
+         └── build_aggregated_tables
 
-Retrieves chunks for issue themes (used in background section).
+Phase 4: RAG RETRIEVAL
+         ├── retrieve_evidence_for_themes
+         └── retrieve_evidence_for_issues
 
-- **Match count:** 20 candidates
-- **Final kept:** Top 6 per theme
+Phase 5: CONTEXTUAL SUMMARISATION (RCS)
+         ├── apply_rcs_to_theme_evidence
+         └── apply_rcs_to_issue_evidence
 
-**Outputs:**
-- `theme_evidence`: `{theme_name: List[RetrievedChunk]}`
-- `issue_evidence`: `{issue_name: List[RetrievedChunk]}`
-- `grounded_citations`: `List[CitationInfo]` with supporting quotes
-- `chunk_to_citation`: `{chunk_id: citation_number}`
+Phase 6: BRIEFING GENERATION
+         └── generate_briefing (tool-augmented with verification)
+```
 
----
+### Phase 1: Data Loading
 
-## Phase 5: Briefing Generation
+**Nodes**: `load_raw_extractions`, `create_canonical_concepts`
 
-**Files:** `nodes/briefing.py`
+Fetches all extractions for a project and normalises them into canonical concepts. Handles:
+- Intervention, issue, outcome, and result extractions
+- Document metadata and quality scores
+- Citation information
 
-### `synthesize_executive_briefing`
+### Phase 2: Theme Discovery
 
-Orchestrates the generation of all briefing sections:
+**Nodes**: `process_issue_themes`, `process_intervention_themes`, `process_outcome_themes`
 
-| Section | Method | LLM? |
-|---------|--------|------|
-| Evidence Snapshot | `_build_evidence_snapshot` | No |
-| Background | `_generate_background` | Yes |
-| Interventions Table | `_generate_interventions_table` | Yes (per row) |
-| Core Answer | `_generate_core_answer` | Yes |
-| Recommendations | `_generate_recommendations` | Yes |
-| Top Citations | `_build_top_citations` | No |
-| Follow-up Suggestions | Hardcoded rules | No |
+Runs in parallel using LLM-driven clustering:
+1. Discovers coherent themes from extracted concepts
+2. Critiques and refines theme boundaries
+3. Maps individual extractions to themes
 
-**Output:** `StructuredBriefing`
+### Phase 3: Aggregation
 
+**Nodes**: `compute_evidence_coverage`, `build_aggregated_tables`
+
+Computes evidence coverage statistics and builds aggregated tables for interventions and issues:
+- Document counts per theme
+- Study types distribution
+- Evidence strength summary
+
+### Phase 4: RAG Retrieval
+
+**Nodes**: `retrieve_evidence_for_themes`, `retrieve_evidence_for_issues`
+
+Retrieves supporting evidence chunks from the vector store:
+- **Constrained retrieval**: Chunks are retrieved only from documents contributing to each theme
+- **Quality-weighted reranking**: Prioritises documents by evidence strength and predicted impact
+
+### Phase 5: Contextual Summarisation (RCS)
+
+**Nodes**: `apply_rcs_to_theme_evidence`, `apply_rcs_to_issue_evidence`
+
+Inspired by the paper-qa library, RCS improves evidence quality by:
+
+1. **Contextual Summarisation**: Each chunk is summarised in the context of a theme-specific question
+2. **Relevance Scoring**: Each chunk receives a 0-10 relevance score
+3. **Quality Filtering**: Only chunks meeting a relevance threshold are used
+
+**Configuration** (`RCSConfig`):
 ```python
-{
-    "core_answer": {
-        "query": "What works to reduce youth crime?",
-        "answer": "Multi-component school programmes show strongest effects...",
-        "directive": "Prioritise early intervention in secondary schools"
-    },
-    "evidence_snapshot": [...],
-    "background_section": {...},
-    "interventions_table": [...],
-    "recommendations": [...],
-    "top_citations": [...],
-    "follow_up_suggestions": [...]
-}
+score_threshold: int = 3           # Minimum score to include
+high_quality_threshold: int = 6    # Score for "high quality"
+max_contexts_per_theme: int = 10   # Max contexts per theme
+max_total_contexts: int = 50       # Max total for briefing
+min_high_quality_per_theme: int = 2  # Required for "sufficient"
+rcs_concurrency: int = 10          # Parallel RCS calls
 ```
 
----
+### Phase 6: Briefing Generation
+
+**Node**: `generate_briefing`
+
+Tool-augmented generation with mandatory verification:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ORCHESTRATOR (gpt-5.2)                                  │
+│ "What evidence do I need for this section?"             │
+└─────────────────────────────────────────────────────────┘
+        ↓                                    ↑
+   Tool calls                          Tool results
+        ↓                                    ↑
+┌─────────────────────────────────────────────────────────┐
+│ TOOL EXECUTOR                                           │
+│ - get_theme_evidence(theme)                             │
+│ - search_extractions(query)                             │
+│ - get_document_quality(citation)                        │
+│ - verify_claim_support(claim)                           │
+└─────────────────────────────────────────────────────────┘
+        ↓
+┌─────────────────────────────────────────────────────────┐
+│ SECTION GENERATOR (gpt-5-mini)                          │
+│ Generate section content with inline [N] citations      │
+└─────────────────────────────────────────────────────────┘
+        ↓
+┌─────────────────────────────────────────────────────────┐
+│ VERIFIER (gpt-5-mini) - MANDATORY                       │
+│ Verify each claim is grounded in cited evidence         │
+│ Flag ungrounded claims → retry with corrections         │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### Briefing Sections
+
+| Section | Purpose |
+|---------|---------|
+| `background` | Policy context and evidence overview |
+| `interventions` | Markdown table of key interventions with citations |
+| `core_answer` | Core findings directly addressing the research question |
+| `recommendations` | Evidence-based policy recommendations |
+
+#### Available Tools
+
+| Tool | Purpose |
+|------|---------|
+| `get_theme_evidence` | Retrieve RCS-scored evidence for a theme |
+| `search_extractions` | Semantic search across all extractions |
+| `get_document_quality` | Get quality scores for citations |
+| `verify_claim_support` | Check if a claim is supported by evidence |
 
 ## Output Schema
 
 ### StructuredBriefing
 
-The final output consumed by the frontend:
+The main output consumed by the frontend:
 
 ```python
 class StructuredBriefing(BaseModel):
-    core_answer: CoreAnswer
-    evidence_snapshot: List[EvidenceSnapshotRow]
-    evidence_snapshot_summary: str
-    background_section: Optional[BackgroundSection]
-    interventions_table: List[InterventionTableRow]
-    recommendations: List[RecommendationItem]
-    top_citations: List[TopCitationItem]
-    follow_up_suggestions: List[str]
+    core_answer: CoreAnswer                    # Main findings
+    background_section: BackgroundSection      # Context paragraphs
+    interventions_table: List[InterventionTableRow]  # Top 6 interventions
+    recommendations: List[RecommendationItem]  # Policy recommendations
+    top_citations: List[TopCitationItem]       # Key sources with reasons
+    evidence_snapshot: List[EvidenceSnapshotRow]     # Summary stats
+    follow_up_suggestions: List[str]           # Further research
+    evidence_snapshot_summary: str             # Brief summary
 ```
 
-### InterventionTableRow
+### Citation Selection
 
-```python
-class InterventionTableRow(BaseModel):
-    intervention_name: str
-    citation_numbers: List[int]
-    context: str  # "Location: UK, USA | Setting: Schools | Study types: RCT (3)"
-    impact_narrative: str  # RAG-grounded 1-2 sentence summary
-    outcome_effects: List[OutcomeEffect]
-```
+Top citations are selected using a multi-signal ranking:
 
-### CitationInfo
+1. **Usage frequency** (0-10 pts): How often cited across sections
+2. **Document quality** (0-10 pts): Evidence strength + predicted impact
+3. **RCS relevance** (0-10 pts): Average relevance score from contextual summarisation
 
-```python
-class CitationInfo(BaseModel):
-    citation_key: str  # "[1]"
-    citation_number: int
-    doc_id: Optional[str]
-    analysis_document_id: str
-    author_short: Optional[str]
-    year: Optional[int]
-    title: Optional[str]
-    url: Optional[str]
-    supporting_quote: Optional[str]  # Grounded from RAG chunk
-    chunk_id: Optional[str]
-```
+Each selected citation includes an **LLM-generated reason** explaining its contribution to the briefing.
 
----
+## Database Tables
+
+| Table | Purpose |
+|-------|---------|
+| `synthesis_runs` | Run metadata, structured briefing JSON |
+| `synthesis_citations` | Citation details with author, year, title, URL |
+| `synthesis_themes` | Discovered themes with extraction mappings |
 
 ## Usage
 
 ```python
-from app.services.synthesis.agent import SynthesisAgent
+from app.services.synthesis import SynthesisAgent, run_synthesis
 
+# Using the convenience function
+result = await run_synthesis(project_id="...")
+briefing = result.get("structured_briefing")
+stats = result.get("briefing_results")
+
+# Or using the agent class
 agent = SynthesisAgent()
-final_state = await agent.run(project_id="...")
-
-briefing = final_state.get("structured_briefing")
-citations = final_state.get("grounded_citations")
+result = await agent.run(project_id="...", user_id="...")
 ```
 
----
+## Configuration
 
-## Database Tables
+### BriefingConfig
 
-The synthesis module reads from and writes to:
-
-| Table | Usage |
-|-------|-------|
-| `analysis_projects` | Read: project title/query |
-| `analysis_documents` | Read: document metadata, extraction_results (scores) |
-| `analysis_extractions` | Read: issues, interventions, results |
-| `chunks` | Read: vector search via pgvector |
-| `synthesis_runs` | Write: cached synthesis results |
-| `synthesis_themes` | Write: discovered themes |
-| `synthesis_citations` | Write: grounded citations |
-| `synthesis_outcome_themes` | Write: outcome themes |
-
----
+```python
+@dataclass
+class BriefingConfig:
+    max_tool_calls_per_section: int = 5   # Max tools per section
+    max_verification_retries: int = 2     # Retry on verification failure
+    min_evidence_per_section: int = 3     # Minimum evidence items
+```
 
 ## Observability
 
-All LLM calls are traced via Langfuse with tags:
-- `component:synthesis`
-- `component:synthesis.<step>` (e.g., `synthesis.discover_themes`)
-- `branch:<issue|intervention|outcome>`
-- `model:<model_name>`
+All LLM calls are traced via Langfuse:
+- Session ID: Derived from project ID
+- Tool execution: Logged with duration and results
+- Verification failures: Captured with issue details
+
+---
+
+## Recent Changes (December 2024)
+
+### Agentic Briefing Architecture
+
+Replaced the legacy single-pass briefing with a tool-augmented approach:
+- **Tool-based evidence retrieval**: LLM decides what evidence to fetch
+- **Mandatory verification**: All claims are verified against cited evidence
+- **Tiered models**: GPT-5.2 for orchestration, GPT-5-mini for generation
+
+### Contextual Summarisation (RCS)
+
+Added Phase 5 inspired by paper-qa:
+- Each chunk is summarised in context of a theme-specific question
+- Relevance scoring (0-10) filters low-quality evidence
+- Reduces hallucination by providing pre-filtered evidence
+
+### Citation Improvements
+
+- **Intelligent ranking**: Multi-signal ranking (usage, quality, relevance)
+- **LLM-generated reasons**: Each top citation has a contextual explanation
+- **Proper formatting**: Fixed `[N]` citation parsing and hyperlinks
+
+### Recommendations Parsing
+
+- Fixed parser to handle markdown bold format (`**1. Title**:`)
+- Improved title/description splitting
+- Added logging for parse failures
+
+### Frontend Integration
+
+- Core findings section renders citation hyperlinks
+- Citation tooltips display source information from `synthesis_citations`
+- Intervention table limited to top 6 by evidence strength
+
+---
+
+## Module Structure
+
+```
+backend/app/services/synthesis/
+├── agent.py                    # LangGraph workflow and SynthesisAgent
+├── state.py                    # SynthesisState TypedDict
+├── schemas.py                  # Pydantic models (StructuredBriefing, etc.)
+├── prompts.py                  # LLM prompt templates
+├── logbook.py                  # Database read/write operations
+├── findings.py                 # Findings extraction utilities
+├── utils.py                    # Shared utilities
+│
+├── nodes/
+│   ├── data_loading.py         # Phase 1: Load extractions
+│   ├── theme_discovery.py      # Phase 2: Discover themes
+│   ├── aggregation.py          # Phase 3: Evidence aggregation
+│   ├── rag_retrieval.py        # Phase 4: RAG evidence retrieval
+│   ├── contextual_summarisation.py  # Phase 5: RCS scoring
+│   └── briefing.py             # Phase 6: Briefing generation
+│
+└── tools/
+    ├── base.py                 # ToolRegistry and base classes
+    ├── models.py               # LLM model configuration
+    ├── orchestrator.py         # BriefingOrchestrator
+    ├── evidence.py             # get_theme_evidence tool
+    ├── search.py               # search_extractions tool
+    ├── quality.py              # get_document_quality tool
+    └── verification.py         # verify_claim_support tool
+```
+
+## See Also
+
+- [RCS_ARCHITECTURE.md](../../backend/app/services/synthesis/RCS_ARCHITECTURE.md) - Detailed RCS documentation
+- [AGENTIC_BRIEFING_PLAN.md](../../backend/app/services/synthesis/AGENTIC_BRIEFING_PLAN.md) - Original agentic briefing design
 
