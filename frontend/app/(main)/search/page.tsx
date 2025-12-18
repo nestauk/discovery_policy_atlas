@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
-import SearchWizard, { SearchContext } from './SearchWizard'
+import SearchWizard, { SearchContext } from '@/components/search/SearchWizard'
 
 export default function SearchPage() {
   const router = useRouter()

@@ -10,8 +10,8 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
-import { NavigatorInterventionsTable } from '@/components/v2/interventions/NavigatorInterventionsTable'
-import { type InterventionData } from '@/components/search/interventions-table'
+import { NavigatorInterventionsTable } from '@/components/interventions/NavigatorInterventionsTable'
+import { type InterventionData } from '@/components/interventions/InterventionsTable'
 
 interface IssueTheme {
   theme_name: string

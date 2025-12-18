@@ -24,13 +24,13 @@ import { useAPI } from '@/lib/api'
 import { useAuth } from '@clerk/nextjs'
 import { SynthesisSummary } from '@/types/search'
 import { ExecutiveBriefing } from './ExecutiveBriefing'
-import { V2ChatInterface } from '@/components/chatbot/V2ChatInterface'
-import { V2ChatbotWidget } from '@/components/chatbot/V2ChatbotWidget'
+import { ChatInterface } from '@/components/chatbot/ChatInterface'
+import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
 import { ProjectCharts } from '@/components/charts/ProjectCharts'
-import { InterventionsNavigator } from '@/components/v2/interventions/InterventionsNavigator'
-import type { InterventionData } from '@/components/search/interventions-table'
-import { PapersTable } from '@/components/search/papers-table'
-import { SearchPlanModal } from '@/components/v2/results/SearchPlanModal'
+import { InterventionsNavigator } from '@/components/interventions/InterventionsNavigator'
+import type { InterventionData } from '@/components/interventions/InterventionsTable'
+import { PapersTable } from '@/components/documents/PapersTable'
+import { SearchPlanModal } from '@/components/results/SearchPlanModal'
 
 interface AnalysisDocument {
   id: string
@@ -1140,7 +1140,7 @@ export default function AnalysisResultsPage() {
               </TabsContent>
 
               <TabsContent value="assistant" className="m-0 h-[600px]">
-                <V2ChatInterface 
+                <ChatInterface 
                   autoFocus={activeTab === 'assistant'}
                   placeholder="Ask about the evidence in this project..."
                   className="h-full"
@@ -1152,7 +1152,7 @@ export default function AnalysisResultsPage() {
       </div>
 
       {/* Floating Chatbot Widget */}
-      <V2ChatbotWidget />
+      <ChatbotWidget />
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Send, Bot, User, ExternalLink } from 'lucide-react'
-import { useV2ChatStore, ChatMessage } from '@/lib/v2ChatStore'
+import { useChatStore, ChatMessage } from '@/lib/chatStore'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
 import ReactMarkdown from 'react-markdown'
@@ -26,19 +26,19 @@ function processInTextCitations(content: string, references: { url?: string }[])
   })
 }
 
-interface V2ChatInterfaceProps {
+interface ChatInterfaceProps {
   className?: string
   placeholder?: string
   autoFocus?: boolean
   showHeader?: boolean
 }
 
-export function V2ChatInterface({ 
+export function ChatInterface({ 
   className = "",
   placeholder = "Ask about the evidence in this project...",
   autoFocus = false,
   showHeader = false
-}: V2ChatInterfaceProps) {
+}: ChatInterfaceProps) {
   const {
     messages, 
     isLoading,
@@ -47,7 +47,7 @@ export function V2ChatInterface({
     setLoading,
     setError,
     clearError
-  } = useV2ChatStore()
+  } = useChatStore()
   
   const { activeProject } = useAnalysisProjectStore()
   const { user } = useUser()

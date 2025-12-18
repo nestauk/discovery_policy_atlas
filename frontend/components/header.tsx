@@ -1,4 +1,4 @@
-import { AuthButtons } from "@/components/auth/auth-buttons";
+import { AuthButtons } from "@/components/auth/AuthButtons";
 
 export function Header() {
   return (

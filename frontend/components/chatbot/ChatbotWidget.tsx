@@ -4,17 +4,17 @@ import { Bot, X, MessageCircle } from 'lucide-react'
 import { Card, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { AnimatePresence, motion } from 'framer-motion'
-import { V2ChatInterface } from './V2ChatInterface'
-import { useV2ChatStore } from '@/lib/v2ChatStore'
+import { ChatInterface } from './ChatInterface'
+import { useChatStore } from '@/lib/chatStore'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 
 
-interface V2ChatbotWidgetProps {
+interface ChatbotWidgetProps {
   className?: string
 }
 
-export function V2ChatbotWidget({ className = "" }: V2ChatbotWidgetProps) {
-  const { isOpen, setIsOpen } = useV2ChatStore()
+export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
+  const { isOpen, setIsOpen } = useChatStore()
   const { activeProject } = useAnalysisProjectStore()
 
   if (!activeProject) {
@@ -72,7 +72,7 @@ export function V2ChatbotWidget({ className = "" }: V2ChatbotWidgetProps) {
               </CardHeader>
               
               <div className="h-[420px]">
-                <V2ChatInterface 
+                <ChatInterface 
                   placeholder="Ask about the evidence..."
                   className="h-full"
                   showHeader={false}

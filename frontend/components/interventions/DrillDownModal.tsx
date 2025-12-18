@@ -15,7 +15,7 @@ interface DrillDownModalProps {
 }
 
 export function DrillDownModal({ open, onOpenChange, interventionName, issueTheme }: DrillDownModalProps) {
-  const { getAnalysisFindings } = useAPI()
+  const { fetchWithAuth } = useAPI()
   const { activeProject } = useProjectStore()
   const [findings, setFindings] = useState<Finding[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -31,10 +31,14 @@ export function DrillDownModal({ open, onOpenChange, interventionName, issueThem
       setLoading(true)
       setError(null)
       try {
-        const data = await getAnalysisFindings(activeProject.id, {
-          intervention_name: interventionName,
-          issue_theme: issueTheme,
-        })
+        const params = new URLSearchParams()
+        if (interventionName) {
+          params.append('intervention_name', interventionName)
+        }
+        if (issueTheme) {
+          params.append('issue_theme', issueTheme)
+        }
+        const data = await fetchWithAuth(`api/analysis-projects/${activeProject.id}/findings?${params.toString()}`)
         if (!cancelled) setFindings(data as Finding[])
       } catch (e: unknown) {
         if (!cancelled) {
@@ -50,9 +54,7 @@ export function DrillDownModal({ open, onOpenChange, interventionName, issueThem
     return () => {
       cancelled = true
     }
-  // Intentionally exclude getAnalysisFindings to avoid unstable deps causing refetch loops
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, activeProject?.id, interventionName, issueTheme])
+  }, [open, activeProject?.id, interventionName, issueTheme, fetchWithAuth])
 
   // Deduplicate findings (issues vs interventions use slightly different keys)
   const uniqueFindings = useMemo(() => {

@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { DocumentDetailView } from '@/components/search/document-detail-view'
+import { DocumentDetailView } from '@/components/documents/DocumentDetailView'
 import { 
   Upload,
   FileText,

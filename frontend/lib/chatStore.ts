@@ -24,7 +24,7 @@ export interface ChatResponse {
   references: DocumentReference[]
 }
 
-interface V2ChatState {
+interface ChatState {
   messages: ChatMessage[]
   isLoading: boolean
   error: string | null
@@ -40,7 +40,7 @@ interface V2ChatState {
   clearError: () => void
 }
 
-export const useV2ChatStore = create<V2ChatState>((set) => ({
+export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   isLoading: false,
   error: null,

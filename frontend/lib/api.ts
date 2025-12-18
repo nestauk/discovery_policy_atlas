@@ -1,6 +1,5 @@
 import { useAuth } from "@clerk/nextjs";
 import { AnalysisProject } from "./analysisProjectStore";
-import { ThematicGroup, EvidenceItem } from './evidenceStore';
 
 // Standalone auth fetch to allow usage from non-React files (e.g., Zustand stores)
 export const fetchWithAuthExternal = async (
@@ -62,22 +61,6 @@ export const fetchWithAuthExternal = async (
 
   return isStreaming ? response : response.json();
 };
-
-// Standalone Evidence tab functions (exported for non-React usage)
-export async function getThematicGroups(
-  projectId: string,
-  themeType: 'intervention' | 'issue'
-): Promise<ThematicGroup[]> {
-  return fetchWithAuthExternal(`api/analysis-projects/${projectId}/thematic-groups?theme_type=${themeType}`);
-}
-
-export async function getThematicGroupItems(
-  projectId: string,
-  themeId: string,
-  itemType: 'intervention' | 'issue'
-): Promise<EvidenceItem[]> {
-  return fetchWithAuthExternal(`api/analysis-projects/${projectId}/thematic-groups/${themeId}/items?item_type=${itemType}`);
-}
 
 export function useAPI() {
   const { getToken } = useAuth();
@@ -183,23 +166,6 @@ export function useAPI() {
     return fetchWithAuth(`api/analysis-projects/${projectId}/interventions`);
   };
 
-  // Evidence tab endpoints
-  // In-hook wrappers use hook-scoped fetchWithAuth for consistency in components
-  const getThematicGroupsInHook = async (
-    projectId: string,
-    themeType: 'intervention' | 'issue'
-  ): Promise<ThematicGroup[]> => {
-    return fetchWithAuth(`api/analysis-projects/${projectId}/thematic-groups?theme_type=${themeType}`);
-  };
-
-  const getThematicGroupItemsInHook = async (
-    projectId: string,
-    themeId: string,
-    itemType: 'intervention' | 'issue'
-  ): Promise<EvidenceItem[]> => {
-    return fetchWithAuth(`api/analysis-projects/${projectId}/thematic-groups/${themeId}/items?item_type=${itemType}`);
-  };
-
   const generatePopulationOptions = async (researchQuestion: string): Promise<{ research_question: string; population_options: string[] }> => {
     return fetchWithAuth('api/analysis-projects/generate-population-options', {
       method: 'POST',
@@ -227,8 +193,5 @@ export function useAPI() {
     runAnalysisForProject,
     getDocumentExtraction,
     getProjectInterventions,
-    // Evidence tab
-    getThematicGroups: getThematicGroupsInHook,
-    getThematicGroupItems: getThematicGroupItemsInHook,
   };
 }
