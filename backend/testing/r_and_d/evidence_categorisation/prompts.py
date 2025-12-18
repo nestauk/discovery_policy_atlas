@@ -24,7 +24,7 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 - Individual randomized controlled trials testing interventions
 - Studies with treatment and control groups (randomized or quasi-experimental)
 
-**Keywords**: "randomized controlled trial", "RCT", "randomisation", "treatment arm", "control group", "quasi-experimental"
+**Keywords**: "randomized controlled trial", "RCT", "randomisation", "treatment arm", "control group", "quasi-experimental",  "difference in differences", "instrumental variables", "propensity score matching", "fixed effects", "synthetic control method", "regression discontinuity design"
 
 ## 3. Observational Research Studies
 **Definition**: An observational study draws inferences from a sample to a population where the independent variable is not under the control of the researcher because of ethical concerns or logistical constraints. One common observational study is about the possible effect of a treatment on subjects, where the assignment of subjects into a treated group versus a control group is outside the control of the investigator.
@@ -64,7 +64,7 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 ## 6. Qualitative & Contextual Evidence
 **Definition**:
 - **Qualitative Research**: Research that aims to gather and analyse non-numerical (descriptive) data to understand individuals' social reality, including attitudes, beliefs, and motivation. Typically involves in-depth interviews, focus groups, or field observations.
-- **Contextual evidence**: Insights drawn from non-research sources describing how policies work in real world settings. Includes implementation evaluations, consultation responses, lived experience reports, thematic inspections, case studies.
+- **Contextual evidence**: Insights drawn from non-research sources describing how policies work in real world settings. Includes implementation evaluations, lived experience reports, thematic inspections, case studies.
 
 **Examples**:
 - Qualitative studies from charities
@@ -81,6 +81,7 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 - Expert essays
 - Thought leadership articles
 - Anecdotal case reports
+- Consultation responses
 
 **Keywords**: "commentary", "editorial", "perspective", "opinion", "viewpoint", "essay"
 
