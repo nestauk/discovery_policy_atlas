@@ -16,6 +16,10 @@
 # 🧪 Testing and Coverage
 # ========================================
 **/coverage/
+**/results/
+**/bibliographies/
+**/bibliographies_standardized/
+**/datasets/
 
 # ========================================
 # ⚙️ Build and Production Artifacts
@@ -54,6 +58,7 @@ yarn-error.log*
 # ========================================
 .DS_Store
 Thumbs.db
+*/mcp/
 
 # ========================================
 # 📁 Python (Backend)
@@ -79,3 +84,4 @@ temp/*
 memory-bank/*
 backend/temp/*
 backend/testing/r_and_d/boolean_queries/outputs/*
+backend/testing/r_and_d/screening/outputs/*

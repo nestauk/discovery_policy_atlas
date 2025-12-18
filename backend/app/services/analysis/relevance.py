@@ -17,6 +17,7 @@ from app.utils.llm import batch_check
 import logging
 from pathlib import Path
 from .prompts import RELEVANCE_SYSTEM_PROMPT
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class RelevanceService:
         export_dir: Optional[str] = None,
         project_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        search_context: Optional[Dict] = None,
     ):
         self.query = query
         self.export_dir = Path(export_dir) if export_dir else Path("./temp")
@@ -43,8 +45,25 @@ class RelevanceService:
         self.project_id = project_id
         self.user_id = user_id
 
-        # System message for relevance and document type assessment
-        self.system_message = RELEVANCE_SYSTEM_PROMPT(query)
+        ctx = (
+            search_context.model_dump()
+            if hasattr(search_context, "model_dump")
+            else (search_context or {})
+        )
+
+        research_question = ctx.get("research_question", query)
+        population_selected = ctx.get("population", [])
+        outcome_selected = ctx.get("outcome", [])
+        screening_factors = ctx.get("screening_factors", [])
+        geography = ctx.get("geography", [])
+
+        self.system_message = RELEVANCE_SYSTEM_PROMPT(
+            research_question=research_question,
+            population_selected=population_selected or None,
+            outcome_selected=outcome_selected or None,
+            screening_factors=screening_factors or None,
+            geography=geography or None,
+        )
 
         # Output fields for LLM processing
         self.fields = [
@@ -281,6 +300,7 @@ class RelevanceService:
     ):
         """Run the batch processor synchronously."""
         processor = batch_check.LLMProcessor(
+            model_name=settings.SCREENING_MODEL,
             output_path=output_path,
             system_message=self.system_message,
             session_name=None,

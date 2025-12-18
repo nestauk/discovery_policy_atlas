@@ -38,7 +38,7 @@ class VectorizationService:
         """Generate embedding for text using OpenAI"""
         try:
             response = await self.openai_client.embeddings.create(
-                model="text-embedding-ada-002", input=text.replace("\n", " ")
+                model="text-embedding-3-small", input=text.replace("\n", " ")
             )
             return response.data[0].embedding
         except Exception as e:

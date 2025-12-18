@@ -1,7 +1,10 @@
-// import { Inter } from 'next/font/google'
+import { Inter } from 'next/font/google'
 import './globals.css'
 import 'antd/dist/reset.css'
-import { LayoutWrapper } from '@/components/layout-wrapper';
+import { ClerkProvider } from "@clerk/nextjs";
+import { ConditionalHeader } from '@/components/layout-wrapper';
+
+const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
   title: 'Policy Atlas',
@@ -19,9 +22,12 @@ export default function RootLayout({
         <base target="_blank" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
       </head>
-      <LayoutWrapper>
-        {children}
-      </LayoutWrapper>
+      <body className={inter.className}>
+        <ClerkProvider>
+          <ConditionalHeader />
+          {children}
+        </ClerkProvider>
+      </body>
     </html>
   )
 }

@@ -31,7 +31,7 @@ export default function V2HomePage() {
 
         <div className="text-center space-y-6">
           <p className="text-lg max-w-2xl mx-auto">
-            Search evidence on any topic, or browse already existing projects
+            Find evidence on policy interventions, or browse already existing projects
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link href="/v2/search">

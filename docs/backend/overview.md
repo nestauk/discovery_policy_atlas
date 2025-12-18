@@ -44,13 +44,16 @@ backend/
 │   │   └── database.py             # SQLAlchemy models (not yet used)
 │   │
 │   ├── services/                   # Business logic services
-│   │   ├── download.py             # File download service
-│   │   ├── logging.py              # Supabase logging service
-│   │   ├── mediacloud.py           # MediaCloud API integration
-│   │   ├── openalex.py             # OpenAlex API integration
-│   │   ├── overton.py              # Overton API integration
-│   │   ├── screening.py            # AI-powered paper screening
-│   │   └── summary.py              # AI summary generation
+    │   │   ├── analysis/               # Document analysis & extraction
+    │   │   ├── synthesis/              # Evidence synthesis (see synthesis.md)
+    │   │   ├── vectorization.py        # Embedding & vector search
+    │   │   ├── download.py             # File download service
+    │   │   ├── logging.py              # Supabase logging service
+    │   │   ├── mediacloud.py           # MediaCloud API integration
+    │   │   ├── openalex.py             # OpenAlex API integration
+    │   │   ├── overton.py              # Overton API integration
+    │   │   ├── screening.py            # AI-powered paper screening
+    │   │   └── summary.py              # AI summary generation
 │   │
 │   ├── utils/                      # Utility functions
 │   │   └── overton.py              # Overton-specific utilities
