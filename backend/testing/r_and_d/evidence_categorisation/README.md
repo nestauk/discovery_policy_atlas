@@ -63,11 +63,11 @@ Optional: use Argilla to manually label documents and validate classifier accura
 
 ```bash
 # Load documents for labelling
-uv run python testing/r_and_d/evidence_categorisation/setup_argilla_v2.py \
+uv run python testing/r_and_d/evidence_categorisation/setup_argilla.py \
   --csv inputs/references.csv --dataset-name evidence-categorization --api-key admin.apikey
 
 # Export labelled results
-uv run python testing/r_and_d/evidence_categorisation/export_from_argilla_v2.py \
+uv run python testing/r_and_d/evidence_categorisation/export_from_argilla.py \
   --dataset-name evidence-categorization --output inputs/validation_set.csv --api-key admin.apikey
 ```
 
@@ -75,4 +75,4 @@ uv run python testing/r_and_d/evidence_categorisation/export_from_argilla_v2.py 
 
 - `categorise_evidence.py` - Main script (uses `LLMProcessor` from `app.utils.llm.batch_check`)
 - `prompts.py` - LLM prompts and detailed category definitions
-- `setup_argilla_v2.py` / `export_from_argilla_v2.py` - Argilla integration
+- `setup_argilla.py` / `export_from_argilla.py` - Argilla integration
