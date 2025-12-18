@@ -58,6 +58,12 @@ async def classify_dataframe(
     """Classify all documents in a dataframe using LLMProcessor."""
     logger.info(f"Starting classification of {len(df)} documents")
 
+    # NOTE: LLMProcessor appends to JSONL for resume capability on large batches.
+    # For R&D we delete to get fresh results. For production, remove this to enable resumability.
+    output_file = Path(output_path)
+    if output_file.exists():
+        output_file.unlink()
+
     text_data = {str(i): _format_document(row.to_dict()) for i, row in df.iterrows()}
 
     processor = LLMProcessor(
