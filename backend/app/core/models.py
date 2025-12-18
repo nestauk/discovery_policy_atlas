@@ -22,12 +22,6 @@ class OpenAlexSearchRequest(BaseSearchRequest):
     date_to: Optional[date] = None
 
 
-class MediaCloudSearchRequest(BaseSearchRequest):
-    source: Literal["mediacloud"] = "mediacloud"
-    date_from: Optional[date] = None
-    date_to: Optional[date] = None
-
-
 class OvertonSearchRequest(BaseSearchRequest):
     source: Literal["overton"] = "overton"
     source_country: Optional[str] = None
@@ -40,7 +34,7 @@ class OvertonSearchRequest(BaseSearchRequest):
 
 
 # Unified search request
-SearchRequest = OpenAlexSearchRequest | MediaCloudSearchRequest | OvertonSearchRequest
+SearchRequest = OpenAlexSearchRequest | OvertonSearchRequest
 
 
 # Result models

@@ -16,8 +16,6 @@
 # 🧪 Testing and Coverage
 # ========================================
 **/coverage/
-**/results/
-!frontend/app/**/results/
 **/bibliographies/
 **/bibliographies_standardized/
 **/datasets/
@@ -86,3 +84,4 @@ memory-bank/*
 backend/temp/*
 backend/testing/r_and_d/boolean_queries/outputs/*
 backend/testing/r_and_d/screening/outputs/*
+backend/testing/evals/screening/results/*
