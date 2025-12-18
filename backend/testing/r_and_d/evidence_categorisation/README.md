@@ -38,38 +38,57 @@ uv run python testing/r_and_d/evidence_categorisation/categorise_evidence.py \
 
 **Output CSV** adds: `evidence_category`, `evidence_confidence` (0-1), `category_reasoning`
 
-## Running Experiments
+## Experiment Workflow
 
-The `experiments/` directory contains tools for testing different model/prompt combinations against validation sets.
+There are two ways to use this:
+
+### Option A: Simple Classification (with optional validation)
+
+1. Run `categorise_evidence.py` on your data (see Quick Start above)
+2. Optionally validate results:
+   - Load output into Argilla for manual labelling → export as `validation_set.csv`
+   - Run `validate_classifier.py --validation validation_set.csv --predictions <your_output>.csv`
+
+### Option B: Full Experiment Pipeline
+
+To evaluate classifier performance across models/prompts, follow this sequence:
+
+**1. Create validation set (manual labelling via Argilla)**
+
+```bash
+# Start Argilla (if not running)
+docker run -d --name argilla -p 6900:6900 argilla/argilla-quickstart:latest
+
+# Load documents into Argilla for labelling
+uv run python testing/r_and_d/evidence_categorisation/setup_argilla.py \
+  --csv inputs/references.csv --dataset-name evidence-categorization --api-key admin.apikey
+
+# Label documents in Argilla UI at http://localhost:6900
+
+# Export labelled results as ground truth
+uv run python testing/r_and_d/evidence_categorisation/export_from_argilla.py \
+  --dataset-name evidence-categorization --output inputs/<dataset>/validation_set.csv --api-key admin.apikey
+```
+
+**2. Run experiments**
 
 ```bash
 # Run a single experiment
 uv run python testing/r_and_d/evidence_categorisation/experiments/run_experiment.py \
   --model gpt-5.2 --prompt variant_a --dataset run_child_obesity
 
-# Run all combinations (models × prompts × datasets)
+# Or run all combinations (models × prompts × datasets)
 ./testing/r_and_d/evidence_categorisation/experiments/batch_run_all.sh
+```
 
-# Collect and visualise results
+**3. Collect and analyse results**
+
+```bash
 uv run python testing/r_and_d/evidence_categorisation/experiments/collect_results.py
 uv run python testing/r_and_d/evidence_categorisation/experiments/visualize_results.py
 ```
 
-Experiments require a `validation_set.csv` (with ground truth labels) in each dataset folder under `inputs/`.
-
-## Validation with Argilla
-
-Optional: use Argilla to manually label documents and validate classifier accuracy.
-
-```bash
-# Load documents for labelling
-uv run python testing/r_and_d/evidence_categorisation/setup_argilla.py \
-  --csv inputs/references.csv --dataset-name evidence-categorization --api-key admin.apikey
-
-# Export labelled results
-uv run python testing/r_and_d/evidence_categorisation/export_from_argilla.py \
-  --dataset-name evidence-categorization --output inputs/validation_set.csv --api-key admin.apikey
-```
+Results are saved to `experiments/results_summary.csv` and `plots/`.
 
 ## Key Files
 
