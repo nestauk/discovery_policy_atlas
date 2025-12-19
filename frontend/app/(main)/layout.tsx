@@ -12,10 +12,12 @@ import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
 
+const getResultsHref = (activeProjectId?: string) => 
+  activeProjectId ? `/projects/${activeProjectId}` : '/projects'
+
 const sidebarItems = [
   { name: 'Projects', href: '/projects', icon: FolderOpen },
   { name: 'Search', href: '/search', icon: Search },
-  { name: 'Results', href: '/results', icon: FileText },
   { name: 'FAQ', href: '/faq', icon: HelpCircle },
 ]
 
@@ -160,6 +162,17 @@ export default function AgentLayout({
                 </Button>
               </Link>
             ))}
+            
+            {/* Results link - dynamic based on active project */}
+            <Link href={getResultsHref(activeProject?.id)}>
+              <Button
+                variant={pathname?.startsWith('/projects/') && pathname !== '/projects' ? "secondary" : "ghost"}
+                className="w-full justify-start h-auto p-3 text-left"
+              >
+                <FileText className="mr-3 h-4 w-4 text-slate-500" />
+                <div className="font-medium text-sm">Results</div>
+              </Button>
+            </Link>
             
             {/* Feedback Button */}
             {activeProject && (

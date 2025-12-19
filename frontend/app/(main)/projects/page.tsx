@@ -105,6 +105,7 @@ export default function ProjectsPage() {
 
   const handleSelectProject = (project: AnalysisProject) => {
     setActiveProject(project)
+    router.push(`/projects/${project.id}`)
   }
 
   const openEditDialog = (project: AnalysisProject) => {
