@@ -58,9 +58,14 @@ Replace the 4-category `document_type` classification with the rigorously tested
 │ Prompt: variant_a (baseline prompt)                             │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              ▼
+                              ▼ (filter: exclude "Other (Non-evidence documents)")
 ┌─────────────────────────────────────────────────────────────────┐
 │ Step 2: ACQUISITION (existing)                                  │
+│ Filters applied before processing:                              │
+│ • is_relevant = True                                            │
+│ • evidence_category != "Other (Non-evidence documents)"         │
+│ Note: "Unknown / Insufficient information" stays - full text    │
+│       may reveal more info                                      │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -81,20 +86,56 @@ Replace the 4-category `document_type` classification with the rigorously tested
 #### 1.1 Create Evidence Categorisation Service
 **New file:** `backend/app/services/analysis/evidence_category.py`
 
-Port the R&D `EvidenceCategoriser` class with:
+Follow the `RelevanceService` pattern in `relevance.py`, which uses `LLMProcessor` from `app.utils.llm.batch_check`.
+
+**Key components:**
 - Use gpt-5.2 model (configurable via settings)
-- Use variant_a prompt (baseline)
-- Structured output via Pydantic
-- Async batch processing with semaphore
+- Use variant_a prompt (baseline, tested in R&D)
 - Note: gpt-5.2 is a thinking model so temperature is not configurable
 
+**Structure (mirroring RelevanceService):**
 ```python
-# Key components to port from R&D:
-# - EvidenceClassification Pydantic model
-# - CLASSIFICATION_SYSTEM_PROMPT
-# - CLASSIFICATION_USER_PROMPT
-# - Async classify_document() and classify_dataframe() methods
+class EvidenceCategoryService:
+    def __init__(self, export_dir, project_id, user_id, model="gpt-5.2"):
+        self.export_dir = Path(export_dir)
+        self.project_id = project_id
+        self.user_id = user_id
+        self.model = model
+        self.system_message = EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT
+
+        # Output fields for LLM processing
+        self.fields = [
+            {"name": "evidence_category", "type": "str", "description": "..."},
+            {"name": "evidence_confidence", "type": "float", "description": "..."},
+            {"name": "evidence_category_reasoning", "type": "str", "description": "..."},
+        ]
+
+    async def categorise_documents(self, references_csv_path: str, only_relevant: bool = True) -> str:
+        """Categorise documents, optionally filtering to relevant only."""
+        # Load CSV, filter if only_relevant=True
+        # Prepare documents dict
+        # Call _screen_batch() -> _run_batch_processor()
+        # Merge results back to CSV
+        # Return updated CSV path
+
+    def _run_batch_processor(self, documents, output_path):
+        """Run LLMProcessor synchronously (same pattern as RelevanceService)."""
+        processor = batch_check.LLMProcessor(
+            model_name=self.model,
+            output_path=output_path,
+            system_message=self.system_message,
+            output_fields=self.fields,
+            # ... other params
+        )
+        processor.run(documents, batch_size=25, sleep_time=0.5)
 ```
+
+**Port from R&D (`testing/r_and_d/evidence_categorisation/`):**
+- `CLASSIFICATION_SYSTEM_PROMPT` from `prompts.py` (battle-tested)
+- `EVIDENCE_CATEGORIES_DEFINITION` from `prompts.py`
+- Document formatting logic from `categorise_evidence.py`
+
+**Note:** R&D uses field name `category_reasoning` - rename to `evidence_category_reasoning` for consistency.
 
 #### 1.2 Add Evidence Category Prompts
 **Modify:** `backend/app/services/analysis/prompts.py`
@@ -124,6 +165,20 @@ Keep:
 
 Simplify RELEVANCE_SYSTEM_PROMPT to remove section 2 (document type classification).
 
+#### 1.5 Update Synthesis Service
+**Modify:** `backend/app/services/synthesis/utils.py`
+
+The `normalize_source_type()` function (line 59) currently uses `document_type` to classify source types (NGO, IGO, etc.) for the evidence base summary. Update to use `evidence_category` instead:
+
+```python
+def normalize_source_type(source: str, evidence_category: str) -> str:
+    """Normalise document source to readable category."""
+    # Update logic to use evidence_category instead of document_type
+    ...
+```
+
+Note: Synthesis will need to be adjusted to use the new 9-category hierarchy appropriately.
+
 ### Phase 2: Pipeline Integration
 
 #### 2.1 Update Analysis Service
@@ -133,26 +188,47 @@ Add Step 1.75 between relevance and acquisition:
 
 ```python
 # After relevance check, before acquisition
-if config.evidence_categorisation_enabled:
-    with StageTimer(monitor, "evidence_categorisation"):
-        evidence_service = EvidenceCategoryService(
-            export_dir=str(run_export_dir),
-            model=settings.EVIDENCE_CATEGORY_MODEL,  # Default: gpt-5.2
-            project_id=project_id,
-            user_id=user_id,
-        )
-        references_csv = await evidence_service.categorise_documents(
-            str(references_csv),
-            only_relevant=True  # Only process is_relevant=True docs
-        )
+with StageTimer(monitor, "evidence_categorisation"):
+    evidence_service = EvidenceCategoryService(
+        export_dir=str(run_export_dir),
+        model=settings.EVIDENCE_CATEGORY_MODEL,  # Default: gpt-5.2
+        project_id=project_id,
+        user_id=user_id,
+    )
+    references_csv = await evidence_service.categorise_documents(
+        str(references_csv),
+        only_relevant=True  # Only process is_relevant=True docs
+    )
 ```
 
-#### 2.2 Update RunConfig Schema
-**Modify:** `backend/app/services/analysis/schemas.py`
+#### 2.2 Update Acquisition Service Filtering
+**Modify:** `backend/app/services/analysis/acquire.py`
 
-Add configuration option:
+Update `acquire_all()` to also filter out "Other (Non-evidence documents)" before acquisition.
+Follow the existing pattern for `is_relevant` filtering (lines 50-61):
+
 ```python
-evidence_categorisation_enabled: bool = True  # Enable 9-category evidence typing
+# In acquire_all(), after loading CSV:
+df = pd.read_csv(references_csv)
+
+# Filter to only relevant documents if relevance checking was performed
+if "is_relevant" in df.columns:
+    relevant_df = df[df["is_relevant"]].copy()
+    ...
+
+# NEW: Also filter out non-evidence documents
+# "Unknown / Insufficient information" stays - full text may reveal more
+if "evidence_category" in relevant_df.columns:
+    pre_evidence_count = len(relevant_df)
+    relevant_df = relevant_df[
+        relevant_df["evidence_category"] != "Other (Non-evidence documents)"
+    ]
+    filtered_count = pre_evidence_count - len(relevant_df)
+    logger.info(
+        f"Evidence filtering: excluded {filtered_count} non-evidence documents"
+    )
+
+records = relevant_df.to_dict("records")
 ```
 
 #### 2.3 Add Settings Configuration
@@ -176,9 +252,9 @@ document_type_reason: Optional[str] = None  # REMOVE
 
 Add:
 ```python
-evidence_category: Optional[str] = None  # NEW: 9-category hierarchy
-evidence_confidence: Optional[float] = None
-evidence_category_reasoning: Optional[str] = None
+evidence_category: Optional[str] = None       # NEW: 9-category hierarchy
+evidence_confidence: Optional[float] = None   # Confidence score 0.0-1.0
+evidence_category_reasoning: Optional[str] = None  # Brief explanation for classification
 ```
 
 #### 3.2 Update Storage Service
@@ -221,9 +297,9 @@ document_type_reason?: string  // REMOVE
 
 Add:
 ```typescript
-evidence_category?: string
-evidence_confidence?: number
-evidence_category_reasoning?: string
+evidence_category?: string           // 9-category hierarchy
+evidence_confidence?: number         // Confidence score 0.0-1.0
+evidence_category_reasoning?: string // Brief explanation for classification
 ```
 
 #### 4.2 Update Analytics Interface
@@ -231,6 +307,11 @@ evidence_category_reasoning?: string
 
 Replace `document_types` with `evidence_categories` in interface.
 Consider adding a new chart showing evidence category distribution.
+
+#### 4.3 Post-Integration Frontend Updates (deferred)
+After initial backend integration is complete, additional frontend updates needed:
+- **Evidence Table** - Update to display `evidence_category` instead of `document_type`
+- **Executive Summary** - Update evidence base summary to use new categories
 
 ### Phase 5: Testing
 
@@ -248,14 +329,40 @@ Update debug output to show `evidence_category` instead of `document_type`.
 - `backend/app/services/analysis/prompts.py` - Add evidence prompts, simplify relevance
 - `backend/app/services/analysis/relevance.py` - Remove document_type
 - `backend/app/services/analysis/service.py` - Add Step 1.75
-- `backend/app/services/analysis/schemas.py` - Update UnifiedReference, add config
+- `backend/app/services/analysis/acquire.py` - Filter out "Other (Non-evidence documents)"
+- `backend/app/services/analysis/schemas.py` - Update UnifiedReference
 - `backend/app/services/analysis/storage.py` - Update field mappings
+- `backend/app/services/synthesis/utils.py` - Update normalize_source_type() to use evidence_category
 - `backend/app/core/config.py` - Add EVIDENCE_CATEGORY_MODEL setting
 - `backend/test/test_analysis_service.py` - Update test output
 
 ### Modified Files (Frontend)
 - `frontend/lib/analysisProjectStore.ts` - Update TypeScript types
 - `frontend/components/charts/AnalyticsCharts.tsx` - Update analytics interface
+
+## R&D Findings
+
+The evidence categorisation system was rigorously tested in `testing/r_and_d/evidence_categorisation/`.
+
+### Experiment Setup
+- **Datasets:** 3 validation sets (child_obesity, home_heating, intervention_home_learning) with human-labelled ground truth
+- **Models tested:** gpt-5-mini, gpt-5, gpt-5.2
+- **Prompt variants:** variant_a (baseline), variant_b (strengthened Unknown definition)
+
+### Key Results
+- **gpt-5.2** achieved highest accuracy (~70-73%) across datasets
+- **gpt-5-mini** showed lower accuracy (~43-60%)
+- **variant_a and variant_b** performed similarly with gpt-5.2
+- Confidence scores correlate with correctness (correct predictions have higher confidence)
+
+### R&D Files Reference
+- `categorise_evidence.py` - Main classification script using `LLMProcessor`
+- `prompts.py` - Battle-tested prompts (`CLASSIFICATION_SYSTEM_PROMPT`, `EVIDENCE_CATEGORIES_DEFINITION`)
+- `validate_classifier.py` - Validation metrics calculation
+- `experiments/` - Full experiment framework (run_experiment.py, collect_results.py, visualize_results.py)
+
+### Field Name Note
+R&D uses `category_reasoning` - production will use `evidence_category_reasoning` for consistency with other fields.
 
 ## Configuration
 
@@ -286,6 +393,11 @@ Note: gpt-5.2 is a thinking model, so temperature parameter is not applicable.
 ## Rollout Strategy
 
 1. **Database:** Add new columns in Supabase (evidence_category, evidence_confidence, evidence_category_reasoning)
-2. **Backend:** Deploy code changes
+2. **Backend:**
+   - Create `EvidenceCategoryService` following `RelevanceService` pattern
+   - Port prompts from R&D to `prompts.py`
+   - Update `RelevanceService` to remove document_type fields
+   - Integrate into pipeline (`service.py`)
 3. **Frontend:** Deploy type updates
 4. **Verify:** Test with new analysis runs
+5. **Cleanup:** R&D code can remain for future experiments/validation
