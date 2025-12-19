@@ -61,7 +61,7 @@ export interface SearchParams {
     download_key?: string
   }
 
-  // Synthesis summary types (MVP)
+  // Synthesis summary types (Enhanced)
   export interface KeyIssue {
     issue_theme: string
     summary_description: string
@@ -75,12 +75,120 @@ export interface SearchParams {
     impact_summary: string
     supporting_doc_ids: string[]
     frequency?: number
+    effect_consensus?: 'increase' | 'decrease' | 'mixed' | 'no change' | 'insufficient'
+    positive_count?: number
+    negative_count?: number
+    null_count?: number
+    sample_effect_sizes?: string[]
+    countries?: string[]
+    study_types?: Record<string, number>
+    related_outcomes?: string[]
+  }
+
+  export interface CitationInfo {
+    citation_key: string
+    citation_number?: number
+    doc_id?: string
+    analysis_document_id: string
+    author_short?: string
+    year?: number
+    title?: string
+    url?: string
+    supporting_quote?: string
+    chunk_id?: string
+  }
+
+  export interface EvidenceCoverageSnapshot {
+    total_sources: number
+    study_types: Record<string, number>
+    source_types: Record<string, number>
+    countries: Record<string, number>
+    years: Record<number, number>
+    overall_strength: string
+    gaps: string[]
+  }
+
+  export interface OutcomeTheme {
+    outcome_name: string
+    outcome_description: string
+    effect_consensus: 'increase' | 'decrease' | 'mixed' | 'no change' | 'insufficient'
+    positive_count: number
+    negative_count: number
+    null_count: number
+    sample_effect_sizes: string[]
+    frequency: number
+    source_doc_ids: string[]
+  }
+
+  // Structured briefing types for frontend rendering
+  export interface EvidenceSnapshotRow {
+    metric: string
+    detail: string
+  }
+
+  export interface OutcomeEffect {
+    outcome_theme: string
+    direction: 'increase' | 'decrease' | 'no change' | 'mixed' | 'insufficient'
+    positive_count: number
+    negative_count: number
+    null_count: number
+  }
+
+  export interface InterventionTableRow {
+    intervention_name: string
+    citation_numbers: number[]
+    context: string
+    impact_narrative: string
+    outcome_effects: OutcomeEffect[]
+  }
+
+  export interface RecommendationItem {
+    number: number
+    title: string
+    description: string
+    citation_numbers: number[]
+  }
+
+  export interface TopCitationItem {
+    citation_number: number
+    title: string
+    author_year: string
+    reason: string
+    url?: string
+  }
+
+  export interface BackgroundSection {
+    title: string
+    paragraphs: string[]
+    citation_numbers_used: number[]
+  }
+
+  export interface CoreAnswer {
+    query: string
+    answer: string
+    directive: string
+  }
+
+  export interface StructuredBriefing {
+    core_answer: CoreAnswer
+    evidence_snapshot: EvidenceSnapshotRow[]
+    evidence_snapshot_summary: string
+    background_section?: BackgroundSection
+    interventions_table: InterventionTableRow[]
+    recommendations: RecommendationItem[]
+    top_citations: TopCitationItem[]
+    follow_up_suggestions: string[]
   }
 
   export interface SynthesisSummary {
     executive_briefing: string
+    structured_briefing?: StructuredBriefing  // New structured output
     key_issues: KeyIssue[]
     interventions: PolicyIntervention[]
+    // Enhanced fields
+    outcome_themes?: OutcomeTheme[]
+    evidence_coverage?: EvidenceCoverageSnapshot
+    citation_map?: Record<string, CitationInfo>
   }
 
   // Drill-down finding interface (matches backend endpoint shape)

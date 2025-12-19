@@ -48,6 +48,55 @@ class UnifiedReference(BaseModel):
     ] = None  # "full_text" | "abstract" - what was used for extraction
 
 
+class SearchContext(BaseModel):
+    """Flat search context payload sent by the search wizard."""
+
+    research_question: str
+    population: List[str] = Field(default_factory=list)
+    outcome: List[str] = Field(default_factory=list)
+    screening_factors: List[str] = Field(default_factory=list)
+    sources: List[str] = Field(default_factory=list)
+    geography: List[str] = Field(default_factory=list)
+    time_preset: Optional[str] = None
+    time_from: Optional[str] = None
+    time_to: Optional[str] = None
+    max_results: Optional[int] = None
+    additional_questions: List[str] = Field(default_factory=list)
+
+
+# Search wizard API request/response schemas
+class PopulationOptionsRequest(BaseModel):
+    research_question: str
+    max_options: int = 3
+
+
+class PopulationOptionsResponse(BaseModel):
+    research_question: str
+    population_options: List[str]  # Ordered from broad to narrow
+
+
+class OutcomeOptionsRequest(BaseModel):
+    research_question: str
+    max_options: int = 3
+
+
+class OutcomeOptionsResponse(BaseModel):
+    research_question: str
+    outcome_options: List[str]  # Ordered from broad to narrow
+
+
+class AdditionalQuestionsRequest(BaseModel):
+    research_question: str
+    population_selected: List[str] = []
+    outcome_selected: List[str] = []
+    max_questions: int = 2
+
+
+class AdditionalQuestionsResponse(BaseModel):
+    research_question: str
+    additional_questions: List[str]
+
+
 class RunConfig(BaseModel):
     query: str
     sources: List[str] = Field(default_factory=lambda: ["openalex", "overton"])
@@ -61,17 +110,12 @@ class RunConfig(BaseModel):
     use_abstracts_only: bool = False
     # Chat interface specific parameters
     geography_filter: Optional[List[str]] = None  # Countries/regions to filter by
-    access_types: Optional[List[str]] = None  # ["academic", "thinkTank", "government"]
     sub_questions: Optional[
         List[str]
-    ] = None  # Additional questions to include in screening
+    ] = None  # Additional questions to include in screening (deprecated - step skipped)
     use_interim_storage: bool = True
-    # Chat interface specific parameters
-    geography_filter: Optional[List[str]] = None  # Countries/regions to filter by
-    access_types: Optional[List[str]] = None  # ["academic", "thinkTank", "government"]
-    sub_questions: Optional[
-        List[str]
-    ] = None  # Additional questions to include in screening
+    # New search wizard context
+    search_context: Optional[SearchContext] = None
 
 
 class RunResult(BaseModel):
@@ -84,4 +128,7 @@ class RunResult(BaseModel):
     extractions_json_path: Optional[
         str
     ] = None  # Single consolidated extractions JSON file
-    boolean_query: Optional[str] = None  # Generated boolean query used for search
+    boolean_queries: Optional[
+        List[str]
+    ] = None  # Generated boolean queries used for search (list for multi-query support)
+    semantic_query: Optional[str] = None  # Generated semantic query used for Overton

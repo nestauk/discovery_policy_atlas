@@ -892,7 +892,7 @@ export default function AnalysisResultsPage() {
         {effectiveProjectId && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
             <div className="px-6 pt-4">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="!grid w-full grid-cols-3">
                 <TabsTrigger value="summary" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   Summary
@@ -949,7 +949,17 @@ export default function AnalysisResultsPage() {
                   )}
                   {summaryData && (
                     <div className="space-y-8">
-                      <ExecutiveBriefing briefing={summaryData.executive_briefing} />
+                      <ExecutiveBriefing 
+                        briefing={summaryData.executive_briefing}
+                        structuredBriefing={summaryData.structured_briefing}
+                        citationMap={summaryData.citation_map}
+                        evidenceCoverage={summaryData.evidence_coverage}
+                        onCitationClick={() => {
+                          // Navigate to evidence tab and highlight the document
+                          setActiveTab('evidence');
+                          setEvidenceSubTab('documents');
+                        }}
+                      />
                       <ProjectCharts projectId={effectiveProjectId} projectTitle={activeProject?.title} />
                     </div>
                   )}

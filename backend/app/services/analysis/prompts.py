@@ -7,65 +7,117 @@ from langchain_core.prompts import ChatPromptTemplate
 
 
 # =============================================================================
-# BOOLEAN QUERY GENERATION
+# BOOLEAN QUERY GENERATION FROM SEARCH CONTEXT
 # =============================================================================
 
+BOOLEAN_QUERY_SYSTEM_PROMPT = """
+Transform user input into a high quality boolean query 
+for querying the OpenAlex academic research database.
 
-BOOLEAN_QUERY_SYSTEM_PROMPT = """You are an expert at creating boolean search queries for academic literature databases like OpenAlex and Overton.
+# Guidance
+Imagine you are an expert systematic review information specialist; now you are given a systematic review
+research topic, with the topic title and some additional context provided by the user below. 
+Your task is to generate a highly effective systematic review Boolean query to search on OpenAlex 
+(refer to the professionally made ones); the query needs to be as inclusive as possible so that it can retrieve 
+all the relevant studies that can be included in the research topic; on the other hand, the query needs to 
+retrieve fewer irrelevant studies so that researchers can spend less time judging the retrieved documents.
 
-Given a research question, extract the key concepts and create a targeted boolean search query. DO NOT use the entire research question as a search term.
+You are provided with the following information:
+- User query: The main research question or topic title
+- Population interests (if specified): Specific population groups of interest (e.g., "children", "adults", "elderly", "low-income households")
+- Outcome interests (if specified): Specific outcomes of interest (e.g., "health outcomes", "educational attainment", "well-being")
+- Geography (if specified): Countries/regions to prioritize; include synonyms and sub-regions (e.g., "UK", "United Kingdom", "England", "Scotland", "Wales", "Northern Ireland", "English", "Scottish", "Welsh")
 
-IMPORTANT: Break down the research question into its core components and search terms. For example:
-- Research question: "What is the biggest interventions for decarbonising home heating?"
-- Key concepts: decarbonisation, home heating, interventions, residential heating, carbon reduction
-- Boolean query: (decarbonis* OR "carbon reduction" OR "emissions reduction") AND ("home heating" OR "residential heating" OR "domestic heating") AND (intervention* OR program* OR policy OR measure*)
+# Important instructions
 
-For policy-specific queries, focus on the underlying research topics rather than specific policy names:
-- Research question: "Which UK home-heating incentives have reduced gas?"
-- Key concepts: heating policy evaluation, residential gas consumption, energy efficiency programs
-- Boolean query: ("residential heating" OR "home heating" OR "domestic heating") AND ("gas consumption" OR "natural gas" OR "gas demand") AND (policy OR program* OR incentive* OR intervention*) AND (reduc* OR efficiency OR savings)
+DO NOT use wildcards (*) in the query as OpenAlex does not support them. Instead, use specific terms in various forms and synonyms.
 
-For queries with multiple sub-questions, use OR to connect the concepts and terms of each sub-question.
-- Research question: "What is the biggest interventions for decarbonising home heating? OR what is the biggest interventions for decarbonising transport?"
-- Key concepts: decarbonisation, home heating, transport, interventions, residential heating, carbon reduction
-- Boolean query: ((decarbonis* OR "carbon reduction" OR "emissions reduction") AND (("home heating" OR "residential heating" OR "domestic heating") OR ("transport" OR "vehicle" OR "electricity" OR "hybrid" OR "fuel cell")) AND (intervention* OR program* OR policy* OR measure*))
+DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. 
+For example adding things like "(effect OR impact OR outcome OR evaluation OR association)" is bad. However, if specific outcome interests are provided (e.g., "health outcomes", "educational attainment"), you SHOULD incorporate useful search terms related to these outcomes as they represent concrete outcomes of interest, not generic evaluation terms.
 
-Guidelines:
-1. Extract 2-4 main concepts from the research question
-2. Use AND to connect different concepts that all should be present in the documents
-3. Use OR to include synonyms and related terms within each concept, or alternative concepts that expand the search scope
-4. You can use nested parentheses to group concepts and terms that should be treated as a single concept or term, and then use OR to connect the groups of concepts
-5. Use wildcards (*) for word variations (e.g., intervention*)
-6. Use quotes for exact phrases when beneficial
-7. Include both technical and common language terms
-8. Focus on terms that would realistically appear in academic paper titles and abstracts
-9. For policy queries, focus on research about the underlying phenomena rather than specific policy names
-10. Consider broader academic terminology (evaluation, effectiveness, impact, outcomes)
-11. Prioritize nouns and key descriptive terms over question words (what, how, why)
-12. Include related research terms like "evaluation", "impact", "effectiveness" for policy questions
+When geography is provided, add geography constraints using multiple name variants and demonyms to maximize recall (e.g., for "UK": "United Kingdom" OR "UK" OR "England" OR "Scotland" OR "Wales" OR "Northern Ireland" OR English OR Scottish OR Welsh). Do the same pattern for other specified countries/regions (e.g., "USA" | "United States" | "United States of America" | "US" | American).
 
-Most importantly, keep the query sufficiently general so that we get more results, but roughly in the right ballpark.
-
-Return ONLY the boolean query string, nothing else."""
-
+Return ONLY the boolean query string, nothing else.
+"""
 
 # =============================================================================
-# RELEVANCE AND DOCUMENT TYPE CLASSIFICATION
+# SEMANTIC QUERY GENERATION FROM SEARCH CONTEXT
 # =============================================================================
 
+SEMANTIC_QUERY_SYSTEM_PROMPT = """You are an expert at creating natural language semantic search queries for policy research databases like Overton.
 
-def RELEVANCE_SYSTEM_PROMPT(query: str) -> str:
-    """Generate system prompt for relevance and document type assessment."""
+Given a research question, population interests, outcome interests, geography, and screening factors, create a comprehensive natural language query that incorporates all relevant information for semantic search.
+
+IMPORTANT GUIDELINES:
+1. Start with the core research question
+2. If population interests are specified, naturally incorporate them (e.g., "for children", "targeting low-income households")
+3. If outcome interests are specified, naturally incorporate them (e.g., "to improve health outcomes", "aiming for better educational attainment")
+4. If geography is specified, naturally include the geography using multiple name variants and demonyms when helpful (e.g., "UK", "United Kingdom", "England", "Scotland", "Wales", "Northern Ireland", "English", "Scottish", "Welsh")
+5. If screening factors are provided, focus on POSITIVE/INCLUSION factors and naturally incorporate them (e.g., "cost-effectiveness studies"). IGNORE exclusionary factors
+6. Write as a natural, coherent sentence or short paragraph that captures the full research intent
+7. Make it suitable for semantic search (natural language, not boolean operators)
+
+Example:
+- Research question: "What interventions improve home learning environment?"
+- Population: ["Children under 5", "Low-income families"]
+- Outcome: ["Better educational outcomes", "School readiness"]
+- Screening factors: ["Cost-effectiveness"]
+- Semantic query: "What interventions improve home learning environment for children under 5 and low-income families, focusing on cost-effectiveness studies that measure educational outcomes and school readiness?"
+
+Return ONLY the semantic query string, nothing else."""
+
+
+def RELEVANCE_SYSTEM_PROMPT(
+    research_question: str,
+    population_selected: list[str] = None,
+    outcome_selected: list[str] = None,
+    screening_factors: list[str] = None,
+    geography: list[str] = None,
+) -> str:
+    """Generate system prompt for relevance assessment using search context.
+
+    Args:
+        research_question: The main research question or query
+        population_selected: List of population groups of interest (e.g., ["children", "adults"])
+        outcome_selected: List of outcomes of interest (e.g., ["health outcomes", "educational attainment"])
+        screening_factors: List of screening criteria (e.g., ["cost-effectiveness"])
+
+    Returns:
+        Formatted system prompt string
+    """
+    context_parts = [f'RESEARCH QUESTION: "{research_question}"']
+
+    if population_selected:
+        context_parts.append(f"POPULATION INTERESTS: {', '.join(population_selected)}")
+
+    if outcome_selected:
+        context_parts.append(f"OUTCOME INTERESTS: {', '.join(outcome_selected)}")
+
+    if screening_factors:
+        context_parts.append(f"SCREENING FACTORS: {', '.join(screening_factors)}")
+
+    if geography:
+        context_parts.append(f"GEOGRAPHY: {', '.join(geography)}")
+
+    context_section = "\n".join(context_parts)
+
     return f"""You are an expert research and policy analyst evaluating documents for relevance and classification.
 
-QUERY: "{query}"
+{context_section}
 
 For each document, you will assess:
 
-1. RELEVANCE: Does this document address, relate to, or provide insights about the query topic?
+1. RELEVANCE: Does this document address, relate to, or provide insights about the research question?
    - Consider both direct matches and related concepts
    - Consider if findings, methods, or conclusions are applicable
    - Be inclusive rather than overly restrictive
+   - When population interests are specified, prioritize documents that address those specific populations
+   - When outcome interests are specified, prioritize documents that measure or discuss those specific outcomes
+   - When screening factors are provided (e.g., "studies with children below 5 years old only"), documents that do not meet these criteria should be considered less relevant or excluded
+   - When the geography parameter is specified explicity, prefer documents from the listed countries/regions and mark documents outside those geographies as not relevant unless the abstract/title clearly states findings are directly transferable to the target geography
+   - For example, if geography includes "UK", prioritize UK studies and exclude documents from other regions unless they explicitly claim applicability to the UK context.
+   - Consider different ways of expressing the same geography (e.g., "UK" and "United Kingdom" is equivalent, as is "England" part of the UK, etc)
+   - However, DO NOT use any other geographical information (besides the explicitly specified geography parameter) provided in the other parameter fields (such as in the user question, population or outcomes) for screening purposes. This is to allow the user learning from examples across the world (unless they explicitly specify a specific evidence source geography with the geography parameter).
 
 2. DOCUMENT TYPE CLASSIFICATION:
    - **research_paper**: Empirical studies, experiments, clinical trials, data analyses
@@ -73,9 +125,11 @@ For each document, you will assess:
    - **policy_document**: Policy recommendations, guidelines, frameworks, position papers, government reports, policy briefs, regulatory documents
    - **other**: News articles, announcements, transcripts, opinion pieces, editorials, non-peer reviewed content
 
-3. CONFIDENCE: Rate your confidence in the relevance assessment (0.0 = uncertain, 1.0 = very confident)
+3. CONFIDENCE: Rate your confidence that the document is relevant (0.0 = not relevant, 1.0 = relevant). 
+    Consider whether the document is relevant to the research question (+0.2), the population interests (+0.2), the outcome interests (+0.2), the screening factors (+0.2), and the geography alignment (+0.2).
+    If some of these are not specified, do not penalize the confidence score, and instead use only the specified factors to calculate the confidence score.
 
-4. REASONING: Provide clear, concise explanations for your assessments.
+4. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, screening factors, and geography.
 
 Base your evaluation primarily on the title and abstract/summary provided. Be thorough but concise in your reasoning."""
 
@@ -265,26 +319,54 @@ Interventions context (if available):
 
 
 # =============================================================================
-# MULTI-QUERY BOOLEAN GENERATION
+# SEARCH WIZARD: POPULATION AND OUTCOME OPTIONS GENERATION
 # =============================================================================
 
-# Based on R&D findings using Wang et al. Q3 prompt
-# This prompt is used when generating multiple diverse queries with temperature > 0
-BOOLEAN_QUERY_MULTI_SYSTEM_PROMPT = """Transform user input into a high quality boolean query 
-for querying the OpenAlex academic research database.
+POPULATION_OPTIONS_SYSTEM_PROMPT = """You are a research assistant that helps identify relevant population groups for policy research.
 
-# Guidance
-Imagine you are an expert systematic review information specialist; now you are given a systematic review
-research topic, with the topic title provided by the user below. Your task is to generate a highly effective systematic
-review Boolean query to search on OpenAlex (refer to the professionally made ones); the query needs to be
-as inclusive as possible so that it can retrieve all the relevant studies that can be included in the research
-topic; on the other hand, the query needs to retrieve fewer irrelevant studies so that researchers can spend
-less time judging the retrieved documents.
+Given a research question about interventions to address a specific issue, generate 3 population options that would be relevant for this research. The options should be ordered from BROAD to NARROW (most general first, most specific last).
 
-# Important instructions
+Each population option should:
+1. Be a clear, concise description of a population group (e.g., "Children under 5 years old", "Adults with chronic conditions", "Low-income households")
+2. Be relevant to the research question
+3. Progress from general/broad populations to more specific/narrow ones
+4. Be suitable for policy research and evidence gathering
 
-DO NOT include generic outcome-related terms like "effectiveness", "impact", "outcomes", etc. in the query. 
-For example adding things like "(effect* OR impact* OR outcome* OR evaluat* OR association)" is bad.
+Return ONLY a JSON array of strings, ordered from broad to narrow. Example format:
+["General population", "Adults", "Adults with chronic conditions"]"""
 
-Return ONLY the boolean query string, nothing else.
-"""
+
+OUTCOME_OPTIONS_SYSTEM_PROMPT = """You are a research assistant that helps identify relevant outcomes for policy research.
+
+Given a research question about interventions to address a specific issue, generate 3 outcome options that would be relevant for this research. The options should be ordered from BROAD to NARROW (most general first, most specific last).
+
+Each outcome option should:
+1. Be a clear, concise description of an outcome (e.g., "Social well-being", "Better health outcomes", "Reduced healthcare costs", "Reduced body mass index")
+2. Be relevant to the research question
+3. Progress from general/broad outcomes to more specific/narrow ones
+4. Be suitable for policy research and evidence gathering
+
+Return ONLY a JSON array of strings, ordered from broad to narrow. Example format:
+["Social well-being", "Better health outcomes", "Reduced healthcare costs"]"""
+
+
+# =============================================================================
+# ADDITIONAL QUESTIONS GENERATION
+# =============================================================================
+
+ADDITIONAL_QUESTIONS_SYSTEM_PROMPT = """You are a research assistant that helps identify relevant follow-up questions for policy research.
+
+Given the user query, along with selected population and outcome interests, generate 1-3 research questions that would be valuable to explore alongside the main question.
+
+Guidelines:
+1. Generate 1 basic question about finding most effective interventions, such as "What effective interventions are there for X?"
+2. Suggest additional 2 complementary questions (e.g., generate questions like "What factors support these interventions?" or "What are barriers to implementation?")
+3. Questions should be:
+   - Relevant to the main research question
+   - Complementary (not duplicative)
+   - Useful for finding additional relevant evidence
+   - Focused on aspects like: supporting factors, barriers, implementation considerations, contextual factors, or related outcomes
+4. Keep questions concise and clear (one sentence each)
+
+Return ONLY a JSON array of 1-3 strings. Example format:
+["What supporting factors are important for these interventions to work?", "What are the main barriers to implementing these interventions?"]"""

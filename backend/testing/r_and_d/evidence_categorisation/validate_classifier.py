@@ -5,6 +5,7 @@ Compares LLM predictions against human-labeled ground truth and calculates
 comprehensive performance metrics.
 """
 
+import json
 import pandas as pd
 from pathlib import Path
 import logging
@@ -443,6 +444,18 @@ def main(
     output_path = Path(output_report)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(report_lines))
+
+    # Save metrics as JSON for programmatic access
+    metrics_json = {
+        **metrics,
+        "confidence_correct": confidence_analysis["correct_mean_confidence"],
+        "confidence_incorrect": confidence_analysis["incorrect_mean_confidence"],
+        "correct_count": confidence_analysis["correct_count"],
+        "incorrect_count": confidence_analysis["incorrect_count"],
+    }
+    json_path = output_path.with_suffix(".json")
+    json_path.write_text(json.dumps(metrics_json, indent=2))
+    logger.info(f"Metrics saved to: {json_path}")
 
     logger.info("\n✓ Validation complete!")
 

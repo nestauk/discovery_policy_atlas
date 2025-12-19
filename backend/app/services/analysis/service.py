@@ -58,17 +58,28 @@ class AnalysisService:
         monitor.start()
         monitor.log_snapshot("Pipeline start")
 
-        # Create unique subfolder for this run
-        run_export_dir = self.export_dir / f"run_{run_id}"
+        # Create unique subfolder for this run with readable date/time format
+        # Extract uuid_part from run_id to ensure they match
+        uuid_part_from_run_id = run_id[-4:]  # Last 4 chars are the uuid_part
+        now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H-%M-%S")
+        run_folder_name = f"run_{date_str}_{time_str}_{uuid_part_from_run_id}"
+        run_export_dir = self.export_dir / run_folder_name
         run_export_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Created run directory: %s", run_export_dir)
 
         # Step 1: build references
         with StageTimer(monitor, "references"):
             references_service = ReferencesService(export_dir=str(run_export_dir))
+            search_context_dict = (
+                config.search_context.model_dump() if config.search_context else None
+            )
+
             (
                 references_csv,
-                generated_boolean_query,
+                generated_boolean_queries,
+                generated_semantic_query,
             ) = await references_service.build_references(
                 query=config.query,
                 sources=config.sources,
@@ -80,6 +91,7 @@ class AnalysisService:
                 geography_filter=config.geography_filter,
                 project_id=project_id,
                 user_id=user_id,
+                search_context=search_context_dict,
             )
 
         # Count rows
@@ -101,11 +113,18 @@ class AnalysisService:
         if config.relevance_enabled:
             with StageTimer(monitor, "relevance"):
                 logger.info("Run %s starting relevance checking", run_id)
+                search_context_dict = (
+                    config.search_context.model_dump()
+                    if config.search_context
+                    else None
+                )
+
                 relevance_service = RelevanceService(
                     query=config.query,
                     export_dir=str(run_export_dir),
                     project_id=project_id,
                     user_id=user_id,
+                    search_context=search_context_dict,
                 )
                 references_csv = await relevance_service.check_relevance(
                     str(references_csv)
@@ -226,7 +245,8 @@ class AnalysisService:
             relevant_references=relevant_references,
             references_csv_path=str(references_csv),
             extractions_json_path=consolidated_json_path,
-            boolean_query=generated_boolean_query,
+            boolean_queries=generated_boolean_queries,
+            semantic_query=generated_semantic_query,
         )
 
         # Store results in Supabase and optionally clean up files

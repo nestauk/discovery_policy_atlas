@@ -8,6 +8,7 @@ import pandas as pd
 import asyncio
 
 from app.core.auth import get_current_user, CurrentUser
+from app.services.search_wizard import SearchWizardService
 from app.services.vectorization import vectorization_service
 from app.services.chatbot import ChatRequest, ChatResponse
 from app.services.chatbot.chat_service import chatbot_service
@@ -17,17 +18,22 @@ from app.services.synthesis.schemas import (
     ThematicGroup,
     EvidenceItem,
 )
-from app.services.synthesis.service import SynthesisService
+from app.services.synthesis.findings import get_findings
 from app.services.synthesis.logbook import read_cached_summary
 from app.utils.geography import COUNTRY_NAME_TO_CODE, COUNTRY_CODE_TO_NAME
 from app.services.download import download_service
+from app.services.analysis.schemas import (
+    PopulationOptionsRequest,
+    PopulationOptionsResponse,
+    OutcomeOptionsRequest,
+    OutcomeOptionsResponse,
+    AdditionalQuestionsRequest,
+    AdditionalQuestionsResponse,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
-
-
-# END-I - INFO REGION END
 
 
 # END-I - INFO REGION END
@@ -558,17 +564,27 @@ async def run_analysis_for_project(
                 status_code=400, detail="Query is required for analysis"
             )
 
-        # Map access_types to appropriate sources
-        access_types = request.get("access_types", [])
-        sources = []
-        if "academic" in access_types:
-            sources.append("openalex")
-        if "policy" in access_types:
-            sources.append("overton")
+        # Extract search_context if provided (from new wizard)
+        search_context = None
+        if request.get("search_context"):
+            from app.services.analysis.schemas import SearchContext
 
-        # Fallback to default sources if none specified
+            try:
+                search_context = SearchContext(**request["search_context"])
+            except Exception as e:
+                logger.warning(f"Failed to parse search_context: {e}")
+
+        # Get sources - prefer from search_context, fallback to request
+        sources = search_context.sources if search_context else []
         if not sources:
             sources = request.get("sources", ["openalex", "overton"])
+
+        limit_value = request.get(
+            "limit",
+            search_context.max_results if search_context else 200,
+        )
+        if limit_value is None:
+            limit_value = 200
 
         config = RunConfig(
             query=query,
@@ -576,7 +592,7 @@ async def run_analysis_for_project(
             date_from=request.get("date_from")
             or request.get("since"),  # Support both chat and legacy formats
             date_to=request.get("date_to") or request.get("until"),
-            limit=int(request.get("limit", 200)),
+            limit=int(limit_value),
             screening_enabled=bool(request.get("screening", False)),
             relevance_enabled=bool(request.get("relevance_enabled", True)),
             retrieval_mode=request.get("mode", "semantic"),
@@ -584,30 +600,49 @@ async def run_analysis_for_project(
             use_abstracts_only=bool(request.get("use_abstracts_only", False)),
             # Chat interface parameters
             geography_filter=request.get("geography_filter"),
-            access_types=access_types,
             sub_questions=request.get("sub_questions"),
+            # New search wizard context
+            search_context=search_context,
         )
 
         # Prepare search query metadata to save with the project
-        search_query_data = {
-            "original_query": query,
-            "sub_questions": request.get("sub_questions", []),
-            "sources": sources,
-            "access_types": access_types,
-            "geography_filter": request.get("geography_filter", []),
-            "time_preset": request.get("time_preset"),
-            "time_from": config.date_from,
-            "time_to": config.date_to,
-            "limit": config.limit,
-            "mode": config.retrieval_mode,
-            "scope": request.get("scope", []),
-            "custom_focus": request.get("custom_focus", []),
-            "excludes": request.get("excludes", []),
-            "custom_excludes": request.get("custom_excludes", []),
-            "relevance_enabled": config.relevance_enabled,
-            "use_abstracts_only": config.use_abstracts_only,
-            "boolean_query": None,  # Will be filled in after generation
-        }
+        if search_context:
+            ctx = search_context.model_dump()
+            search_query_data = {
+                **ctx,
+                "limit": ctx.get("max_results", config.limit),
+                "mode": config.retrieval_mode,
+                "relevance_enabled": config.relevance_enabled,
+                "use_abstracts_only": config.use_abstracts_only,
+                "boolean_queries": None,
+                "semantic_query": None,
+            }
+            # Ensure optional fields are populated for storage consistency
+            search_query_data.setdefault("sources", sources)
+            search_query_data.setdefault(
+                "geography", request.get("geography_filter", [])
+            )
+            search_query_data.setdefault("time_from", config.date_from)
+            search_query_data.setdefault("time_to", config.date_to)
+        else:
+            # Fallback for legacy requests without search_context
+            search_query_data = {
+                "research_question": query,
+                "population": [],
+                "outcome": [],
+                "screening_factors": [],
+                "sources": sources,
+                "geography": request.get("geography_filter", []),
+                "time_preset": request.get("time_preset"),
+                "time_from": config.date_from,
+                "time_to": config.date_to,
+                "limit": config.limit,
+                "mode": config.retrieval_mode,
+                "relevance_enabled": config.relevance_enabled,
+                "use_abstracts_only": config.use_abstracts_only,
+                "boolean_queries": None,
+                "semantic_query": None,
+            }
 
         # Update project status to running (async to avoid blocking)
         loop = asyncio.get_event_loop()
@@ -628,8 +663,9 @@ async def run_analysis_for_project(
             user_name=current_user.name,
         )
 
-        # Update search query data with the generated boolean query
-        search_query_data["boolean_query"] = result.boolean_query
+        # Update search query data with the generated queries
+        search_query_data["boolean_queries"] = result.boolean_queries
+        search_query_data["semantic_query"] = result.semantic_query
 
         # Update project with analysis results but keep status as "running" (async to avoid blocking)
         await loop.run_in_executor(
@@ -1323,10 +1359,9 @@ async def get_detailed_findings(
     ),
     issue_theme: Optional[str] = Query(None, description="Filter by issue label/theme"),
 ):
-    """Get flattened findings via service layer."""
+    """Get flattened findings for an intervention or issue."""
     try:
-        service = SynthesisService()
-        return await service.get_findings(
+        return await get_findings(
             project_id,
             intervention_name=intervention_name,
             issue_theme=issue_theme,
@@ -2252,3 +2287,78 @@ async def save_project_feedback(
     except Exception as e:
         logger.error(f"Error saving feedback for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to save project feedback")
+
+
+@router.post("/generate-population-options", response_model=PopulationOptionsResponse)
+async def generate_population_options(
+    request: PopulationOptionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate population options for a research question using AI, ordered from broad to narrow"""
+    service = SearchWizardService()
+    population_options = await service.generate_population_options(
+        research_question=request.research_question,
+        max_options=request.max_options,
+        user_id=current_user.user_id,
+    )
+
+    if not population_options:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate population options"
+        )
+
+    return PopulationOptionsResponse(
+        research_question=request.research_question,
+        population_options=population_options,
+    )
+
+
+@router.post("/generate-outcome-options", response_model=OutcomeOptionsResponse)
+async def generate_outcome_options(
+    request: OutcomeOptionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate outcome options for a research question using AI, ordered from broad to narrow"""
+    service = SearchWizardService()
+    outcome_options = await service.generate_outcome_options(
+        research_question=request.research_question,
+        max_options=request.max_options,
+        user_id=current_user.user_id,
+    )
+
+    if not outcome_options:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate outcome options"
+        )
+
+    return OutcomeOptionsResponse(
+        research_question=request.research_question, outcome_options=outcome_options
+    )
+
+
+@router.post(
+    "/generate-additional-questions", response_model=AdditionalQuestionsResponse
+)
+async def generate_additional_questions(
+    request: AdditionalQuestionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate additional research questions based on the main question, population, and outcome"""
+    service = SearchWizardService()
+    additional_questions = await service.generate_additional_questions(
+        research_question=request.research_question,
+        population_selected=request.population_selected,
+        outcome_selected=request.outcome_selected,
+        max_questions=request.max_questions,
+        user_id=current_user.user_id,
+    )
+
+    if not additional_questions:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate additional questions"
+        )
+
+    return AdditionalQuestionsResponse(
+        research_question=request.research_question,
+        additional_questions=additional_questions,
+    )

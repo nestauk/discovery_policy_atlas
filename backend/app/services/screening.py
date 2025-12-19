@@ -4,6 +4,7 @@ import os
 import asyncio
 from datetime import datetime
 from app.utils.llm import batch_check
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,7 @@ class ScreeningService:
     ):
         """Run the batch processor synchronously"""
         processor = batch_check.LLMProcessor(
+            model_name=settings.SCREENING_MODEL,
             output_path=output_path,
             system_message=self.system_message,
             session_name=session_name,

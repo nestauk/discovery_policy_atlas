@@ -120,6 +120,17 @@ class Settings(BaseSettings):
     BOOLEAN_QUERY_N_RUNS: int = 5  # Number of queries to generate in multi mode
     BOOLEAN_QUERY_MODEL: str = "gpt-4.1"  # Model for query generation
 
+    # Search Wizard Settings
+    SEARCH_WIZARD_MODEL: str = (
+        "gpt-4.1-mini"
+    )  # Model for search wizard (population/outcome options, additional questions)
+
+    # Screening/Relevance Settings
+    SCREENING_MODEL: str = "gpt-4.1-mini"  # Model for screening and relevance checking
+    OPENALEX_ENABLE_RCT_SYSREV_FANOUT: (
+        bool
+    ) = True  # Fan out RCT/systematic review variants
+
     # Batch Processing Settings
     BATCH_SIZE_SCREENING: int = 5
     BATCH_SIZE_EXTRACTION: int = 5  #
