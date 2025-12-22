@@ -11,6 +11,7 @@ from datetime import datetime
 from .schemas import RunConfig, RunResult
 from .references import ReferencesService
 from .relevance import RelevanceService
+from .evidence_category import EvidenceCategoryService
 from .acquire import AcquisitionService
 from .parse import ParsingService
 from .normalize import normalize_text
@@ -28,8 +29,9 @@ class AnalysisService:
 
     Pipeline steps:
     1. References ingestion and normalization
-    1.5. Relevance checking and document type classification
-    2. Acquisition (download PDFs/HTML) - filtered to relevant documents only
+    1.5. Relevance checking
+    1.75. Evidence categorisation (9-category hierarchy)
+    2. Acquisition (download PDFs/HTML) - filtered to relevant evidence docs
     3. Parsing and normalization
     4. Extraction using LangChain workflow
 
@@ -153,6 +155,20 @@ class AnalysisService:
                 relevant_references,
                 total_references,
             )
+
+            # Step 1.75: Evidence categorisation (only for relevant documents)
+            with StageTimer(monitor, "evidence_categorisation"):
+                logger.info("Run %s starting evidence categorisation", run_id)
+                evidence_service = EvidenceCategoryService(
+                    export_dir=str(run_export_dir),
+                    project_id=project_id,
+                    user_id=user_id,
+                    model=settings.EVIDENCE_CATEGORY_MODEL,
+                )
+                references_csv = await evidence_service.categorise_documents(
+                    str(references_csv)
+                )
+                logger.info("Run %s completed evidence categorisation", run_id)
 
             # STEPWISE UPLOAD: Store initial documents after screening
             if project_id:
@@ -421,6 +437,12 @@ class AnalysisService:
                 "top_line": self._safe_str(row.get("top_line")),
                 "document_type": self._safe_str(row.get("document_type")),
                 "document_type_reason": self._safe_str(row.get("document_type_reason")),
+                # Evidence categorisation fields
+                "evidence_category": self._safe_str(row.get("evidence_category")),
+                "evidence_confidence": self._safe_float(row.get("evidence_confidence")),
+                "evidence_category_reasoning": self._safe_str(
+                    row.get("evidence_category_reasoning")
+                ),
                 # Essential fields: citation count and source country
                 "cited_by_count": self._safe_int(row.get("cited_by_count")),
                 "source_country": self._safe_str(row.get("source_country")),

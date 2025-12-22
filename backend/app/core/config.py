@@ -127,6 +127,9 @@ class Settings(BaseSettings):
 
     # Screening/Relevance Settings
     SCREENING_MODEL: str = "gpt-4.1-mini"  # Model for screening and relevance checking
+    EVIDENCE_CATEGORY_MODEL: (
+        str
+    ) = "gpt-5.2"  # Model for evidence categorisation (needs higher accuracy)
     OPENALEX_ENABLE_RCT_SYSREV_FANOUT: (
         bool
     ) = True  # Fan out RCT/systematic review variants
