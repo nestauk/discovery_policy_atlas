@@ -176,6 +176,10 @@ class EvidenceCoverageSnapshot(BaseModel):
     source_types: Dict[str, int] = Field(
         default_factory=dict, description="Academic, Government, NGO, etc."
     )
+    evidence_categories: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Evidence type distribution: Systematic Review, RCT, Observational, etc.",
+    )
     countries: Dict[str, int] = Field(default_factory=dict)
     years: Dict[int, int] = Field(default_factory=dict)
     overall_strength: str = Field("Unknown", description="High | Moderate | Low")

@@ -1,10 +1,13 @@
 """
-Relevance and document type classification service for the analysis pipeline.
+Relevance classification service for the analysis pipeline.
 
 This service evaluates documents based on title and abstract to determine:
 1. Relevance to the user's query
-2. Document type classification (research paper, policy document, other)
-3. Confidence scores and reasoning
+2. Confidence scores and reasoning
+3. Top-line summary
+
+Note: Document type/evidence categorisation is now handled separately by
+EvidenceCategoryService after relevance filtering.
 
 Based on the screening service pattern but optimized for the analysis workflow.
 """
@@ -24,11 +27,11 @@ logger = logging.getLogger(__name__)
 
 class RelevanceService:
     """
-    Service for determining document relevance and type classification.
+    Service for determining document relevance.
 
     Evaluates documents using title and abstract against the user query to:
     - Determine relevance (boolean + confidence + reasoning)
-    - Classify document type (research_paper | policy_document | other)
+    - Generate top-line summary
     """
 
     def __init__(
@@ -86,16 +89,6 @@ class RelevanceService:
                 "name": "top_line",
                 "type": "str",
                 "description": "A concise, one-sentence top line summary with 15 words max, that clearly states the main takeaway or insight as it directly answers the research question or search query. Use clear, declarative language without introductory phrases (e.g. avoid 'This document outlines...'). Focus on delivering the core message or conclusion in plain terms, as if highlighting the key point for an executive summary.",
-            },
-            {
-                "name": "document_type",
-                "type": "str",
-                "description": "Document type classification: 'research_paper' for studies/experiments/trials/data analyses, 'reviews' for reviews/meta-analyses/systematic reviews, 'policy_document' for policy recommendations/guidelines/frameworks, or 'other' for announcements/transcripts/opinion pieces",
-            },
-            {
-                "name": "document_type_reason",
-                "type": "str",
-                "description": "Brief explanation (1 sentence) of why the document was classified as this type",
             },
         ]
 
@@ -179,8 +172,6 @@ class RelevanceService:
                     "relevance_confidence": row.get("relevance_confidence", 0.0),
                     "relevance_reason": row.get("relevance_reason", ""),
                     "top_line": row.get("top_line", ""),
-                    "document_type": row.get("document_type", "other"),
-                    "document_type_reason": row.get("document_type_reason", ""),
                 }
 
         # Add relevance fields to references DataFrame
@@ -189,8 +180,6 @@ class RelevanceService:
             "relevance_confidence",
             "relevance_reason",
             "top_line",
-            "document_type",
-            "document_type_reason",
         ]:
             references_df[field] = None
 
@@ -206,8 +195,6 @@ class RelevanceService:
                 references_df.at[idx, "relevance_confidence"] = 0.0
                 references_df.at[idx, "relevance_reason"] = "Not processed"
                 references_df.at[idx, "top_line"] = "Not processed"
-                references_df.at[idx, "document_type"] = "other"
-                references_df.at[idx, "document_type_reason"] = "Not processed"
 
         return references_df
 
@@ -257,8 +244,6 @@ class RelevanceService:
                 "relevance_confidence": 0.0,
                 "relevance_reason": "",
                 "top_line": "",
-                "document_type": "other",
-                "document_type_reason": "",
             }
 
             for col, default_value in expected_defaults.items():
@@ -282,8 +267,6 @@ class RelevanceService:
                     "relevance_confidence",
                     "relevance_reason",
                     "top_line",
-                    "document_type",
-                    "document_type_reason",
                 ]
             )
 

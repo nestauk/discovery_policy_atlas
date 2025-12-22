@@ -315,7 +315,59 @@ After initial backend integration is complete, additional frontend updates neede
 
 ### Phase 5: Testing
 
-#### 5.1 Update Tests
+#### 5.1 Unit Tests for EvidenceCategoryService
+**New file:** `backend/test/test_evidence_category.py`
+
+Unit tests with mocked LLM to verify service logic without API calls:
+
+```python
+class TestEvidenceCategoryService:
+    def test_filter_only_relevant_documents(self):
+        """Ensure only is_relevant=True docs are passed to LLM"""
+
+    def test_csv_merge_logic(self):
+        """Ensure LLM results merge correctly back to source CSV"""
+
+    def test_handles_missing_columns_gracefully(self):
+        """Handle CSVs without is_relevant column (skip filtering)"""
+
+    def test_output_fields_schema(self):
+        """Verify correct field names in output: evidence_category,
+        evidence_confidence, evidence_category_reasoning"""
+
+    def test_valid_category_values(self):
+        """Ensure evidence_category is one of the 9 valid categories"""
+
+    def test_confidence_range(self):
+        """Ensure evidence_confidence is between 0.0 and 1.0"""
+```
+
+#### 5.2 Live End-to-End Test
+**Manual test with minimal query to verify full pipeline integration**
+
+Run a real analysis with a narrow search query (~5-10 documents) and verify:
+
+| Checkpoint | What to Verify |
+|------------|----------------|
+| After relevance | `is_relevant` column exists in CSV |
+| After categorisation | `evidence_category` column exists with valid values |
+| After categorisation | `evidence_confidence` is in range 0.0-1.0 |
+| After categorisation | `evidence_category_reasoning` is populated |
+| Before acquisition | "Other (Non-evidence documents)" filtered out from processing |
+| After acquisition | Only relevant evidence docs were acquired |
+
+**Test query suggestions:**
+- Very specific policy topic with known document types
+- Query that returns mix of systematic reviews, RCTs, and non-evidence docs
+
+**Verification steps:**
+1. Run pipeline with narrow query
+2. Inspect intermediate CSV after Step 1.75 (evidence categorisation)
+3. Verify column schema and value ranges
+4. Confirm acquisition excludes "Other (Non-evidence documents)"
+5. Spot-check a few categorisations manually for reasonableness
+
+#### 5.3 Update Existing Tests
 **Modify:** `backend/test/test_analysis_service.py`
 
 Update debug output to show `evidence_category` instead of `document_type`.
@@ -324,6 +376,7 @@ Update debug output to show `evidence_category` instead of `document_type`.
 
 ### New Files
 - `backend/app/services/analysis/evidence_category.py` - Main service
+- `backend/test/test_evidence_category.py` - Unit tests for EvidenceCategoryService
 
 ### Modified Files (Backend)
 - `backend/app/services/analysis/prompts.py` - Add evidence prompts, simplify relevance
@@ -350,8 +403,8 @@ The evidence categorisation system was rigorously tested in `testing/r_and_d/evi
 - **Prompt variants:** variant_a (baseline), variant_b (strengthened Unknown definition)
 
 ### Key Results
-- **gpt-5.2** achieved highest accuracy (~70-73%) across datasets
-- **gpt-5-mini** showed lower accuracy (~43-60%)
+- **gpt-5.2** achieved highest accuracy (~76%) across datasets
+- **gpt-5-mini** showed lower accuracy (~50%)
 - **variant_a and variant_b** performed similarly with gpt-5.2
 - Confidence scores correlate with correctness (correct predictions have higher confidence)
 

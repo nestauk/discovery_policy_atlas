@@ -37,6 +37,7 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     study_types: Counter = Counter()
     countries: Counter = Counter()
     source_types: Counter = Counter()
+    evidence_categories: Counter = Counter()
 
     for ext in raw_extractions:
         if ext.get("type") == "intervention":
@@ -51,9 +52,13 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     for doc in doc_metadata.values():
         if doc.get("year"):
             years[doc["year"]] += 1
-        # Count source types
-        src_type = normalize_source_type(doc.get("source"), doc.get("document_type"))
+        # Count source types (institutional: Academic, Government, NGO, etc.)
+        src_type = normalize_source_type(doc.get("source"), doc.get("type"))
         source_types[src_type] += 1
+        # Count evidence categories (methodological: Systematic Review, RCT, etc.)
+        ev_cat = doc.get("evidence_category")
+        if ev_cat:
+            evidence_categories[ev_cat] += 1
 
     # Determine strength based on study design quality
     rct_count = sum(c for st, c in study_types.items() if "rct" in st.lower())
@@ -85,6 +90,7 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
         total_sources=len(doc_metadata),
         study_types=filtered_study_types,
         source_types=dict(source_types),
+        evidence_categories=dict(evidence_categories),
         countries=filtered_countries,
         years={int(k): v for k, v in years.items()},
         overall_strength=strength,

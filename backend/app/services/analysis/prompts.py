@@ -101,7 +101,7 @@ def RELEVANCE_SYSTEM_PROMPT(
 
     context_section = "\n".join(context_parts)
 
-    return f"""You are an expert research and policy analyst evaluating documents for relevance and classification.
+    return f"""You are an expert research and policy analyst evaluating documents for relevance.
 
 {context_section}
 
@@ -119,17 +119,11 @@ For each document, you will assess:
    - Consider different ways of expressing the same geography (e.g., "UK" and "United Kingdom" is equivalent, as is "England" part of the UK, etc)
    - However, DO NOT use any other geographical information (besides the explicitly specified geography parameter) provided in the other parameter fields (such as in the user question, population or outcomes) for screening purposes. This is to allow the user learning from examples across the world (unless they explicitly specify a specific evidence source geography with the geography parameter).
 
-2. DOCUMENT TYPE CLASSIFICATION:
-   - **research_paper**: Empirical studies, experiments, clinical trials, data analyses
-   - **reviews**: Reviews, meta-analyses, systematic reviews, and other literature reviews
-   - **policy_document**: Policy recommendations, guidelines, frameworks, position papers, government reports, policy briefs, regulatory documents
-   - **other**: News articles, announcements, transcripts, opinion pieces, editorials, non-peer reviewed content
-
-3. CONFIDENCE: Rate your confidence that the document is relevant (0.0 = not relevant, 1.0 = relevant). 
+2. CONFIDENCE: Rate your confidence that the document is relevant (0.0 = not relevant, 1.0 = relevant).
     Consider whether the document is relevant to the research question (+0.2), the population interests (+0.2), the outcome interests (+0.2), the screening factors (+0.2), and the geography alignment (+0.2).
     If some of these are not specified, do not penalize the confidence score, and instead use only the specified factors to calculate the confidence score.
 
-4. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, screening factors, and geography.
+3. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, screening factors, and geography.
 
 Base your evaluation primarily on the title and abstract/summary provided. Be thorough but concise in your reasoning."""
 
