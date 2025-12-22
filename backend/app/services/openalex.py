@@ -222,6 +222,13 @@ class OpenAlexService:
 
         df = pd.DataFrame(processed_results)
 
+        # Handle empty results
+        if df.empty:
+            if return_n_total:
+                return df, 0
+            else:
+                return df
+
         # Clean up the data
         df["abstract"] = df["abstract"].fillna("No abstract available")
         df["content"] = df["abstract"].str[:1000]  # Limit content to first 1000 chars

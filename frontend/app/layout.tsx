@@ -2,7 +2,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import 'antd/dist/reset.css'
 import { ClerkProvider } from "@clerk/nextjs";
-import { ConditionalHeader } from '@/components/layout-wrapper';
+import { ConditionalHeader } from '@/components/LayoutWrapper';
 
 const inter = Inter({ subsets: ['latin'] })
 
