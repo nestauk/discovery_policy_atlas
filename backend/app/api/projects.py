@@ -758,7 +758,7 @@ async def get_project_charts_data(
         # Get all documents for this project
         docs_result = (
             vectorization_service.supabase.table("analysis_documents")
-            .select("year, source_country, authors")
+            .select("year, source_country, authors, evidence_category")
             .eq("analysis_project_id", project_id)
             .execute()
         )
@@ -768,12 +768,14 @@ async def get_project_charts_data(
                 "documents_by_year": [],
                 "documents_by_country": [],
                 "documents_by_author": [],
+                "documents_by_evidence_category": [],
             }
 
         # Aggregate data
         year_counts = {}
         country_counts = {}
         author_counts = {}
+        evidence_category_counts = {}
 
         for doc in docs_result.data:
             # Count by year
@@ -847,6 +849,13 @@ async def get_project_charts_data(
                             # Regular author or no country data available
                             author_counts[author] = author_counts.get(author, 0) + 1
 
+            # Count by evidence category
+            evidence_category = doc.get("evidence_category")
+            if evidence_category and evidence_category.strip():
+                evidence_category_counts[evidence_category] = (
+                    evidence_category_counts.get(evidence_category, 0) + 1
+                )
+
         # Sort and format data
         documents_by_year = [
             {"year": year, "count": count}
@@ -867,10 +876,31 @@ async def get_project_charts_data(
             )[:10]
         ]
 
+        # Sort evidence categories by strength (predefined order)
+        evidence_category_order = [
+            "Systematic Review and Meta-Analysis",
+            "RCTs and Quasi-Experimental Studies",
+            "Observational Research Studies",
+            "Modelling & Simulation",
+            "Policy Syntheses & Guidance Documents",
+            "Qualitative & Contextual Evidence",
+            "Expert Opinion and Commentary",
+            "Other (Non-evidence documents)",
+            "Unknown / Insufficient information",
+        ]
+
+        documents_by_evidence_category = []
+        for category in evidence_category_order:
+            if category in evidence_category_counts:
+                documents_by_evidence_category.append(
+                    {"category": category, "count": evidence_category_counts[category]}
+                )
+
         return {
             "documents_by_year": documents_by_year,
             "documents_by_country": documents_by_country,
             "documents_by_author": documents_by_author,
+            "documents_by_evidence_category": documents_by_evidence_category,
         }
 
     except Exception as e:

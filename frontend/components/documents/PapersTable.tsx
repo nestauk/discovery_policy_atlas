@@ -245,8 +245,75 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
     },
   ];
 
-  // Conditional columns (Study Type, Sample Size, Source, and Status)
+  // Conditional columns (Evidence Category, Study Type, Sample Size, Source, and Status)
   const conditionalColumns: ColumnsType<DataType> = showAdditionalColumns ? [
+    {
+      title: 'Evidence Category',
+      dataIndex: 'evidence_category',
+      key: 'evidence_category',
+      width: '12%',
+      sorter: (a, b) => {
+        // Sort by evidence strength (Systematic Review = 1, Unknown = 9)
+        const evidenceRank: Record<string, number> = {
+          'Systematic Review and Meta-Analysis': 1,
+          'RCTs and Quasi-Experimental Studies': 2,
+          'Observational Research Studies': 3,
+          'Modelling & Simulation': 4,
+          'Policy Syntheses & Guidance Documents': 5,
+          'Qualitative & Contextual Evidence': 6,
+          'Expert Opinion and Commentary': 7,
+          'Other (Non-evidence documents)': 8,
+          'Unknown / Insufficient information': 9,
+        }
+        const aRank = evidenceRank[a.evidence_category || ''] || 999
+        const bRank = evidenceRank[b.evidence_category || ''] || 999
+        return aRank - bRank
+      },
+      render: (text, record) => {
+        const category = record.evidence_category
+        if (!category) {
+          return <span className="text-gray-400 text-xs">-</span>
+        }
+
+        // Color coding by evidence strength
+        const categoryColors: Record<string, { bg: string; text: string }> = {
+          'Systematic Review and Meta-Analysis': { bg: 'bg-[#0F294A]', text: 'text-white' },
+          'RCTs and Quasi-Experimental Studies': { bg: 'bg-[#9A1BBE]', text: 'text-white' },
+          'Observational Research Studies': { bg: 'bg-[#0000FF]', text: 'text-white' },
+          'Modelling & Simulation': { bg: 'bg-[#18A48C]', text: 'text-white' },
+          'Policy Syntheses & Guidance Documents': { bg: 'bg-[#97D9E3]', text: 'text-gray-900' },
+          'Qualitative & Contextual Evidence': { bg: 'bg-[#A59BEE]', text: 'text-gray-900' },
+          'Expert Opinion and Commentary': { bg: 'bg-[#F6A4B7]', text: 'text-gray-900' },
+          'Other (Non-evidence documents)': { bg: 'bg-[#D2C9C0]', text: 'text-gray-900' },
+          'Unknown / Insufficient information': { bg: 'bg-[#f8f5f4]', text: 'text-gray-700' },
+        }
+
+        const colors = categoryColors[category] || { bg: 'bg-gray-100', text: 'text-gray-700' }
+
+        // Shortened display names
+        const shortNames: Record<string, string> = {
+          'Systematic Review and Meta-Analysis': 'Systematic Review',
+          'RCTs and Quasi-Experimental Studies': 'RCT/Quasi-Exp',
+          'Observational Research Studies': 'Observational',
+          'Modelling & Simulation': 'Modelling',
+          'Policy Syntheses & Guidance Documents': 'Policy Guidance',
+          'Qualitative & Contextual Evidence': 'Qualitative',
+          'Expert Opinion and Commentary': 'Expert Opinion',
+          'Other (Non-evidence documents)': 'Other',
+          'Unknown / Insufficient information': 'Unknown',
+        }
+
+        const displayName = shortNames[category] || category
+
+        return (
+          <Tooltip content={`${category}${record.evidence_confidence ? ` (${(record.evidence_confidence * 100).toFixed(0)}% confidence)` : ''}`}>
+            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} cursor-help whitespace-normal leading-tight`}>
+              {displayName}
+            </span>
+          </Tooltip>
+        )
+      },
+    },
     {
       title: 'Study Type',
       dataIndex: 'study_strength',

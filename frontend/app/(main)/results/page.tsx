@@ -49,6 +49,10 @@ interface AnalysisDocument {
   top_line?: string
   doi?: string
   landing_page_url?: string
+  // Evidence categorisation fields
+  evidence_category?: string
+  evidence_confidence?: number
+  evidence_category_reasoning?: string
   full_text_available?: boolean
   extraction_status?: string
   text_source?: string  // "full_text" or "abstract" - what was used for extraction
@@ -774,6 +778,10 @@ export default function AnalysisResultsPage() {
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
+        // Add evidence categorisation fields
+        evidence_category: doc.evidence_category,
+        evidence_confidence: doc.evidence_confidence,
+        evidence_category_reasoning: doc.evidence_category_reasoning,
         // Add evidence assessment fields
         evidence_strength: evidenceStrength?.stars || undefined,
         evidence_strength_justification: evidenceStrength?.justification,

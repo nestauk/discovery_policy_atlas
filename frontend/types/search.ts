@@ -37,6 +37,10 @@ export interface SearchParams {
     top_line?: string
     // URL fields
     landing_page_url?: string
+    // Evidence categorisation fields (9-category hierarchy)
+    evidence_category?: string
+    evidence_confidence?: number
+    evidence_category_reasoning?: string
     // Processing status fields
     full_text_available?: boolean
     extraction_status?: string
@@ -102,6 +106,7 @@ export interface SearchParams {
     total_sources: number
     study_types: Record<string, number>
     source_types: Record<string, number>
+    evidence_categories?: Record<string, number>
     countries: Record<string, number>
     years: Record<number, number>
     overall_strength: string
