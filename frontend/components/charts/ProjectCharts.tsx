@@ -407,6 +407,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
   }
 
   // Evidence category colors (dark = strong evidence, light = weak evidence)
+  // Removed "Other" - it's filtered out at the backend
   const evidenceCategoryColors: Record<string, string> = {
     'Systematic Review and Meta-Analysis': '#0F294A',      // Navy (strongest)
     'RCTs and Quasi-Experimental Studies': '#9A1BBE',     // Purple
@@ -415,11 +416,11 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
     'Policy Syntheses & Guidance Documents': '#97D9E3',   // Aqua
     'Qualitative & Contextual Evidence': '#A59BEE',       // Violet
     'Expert Opinion and Commentary': '#F6A4B7',           // Pink
-    'Other (Non-evidence documents)': '#D2C9C0',          // Sand
     'Unknown / Insufficient information': '#f8f5f4',      // Light grey (weakest)
   }
 
   // Evidence category short names for chart display
+  // Removed "Other" - it's filtered out at the backend
   const evidenceCategoryShortNames: Record<string, string> = {
     'Systematic Review and Meta-Analysis': 'Systematic Review',
     'RCTs and Quasi-Experimental Studies': 'RCT/Quasi-Exp',
@@ -428,7 +429,6 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
     'Policy Syntheses & Guidance Documents': 'Policy Guidance',
     'Qualitative & Contextual Evidence': 'Qualitative',
     'Expert Opinion and Commentary': 'Expert Opinion',
-    'Other (Non-evidence documents)': 'Other',
     'Unknown / Insufficient information': 'Unknown',
   }
 
@@ -442,6 +442,11 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       borderWidth: 0,
     }))
   } : null
+
+  // Calculate total for evidence category chart max value
+  const evidenceTotalDocs = evidenceCategoryChartData
+    ? evidenceCategoryChartData.datasets.reduce((sum, dataset) => sum + dataset.data[0], 0)
+    : 0
 
   const evidenceCategoryOptions = {
     indexAxis: 'y' as const,
@@ -469,8 +474,8 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       },
       tooltip: {
         callbacks: {
-          label: (context: any) => {
-            return `${context.dataset.label}: ${context.parsed.x} documents`
+          label: (context: { dataset: { label?: string }; parsed: { x: number } }) => {
+            return `${context.dataset.label || 'Unknown'}: ${context.parsed.x} documents`
           }
         }
       }
@@ -479,6 +484,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       x: {
         stacked: true,
         beginAtZero: true,
+        max: evidenceTotalDocs || undefined, // Set max to total so bar fills width
         grid: { display: false },
         ticks: { display: false },
       },

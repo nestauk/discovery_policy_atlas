@@ -8,15 +8,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { 
-  FileText, 
+import {
+  FileText,
   Loader2,
   ArrowLeft,
   AlertCircle,
   BookOpen,
   Target,
   Bot,
-  Filter,
   Download
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
@@ -98,11 +97,8 @@ export default function AnalysisResultsPage() {
   const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
   const [evidenceSubTab, setEvidenceSubTab] = useState('interventions')
-  
-  // Relevance filtering state
-  const [showRelevantOnly, setShowRelevantOnly] = useState(true)
-  
-  // Column visibility state - controls Study Type, Sample Size, Source, Status
+
+  // Column visibility state - controls Evidence Category, Sample Size, Source, Status
   const [showAdditionalColumns, setShowAdditionalColumns] = useState(false)
   
   // Documents download state
@@ -790,16 +786,14 @@ export default function AnalysisResultsPage() {
       }
     });
 
+    // Always filter to show only relevant documents
     const relevant = allTransformed.filter(doc => doc.is_relevant);
-    
-    // Apply filtering based on toggle
-    const filtered = showRelevantOnly ? relevant : allTransformed;
-    
+
     return {
-      transformedPapers: filtered,
+      transformedPapers: relevant,
       relevantCount: relevant.length
     };
-  }, [documents, showRelevantOnly, studyStrengthMapping, sampleSizeMapping]);
+  }, [documents, studyStrengthMapping, sampleSizeMapping]);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -1000,7 +994,7 @@ export default function AnalysisResultsPage() {
                           className="flex items-center gap-2"
                         >
                           <FileText className="h-3 w-3" />
-                          Documents ({showRelevantOnly ? relevantCount : documents.length})
+                          Documents ({relevantCount})
                         </Button>
                       </div>
 
@@ -1015,16 +1009,6 @@ export default function AnalysisResultsPage() {
                               id="additional-columns"
                               checked={showAdditionalColumns}
                               onCheckedChange={setShowAdditionalColumns}
-                            />
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor="relevance-filter" className="text-sm text-slate-700">
-                              Relevant only
-                            </Label>
-                            <Switch
-                              id="relevance-filter"
-                              checked={showRelevantOnly}
-                              onCheckedChange={setShowRelevantOnly}
                             />
                           </div>
                           
@@ -1121,20 +1105,6 @@ export default function AnalysisResultsPage() {
                         </div>
                       ) : transformedPapers.length > 0 ? (
                         <PapersTable papers={transformedPapers} showAdditionalColumns={showAdditionalColumns} />
-                      ) : documents.length > 0 && showRelevantOnly ? (
-                        <div className="text-center py-12">
-                          <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-                          <h3 className="text-lg font-medium text-slate-900 mb-2">No Relevant Documents</h3>
-                          <p className="text-slate-600 mb-4">All {documents.length} documents in this project were marked as non-relevant.</p>
-                          <Button 
-                            variant="outline" 
-                            onClick={() => setShowRelevantOnly(false)}
-                            className="flex items-center gap-2"
-                          >
-                            <Filter className="h-4 w-4" />
-                            Show All Documents
-                          </Button>
-                        </div>
                       ) : (
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />

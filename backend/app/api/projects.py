@@ -736,6 +736,10 @@ async def get_project_documents(
         # Map database field names to frontend expectations
         documents = []
         for doc in docs_result.data:
+            # Filter out "Other (Non-evidence documents)" - these shouldn't reach the UI
+            if doc.get("evidence_category") == "Other (Non-evidence documents)":
+                continue
+
             doc_copy = doc.copy()
             # Map citation_count (database) to cited_by_count (frontend)
             if "citation_count" in doc_copy:
@@ -877,6 +881,7 @@ async def get_project_charts_data(
         ]
 
         # Sort evidence categories by strength (predefined order)
+        # Exclude "Other (Non-evidence documents)" - these are filtered out during acquisition
         evidence_category_order = [
             "Systematic Review and Meta-Analysis",
             "RCTs and Quasi-Experimental Studies",
@@ -885,7 +890,6 @@ async def get_project_charts_data(
             "Policy Syntheses & Guidance Documents",
             "Qualitative & Contextual Evidence",
             "Expert Opinion and Commentary",
-            "Other (Non-evidence documents)",
             "Unknown / Insufficient information",
         ]
 

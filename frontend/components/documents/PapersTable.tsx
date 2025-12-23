@@ -59,26 +59,6 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
     }))
   }, [papers])
 
-
-
-  // Helper function to get study type rank and description (reversed: 10 = strongest)
-  const getStudyTypeInfo = (studyType?: string) => {
-    if (!studyType) return { rank: 0, sortRank: 999, description: 'Unknown study type' }
-    const type = studyType.trim().toLowerCase()
-    
-    if (type === 'g') return { rank: 10, sortRank: 1, description: 'Randomized Controlled Trial (highest quality)' }
-    if (type === 'h') return { rank: 9, sortRank: 2, description: 'Meta-analysis' }
-    if (type === 'f') return { rank: 8, sortRank: 3, description: 'Quasi-experimental study' }
-    if (type === 'e') return { rank: 7, sortRank: 4, description: 'Comparison of outcomes in treated group' }
-    if (type === 'd') return { rank: 6, sortRank: 5, description: 'Study measures outcome pre and post' }
-    if (type === 'c') return { rank: 5, sortRank: 6, description: 'Cross-sectional with control variables' }
-    if (type === 'b') return { rank: 4, sortRank: 7, description: 'Pre/post study (no control group)' }
-    if (type === 'a') return { rank: 3, sortRank: 8, description: 'Purely cross-sectional study' }
-    if (type === 'i') return { rank: 2, sortRank: 9, description: 'Policy recommendation/theoretical modeling' }
-    if (type === 'j') return { rank: 1, sortRank: 10, description: 'News article/opinion piece (lowest quality)' }
-    return { rank: 0, sortRank: 999, description: 'Unknown study type' }
-  }
-
   // Build columns conditionally
   const baseColumns: ColumnsType<DataType> = [
     {
@@ -245,7 +225,7 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
     },
   ];
 
-  // Conditional columns (Evidence Category, Study Type, Sample Size, Source, and Status)
+  // Conditional columns (Evidence Category, Sample Size, Source, and Status)
   const conditionalColumns: ColumnsType<DataType> = showAdditionalColumns ? [
     {
       title: 'Evidence Category',
@@ -253,7 +233,7 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       key: 'evidence_category',
       width: '12%',
       sorter: (a, b) => {
-        // Sort by evidence strength (Systematic Review = 1, Unknown = 9)
+        // Sort by evidence strength (Systematic Review = 1, Unknown = 8)
         const evidenceRank: Record<string, number> = {
           'Systematic Review and Meta-Analysis': 1,
           'RCTs and Quasi-Experimental Studies': 2,
@@ -262,20 +242,19 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
           'Policy Syntheses & Guidance Documents': 5,
           'Qualitative & Contextual Evidence': 6,
           'Expert Opinion and Commentary': 7,
-          'Other (Non-evidence documents)': 8,
-          'Unknown / Insufficient information': 9,
+          'Unknown / Insufficient information': 8,
         }
         const aRank = evidenceRank[a.evidence_category || ''] || 999
         const bRank = evidenceRank[b.evidence_category || ''] || 999
         return aRank - bRank
       },
-      render: (text, record) => {
+      render: (_text, record) => {
         const category = record.evidence_category
         if (!category) {
           return <span className="text-gray-400 text-xs">-</span>
         }
 
-        // Color coding by evidence strength
+        // Color coding by evidence strength (removed "Other" - it's filtered out)
         const categoryColors: Record<string, { bg: string; text: string }> = {
           'Systematic Review and Meta-Analysis': { bg: 'bg-[#0F294A]', text: 'text-white' },
           'RCTs and Quasi-Experimental Studies': { bg: 'bg-[#9A1BBE]', text: 'text-white' },
@@ -284,13 +263,12 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
           'Policy Syntheses & Guidance Documents': { bg: 'bg-[#97D9E3]', text: 'text-gray-900' },
           'Qualitative & Contextual Evidence': { bg: 'bg-[#A59BEE]', text: 'text-gray-900' },
           'Expert Opinion and Commentary': { bg: 'bg-[#F6A4B7]', text: 'text-gray-900' },
-          'Other (Non-evidence documents)': { bg: 'bg-[#D2C9C0]', text: 'text-gray-900' },
           'Unknown / Insufficient information': { bg: 'bg-[#f8f5f4]', text: 'text-gray-700' },
         }
 
         const colors = categoryColors[category] || { bg: 'bg-gray-100', text: 'text-gray-700' }
 
-        // Shortened display names
+        // Shortened display names (removed "Other")
         const shortNames: Record<string, string> = {
           'Systematic Review and Meta-Analysis': 'Systematic Review',
           'RCTs and Quasi-Experimental Studies': 'RCT/Quasi-Exp',
@@ -299,43 +277,20 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
           'Policy Syntheses & Guidance Documents': 'Policy Guidance',
           'Qualitative & Contextual Evidence': 'Qualitative',
           'Expert Opinion and Commentary': 'Expert Opinion',
-          'Other (Non-evidence documents)': 'Other',
           'Unknown / Insufficient information': 'Unknown',
         }
 
         const displayName = shortNames[category] || category
 
+        // Build tooltip: category name + reasoning (if available)
+        const tooltipContent = record.evidence_category_reasoning
+          ? `${category}\n\n${record.evidence_category_reasoning}`
+          : category
+
         return (
-          <Tooltip content={`${category}${record.evidence_confidence ? ` (${(record.evidence_confidence * 100).toFixed(0)}% confidence)` : ''}`}>
+          <Tooltip content={tooltipContent}>
             <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} cursor-help whitespace-normal leading-tight`}>
               {displayName}
-            </span>
-          </Tooltip>
-        )
-      },
-    },
-    {
-      title: 'Study Type',
-      dataIndex: 'study_strength',
-      key: 'study_strength',
-      width: '6%',
-      sorter: (a, b) => {
-        const aSortRank = getStudyTypeInfo(a.study_strength).sortRank
-        const bSortRank = getStudyTypeInfo(b.study_strength).sortRank
-        return aSortRank - bSortRank // Lower sortRank = stronger study (for sorting)
-      },
-      render: (text, record) => {
-        const studyType = record.study_strength
-        if (!studyType) {
-          return <span className="text-gray-400 text-xs">-</span>
-        }
-        
-        const { description } = getStudyTypeInfo(studyType)
-        
-        return (
-          <Tooltip content={description}>
-            <span className="inline-block px-2 py-1 rounded text-xs font-medium text-gray-700 bg-gray-100 cursor-help">
-              {studyType.toUpperCase()}
             </span>
           </Tooltip>
         )
@@ -347,7 +302,7 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       key: 'sample_size',
       width: '8%',
       sorter: (a, b) => (a.sample_size || 0) - (b.sample_size || 0),
-      render: (text, record) => {
+      render: (_text, record) => {
         const sampleSize = record.sample_size
         if (!sampleSize || sampleSize <= 0) {
           return <span className="text-gray-400 text-xs">-</span>
@@ -369,7 +324,7 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       key: 'source',
       width: '6%',
       sorter: (a, b) => (a.source || '').localeCompare(b.source || ''),
-      render: (text, record) => {
+      render: (_text, record) => {
         const source = record.source || 'unknown'
         let displayText = source
         
@@ -397,12 +352,12 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
           if (status === 'skipped') return 1
           return 0 // failed, not processed, unknown
         }
-        
+
         const aPriority = getStatusPriority(a.extraction_status || 'unknown', a.text_source)
         const bPriority = getStatusPriority(b.extraction_status || 'unknown', b.text_source)
         return aPriority - bPriority
       },
-      render: (text, record) => {
+      render: (_text, record) => {
         const status = record.extraction_status || 'unknown'
         const textSource = record.text_source
         
