@@ -11,7 +11,6 @@ import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
-import { useAPI } from '@/lib/api'
 
 const sidebarItems = [
   { name: 'Projects', href: '/v2/projects', icon: FolderOpen },
@@ -39,11 +38,8 @@ export default function AgentLayout({
   const { isSignedIn, isLoaded, user } = useUser()
   const router = useRouter()
   const pathname = usePathname()
-  const { activeProject, projects, setActiveProject, setProjects } = useAnalysisProjectStore()
-  const { rerunSynthesisForProject } = useAPI()
+  const { activeProject } = useAnalysisProjectStore()
   const [testSectionOpen, setTestSectionOpen] = useState(false)
-  const [isRerunning, setIsRerunning] = useState(false)
-  const [rerunError, setRerunError] = useState<string | null>(null)
   
   // Feedback state
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false)
@@ -95,37 +91,6 @@ export default function AgentLayout({
     }
   }, [pathname])
 
-  const handleRerunSynthesis = async () => {
-    if (!activeProject?.id || isRerunning) return
-
-    const forceFlag = activeProject.status === 'running'
-    if (forceFlag) {
-      const confirmed = window.confirm(
-        'Synthesis is currently running. Force rerun anyway? This will start a new synthesis run.'
-      )
-      if (!confirmed) return
-    }
-
-    setIsRerunning(true)
-    setRerunError(null)
-    try {
-      await rerunSynthesisForProject(activeProject.id, {
-        force: forceFlag,
-        invalidate_previous: true,
-      })
-
-      // Optimistically mark status as running so the UI reflects progress
-      const updated = { ...activeProject, status: 'running' as const }
-      setActiveProject(updated)
-      setProjects(projects.map((p) => (p.id === updated.id ? { ...p, status: updated.status } : p)))
-    } catch (error) {
-      console.error('Failed to rerun synthesis', error)
-      setRerunError('Failed to start synthesis rerun')
-    } finally {
-      setIsRerunning(false)
-    }
-  }
-
   if (!isLoaded) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>
   }
@@ -171,19 +136,6 @@ export default function AgentLayout({
                     <span className="text-xs text-slate-500">
                       {activeProject.total_references} refs
                     </span>
-                  )}
-                </div>
-                <div className="mt-2 flex flex-col gap-1">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={isRerunning}
-                    onClick={handleRerunSynthesis}
-                  >
-                    {isRerunning ? 'Starting synthesis…' : 'Re-run synthesis'}
-                  </Button>
-                  {rerunError && (
-                    <span className="text-xs text-red-500">{rerunError}</span>
                   )}
                 </div>
               </div>

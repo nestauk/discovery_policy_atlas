@@ -308,4 +308,3 @@ backend/app/services/synthesis/
 
 - [RCS_ARCHITECTURE.md](../../backend/app/services/synthesis/RCS_ARCHITECTURE.md) - Detailed RCS documentation
 - [AGENTIC_BRIEFING_PLAN.md](../../backend/app/services/synthesis/AGENTIC_BRIEFING_PLAN.md) - Original agentic briefing design
-

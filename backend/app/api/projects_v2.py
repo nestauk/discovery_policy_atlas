@@ -477,6 +477,17 @@ async def trigger_synthesis_for_project(
                 f"Failed to invalidate prior synthesis cache for {project_id}: {e}"
             )
 
+    if force:
+        try:
+            # Clear prior synthesis_runs rows to satisfy unique constraint on analysis_project_id
+            vectorization_service.supabase.table("synthesis_runs").delete().eq(
+                "analysis_project_id", project_id
+            ).execute()
+        except Exception as e:
+            logger.warning(
+                f"Failed to clear existing synthesis_runs for forced rerun of project {project_id}: {e}"
+            )
+
     # Create placeholder to prevent duplicate runs
     run_id = await create_synthesis_run_placeholder(project_id)
 

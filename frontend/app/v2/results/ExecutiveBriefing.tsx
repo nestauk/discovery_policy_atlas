@@ -43,6 +43,9 @@ interface ExecutiveBriefingProps {
     authors?: string[];
   }>;
   onCitationClick?: (docId: string) => void;
+  onRerunSynthesis?: () => void | Promise<void>;
+  isRerunningSynthesis?: boolean;
+  rerunError?: string | null;
 }
 
 // Study type normalisation
@@ -519,7 +522,10 @@ export function ExecutiveBriefing({
   structuredBriefing,
   citationMap, 
   evidenceCoverage,
-  onCitationClick 
+  onCitationClick,
+  onRerunSynthesis,
+  isRerunningSynthesis,
+  rerunError,
 }: ExecutiveBriefingProps) {
   const lookupCitation = useMemo(() => buildCitationLookup(citationMap), [citationMap]);
   const renderCitations = useRenderCitations(lookupCitation, onCitationClick);
@@ -839,21 +845,38 @@ export function ExecutiveBriefing({
 
   return (
     <Card className="shadow-sm">
-      <CardHeader className="pb-2 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <CardTitle className="flex items-center gap-2">
-          <FileText className="h-5 w-5 text-slate-500" />
-          Executive Briefing
-        </CardTitle>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleDownloadPdf}
-          disabled={!structuredBriefing && !briefing}
-          className="gap-2"
-        >
-          <Download className="h-4 w-4" />
-          Download PDF
-        </Button>
+      <CardHeader className="pb-2">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-slate-500" />
+            Executive Briefing
+          </CardTitle>
+          <div className="flex flex-wrap gap-2 justify-end">
+            {onRerunSynthesis && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRerunSynthesis}
+                disabled={isRerunningSynthesis}
+              >
+                {isRerunningSynthesis ? 'Starting synthesis…' : 'Re-run synthesis'}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadPdf}
+              disabled={!structuredBriefing && !briefing}
+              className="gap-2"
+            >
+              <Download className="h-4 w-4" />
+              Download PDF
+            </Button>
+          </div>
+        </div>
+        {rerunError && (
+          <div className="text-xs text-red-600 mt-2">{rerunError}</div>
+        )}
       </CardHeader>
       <CardContent>
         {evidenceCoverage && <EvidenceCoverageBadge coverage={evidenceCoverage} />}
