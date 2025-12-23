@@ -144,15 +144,12 @@ class SynthesisAgent:
         resolved_user = user_id or self._resolve_project_user(project_id)
 
         initial_state: SynthesisState = {
-
-        initial_state: SynthesisState = {
             "project_id": project_id,
             "langfuse_handler": handler,
             "langfuse_session_id": session_id,
             "policy_user_id": resolved_user,
             "rcs_config": RCSConfig(),
         }
-        return await self.workflow.ainvoke(initial_state)
         return await self.workflow.ainvoke(initial_state)
 
     @staticmethod
