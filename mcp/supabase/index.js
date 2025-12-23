@@ -340,8 +340,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const conditions = parseWhere(args.where);
         
         if (column) {
-          let query = supabase.from(tableName).select(column);
+          let query = supabase.from(tableName).select(`${column}, count`);
           query = applyWhere(query, conditions);
+          query = query.order('count', { ascending: false });
           
           const { data, error } = await query;
           
@@ -349,15 +350,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             return { content: [{ type: "text", text: `Error: ${error.message}` }] };
           }
           
-          const counts = {};
-          for (const row of data || []) {
-            const val = row[column] ?? "(null)";
-            counts[val] = (counts[val] || 0) + 1;
-          }
-          
-          const sorted = Object.entries(counts)
-            .sort((a, b) => b[1] - a[1])
-            .map(([val, count]) => `  ${val}: ${count}`)
+          const sorted = (data || [])
+            .map((row) => `  ${row[column] ?? "(null)"}: ${row.count}`)
             .join("\n");
           
           return { content: [{ type: "text", text: `Counts by '${column}' in '${tableName}':\n\n${sorted}` }] };
