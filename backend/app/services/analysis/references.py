@@ -688,6 +688,10 @@ class ReferencesService:
         else:
             frames: List[pd.DataFrame] = []
             for idx, df in enumerate(results):
+                # Skip empty DataFrames
+                if df.empty:
+                    continue
+
                 if "overton_url" in df.columns:
                     source = "overton"
                     source_id_col = "id"
