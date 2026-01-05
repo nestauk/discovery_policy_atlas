@@ -95,9 +95,6 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
 
     workflow_type = "sr"
 
-    def _get_workflow_type(self) -> str:
-        return "sr"
-
     def _build_workflow(self) -> StateGraph:
         workflow = StateGraph(WorkflowState)
         workflow.add_node("extract_issues", self._extract_issues)
@@ -243,50 +240,19 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
             return {"conclusion": None, "error": str(e)}
 
     async def _validate_and_filter(self, state: WorkflowState) -> Dict[str, Any]:
-        try:
-            full_text = state["full_text"]
+        """SR validation: base validation plus heterogeneity completeness check."""
+        # Run base validation
+        result = await super()._validate_and_filter(state)
 
-            valid_issues, _ = self._split_by_grounded_quote(state["issues"], full_text)
-            valid_interventions, _ = self._split_by_grounded_quote(
-                state["interventions"], full_text
-            )
-            valid_issue_idx = {i.idx for i in valid_issues}
-            valid_intervention_idx = {i.idx for i in valid_interventions}
+        if "error" in result:
+            return result
 
-            valid_mappings, _ = self._split_mappings_by_grounded_quote(
-                state["mappings"],
-                valid_issue_idx,
-                valid_intervention_idx,
-                full_text,
-            )
+        # SR-specific: Check completeness (heterogeneity measures present?)
+        valid_results = result.get("results", [])
+        has_heterogeneity = any(r.heterogeneity_I2 or r.tau2 for r in valid_results)
+        result["sr_completeness_flag"] = (
+            "complete" if has_heterogeneity else "incomplete_heterogeneity"
+        )
 
-            valid_results, _ = self._split_results_by_grounded_quote(
-                state["results"], valid_intervention_idx, full_text
-            )
-
-            valid_conclusion = self._validate_conclusion(
-                state.get("conclusion"), full_text
-            )
-
-            # Check SR completeness (heterogeneity measures present?)
-            has_heterogeneity = any(r.heterogeneity_I2 or r.tau2 for r in valid_results)
-            sr_completeness = (
-                "complete" if has_heterogeneity else "incomplete_heterogeneity"
-            )
-
-            logger.info(
-                f"[SR] Validation: {len(valid_issues)} issues, {len(valid_interventions)} interventions, "
-                f"{len(valid_results)} results. Completeness: {sr_completeness}"
-            )
-
-            return {
-                "issues": valid_issues,
-                "interventions": valid_interventions,
-                "mappings": valid_mappings,
-                "results": valid_results,
-                "conclusion": valid_conclusion,
-                "sr_completeness_flag": sr_completeness,
-            }
-        except Exception as e:
-            logger.error(f"[SR] Validation failed: {e}")
-            return {"error": str(e)}
+        logger.info(f"[SR] Completeness: {result['sr_completeness_flag']}")
+        return result

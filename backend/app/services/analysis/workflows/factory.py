@@ -133,32 +133,3 @@ class WorkflowFactory:
 
         # Everything else uses RCT (including Phase 2 categories as fallback)
         return "rct"
-
-    @staticmethod
-    def get_routing_reason(evidence_category: str, confidence: float) -> str:
-        """Get a human-readable routing reason for debugging/logging.
-
-        Args:
-            evidence_category: The document's evidence category
-            confidence: Classification confidence score
-
-        Returns:
-            String explaining why this routing was chosen
-        """
-        if confidence < CONFIDENCE_THRESHOLD:
-            return "low_confidence_fallback"
-
-        if evidence_category in SR_CATEGORIES:
-            return "evidence_category"
-
-        if evidence_category in RCT_CATEGORIES:
-            if evidence_category in {
-                "Modelling & Simulation",
-                "Policy Syntheses & Guidance Documents",
-                "Qualitative & Contextual Evidence",
-                "Expert Opinion and Commentary",
-            }:
-                return "phase2_fallback"
-            return "evidence_category"
-
-        return "unknown_category_fallback"

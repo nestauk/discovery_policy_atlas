@@ -69,8 +69,12 @@ class BaseExtractionWorkflow(ABC):
     Subclasses implement workflow-specific extraction stages and prompts.
     """
 
-    # Subclasses should set this
+    # Subclasses must set this to identify the workflow type
     workflow_type: str = "base"
+
+    def _get_workflow_type(self) -> str:
+        """Return the workflow type identifier. Uses class attribute."""
+        return self.workflow_type
 
     def __init__(
         self,
@@ -102,11 +106,6 @@ class BaseExtractionWorkflow(ABC):
     @abstractmethod
     def _build_workflow(self) -> StateGraph:
         """Build the LangGraph workflow. Implemented by subclasses."""
-        pass
-
-    @abstractmethod
-    def _get_workflow_type(self) -> str:
-        """Return the workflow type identifier."""
         pass
 
     async def run(
@@ -145,7 +144,7 @@ class BaseExtractionWorkflow(ABC):
 
             if final_state.get("error"):
                 logger.error(f"Workflow error for {paper_id}: {final_state['error']}")
-                return self._empty_bundle(paper_id, workflow_type, evidence_category)
+                return self._empty_bundle(paper_id, workflow_type)
 
             return DocumentExtractionBundle(
                 paper_id=paper_id,
@@ -162,10 +161,10 @@ class BaseExtractionWorkflow(ABC):
 
         except Exception as e:
             logger.error(f"Workflow failed for {paper_id}: {e}")
-            return self._empty_bundle(paper_id, workflow_type, evidence_category)
+            return self._empty_bundle(paper_id, workflow_type)
 
     def _empty_bundle(
-        self, paper_id: str, workflow_type: str, evidence_category: str
+        self, paper_id: str, workflow_type: str
     ) -> DocumentExtractionBundle:
         """Return an empty bundle on error."""
         return DocumentExtractionBundle(
@@ -378,3 +377,77 @@ class BaseExtractionWorkflow(ABC):
         if self._fuzzy_quote_match(conclusion.supporting_quote, full_text):
             return conclusion
         return None
+
+    async def _validate_and_filter(self, state: WorkflowState) -> Dict[str, Any]:
+        """Stage: Post-hoc validation - filter items without valid quotes.
+
+        Common validation logic for all workflows. Can be overridden by subclasses
+        for workflow-specific validation (e.g., SR heterogeneity checking).
+        """
+        try:
+            full_text = state["full_text"]
+            workflow_tag = f"[{self.workflow_type.upper()}]"
+
+            valid_issues, invalid_issues = self._split_by_grounded_quote(
+                state["issues"], full_text
+            )
+            if invalid_issues:
+                logger.warning(
+                    f"{workflow_tag} Filtered {len(invalid_issues)} issues with ungrounded quotes"
+                )
+
+            valid_interventions, invalid_interventions = self._split_by_grounded_quote(
+                state["interventions"], full_text
+            )
+            if invalid_interventions:
+                logger.warning(
+                    f"{workflow_tag} Filtered {len(invalid_interventions)} interventions with ungrounded quotes"
+                )
+
+            valid_issue_indices = {issue.idx for issue in valid_issues}
+            valid_intervention_indices = {i.idx for i in valid_interventions}
+
+            valid_mappings, invalid_mappings = self._split_mappings_by_grounded_quote(
+                state["mappings"],
+                valid_issue_indices,
+                valid_intervention_indices,
+                full_text,
+            )
+            if invalid_mappings:
+                logger.warning(
+                    f"{workflow_tag} Filtered {len(invalid_mappings)} mappings with invalid references or ungrounded quotes"
+                )
+
+            valid_results, invalid_results = self._split_results_by_grounded_quote(
+                state["results"], valid_intervention_indices, full_text
+            )
+            if invalid_results:
+                logger.warning(
+                    f"{workflow_tag} Filtered {len(invalid_results)} results with invalid references or ungrounded quotes"
+                )
+
+            valid_conclusion = self._validate_conclusion(
+                state.get("conclusion"), full_text
+            )
+            if state.get("conclusion") and not valid_conclusion:
+                logger.warning(
+                    f"{workflow_tag} Filtered conclusion: quote not grounded"
+                )
+
+            logger.info(
+                f"{workflow_tag} Validation complete. Kept: {len(valid_issues)} issues, "
+                f"{len(valid_interventions)} interventions, {len(valid_mappings)} mappings, "
+                f"{len(valid_results)} results, {'1' if valid_conclusion else '0'} conclusion"
+            )
+
+            return {
+                "issues": valid_issues,
+                "interventions": valid_interventions,
+                "mappings": valid_mappings,
+                "results": valid_results,
+                "conclusion": valid_conclusion,
+            }
+
+        except Exception as e:
+            logger.error(f"[{self.workflow_type.upper()}] Validation failed: {e}")
+            return {"error": f"Validation failed: {e}"}

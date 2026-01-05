@@ -44,9 +44,6 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
 
     workflow_type = "rct"
 
-    def _get_workflow_type(self) -> str:
-        return "rct"
-
     def _build_workflow(self) -> StateGraph:
         """Build the RCT extraction workflow graph."""
         workflow = StateGraph(WorkflowState)
@@ -278,68 +275,4 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
             logger.error(f"[RCT] Conclusions extraction failed: {e}")
             return {"conclusion": None, "error": f"Conclusions extraction failed: {e}"}
 
-    async def _validate_and_filter(self, state: WorkflowState) -> Dict[str, Any]:
-        """Stage F: Post-hoc validation - filter items without valid quotes."""
-        try:
-            full_text = state["full_text"]
-
-            valid_issues, invalid_issues = self._split_by_grounded_quote(
-                state["issues"], full_text
-            )
-            for issue in invalid_issues:
-                logger.warning(
-                    f"[RCT] Filtered out issue {issue.idx}: quote not grounded"
-                )
-
-            valid_interventions, invalid_interventions = self._split_by_grounded_quote(
-                state["interventions"], full_text
-            )
-            for intervention in invalid_interventions:
-                logger.warning(
-                    f"[RCT] Filtered out intervention {intervention.idx}: quote not grounded"
-                )
-
-            valid_issue_indices = {issue.idx for issue in valid_issues}
-            valid_intervention_indices = {i.idx for i in valid_interventions}
-            valid_mappings, invalid_mappings = self._split_mappings_by_grounded_quote(
-                state["mappings"],
-                valid_issue_indices,
-                valid_intervention_indices,
-                full_text,
-            )
-            for mapping in invalid_mappings:
-                logger.warning(
-                    f"[RCT] Filtered out mapping {mapping.issue_idx}->{mapping.intervention_idx}"
-                )
-
-            valid_results, invalid_results = self._split_results_by_grounded_quote(
-                state["results"], valid_intervention_indices, full_text
-            )
-            for result in invalid_results:
-                logger.warning(
-                    f"[RCT] Filtered out result for intervention {result.intervention_idx}"
-                )
-
-            valid_conclusion = self._validate_conclusion(
-                state.get("conclusion"), full_text
-            )
-            if state.get("conclusion") and not valid_conclusion:
-                logger.warning("[RCT] Filtered out conclusion: quote not grounded")
-
-            logger.info(
-                f"[RCT] Validation complete. Kept: {len(valid_issues)} issues, "
-                f"{len(valid_interventions)} interventions, {len(valid_mappings)} mappings, "
-                f"{len(valid_results)} results, {'1' if valid_conclusion else '0'} conclusion"
-            )
-
-            return {
-                "issues": valid_issues,
-                "interventions": valid_interventions,
-                "mappings": valid_mappings,
-                "results": valid_results,
-                "conclusion": valid_conclusion,
-            }
-
-        except Exception as e:
-            logger.error(f"[RCT] Validation failed: {e}")
-            return {"error": f"Validation failed: {e}"}
+    # Uses base class _validate_and_filter - no RCT-specific validation needed
