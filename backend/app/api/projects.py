@@ -735,9 +735,12 @@ async def get_project_documents(
         )
         # Map database field names to frontend expectations
         documents = []
+        filtered_other_count = 0
+
         for doc in docs_result.data:
             # Filter out "Other (Non-evidence documents)" - these shouldn't reach the UI
             if doc.get("evidence_category") == "Other (Non-evidence documents)":
+                filtered_other_count += 1
                 continue
 
             doc_copy = doc.copy()
@@ -745,6 +748,12 @@ async def get_project_documents(
             if "citation_count" in doc_copy:
                 doc_copy["cited_by_count"] = doc_copy["citation_count"]
             documents.append(doc_copy)
+
+        if filtered_other_count > 0:
+            logger.info(
+                f"Filtered {filtered_other_count} 'Other (Non-evidence)' documents from project {project_id} "
+                f"(returning {len(documents)} documents to UI)"
+            )
 
         return {"documents": documents, "total": len(documents)}
 
@@ -780,6 +789,7 @@ async def get_project_charts_data(
         country_counts = {}
         author_counts = {}
         evidence_category_counts = {}
+        filtered_other_count = 0
 
         for doc in docs_result.data:
             # Count by year
@@ -853,9 +863,11 @@ async def get_project_charts_data(
                             # Regular author or no country data available
                             author_counts[author] = author_counts.get(author, 0) + 1
 
-            # Count by evidence category
+            # Count by evidence category (track but don't include "Other" in results)
             evidence_category = doc.get("evidence_category")
             if evidence_category and evidence_category.strip():
+                if evidence_category == "Other (Non-evidence documents)":
+                    filtered_other_count += 1
                 evidence_category_counts[evidence_category] = (
                     evidence_category_counts.get(evidence_category, 0) + 1
                 )
@@ -899,6 +911,12 @@ async def get_project_charts_data(
                 documents_by_evidence_category.append(
                     {"category": category, "count": evidence_category_counts[category]}
                 )
+
+        if filtered_other_count > 0:
+            logger.info(
+                f"Charts data for project {project_id}: {filtered_other_count} 'Other (Non-evidence)' documents "
+                f"excluded from evidence category chart (total categories shown: {len(documents_by_evidence_category)})"
+            )
 
         return {
             "documents_by_year": documents_by_year,
