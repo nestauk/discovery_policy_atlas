@@ -118,16 +118,12 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
 
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         try:
-            chain = SR_ISSUES_PROMPT | self.llm | self.json_parser
             tags = ["component:extraction", "workflow:sr", f"paper:{state['paper_id']}"]
-            result = await chain.ainvoke(
+            result = await self._run_prompt_stage(
+                SR_ISSUES_PROMPT,
                 {"full_text": state["full_text"]},
-                config={
-                    "callbacks": self._get_callbacks(),
-                    "tags": tags,
-                    "metadata": self._build_metadata(tags),
-                    "run_name": "sr.issues",
-                },
+                tags,
+                "sr.issues",
             )
             extraction = IssuesExtraction(**result)
             logger.info(f"[SR] Extracted {len(extraction.issues)} review questions")
@@ -138,16 +134,12 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
 
     async def _extract_interventions(self, state: WorkflowState) -> Dict[str, Any]:
         try:
-            chain = SR_INTERVENTIONS_PROMPT | self.llm | self.json_parser
             tags = ["component:extraction", "workflow:sr", f"paper:{state['paper_id']}"]
-            result = await chain.ainvoke(
+            result = await self._run_prompt_stage(
+                SR_INTERVENTIONS_PROMPT,
                 {"full_text": state["full_text"]},
-                config={
-                    "callbacks": self._get_callbacks(),
-                    "tags": tags,
-                    "metadata": self._build_metadata(tags),
-                    "run_name": "sr.interventions",
-                },
+                tags,
+                "sr.interventions",
             )
             extraction = InterventionsExtraction(**result)
             for intervention in extraction.interventions:
@@ -164,9 +156,9 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
         try:
             if not state["issues"] or not state["interventions"]:
                 return {"mappings": []}
-            chain = MAPPING_PROMPT | self.llm | self.json_parser
             tags = ["component:extraction", "workflow:sr", f"paper:{state['paper_id']}"]
-            result = await chain.ainvoke(
+            result = await self._run_prompt_stage(
+                MAPPING_PROMPT,
                 {
                     "full_text": state["full_text"],
                     "issues_json": self._serialize_for_prompt(
@@ -176,12 +168,8 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                         state["interventions"], "interventions"
                     ),
                 },
-                config={
-                    "callbacks": self._get_callbacks(),
-                    "tags": tags,
-                    "metadata": self._build_metadata(tags),
-                    "run_name": "sr.mappings",
-                },
+                tags,
+                "sr.mappings",
             )
             extraction = MappingsExtraction(**result)
             logger.info(f"[SR] Extracted {len(extraction.mappings)} mappings")
@@ -195,7 +183,6 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
             if not state["interventions"]:
                 return {"results": []}
             all_results = []
-            chain = SR_RESULTS_PROMPT | self.llm | self.json_parser
 
             for intervention in state["interventions"]:
                 try:
@@ -204,19 +191,16 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                         "workflow:sr",
                         f"paper:{state['paper_id']}",
                     ]
-                    result = await chain.ainvoke(
+                    result = await self._run_prompt_stage(
+                        SR_RESULTS_PROMPT,
                         {
                             "full_text": state["full_text"],
                             "one_intervention_json": json.dumps(
                                 intervention.model_dump()
                             ),
                         },
-                        config={
-                            "callbacks": self._get_callbacks(),
-                            "tags": tags,
-                            "metadata": self._build_metadata(tags),
-                            "run_name": "sr.results",
-                        },
+                        tags,
+                        "sr.results",
                     )
                     extraction = ResultsExtraction(**result)
                     for res in extraction.results:
@@ -236,24 +220,20 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
 
     async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
         try:
-            chain = CONCLUSIONS_PROMPT | self.llm | self.json_parser
             tags = ["component:extraction", "workflow:sr", f"paper:{state['paper_id']}"]
             interventions_json = (
                 json.dumps([i.model_dump() for i in state["interventions"]], indent=2)
                 if state["interventions"]
                 else "No interventions"
             )
-            result = await chain.ainvoke(
+            result = await self._run_prompt_stage(
+                CONCLUSIONS_PROMPT,
                 {
                     "full_text": state["full_text"],
                     "interventions_json": interventions_json,
                 },
-                config={
-                    "callbacks": self._get_callbacks(),
-                    "tags": tags,
-                    "metadata": self._build_metadata(tags),
-                    "run_name": "sr.conclusions",
-                },
+                tags,
+                "sr.conclusions",
             )
             extraction = ConclusionsExtraction(**result)
             logger.info("[SR] Extracted conclusion")
@@ -266,45 +246,27 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
         try:
             full_text = state["full_text"]
 
-            valid_issues = [
-                i
-                for i in state["issues"]
-                if i.supporting_quote
-                and self._fuzzy_quote_match(i.supporting_quote, full_text)
-            ]
-            valid_interventions = [
-                i
-                for i in state["interventions"]
-                if i.supporting_quote
-                and self._fuzzy_quote_match(i.supporting_quote, full_text)
-            ]
-
+            valid_issues, _ = self._split_by_grounded_quote(state["issues"], full_text)
+            valid_interventions, _ = self._split_by_grounded_quote(
+                state["interventions"], full_text
+            )
             valid_issue_idx = {i.idx for i in valid_issues}
             valid_intervention_idx = {i.idx for i in valid_interventions}
 
-            valid_mappings = [
-                m
-                for m in state["mappings"]
-                if m.issue_idx in valid_issue_idx
-                and m.intervention_idx in valid_intervention_idx
-                and m.supporting_quote
-                and self._fuzzy_quote_match(m.supporting_quote, full_text)
-            ]
+            valid_mappings, _ = self._split_mappings_by_grounded_quote(
+                state["mappings"],
+                valid_issue_idx,
+                valid_intervention_idx,
+                full_text,
+            )
 
-            valid_results = [
-                r
-                for r in state["results"]
-                if r.intervention_idx in valid_intervention_idx
-                and r.supporting_quote
-                and self._fuzzy_quote_match(r.supporting_quote, full_text)
-            ]
+            valid_results, _ = self._split_results_by_grounded_quote(
+                state["results"], valid_intervention_idx, full_text
+            )
 
-            valid_conclusion = None
-            if state.get("conclusion") and state["conclusion"].supporting_quote:
-                if self._fuzzy_quote_match(
-                    state["conclusion"].supporting_quote, full_text
-                ):
-                    valid_conclusion = state["conclusion"]
+            valid_conclusion = self._validate_conclusion(
+                state.get("conclusion"), full_text
+            )
 
             # Check SR completeness (heterogeneity measures present?)
             has_heterogeneity = any(r.heterogeneity_I2 or r.tau2 for r in valid_results)

@@ -10,7 +10,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
@@ -197,6 +197,26 @@ class BaseExtractionWorkflow(ABC):
             return [self._langfuse_handler]
         return []
 
+    async def _run_prompt_stage(
+        self,
+        prompt,
+        payload: Dict[str, Any],
+        tags: List[str],
+        run_name: str,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Run a prompt stage with standard callbacks, tags, and metadata."""
+        chain = prompt | self.llm | self.json_parser
+        return await chain.ainvoke(
+            payload,
+            config={
+                "callbacks": self._get_callbacks(),
+                "tags": tags,
+                "metadata": self._build_metadata(tags, extra=extra),
+                "run_name": run_name,
+            },
+        )
+
     async def _extract_with_retry(
         self,
         extract_fn,
@@ -292,3 +312,69 @@ class BaseExtractionWorkflow(ABC):
     def _serialize_for_prompt(self, items: List, key: str) -> str:
         """Serialize a list of Pydantic models to JSON string for prompts."""
         return json.dumps({key: [item.model_dump() for item in items]})
+
+    def _split_by_grounded_quote(
+        self, items: List, full_text: str
+    ) -> Tuple[List, List]:
+        """Split items into valid/invalid based on supporting_quote grounding."""
+        valid = []
+        invalid = []
+        for item in items:
+            quote = getattr(item, "supporting_quote", None)
+            if quote and self._fuzzy_quote_match(quote, full_text):
+                valid.append(item)
+            else:
+                invalid.append(item)
+        return valid, invalid
+
+    def _split_results_by_grounded_quote(
+        self,
+        results: List[ResultItem],
+        valid_intervention_indices: Set[int],
+        full_text: str,
+    ) -> Tuple[List[ResultItem], List[ResultItem]]:
+        """Split results based on grounding and valid intervention indices."""
+        valid = []
+        invalid = []
+        for result in results:
+            if (
+                result.intervention_idx in valid_intervention_indices
+                and result.supporting_quote
+                and self._fuzzy_quote_match(result.supporting_quote, full_text)
+            ):
+                valid.append(result)
+            else:
+                invalid.append(result)
+        return valid, invalid
+
+    def _split_mappings_by_grounded_quote(
+        self,
+        mappings: List[MappingItem],
+        valid_issue_indices: Set[int],
+        valid_intervention_indices: Set[int],
+        full_text: str,
+    ) -> Tuple[List[MappingItem], List[MappingItem]]:
+        """Split mappings based on grounding and valid indices."""
+        valid = []
+        invalid = []
+        for mapping in mappings:
+            if (
+                mapping.issue_idx in valid_issue_indices
+                and mapping.intervention_idx in valid_intervention_indices
+                and mapping.supporting_quote
+                and self._fuzzy_quote_match(mapping.supporting_quote, full_text)
+            ):
+                valid.append(mapping)
+            else:
+                invalid.append(mapping)
+        return valid, invalid
+
+    def _validate_conclusion(
+        self, conclusion: Optional[ConclusionItem], full_text: str
+    ) -> Optional[ConclusionItem]:
+        """Return the conclusion if it is grounded, else None."""
+        if not conclusion or not conclusion.supporting_quote:
+            return None
+        if self._fuzzy_quote_match(conclusion.supporting_quote, full_text):
+            return conclusion
+        return None

@@ -73,7 +73,6 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage A: Extract issues."""
         try:
-            chain = ISSUES_PROMPT | self.llm | self.json_parser
             tags = [
                 "component:extraction",
                 "component:extraction.issues",
@@ -82,16 +81,12 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 f"model:{self.model_name}",
             ]
 
-            result = await chain.ainvoke(
+            result = await self._run_prompt_stage(
+                ISSUES_PROMPT,
                 {"full_text": state["full_text"]},
-                config={
-                    "callbacks": self._get_callbacks(),
-                    "tags": tags,
-                    "metadata": self._build_metadata(
-                        tags, extra={"paper_id": state["paper_id"]}
-                    ),
-                    "run_name": "rct.extraction.issues",
-                },
+                tags,
+                "rct.extraction.issues",
+                extra={"paper_id": state["paper_id"]},
             )
 
             extraction = IssuesExtraction(**result)
@@ -106,7 +101,6 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
     async def _extract_interventions(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage B: Extract interventions."""
         try:
-            chain = INTERVENTIONS_PROMPT | self.llm | self.json_parser
             tags = [
                 "component:extraction",
                 "component:extraction.interventions",
@@ -115,16 +109,12 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 f"model:{self.model_name}",
             ]
 
-            result = await chain.ainvoke(
+            result = await self._run_prompt_stage(
+                INTERVENTIONS_PROMPT,
                 {"full_text": state["full_text"]},
-                config={
-                    "callbacks": self._get_callbacks(),
-                    "tags": tags,
-                    "metadata": self._build_metadata(
-                        tags, extra={"paper_id": state["paper_id"]}
-                    ),
-                    "run_name": "rct.extraction.interventions",
-                },
+                tags,
+                "rct.extraction.interventions",
+                extra={"paper_id": state["paper_id"]},
             )
 
             extraction = InterventionsExtraction(**result)
@@ -157,7 +147,6 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 state["interventions"], "interventions"
             )
 
-            chain = MAPPING_PROMPT | self.llm | self.json_parser
             tags = [
                 "component:extraction",
                 "component:extraction.mappings",
@@ -166,20 +155,16 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 f"model:{self.model_name}",
             ]
 
-            result = await chain.ainvoke(
+            result = await self._run_prompt_stage(
+                MAPPING_PROMPT,
                 {
                     "full_text": state["full_text"],
                     "issues_json": issues_json,
                     "interventions_json": interventions_json,
                 },
-                config={
-                    "callbacks": self._get_callbacks(),
-                    "tags": tags,
-                    "metadata": self._build_metadata(
-                        tags, extra={"paper_id": state["paper_id"]}
-                    ),
-                    "run_name": "rct.extraction.mappings",
-                },
+                tags,
+                "rct.extraction.mappings",
+                extra={"paper_id": state["paper_id"]},
             )
 
             extraction = MappingsExtraction(**result)
@@ -198,7 +183,6 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 return {"results": []}
 
             all_results = []
-            chain = RESULTS_PROMPT | self.llm | self.json_parser
 
             # Process each intervention
             for intervention in state["interventions"]:
@@ -212,22 +196,17 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                         f"model:{self.model_name}",
                     ]
 
-                    result = await chain.ainvoke(
+                    result = await self._run_prompt_stage(
+                        RESULTS_PROMPT,
                         {
                             "full_text": state["full_text"],
                             "one_intervention_json": one_intervention_json,
                         },
-                        config={
-                            "callbacks": self._get_callbacks(),
-                            "tags": tags,
-                            "metadata": self._build_metadata(
-                                tags,
-                                extra={
-                                    "paper_id": state["paper_id"],
-                                    "intervention_idx": intervention.idx,
-                                },
-                            ),
-                            "run_name": "rct.extraction.results",
+                        tags,
+                        "rct.extraction.results",
+                        extra={
+                            "paper_id": state["paper_id"],
+                            "intervention_idx": intervention.idx,
                         },
                     )
 
@@ -271,7 +250,6 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 else "No interventions extracted"
             )
 
-            chain = CONCLUSIONS_PROMPT | self.llm | self.json_parser
             tags = [
                 "component:extraction",
                 "component:extraction.conclusions",
@@ -280,19 +258,15 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 f"model:{self.model_name}",
             ]
 
-            result = await chain.ainvoke(
+            result = await self._run_prompt_stage(
+                CONCLUSIONS_PROMPT,
                 {
                     "full_text": state["full_text"],
                     "interventions_json": interventions_json,
                 },
-                config={
-                    "callbacks": self._get_callbacks(),
-                    "tags": tags,
-                    "metadata": self._build_metadata(
-                        tags, extra={"paper_id": state["paper_id"]}
-                    ),
-                    "run_name": "rct.extraction.conclusions",
-                },
+                tags,
+                "rct.extraction.conclusions",
+                extra={"paper_id": state["paper_id"]},
             )
 
             extraction = ConclusionsExtraction(**result)
@@ -309,72 +283,48 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
         try:
             full_text = state["full_text"]
 
-            # Filter issues
-            valid_issues = []
-            for issue in state["issues"]:
-                if issue.supporting_quote and self._fuzzy_quote_match(
-                    issue.supporting_quote, full_text
-                ):
-                    valid_issues.append(issue)
-                else:
-                    logger.warning(
-                        f"[RCT] Filtered out issue {issue.idx}: quote not grounded"
-                    )
+            valid_issues, invalid_issues = self._split_by_grounded_quote(
+                state["issues"], full_text
+            )
+            for issue in invalid_issues:
+                logger.warning(
+                    f"[RCT] Filtered out issue {issue.idx}: quote not grounded"
+                )
 
-            # Filter interventions
-            valid_interventions = []
-            for intervention in state["interventions"]:
-                if intervention.supporting_quote and self._fuzzy_quote_match(
-                    intervention.supporting_quote, full_text
-                ):
-                    valid_interventions.append(intervention)
-                else:
-                    logger.warning(
-                        f"[RCT] Filtered out intervention {intervention.idx}: quote not grounded"
-                    )
+            valid_interventions, invalid_interventions = self._split_by_grounded_quote(
+                state["interventions"], full_text
+            )
+            for intervention in invalid_interventions:
+                logger.warning(
+                    f"[RCT] Filtered out intervention {intervention.idx}: quote not grounded"
+                )
 
-            # Filter mappings
             valid_issue_indices = {issue.idx for issue in valid_issues}
             valid_intervention_indices = {i.idx for i in valid_interventions}
-            valid_mappings = []
+            valid_mappings, invalid_mappings = self._split_mappings_by_grounded_quote(
+                state["mappings"],
+                valid_issue_indices,
+                valid_intervention_indices,
+                full_text,
+            )
+            for mapping in invalid_mappings:
+                logger.warning(
+                    f"[RCT] Filtered out mapping {mapping.issue_idx}->{mapping.intervention_idx}"
+                )
 
-            for mapping in state["mappings"]:
-                if (
-                    mapping.issue_idx in valid_issue_indices
-                    and mapping.intervention_idx in valid_intervention_indices
-                    and mapping.supporting_quote
-                    and self._fuzzy_quote_match(mapping.supporting_quote, full_text)
-                ):
-                    valid_mappings.append(mapping)
-                else:
-                    logger.warning(
-                        f"[RCT] Filtered out mapping {mapping.issue_idx}->{mapping.intervention_idx}"
-                    )
+            valid_results, invalid_results = self._split_results_by_grounded_quote(
+                state["results"], valid_intervention_indices, full_text
+            )
+            for result in invalid_results:
+                logger.warning(
+                    f"[RCT] Filtered out result for intervention {result.intervention_idx}"
+                )
 
-            # Filter results
-            valid_results = []
-            for result in state["results"]:
-                if (
-                    result.intervention_idx in valid_intervention_indices
-                    and result.supporting_quote
-                    and self._fuzzy_quote_match(result.supporting_quote, full_text)
-                ):
-                    valid_results.append(result)
-                else:
-                    logger.warning(
-                        f"[RCT] Filtered out result for intervention {result.intervention_idx}"
-                    )
-
-            # Validate conclusion
-            valid_conclusion = None
-            if state.get("conclusion"):
-                conclusion = state["conclusion"]
-                if conclusion.supporting_quote and self._fuzzy_quote_match(
-                    conclusion.supporting_quote, full_text
-                ):
-                    valid_conclusion = conclusion
-                else:
-                    logger.warning("[RCT] Filtered out conclusion: quote not grounded")
+            valid_conclusion = self._validate_conclusion(
+                state.get("conclusion"), full_text
+            )
+            if state.get("conclusion") and not valid_conclusion:
+                logger.warning("[RCT] Filtered out conclusion: quote not grounded")
 
             logger.info(
                 f"[RCT] Validation complete. Kept: {len(valid_issues)} issues, "
