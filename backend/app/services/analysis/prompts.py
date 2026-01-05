@@ -248,14 +248,14 @@ Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"..."}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"..."}}]}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
 - Focus on PRIMARY RESULTS for this intervention (effects compared to control/baseline).
 - DO NOT extract control group results or "no change" findings unless they are the main finding.
 - Prefer explicit statistics (e.g., t, β, OR, CI, effect sizes). If absent, keep qualitative result with quote.
-- Include effect direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect.
+- Include direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect, "mixed_or_unclear" for conflicting or ambiguous results.
 - population_measured: Who was measured for this specific result (may be subset of intervention population).
 
 Paper text:

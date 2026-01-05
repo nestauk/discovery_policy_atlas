@@ -186,11 +186,24 @@ class LangChainExtractorService:
                     f"✂️  Truncated text from {original_length} to {len(doc_text)} chars"
                 )
 
-            # Run the LangGraph workflow
+            # Run the LangGraph workflow with evidence category routing
             try:
-                extraction = await self.workflow.run(doc_id, doc_text)
+                evidence_category = row.get(
+                    "evidence_category", "RCTs and Quasi-Experimental Studies"
+                )
+                evidence_confidence = row.get("evidence_confidence", 1.0)
+                if pd.isna(evidence_category):
+                    evidence_category = "RCTs and Quasi-Experimental Studies"
+                if pd.isna(evidence_confidence):
+                    evidence_confidence = 1.0
 
-                print("📊 Extraction results:")
+                extraction = await self.workflow.run(
+                    doc_id, doc_text, evidence_category, float(evidence_confidence)
+                )
+
+                print(
+                    f"📊 Extraction results (workflow: {extraction.workflow_used or 'rct'}):"
+                )
                 print(f"  • Issues: {len(extraction.issues)}")
                 print(f"  • Interventions: {len(extraction.interventions)}")
                 print(f"  • Mappings: {len(extraction.mappings)}")
@@ -609,6 +622,10 @@ class LangChainExtractorService:
                         "population_intervened": item.get("population_intervened"),
                         "population_demographics": item.get("population_demographics"),
                         "sample_size": item.get("sample_size"),
+                        "comparator": item.get("comparator"),
+                        "intervention_semantic_type": item.get(
+                            "intervention_semantic_type"
+                        ),
                         "supporting_quote": item.get("supporting_quote"),
                         "source": m.get("source"),
                         "year": m.get("year"),
@@ -636,11 +653,16 @@ class LangChainExtractorService:
                         "doc_id": doc_id,
                         "intervention_idx": item.get("intervention_idx"),
                         "outcome_variable": item.get("outcome_variable"),
-                        "effect_direction": item.get("effect_direction"),
+                        "direction": item.get("direction"),
+                        "estimate_level": item.get("estimate_level"),
                         "effect_size_type": item.get("effect_size_type"),
                         "effect_size": item.get("effect_size"),
                         "uncertainty": item.get("uncertainty"),
                         "p_value": item.get("p_value"),
+                        "heterogeneity_I2": item.get("heterogeneity_I2"),
+                        "tau2": item.get("tau2"),
+                        "summary_statistic": item.get("summary_statistic"),
+                        "impact_magnitude": item.get("impact_magnitude"),
                         "population_measured": item.get("population_measured"),
                         "subgroup_or_dose": item.get("subgroup_or_dose"),
                         "result_text": item.get("result_text"),
@@ -711,6 +733,8 @@ class LangChainExtractorService:
                     "population_intervened",
                     "population_demographics",
                     "sample_size",
+                    "comparator",
+                    "intervention_semantic_type",
                     "supporting_quote",
                     "source",
                     "year",
@@ -744,11 +768,16 @@ class LangChainExtractorService:
                     "doc_id",
                     "intervention_idx",
                     "outcome_variable",
-                    "effect_direction",
+                    "direction",
+                    "estimate_level",
                     "effect_size_type",
                     "effect_size",
                     "uncertainty",
                     "p_value",
+                    "heterogeneity_I2",
+                    "tau2",
+                    "summary_statistic",
+                    "impact_magnitude",
                     "population_measured",
                     "subgroup_or_dose",
                     "result_text",
