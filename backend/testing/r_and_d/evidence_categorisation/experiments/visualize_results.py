@@ -24,7 +24,7 @@ PLOTS_DIR = PROJECT_DIR / "plots"
 plt.style.use("seaborn-v0_8-whitegrid")
 COLORS = {
     "accuracy": "steelblue",
-    "unknown_recall": "coral",
+    "macro_recall": "coral",
     "macro_f1": "mediumseagreen",
     "variant_a": "steelblue",
     "variant_b": "darkorange",
@@ -41,13 +41,13 @@ def plot_model_comparison(df: pd.DataFrame, output_dir: Path) -> None:
     # Average across datasets and prompts
     model_metrics = (
         df.groupby("model")
-        .agg({"accuracy": "mean", "unknown_recall": "mean", "macro_f1": "mean"})
+        .agg({"accuracy": "mean", "macro_recall": "mean", "macro_f1": "mean"})
         .sort_values("accuracy", ascending=True)
     )
 
     metrics = [
         ("accuracy", "Accuracy", COLORS["accuracy"]),
-        ("unknown_recall", "Unknown Recall", COLORS["unknown_recall"]),
+        ("macro_recall", "Macro Recall", COLORS["macro_recall"]),
         ("macro_f1", "Macro F1", COLORS["macro_f1"]),
     ]
 
@@ -67,13 +67,6 @@ def plot_model_comparison(df: pd.DataFrame, output_dir: Path) -> None:
                 va="center",
                 fontsize=9,
             )
-
-        # Add target line for unknown_recall
-        if metric == "unknown_recall":
-            ax.axvline(
-                x=0.6, color="green", linestyle="--", alpha=0.5, label="Target (60%)"
-            )
-            ax.legend(loc="lower right")
 
     plt.tight_layout()
     output_path = output_dir / "model_comparison.png"
@@ -96,14 +89,14 @@ def plot_prompt_comparison(df: pd.DataFrame, output_dir: Path) -> None:
 
     # Group by prompt variant
     prompt_metrics = df_best.groupby("prompt_variant").agg(
-        {"accuracy": "mean", "unknown_recall": "mean", "macro_f1": "mean"}
+        {"accuracy": "mean", "macro_recall": "mean", "macro_f1": "mean"}
     )
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     metrics = [
         ("accuracy", "Accuracy"),
-        ("unknown_recall", "Unknown Recall"),
+        ("macro_recall", "Macro Recall"),
         ("macro_f1", "Macro F1"),
     ]
 
@@ -126,13 +119,6 @@ def plot_prompt_comparison(df: pd.DataFrame, output_dir: Path) -> None:
                 ha="center",
                 fontsize=10,
             )
-
-        # Add target line for unknown_recall
-        if metric == "unknown_recall":
-            ax.axhline(
-                y=0.6, color="green", linestyle="--", alpha=0.5, label="Target (60%)"
-            )
-            ax.legend(loc="upper right")
 
     plt.tight_layout()
     output_path = output_dir / "prompt_comparison.png"
