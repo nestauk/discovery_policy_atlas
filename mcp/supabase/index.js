@@ -90,10 +90,23 @@ const SCHEMA_RELATIONSHIPS = {
       { table: "synthesis_outcome_themes", foreign_key: "outcome_theme_id" }
     ]
   },
-  document_chunks: {
+  chunks: {
     primary_key: "id",
     belongs_to: [
-      { table: "analysis_documents", foreign_key: "analysis_document_id" }
+      { table: "analysis_documents", foreign_key: "document_id" }
+    ]
+  },
+  theme_assignments: {
+    primary_key: "id",
+    belongs_to: [
+      { table: "synthesis_themes", foreign_key: "synthesis_theme_id" },
+      { table: "analysis_extractions", foreign_key: "extraction_id" }
+    ]
+  },
+  user_feedback: {
+    primary_key: "id",
+    belongs_to: [
+      { table: "analysis_projects", foreign_key: "project_id" }
     ]
   }
 };
@@ -266,9 +279,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case "list_tables": {
         const tables = Object.keys(SCHEMA_RELATIONSHIPS);
-        return {
-          content: [{ type: "text", text: `Available tables:\n${tables.join("\n")}` }]
-        };
+        const msg = [
+          "Available tables (from schema relationships map):",
+          ...tables
+        ].join("\n");
+        return { content: [{ type: "text", text: msg }] };
       }
 
       case "describe_table": {
