@@ -168,10 +168,18 @@ supabase login
 supabase link --project-ref YOUR_PROJECT_REF
 ```
 
-## Best practices
+## Collaboration: git workflow for database migrations
+
+- **Branch per change** - Create a feature branch for each schema change; one logical change per migration
+- **Test before PR** - Run `supabase db reset` locally and verify before opening a PR
+- **Review process** - Reviewer tests the migration locally; check SQL safety and idempotency
+- **Merge & deploy** - After merging to `dev` or `main`, one person pulls, tests, then runs `supabase db push` to production
+- **Communication** - Announce when creating migrations or deploying to production to avoid conflicts
+
+### Best practices
 
 1. **Never edit applied migrations** - Create new migrations for changes
 2. **Test locally first** - Always run `supabase db reset` before pushing
-3. **Use safe DDL** - Prefer `IF EXISTS` / `IF NOT EXISTS` clauses
+3. **Use safe data definition language** - Prefer `IF EXISTS` / `IF NOT EXISTS` clauses
 4. **One concern per migration** - Keep migrations focused and reviewable
 5. **Document breaking changes** - Add comments for non-obvious migrations
