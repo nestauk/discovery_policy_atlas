@@ -70,6 +70,8 @@ interface DocumentDetailResult {
       addresses_issues?: number[]
       results?: Array<{
         outcome_variable?: string
+        // Support both 'direction' (new schema) and 'effect_direction' (legacy)
+        direction?: string
         effect_direction?: string
         effect_size_type?: string
         effect_size?: string
@@ -79,6 +81,11 @@ interface DocumentDetailResult {
         subgroup_or_dose?: string
         result_text?: string
         supporting_quote?: string
+        // SR-specific fields for meta-analysis results
+        heterogeneity_I2?: string
+        tau2?: string
+        summary_statistic?: string
+        estimate_level?: string
       }>
     }>
     mappings?: unknown[]
@@ -239,8 +246,9 @@ function DocumentDetailView({ extraction }: {
                                     <span className="font-medium text-green-900 text-sm">
                                       {result.outcome_variable}
                                     </span>
+                                    {/* Support both 'direction' (new) and 'effect_direction' (legacy) */}
                                     <Badge variant="outline" className="text-xs bg-green-100 text-green-700">
-                                      {result.effect_direction}
+                                      {result.direction || result.effect_direction}
                                     </Badge>
                                   </div>
                                   

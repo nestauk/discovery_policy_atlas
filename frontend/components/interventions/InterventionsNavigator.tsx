@@ -44,6 +44,8 @@ interface DetailedIntervention {
   document_url?: string
   results: Array<{
     outcome_variable?: string
+    // Support both 'direction' (new schema) and 'effect_direction' (legacy)
+    direction?: string
     effect_direction?: string
     effect_size?: string
     p_value?: string
@@ -51,6 +53,11 @@ interface DetailedIntervention {
     result_text?: string
     population_measured?: string
     subgroup_or_dose?: string
+    // SR-specific fields for meta-analysis results
+    heterogeneity_I2?: string
+    tau2?: string
+    summary_statistic?: string
+    estimate_level?: string
   }>
   source_documents: Array<{
     doc_id?: string
@@ -330,7 +337,8 @@ export function InterventionsNavigator({
       result_count: detail.results?.length || 0,
       results_summary: (detail.results || []).map(result => ({
         outcome: result.outcome_variable || 'Outcome',
-        direction: result.effect_direction || 'unknown',
+        // Support both 'direction' (new schema) and 'effect_direction' (legacy)
+        direction: result.direction || result.effect_direction || 'unknown',
         effect_size: result.effect_size,
         effect_size_type: undefined,
         p_value: result.p_value,
@@ -339,6 +347,11 @@ export function InterventionsNavigator({
         supporting_quote: undefined,
         population_measured: result.population_measured,
         subgroup_or_dose: result.subgroup_or_dose,
+        // SR-specific fields for meta-analysis results
+        heterogeneity_I2: result.heterogeneity_I2,
+        tau2: result.tau2,
+        summary_statistic: result.summary_statistic,
+        estimate_level: result.estimate_level,
       })),
       total_sample_size: detail.sample_size || null,
       documents: detail.source_documents?.map(doc => ({

@@ -1162,7 +1162,10 @@ async def get_project_interventions(
                 # Add results summaries with detailed information
                 for result in intervention_results:
                     outcome = result.get("outcome_variable", "Unknown outcome")
-                    direction = result.get("effect_direction", "unknown")
+                    # Support both 'direction' (new schema) and 'effect_direction' (legacy) field names
+                    direction = result.get("direction") or result.get(
+                        "effect_direction", "unknown"
+                    )
                     if outcome and outcome != "Unknown outcome":
                         result_detail = {
                             "outcome": outcome,
@@ -1175,6 +1178,11 @@ async def get_project_interventions(
                             "supporting_quote": result.get("supporting_quote"),
                             "population_measured": result.get("population_measured"),
                             "subgroup_or_dose": result.get("subgroup_or_dose"),
+                            # SR-specific fields for meta-analysis results
+                            "heterogeneity_I2": result.get("heterogeneity_I2"),
+                            "tau2": result.get("tau2"),
+                            "summary_statistic": result.get("summary_statistic"),
+                            "estimate_level": result.get("estimate_level"),
                         }
                         aggregated_interventions[intervention_key][
                             "results_summary"
@@ -1674,7 +1682,11 @@ async def get_issue_intervention_navigator(
                                                         "outcome_variable": result.get(
                                                             "outcome_variable"
                                                         ),
+                                                        # Support both 'direction' (new) and 'effect_direction' (legacy)
                                                         "effect_direction": result.get(
+                                                            "direction"
+                                                        )
+                                                        or result.get(
                                                             "effect_direction"
                                                         ),
                                                         "effect_size": result.get(
@@ -1694,6 +1706,17 @@ async def get_issue_intervention_navigator(
                                                         ),
                                                         "subgroup_or_dose": result.get(
                                                             "subgroup_or_dose"
+                                                        ),
+                                                        # SR-specific fields for meta-analysis results
+                                                        "heterogeneity_I2": result.get(
+                                                            "heterogeneity_I2"
+                                                        ),
+                                                        "tau2": result.get("tau2"),
+                                                        "summary_statistic": result.get(
+                                                            "summary_statistic"
+                                                        ),
+                                                        "estimate_level": result.get(
+                                                            "estimate_level"
                                                         ),
                                                     }
                                                 )
@@ -2057,10 +2080,17 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                             "Impact Score": impact_score,
                             "Evidence Score": evidence_score,
                             "Outcome Variable": result.get("outcome_variable", ""),
-                            "Effect Direction": result.get("effect_direction", ""),
+                            # Support both 'direction' (new) and 'effect_direction' (legacy)
+                            "Effect Direction": result.get("direction")
+                            or result.get("effect_direction", ""),
                             "Effect Size": result.get("effect_size", ""),
                             "P-Value": result.get("p_value", ""),
                             "Uncertainty": result.get("uncertainty", ""),
+                            # SR-specific fields for meta-analysis results
+                            "Heterogeneity I2": result.get("heterogeneity_I2", ""),
+                            "Tau2": result.get("tau2", ""),
+                            "Summary Statistic": result.get("summary_statistic", ""),
+                            "Estimate Level": result.get("estimate_level", ""),
                             "Result Text": result.get("result_text", ""),
                             "Population Measured": result.get(
                                 "population_measured", ""

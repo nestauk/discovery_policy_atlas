@@ -42,6 +42,8 @@ interface DocumentDetailResult {
       addresses_issues?: number[]
       results?: Array<{
         outcome_variable?: string
+        // Support both 'direction' (new schema) and 'effect_direction' (legacy)
+        direction?: string
         effect_direction?: string
         effect_size_type?: string
         effect_size?: string
@@ -51,6 +53,11 @@ interface DocumentDetailResult {
         subgroup_or_dose?: string
         result_text?: string
         supporting_quote?: string
+        // SR-specific fields for meta-analysis results
+        heterogeneity_I2?: string
+        tau2?: string
+        summary_statistic?: string
+        estimate_level?: string
       }>
     }>
     mappings?: unknown[]
@@ -223,22 +230,32 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                                 <span className="font-medium text-green-900 text-sm">
                                   {result.outcome_variable}
                                 </span>
+                                {/* Support both 'direction' (new schema) and 'effect_direction' (legacy) */}
                                 <Badge variant="outline" className="text-xs bg-green-100 text-green-700">
-                                  {result.effect_direction}
+                                  {result.direction || result.effect_direction}
                                 </Badge>
                               </div>
                               
                               {/* Quantitative measures */}
-                              {((result.effect_size && result.effect_size !== 'null') || (result.p_value && result.p_value !== 'null') || (result.uncertainty && result.uncertainty !== 'null')) && (
-                                <div className="flex gap-3 text-xs text-green-800 mb-1">
+                              {((result.effect_size && result.effect_size !== 'null') || (result.p_value && result.p_value !== 'null') || (result.uncertainty && result.uncertainty !== 'null') || (result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null')) && (
+                                <div className="flex flex-wrap gap-3 text-xs text-green-800 mb-1">
                                   {result.effect_size && result.effect_size !== 'null' && (
-                                    <span>Effect: {result.effect_size}</span>
+                                    <span>
+                                      Effect{result.summary_statistic && result.summary_statistic !== 'null' ? ` (${result.summary_statistic})` : ''}: {result.effect_size}
+                                    </span>
                                   )}
                                   {result.p_value && result.p_value !== 'null' && (
                                     <span>p = {result.p_value}</span>
                                   )}
                                   {result.uncertainty && result.uncertainty !== 'null' && (
                                     <span>CI: {result.uncertainty}</span>
+                                  )}
+                                  {/* SR-specific: heterogeneity measures for pooled results */}
+                                  {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' && (
+                                    <span>I²: {result.heterogeneity_I2}</span>
+                                  )}
+                                  {result.tau2 && result.tau2 !== 'null' && (
+                                    <span>τ²: {result.tau2}</span>
                                   )}
                                 </div>
                               )}
