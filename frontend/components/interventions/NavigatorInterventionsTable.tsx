@@ -309,18 +309,26 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                                     <span className="text-gray-400 italic">n/a</span>
                                   )}
                                 </div>
-                                {/* SR-specific: heterogeneity measures for pooled results */}
-                                {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' && (
-                                  <div>
-                                    <span className="font-medium text-gray-600">I²: </span>
-                                    <span className="text-gray-600">{result.heterogeneity_I2}</span>
-                                  </div>
-                                )}
-                                {result.tau2 && result.tau2 !== 'null' && (
-                                  <div>
-                                    <span className="font-medium text-gray-600">τ²: </span>
-                                    <span className="text-gray-600">{result.tau2}</span>
-                                  </div>
+                                {/* SR-specific: heterogeneity measures for pooled results (always show for SRs) */}
+                                {result.estimate_level === 'pooled' && (
+                                  <>
+                                    <div>
+                                      <span className="font-medium text-gray-600">I²: </span>
+                                      {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? (
+                                        <span className="text-gray-600">{result.heterogeneity_I2}</span>
+                                      ) : (
+                                        <span className="text-gray-400 italic">n/a</span>
+                                      )}
+                                    </div>
+                                    <div>
+                                      <span className="font-medium text-gray-600">τ²: </span>
+                                      {result.tau2 && result.tau2 !== 'null' ? (
+                                        <span className="text-gray-600">{result.tau2}</span>
+                                      ) : (
+                                        <span className="text-gray-400 italic">n/a</span>
+                                      )}
+                                    </div>
+                                  </>
                                 )}
                               </div>
                               

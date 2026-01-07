@@ -250,12 +250,16 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                                   {result.uncertainty && result.uncertainty !== 'null' && (
                                     <span>CI: {result.uncertainty}</span>
                                   )}
-                                  {/* SR-specific: heterogeneity measures for pooled results */}
-                                  {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' && (
-                                    <span>I²: {result.heterogeneity_I2}</span>
-                                  )}
-                                  {result.tau2 && result.tau2 !== 'null' && (
-                                    <span>τ²: {result.tau2}</span>
+                                  {/* SR-specific: heterogeneity measures for pooled results (always show for SRs) */}
+                                  {result.estimate_level === 'pooled' && (
+                                    <>
+                                      <span>
+                                        I²: {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? result.heterogeneity_I2 : <span className="text-green-600 italic">n/a</span>}
+                                      </span>
+                                      <span>
+                                        τ²: {result.tau2 && result.tau2 !== 'null' ? result.tau2 : <span className="text-green-600 italic">n/a</span>}
+                                      </span>
+                                    </>
                                   )}
                                 </div>
                               )}

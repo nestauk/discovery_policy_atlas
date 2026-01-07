@@ -28,6 +28,11 @@ export interface InterventionData {
     supporting_quote?: string
     population_measured?: string
     subgroup_or_dose?: string
+    // SR-specific fields for meta-analysis results
+    heterogeneity_I2?: string
+    tau2?: string
+    summary_statistic?: string
+    estimate_level?: string
   }>
   highest_study_type: string | null
   highest_study_type_rank: number
@@ -286,13 +291,13 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
                               </div>
                               
                               {/* Additional details */}
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
                                 <div>
-                                  <span className="font-medium text-gray-600">Effect Size: </span>
-                                  {result.effect_size && result.effect_size !== 'null' && result.effect_size_type !== 'null' ? (
-                                    <span className="text-gray-600">
-                                      {result.effect_size_type && result.effect_size_type !== 'null' && `${result.effect_size_type}: `}{result.effect_size}
-                                    </span>
+                                  <span className="font-medium text-gray-600">
+                                    Effect Size{result.summary_statistic && result.summary_statistic !== 'null' ? ` (${result.summary_statistic})` : ''}:{' '}
+                                  </span>
+                                  {result.effect_size && result.effect_size !== 'null' ? (
+                                    <span className="text-gray-600">{result.effect_size}</span>
                                   ) : (
                                     <span className="text-gray-400 italic">n/a</span>
                                   )}
@@ -313,6 +318,27 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
                                     <span className="text-gray-400 italic">n/a</span>
                                   )}
                                 </div>
+                                {/* SR-specific: heterogeneity measures for pooled results (always show for SRs) */}
+                                {result.estimate_level === 'pooled' && (
+                                  <>
+                                    <div>
+                                      <span className="font-medium text-gray-600">I²: </span>
+                                      {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? (
+                                        <span className="text-gray-600">{result.heterogeneity_I2}</span>
+                                      ) : (
+                                        <span className="text-gray-400 italic">n/a</span>
+                                      )}
+                                    </div>
+                                    <div>
+                                      <span className="font-medium text-gray-600">τ²: </span>
+                                      {result.tau2 && result.tau2 !== 'null' ? (
+                                        <span className="text-gray-600">{result.tau2}</span>
+                                      ) : (
+                                        <span className="text-gray-400 italic">n/a</span>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </div>
                           ))}
