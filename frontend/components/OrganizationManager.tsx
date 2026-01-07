@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { useOrganization, useOrganizationList, useSession } from '@clerk/nextjs'
-import { Building2 } from 'lucide-react'
+import { Home } from 'lucide-react'
 
 /**
  * Handles organization auto-selection and displays current org.
@@ -40,39 +40,26 @@ export function OrganizationManager() {
     return null
   }
 
-  // If user has no organizations, show nothing (or a message)
+  // If user has no organizations, show nothing
   if (!organization && (!userMemberships?.data || userMemberships.data.length === 0)) {
-    return (
-      <div className="px-6 pb-4">
-        <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-          <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-amber-600" />
-            <p className="text-xs text-amber-700">No organization assigned</p>
-          </div>
-        </div>
-      </div>
-    )
+    return null
   }
 
   // Show current organization
   if (organization) {
     return (
-      <div className="px-6 pb-2">
-        <div className="flex items-center gap-2 text-slate-500">
-          <Building2 className="h-3.5 w-3.5" />
-          <p className="text-xs font-medium truncate">{organization.name}</p>
-        </div>
+      <div className="flex items-center gap-1.5 text-slate-500">
+        <Home className="h-3 w-3 flex-shrink-0" />
+        <span className="text-xs truncate">{organization.name}</span>
       </div>
     )
   }
 
   // Still loading/selecting
   return (
-    <div className="px-6 pb-2">
-      <div className="flex items-center gap-2 text-slate-400">
-        <Building2 className="h-3.5 w-3.5" />
-        <p className="text-xs">Loading organization...</p>
-      </div>
+    <div className="flex items-center gap-1.5 text-slate-400">
+      <Home className="h-3 w-3 flex-shrink-0" />
+      <span className="text-xs">Loading...</span>
     </div>
   )
 }
