@@ -11,6 +11,7 @@ import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
+import { OrganizationManager } from '@/components/OrganizationManager'
 
 const sidebarItems = [
   { name: 'Projects', href: '/projects', icon: FolderOpen },
@@ -113,6 +114,9 @@ export default function AgentLayout({
             </div>
           </div>
         </div>
+
+        {/* Organization */}
+        <OrganizationManager />
 
         {/* Active Project */}
         <div className="px-6 pb-4">

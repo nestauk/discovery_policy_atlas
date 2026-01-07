@@ -166,6 +166,7 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
                     "created_at": project_data["created_at"],
                     "created_by_user_id": project_data.get("created_by_user_id"),
                     "created_by_name": project_data.get("created_by_name"),
+                    "organization_id": project_data.get("organization_id"),
                 }
             )
 
@@ -200,6 +201,7 @@ async def create_analysis_project(
             "created_at": datetime.utcnow().isoformat(),
             "created_by_user_id": current_user.user_id,
             "created_by_name": current_user.name,
+            "organization_id": current_user.organization_id,
         }
 
         result = (
@@ -225,6 +227,7 @@ async def create_analysis_project(
             "created_at": created_project["created_at"],
             "created_by_user_id": created_project.get("created_by_user_id"),
             "created_by_name": created_project.get("created_by_name"),
+            "organization_id": created_project.get("organization_id"),
         }
 
     except HTTPException:
@@ -291,6 +294,7 @@ async def get_analysis_project(
                 "created_at": project["created_at"],
                 "created_by_user_id": project.get("created_by_user_id"),
                 "created_by_name": project.get("created_by_name"),
+                "organization_id": project.get("organization_id"),
                 "search_query": project.get("search_query"),
             },
             "documents": documents,
@@ -358,6 +362,7 @@ async def update_analysis_project(
             "created_at": updated_project["created_at"],
             "created_by_user_id": updated_project.get("created_by_user_id"),
             "created_by_name": updated_project.get("created_by_name"),
+            "organization_id": updated_project.get("organization_id"),
         }
 
     except HTTPException:
