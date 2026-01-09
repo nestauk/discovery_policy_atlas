@@ -8,19 +8,8 @@ These models define the data structures for:
 - Aggregated themes (issues, interventions, outcomes)
 """
 
-"""
-Pydantic schemas for synthesis agent.
-
-These models define the data structures for:
-- RAG retrieval (chunks, citations)
-- Structured briefing output (for frontend rendering)
-- Evidence coverage statistics
-- Aggregated themes (issues, interventions, outcomes)
-"""
-
 from __future__ import annotations
 
-from typing import List, Optional, Dict, Literal
 from typing import List, Optional, Dict, Literal
 from pydantic import BaseModel, Field
 
@@ -203,15 +192,31 @@ class OutcomeEffect(BaseModel):
 class InterventionTableRow(BaseModel):
     """A row in the Key Interventions table."""
 
-    intervention_name: str = Field(..., description="Intervention name")
+    intervention_name: str = Field(..., description="Intervention type/category name")
     citation_numbers: List[int] = Field(
-        default_factory=list, description="Citation numbers"
+        default_factory=list, description="Citation numbers [N] used"
     )
     context: str = Field(
-        "", description="Structured context: Location, Setting, Study types"
+        "",
+        description=(
+            "Context and features: delivery method, setting, key components, "
+            "notable features (e.g., 'School-based with family involvement')"
+        ),
+    )
+    delivery_features: List[str] = Field(
+        default_factory=list,
+        description="Key delivery attributes (e.g., school-based, family involvement, duration/intensity).",
+    )
+    subgroup_effects: List[str] = Field(
+        default_factory=list,
+        description="Notable subgroup findings (e.g., more effective in younger children, girls, high-risk groups).",
     )
     impact_narrative: str = Field(
-        "", description="1-2 sentence RAG-grounded summary of key effects"
+        "",
+        description=(
+            "Impact and outcomes: effectiveness on key outcomes, effect sizes, "
+            "findings (e.g., 'Modest BMI reduction; more effective in overweight children')"
+        ),
     )
     outcome_effects: List[OutcomeEffect] = Field(
         default_factory=list, description="Effects grouped by outcome theme"
@@ -256,27 +261,6 @@ class TopCitationItem(BaseModel):
     url: Optional[str] = Field(None, description="Document URL")
 
 
-class RecommendationsOutput(BaseModel):
-    """Structured output for recommendations generation."""
-
-    recommendations: List[RecommendationItem] = Field(
-        ...,
-        description="List of 3-4 policy recommendations",
-        min_length=1,
-        max_length=5,
-    )
-
-
-class TopCitationItem(BaseModel):
-    """A top citation for the reading list."""
-
-    citation_number: int = Field(..., description="Citation number")
-    title: str = Field(..., description="Document title")
-    author_year: str = Field(..., description="Author, Year string")
-    reason: str = Field("", description="Recommendation reason")
-    url: Optional[str] = Field(None, description="Document URL")
-
-
 class BackgroundSection(BaseModel):
     """Structured background/context section."""
 
@@ -295,6 +279,28 @@ class CoreAnswer(BaseModel):
     directive: str = Field("", description="Key recommendation")
 
 
+class SynthesisSection(BaseModel):
+    """Optional synthesis section inserted between interventions and recommendations."""
+
+    title: str = Field(..., description="Section title")
+    content_type: Literal["paragraphs", "bullets"] = Field(
+        "paragraphs", description="Rendering preference."
+    )
+    paragraphs: List[str] = Field(default_factory=list, description="Paragraph content")
+    bullets: List[str] = Field(default_factory=list, description="Bullet content")
+    citation_numbers_used: List[int] = Field(
+        default_factory=list, description="Citations referenced in this section"
+    )
+
+
+class SynthesisSectionProposal(BaseModel):
+    """Structured proposal for a synthesis section."""
+
+    section_title: str = Field(..., description="Proposed section title")
+    rationale: str = Field(..., description="Why this section is needed")
+    focus: str = Field(..., description="What the section will cover")
+
+
 class StructuredBriefing(BaseModel):
     """Complete structured executive briefing for frontend rendering."""
 
@@ -303,6 +309,7 @@ class StructuredBriefing(BaseModel):
     evidence_snapshot_summary: str = Field("")
     background_section: Optional[BackgroundSection] = Field(None)
     interventions_table: List[InterventionTableRow] = Field(default_factory=list)
+    synthesis_sections: List["SynthesisSection"] = Field(default_factory=list)
     recommendations: List[RecommendationItem] = Field(default_factory=list)
     top_citations: List[TopCitationItem] = Field(default_factory=list)
     follow_up_suggestions: List[str] = Field(default_factory=list)
@@ -348,6 +355,31 @@ class OutcomeTheme(BaseModel):
     sample_effect_sizes: List[str] = Field(default_factory=list)
     frequency: int = Field(0)
     source_doc_ids: List[str] = Field(default_factory=list)
+
+
+class InterventionDetails(BaseModel):
+    """Rich intervention detail for table enrichment."""
+
+    intervention_name: str = Field(..., description="Intervention type/category name")
+    delivery_features: List[str] = Field(
+        default_factory=list,
+        description="Delivery method, setting, intensity, components (e.g., school-based, family involvement, duration).",
+    )
+    target_population: List[str] = Field(
+        default_factory=list,
+        description="Populations targeted (ages, risk groups, sexes).",
+    )
+    subgroup_effects: List[str] = Field(
+        default_factory=list,
+        description="Subgroup differences (e.g., more effective in girls, younger children).",
+    )
+    effect_sizes: List[str] = Field(
+        default_factory=list,
+        description="Effect sizes with units (e.g., BMI −0.2 kg/m², prevalence −5%).",
+    )
+    supporting_citations: List[int] = Field(
+        default_factory=list, description="Citation numbers supporting these details."
+    )
 
 
 class KeyIssue(BaseModel):
@@ -404,6 +436,7 @@ class SynthesisSummary(BaseModel):
 
 class Finding(BaseModel):
     """Drill-down finding for intervention/issue detail views."""
+
     """Drill-down finding for intervention/issue detail views."""
 
     SourceTitle: str
@@ -421,10 +454,9 @@ class Finding(BaseModel):
     Uncertainty: Optional[str] = None
     Evidence: List[str] = Field(default_factory=list)
 
-
-# =============================================================================
-# EVIDENCE VIEW (Used by frontend Evidence tab)
-# =============================================================================
+    # =============================================================================
+    # EVIDENCE VIEW (Used by frontend Evidence tab)
+    # =============================================================================
     Evidence: List[str] = Field(default_factory=list)
 
 
@@ -435,7 +467,6 @@ class Finding(BaseModel):
 
 class ThematicGroup(BaseModel):
     """Level-1 thematic grouping for the Evidence view."""
-    """Level-1 thematic grouping for the Evidence view."""
 
     id: str
     theme_title: str
@@ -443,8 +474,6 @@ class ThematicGroup(BaseModel):
     item_count: int
 
 
-class OutcomeItem(BaseModel):
-    """A single outcome within an intervention item."""
 class OutcomeItem(BaseModel):
     """A single outcome within an intervention item."""
 
@@ -461,9 +490,6 @@ class EvidenceItem(BaseModel):
     title: str
     brief_description: Optional[str] = None
     frequency: Optional[int] = None
-    outcomes: List[OutcomeItem] = Field(default_factory=list)
-    supporting_evidence: List[str] = Field(default_factory=list)
-    countries: List[str] = Field(default_factory=list)
     outcomes: List[OutcomeItem] = Field(default_factory=list)
     supporting_evidence: List[str] = Field(default_factory=list)
     countries: List[str] = Field(default_factory=list)

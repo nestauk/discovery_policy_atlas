@@ -139,6 +139,8 @@ export interface SearchParams {
     intervention_name: string
     citation_numbers: number[]
     context: string
+  delivery_features?: string[]
+  subgroup_effects?: string[]
     impact_narrative: string
     outcome_effects: OutcomeEffect[]
   }
@@ -164,6 +166,14 @@ export interface SearchParams {
     citation_numbers_used: number[]
   }
 
+export interface SynthesisSection {
+  title: string
+  content_type: 'paragraphs' | 'bullets'
+  paragraphs: string[]
+  bullets: string[]
+  citation_numbers_used: number[]
+}
+
   export interface CoreAnswer {
     query: string
     answer: string
@@ -176,6 +186,7 @@ export interface SearchParams {
     evidence_snapshot_summary: string
     background_section?: BackgroundSection
     interventions_table: InterventionTableRow[]
+  synthesis_sections?: SynthesisSection[]
     recommendations: RecommendationItem[]
     top_citations: TopCitationItem[]
     follow_up_suggestions: string[]

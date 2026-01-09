@@ -83,6 +83,7 @@ interface AnalysisDocument {
 export default function AnalysisResultsPage() {
   const searchParams = useSearchParams()
   const router = useRouter()
+  const showRerunButton = process.env.NEXT_PUBLIC_SHOW_SYNTHESIS_RERUN === 'true'
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hasLoadedData, setHasLoadedData] = useState(false)
@@ -116,7 +117,6 @@ export default function AnalysisResultsPage() {
   const [dataError, setDataError] = useState<string | null>(null)
   const [isRerunningSynthesis, setIsRerunningSynthesis] = useState(false)
   const [rerunError, setRerunError] = useState<string | null>(null)
-  const showSynthesisRerun = process.env.NEXT_PUBLIC_SHOW_SYNTHESIS_RERUN === 'true'
 
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
@@ -988,9 +988,13 @@ export default function AnalysisResultsPage() {
                         structuredBriefing={summaryData.structured_briefing}
                         citationMap={summaryData.citation_map}
                         evidenceCoverage={summaryData.evidence_coverage}
-                        onRerunSynthesis={showSynthesisRerun ? handleRerunSynthesis : undefined}
-                        isRerunningSynthesis={isRerunningSynthesis}
-                        rerunError={rerunError}
+                        {...(showRerunButton
+                          ? {
+                              onRerunSynthesis: handleRerunSynthesis,
+                              isRerunningSynthesis,
+                              rerunError,
+                            }
+                          : {})}
                         onCitationClick={() => {
                           // Navigate to evidence tab and highlight the document
                           setActiveTab('evidence');

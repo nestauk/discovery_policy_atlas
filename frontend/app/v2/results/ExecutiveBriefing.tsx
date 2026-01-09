@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useCallback } from "react";
-import { useMemo, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,15 +15,7 @@ import type {
   RecommendationItem,
   TopCitationItem,
   BackgroundSection,
-} from "@/types/search";
-import type { 
-  CitationInfo, 
-  EvidenceCoverageSnapshot, 
-  StructuredBriefing,
-  InterventionTableRow,
-  RecommendationItem,
-  TopCitationItem,
-  BackgroundSection,
+  SynthesisSection as SynthesisSectionType,
 } from "@/types/search";
 
 interface ExecutiveBriefingProps {
@@ -389,6 +380,18 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                 <td className="px-4 py-3 text-sm text-slate-600">
                   <div className="space-y-1">
                     {renderFormattedText(row.context || 'Various settings', `ctx-${idx}`)}
+                  {row.delivery_features && row.delivery_features.length > 0 && (
+                    <div className="text-xs text-slate-600">
+                      <span className="font-semibold">Features: </span>
+                      {row.delivery_features.join("; ")}
+                    </div>
+                  )}
+                  {row.subgroup_effects && row.subgroup_effects.length > 0 && (
+                    <div className="text-xs text-slate-600">
+                      <span className="font-semibold">Subgroups: </span>
+                      {row.subgroup_effects.join("; ")}
+                    </div>
+                  )}
                   </div>
                 </td>
                 <td className="px-4 py-3">
@@ -425,9 +428,9 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                 </td>
                 <td className="px-4 py-3 text-sm">
                   <div className="flex flex-wrap gap-1">
-                    {row.citation_numbers.map((num) => (
+                    {[...(new Set(row.citation_numbers || []))].map((num, citIdx) => (
                       <CitationLink
-                        key={`int-${idx}-${num}`}
+                        key={`int-${idx}-${citIdx}-${num}`}
                         citationKey={`[${num}]`}
                         citationNumber={num}
                         citationInfo={lookupCitation(num)}
@@ -470,6 +473,36 @@ function RecommendationsList({ recommendations, renderCitations }: {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function SynthesisSections({ sections, renderCitations }: { 
+  sections?: SynthesisSectionType[];
+  renderCitations: (text: string, prefix: string) => React.ReactNode[];
+}) {
+  if (!sections || sections.length === 0) return null;
+
+  return (
+    <div className="mb-6 space-y-4">
+      {sections.map((section, idx) => (
+        <div key={idx} className="bg-white border border-slate-200 rounded-lg p-4">
+          <h3 className="text-lg font-semibold text-slate-800 mb-2">{section.title}</h3>
+          {section.content_type === 'bullets' ? (
+            <ul className="list-disc pl-5 space-y-1 text-slate-700">
+              {section.bullets.map((b, i) => (
+                <li key={i}>{renderCitations(b, `synth-${idx}-b-${i}`)}</li>
+              ))}
+            </ul>
+          ) : (
+            <div className="space-y-2 text-slate-700">
+              {section.paragraphs.map((p, i) => (
+                <p key={i}>{renderCitations(p, `synth-${idx}-p-${i}`)}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -529,6 +562,12 @@ export function ExecutiveBriefing({
 }: ExecutiveBriefingProps) {
   const lookupCitation = useMemo(() => buildCitationLookup(citationMap), [citationMap]);
   const renderCitations = useRenderCitations(lookupCitation, onCitationClick);
+  const synthesisSections = useMemo<SynthesisSectionType[]>(() => {
+    if (!structuredBriefing) return [];
+    const snake = structuredBriefing.synthesis_sections;
+    const camel = (structuredBriefing as { synthesisSections?: SynthesisSectionType[] })?.synthesisSections;
+    return snake ?? camel ?? [];
+  }, [structuredBriefing]);
 
   const handleDownloadPdf = useCallback(() => {
     const sanitize = (text?: string) =>
@@ -725,6 +764,32 @@ export function ExecutiveBriefing({
       `;
     };
 
+    const renderSynthesisSections = () => {
+      if (!synthesisSections || synthesisSections.length === 0) return "";
+      return synthesisSections
+        .map((section: SynthesisSectionType) => {
+          const bullets =
+            section.content_type === "bullets"
+              ? `<ul>${(section.bullets || [])
+                  .map((b: string) => `<li>${rich(b)}</li>`)
+                  .join("")}</ul>`
+              : "";
+          const paras =
+            section.content_type === "paragraphs"
+              ? (section.paragraphs || [])
+                  .map((p: string) => `<p>${rich(p)}</p>`)
+                  .join("")
+              : "";
+          return `
+            <div class="card">
+              <div class="card-title">${sanitize(section.title)}</div>
+              ${bullets || paras}
+            </div>
+          `;
+        })
+        .join("");
+    };
+
     const structuredHtml = structuredBriefing
       ? `
         ${renderQuestion()}
@@ -743,6 +808,7 @@ export function ExecutiveBriefing({
         ${renderEvidenceSnapshot()}
         ${renderBackground()}
         ${renderInterventions()}
+        ${renderSynthesisSections()}
         ${renderRecommendations()}
       `
       : `<div style="white-space: pre-wrap;">${sanitize(briefing)}</div>`;
@@ -804,7 +870,7 @@ export function ExecutiveBriefing({
     setTimeout(() => {
       w.print();
     }, 300);
-  }, [structuredBriefing, briefing]);
+  }, [briefing, evidenceCoverage, lookupCitation, structuredBriefing, synthesisSections]);
 
   // Legacy markdown components (simplified)
   const processText = useCallback((text: string, prefix: string): React.ReactNode => {
@@ -901,6 +967,11 @@ export function ExecutiveBriefing({
               onCitationClick={onCitationClick}
               renderCitations={renderCitations}
             />
+
+            <SynthesisSections 
+              sections={synthesisSections}
+              renderCitations={renderCitations}
+            />
             
             <RecommendationsList 
               recommendations={structuredBriefing.recommendations}
@@ -930,12 +1001,8 @@ export function ExecutiveBriefing({
         ) : briefing ? (
           <div className="prose prose-slate max-w-none">
             <ReactMarkdown skipHtml components={markdownComponents}>{briefing}</ReactMarkdown>
-            <ReactMarkdown skipHtml components={markdownComponents}>{briefing}</ReactMarkdown>
           </div>
         ) : (
-          <div className="text-center py-8 text-slate-500">
-            <FileText className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-            <p>We are preparing the executive briefing. Please come back a bit later.</p>
           <div className="text-center py-8 text-slate-500">
             <FileText className="h-12 w-12 mx-auto mb-3 text-slate-300" />
             <p>We are preparing the executive briefing. Please come back a bit later.</p>

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
@@ -23,6 +24,8 @@ from app.services.synthesis.schemas import (
     CoreAnswer,
     InterventionTableRow,
     RecommendationItem,
+    SynthesisSection,
+    SynthesisSectionProposal,
     CitationInfo,
     EvidenceSnapshotRow,
     TopCitationItem,
@@ -56,65 +59,69 @@ SECTION_CONFIGS = {
     "background": {
         "name": "Background Context",
         "instructions": """
-Write a concise background section (2-3 paragraphs) that:
-1. Establishes the policy context and why this topic matters
-2. Summarises the scope of evidence reviewed
-3. Highlights the key themes that emerged from the analysis
-
-Focus on setting up the reader to understand the interventions and recommendations.
+Write 2-3 short paragraphs (120-180 words total) that:
+1) Establish the policy context and why this matters
+2) Summarise evidence scope and key themes
+3) Set up the reader for interventions/recommendations
 """,
-        "additional": "Format as flowing prose paragraphs. Include 3-5 citations.",
+        "additional": (
+            "Use flowing prose. Include 3-5 inline citations in [N] format. "
+            "No bullets or headings."
+        ),
     },
     "interventions": {
         "name": "Policy Interventions Analysis",
         "instructions": """
-Create a structured analysis of policy interventions found in the evidence:
-1. List each major intervention type identified
-2. For each intervention, provide:
-   - Brief description of what it involves
-   - Evidence strength (how well studied)
-   - Effect direction (positive, negative, mixed, unclear)
-   - Key findings from the research
+Create a concise interventions table. Include 4-6 rows covering distinct intervention types.
 
-Prioritise interventions with stronger evidence bases.
+IMPORTANT: Use the get_intervention_outcomes tool to retrieve aggregated outcome data 
+(effect sizes, effect consensus, study types) for the interventions table.
+
+For each row provide:
+1. Intervention Type (3-6 words): Clear category name (e.g., "Combined Diet and Activity Programs")
+2. Context/Features (15-25 words): Delivery method, setting, key components, notable features
+   Example: "School-based with family involvement; integrates nutrition education and structured PA"
+3. Impact & Outcomes (20-30 words): Effectiveness on key outcomes WITH effect sizes from the evidence
+   Example: "Modest BMI reduction (−0.15 to −0.3 kg/m²); more effective in already-overweight children"
+4. Sources: [N] citation references
+
+Ensure each row covers a meaningfully different intervention approach.
 """,
-        "additional": "Format as a markdown table with columns: Intervention | Description | Evidence | Effect | Key Findings | Citations",
+        "additional": (
+            "Output a markdown table with header exactly: "
+            "| Intervention | Context & Features | Impact & Outcomes | Sources |\n"
+            "Make Context rich with implementation details (delivery method, setting, components). "
+            "Make Impact specific with effect sizes, outcome measures, and effect direction (positive/negative/mixed) from get_intervention_outcomes. "
+            "Prefer 3-4 high-impact, well-evidenced interventions per dominant themes rather than broad lists."
+        ),
     },
     "core_answer": {
         "name": "Core Findings",
         "instructions": """
-Write the core findings section as flowing prose (2-3 paragraphs) that:
-1. Opens with a direct, bold headline answer to the research question (1-2 sentences)
-2. Synthesises the most important findings across interventions
-3. Highlights what works, what doesn't, and what's uncertain
-4. Notes any important caveats or limitations
-
-IMPORTANT: Every factual claim MUST have a citation in [N] format immediately after the claim.
-Example: "School-based programmes show consistent effectiveness [4][10]."
-
-This is the most important section - be precise and well-cited.
+Write a tight core answer (110-150 words) that:
+1) Opens with a direct headline answer (1-2 sentences, cite)
+2) Synthesises what works/does not work and key uncertainties (cite)
+3) Ends with a 1-sentence directive in imperative voice (cite)
 """,
-        "additional": "Every major claim must have at least one citation. Use [N] format consistently.",
+        "additional": (
+            "Every factual claim must have [N] citations. Keep sentences short. "
+            "Do not restate the question. British English. "
+            "Do NOT include meta-labels such as 'Core answer:', 'Synthesis:', or 'Directive:' "
+            "anywhere in the output."
+        ),
     },
     "recommendations": {
         "name": "Policy Recommendations",
         "instructions": """
-Provide 3-5 evidence-based policy recommendations. For EACH recommendation, use this EXACT structure:
-
-**[Number]. [Short Action Title]**: [Main recommendation text with supporting evidence and citations]
-- **Why**: [Brief explanation of why this is recommended, with citation]
-- **Strength of evidence**: [High/Moderate/Low] — [Brief justification]
-- **Implementation**: [Key implementation considerations]
-
-Example format:
-**1. Scale up multi-component school programmes**: Evidence supports comprehensive school interventions combining nutrition, physical activity and behavioural components [4][10].
-- **Why**: Multi-component approaches show larger effects than single-component interventions [4].
-- **Strength of evidence**: Moderate — Multiple systematic reviews demonstrate consistent benefits.
-- **Implementation**: Integrate into existing curricula; train teachers; ensure parental engagement.
-
-Make each recommendation specific and actionable for policymakers.
+Provide exactly 3-4 actionable recommendations. Each must have:
+- Numbered title (3-7 words, action-led)
+- One paragraph (60-90 words) with [N] citations
+- At least one citation per recommendation
 """,
-        "additional": "Use the exact format shown. Every claim needs a citation in [N] format.",
+        "additional": (
+            "Return as numbered items; keep lines clean (no stray asterisks). "
+            "Use [N] citation format only."
+        ),
     },
 }
 
@@ -125,7 +132,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     Uses the BriefingOrchestrator to:
     1. Gather evidence using tools (get_theme_evidence, search_extractions, etc.)
     2. Generate each section with gpt-5-mini
-    3. Verify each section (mandatory) with retry logic
+    3. Verify each section (soft verification with warnings)
 
     Args:
         state: Current synthesis state with RCS results.
@@ -134,6 +141,16 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         State update with structured_briefing and briefing_results.
     """
     print("--- Phase 6: Generating Executive Briefing ---")
+
+    # Ensure doc_citation_map is populated early (critical for tool evidence)
+    doc_citation_map = state.get("doc_citation_map") or {}
+    if not doc_citation_map:
+        grounded_citations = state.get("grounded_citations") or []
+        for cit in grounded_citations:
+            if cit.analysis_document_id and cit.citation_number:
+                doc_citation_map[cit.analysis_document_id] = cit.citation_number
+        state["doc_citation_map"] = doc_citation_map
+        print(f"  Populated doc_citation_map with {len(doc_citation_map)} entries")
 
     # Get research question for context
     research_question = state.get("research_question", "")
@@ -145,25 +162,37 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     orchestrator = BriefingOrchestrator(state)
     config = BriefingConfig()
 
+    grounded_citations = state.get("grounded_citations") or []
+    num_docs = len(grounded_citations)
+    limits = {
+        "max_interventions": min(8, max(4, num_docs // 4 or 4)),
+        "max_recommendations": min(5, max(3, num_docs // 10 or 3)),
+        "max_top_citations": min(10, max(6, (num_docs // 2) or 6)),
+        "max_synthesis_sections": 2,
+    }
+
     # Track results
     section_outputs: Dict[str, SectionOutput] = {}
+    synthesis_outputs: List[Tuple[str, SectionOutput]] = []
     total_tool_calls = 0
     verification_failures: List[str] = []
 
-    # Generate each section
-    for section_key, section_config in SECTION_CONFIGS.items():
+    async def _run_section(section_key: str, additional_extra: str = "") -> None:
+        nonlocal total_tool_calls
+        section_config = SECTION_CONFIGS[section_key]
         print(f"  Generating section: {section_config['name']}...")
 
-        # Add research question context to instructions
         instructions = section_config["instructions"]
         if research_question:
             instructions = f"Research Question: {research_question}\n\n{instructions}"
+
+        additional = section_config.get("additional", "") + additional_extra
 
         try:
             output = await orchestrator.generate_section(
                 section_name=section_config["name"],
                 section_instructions=instructions,
-                additional_instructions=section_config.get("additional", ""),
+                additional_instructions=additional,
                 max_retries=config.max_verification_retries,
             )
 
@@ -185,7 +214,6 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
 
         except Exception as e:
             logger.error(f"Failed to generate section '{section_key}': {e}")
-            # Use fallback content
             section_outputs[section_key] = SectionOutput(
                 content=f"[Section generation failed: {e}]",
                 citations_used=[],
@@ -194,15 +222,58 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
                 tool_calls_made=0,
             )
 
+    # Background
+    await _run_section("background")
+
+    # Interventions with dynamic limits and tool guidance
+    inter_extra = (
+        f"Aim for {limits['max_interventions']} rows, prioritising high-impact, well-evidenced interventions. "
+        "Use get_intervention_outcomes for effect sizes and get_intervention_details for delivery features and subgroups."
+    )
+    await _run_section("interventions", additional_extra=f" {inter_extra}")
+
+    # Decide and generate synthesis sections (always propose up to 2)
+    proposals = await _decide_synthesis_sections(
+        orchestrator=orchestrator,
+        research_question=research_question,
+        max_sections=limits["max_synthesis_sections"],
+        num_sources=num_docs,
+    )
+    for idx, proposal in enumerate(proposals[: limits["max_synthesis_sections"]]):
+        synth_output = await _generate_synthesis_section(
+            orchestrator=orchestrator,
+            proposal=proposal,
+            research_question=research_question,
+            section_index=idx + 1,
+            max_retries=config.max_verification_retries,
+        )
+        synthesis_outputs.append((proposal.section_title, synth_output))
+        section_outputs[f"synthesis_{idx+1}"] = synth_output
+        total_tool_calls += synth_output.tool_calls_made
+        if not synth_output.verification_passed:
+            verification_failures.append(f"synthesis_{idx+1}")
+
+    # Core Findings
+    await _run_section("core_answer")
+
+    # Recommendations with adaptive count
+    rec_extra = (
+        f"Provide {limits['max_recommendations']} concise recommendations unless evidence is sparse. "
+        "Each must include [N] citations."
+    )
+    await _run_section("recommendations", additional_extra=f" {rec_extra}")
+
     # Build structured briefing from sections
     structured_briefing = await _build_structured_briefing(
         section_outputs,
-        state.get("grounded_citations") or [],
+        grounded_citations,
         state.get("aggregated_interventions") or [],
         research_question,
         state.get("doc_scores") or {},
         state.get("all_scored_contexts") or [],
         state.get("doc_citation_map") or {},
+        synthesis_outputs,
+        limits,
     )
 
     # Collect all citations used
@@ -273,6 +344,8 @@ async def _build_structured_briefing(
     doc_scores: Dict[str, Dict[str, Any]],
     all_scored_contexts: List[ScoredContext],
     doc_citation_map: Dict[str, int],
+    synthesis_outputs: List[Tuple[str, SectionOutput]],
+    limits: Dict[str, int],
 ) -> StructuredBriefing:
     """Build StructuredBriefing from section outputs.
 
@@ -289,21 +362,62 @@ async def _build_structured_briefing(
         StructuredBriefing object matching frontend schema.
     """
 
-    # Parse core answer - use full content, not just first line
+    def _strip_leading_label(text: str, labels: List[str]) -> str:
+        """Strip any leading meta-labels like 'Directive:' from generated text."""
+        if not text:
+            return ""
+        cleaned = text.strip()
+        for label in labels:
+            cleaned = re.sub(rf"^\s*{re.escape(label)}\s*", "", cleaned, flags=re.I)
+        return cleaned.strip()
+
+    def _strip_inline_labels(text: str, labels: List[str]) -> str:
+        """Remove inline meta-labels like 'Synthesis:' that sometimes appear mid-paragraph."""
+        if not text:
+            return ""
+        cleaned = text
+        for label in labels:
+            cleaned = re.sub(rf"\b{re.escape(label)}\s*", "", cleaned, flags=re.I)
+        return cleaned.strip()
+
+    def _clean_rec_title(title: str) -> str:
+        """Normalise recommendation titles to plain text (no stray markdown)."""
+        cleaned = (title or "").strip()
+        cleaned = cleaned.strip("*").strip()
+        # Remove any trailing punctuation/markdown artefacts that frequently occur
+        cleaned = re.sub(r"[*_`]+$", "", cleaned).strip()
+        return cleaned
+
+    # Fallback mapping if none provided
+    if not doc_citation_map:
+        for cit in grounded_citations:
+            if cit.analysis_document_id and cit.citation_number:
+                doc_citation_map[cit.analysis_document_id] = cit.citation_number
+
+    # Parse core answer - split directive if present
     core_output = section_outputs.get(
         "core_answer", SectionOutput(content="", citations_used=[])
     )
 
-    # The full content becomes the answer; extract first sentence as a directive if present
     full_content = core_output.content.strip()
+    directive = ""
+    answer_text = full_content
 
-    # Try to extract a headline (first sentence before a period)
-    # first_para = full_content.split("\n\n")[0] if full_content else ""
+    if full_content:
+        sentences = re.split(r"(?<=[.!?])\s+", full_content)
+        if len(sentences) > 1:
+            directive = sentences[-1].strip()
+            answer_text = " ".join(sentences[:-1]).strip() or full_content
+
+    # Strip meta-labels if the model included them anyway
+    answer_text = _strip_leading_label(answer_text, ["Core answer:", "Core answer"])
+    answer_text = _strip_inline_labels(answer_text, ["Synthesis:", "Synthesis"])
+    directive = _strip_leading_label(directive, ["Directive:", "Directive"])
 
     core_answer = CoreAnswer(
         query=research_question or "Policy intervention analysis",
-        answer=full_content,  # Full synthesis content
-        directive="",  # Could be populated with a key recommendation
+        answer=answer_text,
+        directive=directive,
     )
 
     # Parse background into paragraphs
@@ -318,13 +432,13 @@ async def _build_structured_briefing(
         citation_numbers_used=bg_output.citations_used,
     )
 
-    # Parse interventions table - filter nulls and limit to top 6
+    # Parse interventions table - filter nulls and limit to top N
     int_output = section_outputs.get(
         "interventions", SectionOutput(content="", citations_used=[])
     )
     all_intervention_rows = _parse_intervention_table(int_output.content, interventions)
 
-    # Filter out null/empty rows and limit to top 6 by citation count
+    # Filter out null/empty rows and limit to top N by citation count
     intervention_rows = [
         row
         for row in all_intervention_rows
@@ -332,15 +446,23 @@ async def _build_structured_briefing(
         and row.intervention_name.strip() not in ("", "---", "-")
     ]
     # Sort by number of citations (most evidence first), then limit
+    max_interventions = limits.get("max_interventions", 6)
     intervention_rows = sorted(
         intervention_rows, key=lambda r: len(r.citation_numbers), reverse=True
-    )[:6]
+    )[:max_interventions]
 
     # Parse recommendations
     rec_output = section_outputs.get(
         "recommendations", SectionOutput(content="", citations_used=[])
     )
     recommendation_items = _parse_recommendations(rec_output.content)
+    max_recs = limits.get("max_recommendations", len(recommendation_items))
+    recommendation_items = recommendation_items[:max_recs]
+    for rec in recommendation_items:
+        rec.title = _clean_rec_title(rec.title)
+
+    # Parse synthesis sections (if any)
+    synthesis_sections = _parse_synthesis_sections(synthesis_outputs)
 
     # Build top citations with LLM-generated contextual reasons
     top_citations = await _build_top_citations_async(
@@ -350,7 +472,7 @@ async def _build_structured_briefing(
         all_scored_contexts,
         doc_citation_map,
         research_question,
-        max_citations=8,
+        max_citations=limits.get("max_top_citations", 8),
     )
 
     # Build evidence snapshot summary
@@ -366,6 +488,7 @@ async def _build_structured_briefing(
         evidence_snapshot_summary=f"Based on {len(grounded_citations)} cited sources.",
         background_section=background_section,
         interventions_table=intervention_rows,
+        synthesis_sections=synthesis_sections,
         recommendations=recommendation_items,
         top_citations=top_citations,
         follow_up_suggestions=[],
@@ -536,6 +659,56 @@ def _parse_recommendations(content: str) -> List[RecommendationItem]:
     return recommendations
 
 
+def _parse_synthesis_sections(
+    synthesis_outputs: List[Tuple[str, SectionOutput]]
+) -> List[SynthesisSection]:
+    """Convert synthesis section outputs into structured sections."""
+    sections: List[SynthesisSection] = []
+
+    for title, output in synthesis_outputs:
+        content = (output.content or "").strip()
+        if not content:
+            continue
+
+        lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+
+        # Drop any leading line that simply repeats the title
+        lowered_title = title.lower().rstrip(":")
+        while lines and (
+            lines[0].lower().rstrip(":") == lowered_title
+            or lines[0].lower().startswith(lowered_title)
+        ):
+            lines.pop(0)
+
+        bullet_lines = [ln for ln in lines if ln.startswith("-") or ln.startswith("*")]
+
+        if bullet_lines and len(bullet_lines) >= max(2, int(0.6 * len(lines))):
+            bullets = [ln.lstrip("-* ").strip() for ln in bullet_lines]
+            sections.append(
+                SynthesisSection(
+                    title=title,
+                    content_type="bullets",
+                    bullets=bullets,
+                    citation_numbers_used=output.citations_used,
+                )
+            )
+        else:
+            paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+            if not paragraphs and lines:
+                paragraphs = [" ".join(lines)]
+
+            sections.append(
+                SynthesisSection(
+                    title=title,
+                    content_type="paragraphs",
+                    paragraphs=paragraphs,
+                    citation_numbers_used=output.citations_used,
+                )
+            )
+
+    return sections
+
+
 def _split_recommendation(text: str) -> tuple:
     """Split recommendation text into title and description.
 
@@ -560,6 +733,98 @@ def _split_recommendation(text: str) -> tuple:
         return title, description
 
 
+class SynthesisSectionDecision(BaseModel):
+    """Container for structured section proposals."""
+
+    sections: List[SynthesisSectionProposal] = Field(default_factory=list, max_length=2)
+
+
+async def _decide_synthesis_sections(
+    orchestrator: BriefingOrchestrator,
+    research_question: str,
+    max_sections: int,
+    num_sources: int,
+) -> List[SynthesisSectionProposal]:
+    """Use the orchestrator LLM to propose synthesis sections."""
+    prompt = f"""You are designing synthesis sections for an executive policy briefing.
+
+Research question: {research_question or 'Not provided'}
+Evidence base: {num_sources} cited sources
+
+Always propose 1-2 sections to include between the interventions table and recommendations.
+Choose from the menu when relevant, or propose a custom title if it better fits the evidence:
+- Key Success Factors (moderators, delivery components that drive effect)
+- Limitations & Research Gaps (uncertainties, heterogeneity, missing data)
+- Implementation Challenges (barriers/facilitators, feasibility)
+- Cost-Effectiveness Evidence (economic results if present)
+- Stakeholder Perspectives (where evidence includes adoption/acceptability signals)
+
+For each section, provide:
+- section_title
+- rationale (why this section is needed for this briefing)
+- focus (what specific content it will cover)
+
+Avoid generic text; tailor to the evidence themes. Do not reference Consensus."""
+
+    decision_llm = orchestrator.orchestrator_llm.with_structured_output(
+        SynthesisSectionDecision,
+        method="function_calling",
+    )
+
+    try:
+        decision = await decision_llm.ainvoke(prompt)
+        proposals = decision.sections or []
+    except Exception as e:
+        logger.warning(f"Synthesis section proposal generation failed: {e}")
+        proposals = []
+
+    if not proposals:
+        proposals = [
+            SynthesisSectionProposal(
+                section_title="Limitations and Research Gaps",
+                rationale="Evidence shows heterogeneity and limited long-term data; decision-makers need to understand uncertainties.",
+                focus="Summarise main gaps, sources of heterogeneity, and priority research needs.",
+            )
+        ]
+
+    return proposals[:max_sections]
+
+
+async def _generate_synthesis_section(
+    orchestrator: BriefingOrchestrator,
+    proposal: SynthesisSectionProposal,
+    research_question: str,
+    section_index: int,
+    max_retries: int,
+) -> SectionOutput:
+    """Generate a single synthesis section via the orchestrator."""
+    instructions = f"""Write a synthesis section titled "{proposal.section_title}" that supports the policy briefing.
+
+Focus: {proposal.focus}
+Rationale: {proposal.rationale}
+
+Guidance:
+- Do NOT repeat the section title in the content.
+- Prefer a concise bullet list with 4-6 bullets; if you use bullets, start lines with '- ' only.
+- Use either 2-4 short paragraphs or a 4-6 bullet list (choose the better fit for clarity).
+- Aim for 120-180 words total.
+- Every factual claim must include [N] citations.
+- British English. No headings or extraneous labels.
+- If evidence is thin, be explicit about uncertainties rather than inventing detail."""
+
+    additional = (
+        "Prioritise precise effect sizes, subgroup/moderator notes, and concrete implementation signals where available. "
+        "Do not restate the research question. Do not add an inline heading or repeat the section title."
+    )
+
+    return await orchestrator.generate_section(
+        section_name=f"Synthesis {section_index}: {proposal.section_title}",
+        section_instructions=instructions,
+        additional_instructions=additional,
+        max_retries=max_retries,
+    )
+
+
 # =============================================================================
 # TOP CITATIONS SELECTION AND REASON GENERATION
 # =============================================================================
@@ -570,8 +835,9 @@ class CitationReasonOutput(BaseModel):
 
     reason: str = Field(
         ...,
-        description="A single sentence explaining why this source is important for the policy briefing",
-        max_length=150,
+        description=(
+            "A concise reason explaining why this source is important for the policy briefing"
+        ),
     )
 
 
@@ -686,13 +952,16 @@ async def _generate_citation_reasons_batch(
     llm = ChatOpenAI(
         model=GENERATION_MODEL,
         temperature=0.3,
-        max_tokens=500,  # Needs to be higher for reasoning models
+        max_tokens=300,  # keep concise; we manually truncate below
     )
-    structured_llm = llm.with_structured_output(CitationReasonOutput)
+    structured_llm = llm.with_structured_output(
+        CitationReasonOutput,
+        method="function_calling",
+    )
 
     async def generate_single_reason(cit: CitationInfo) -> Tuple[int, str]:
         """Generate reason for a single citation."""
-        prompt = f"""You are helping create an executive policy briefing. Generate a single sentence (max 20 words) explaining why this source is important for the briefing.
+        prompt = f"""You are helping create an executive policy briefing. Generate 1–2 sentences (~150 characters) explaining why this source is important for the briefing.
 
 RESEARCH QUESTION: {research_question}
 
@@ -708,13 +977,27 @@ Write ONE sentence explaining what unique evidence or perspective this source co
 
         try:
             result = await structured_llm.ainvoke(prompt)
-            return (cit.citation_number, result.reason)
+            reason_text = result.reason.strip()
         except Exception as e:
             logger.warning(
                 f"Failed to generate reason for citation {cit.citation_number}: {e}"
             )
-            # Fallback to simple description
+            # Fallback attempt: plain text generation then truncate
+            try:
+                raw = await llm.ainvoke(prompt + "\nReturn 1-2 sentences.")
+                reason_text = (
+                    raw.content.strip() if hasattr(raw, "content") else str(raw).strip()
+                )
+            except Exception as e2:
+                logger.warning(
+                    f"Plain-text reason fallback failed for citation {cit.citation_number}: {e2}"
+                )
             return (cit.citation_number, _fallback_reason(cit))
+
+        if len(reason_text) > 200:
+            reason_text = reason_text[:200].rstrip() + "..."
+
+        return (cit.citation_number, reason_text)
 
     # Run in parallel with concurrency limit
     tasks = [generate_single_reason(cit) for cit in citations]

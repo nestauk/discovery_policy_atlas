@@ -8,11 +8,17 @@ retrieve targeted evidence for specific themes.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
+from rapidfuzz import fuzz
 
-from app.services.synthesis.schemas import ScoredContext, ThemeEvidence
+from app.services.synthesis.schemas import (
+    ScoredContext,
+    ThemeEvidence,
+    InterventionDetails,
+)
 from app.services.synthesis.tools.base import (
     BaseTool,
     ToolResult,
@@ -20,6 +26,10 @@ from app.services.synthesis.tools.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Minimum fuzzy match ratio to consider a theme match
+FUZZY_MATCH_THRESHOLD = 60
 
 
 class ThemeEvidenceItem(BaseModel):
@@ -93,26 +103,39 @@ class GetThemeEvidenceTool(BaseTool):
         # Search both theme and issue evidence
         all_evidence = scored_theme_evidence + scored_issue_evidence
 
-        # Find matching theme
+        # Find matching theme using fuzzy matching
         matching_contexts: List[ScoredContext] = []
         theme_name_lower = theme_name.lower().strip()
 
+        # First pass: exact/partial match
         for te in all_evidence:
-            # Match by theme_id or theme_name (case-insensitive partial match)
             if (te.theme_id and te.theme_id.lower() == theme_name_lower) or (
                 te.theme_name and theme_name_lower in te.theme_name.lower()
             ):
                 matching_contexts.extend(te.scored_contexts)
 
         if not matching_contexts:
-            # Try fuzzy matching on all themes
+            # Second pass: fuzzy matching using rapidfuzz
+            best_match_score = 0
+            best_match_theme = None
             for te in all_evidence:
                 if te.theme_name:
-                    # Check if any word from theme_name appears in the search
-                    theme_words = set(te.theme_name.lower().split())
-                    search_words = set(theme_name_lower.split())
-                    if theme_words & search_words:  # Intersection
-                        matching_contexts.extend(te.scored_contexts)
+                    # Calculate fuzzy ratio
+                    ratio = fuzz.ratio(theme_name_lower, te.theme_name.lower())
+                    partial_ratio = fuzz.partial_ratio(
+                        theme_name_lower, te.theme_name.lower()
+                    )
+                    best_ratio = max(ratio, partial_ratio)
+                    if best_ratio > best_match_score:
+                        best_match_score = best_ratio
+                        best_match_theme = te
+
+            if best_match_theme and best_match_score >= FUZZY_MATCH_THRESHOLD:
+                logger.info(
+                    f"Fuzzy matched '{theme_name}' to '{best_match_theme.theme_name}' "
+                    f"(score: {best_match_score})"
+                )
+                matching_contexts.extend(best_match_theme.scored_contexts)
 
         if not matching_contexts:
             # Fallback: use all_scored_contexts from state
@@ -150,14 +173,21 @@ class GetThemeEvidenceTool(BaseTool):
         # Limit results
         final_contexts = deduped[:max_results]
 
-        # Convert to output format
+        # Convert to output format - DO NOT drop evidence without citations
         evidence_items: List[ThemeEvidenceItem] = []
+        uncited_counter = 100  # Start uncited at 100+ to distinguish
+
         for ctx in final_contexts:
-            # Get citation number
+            # Get citation number - assign temporary if missing
             cit_num = doc_citation_map.get(ctx.document_id, 0)
             if cit_num == 0:
-                # Skip contexts without valid citations
-                continue
+                # Don't drop - assign temporary citation number and log
+                uncited_counter += 1
+                cit_num = uncited_counter
+                logger.debug(
+                    f"No citation for doc {ctx.document_id}, "
+                    f"assigning temporary [{cit_num}]"
+                )
 
             # Get document quality
             doc_score_info = doc_scores.get(ctx.document_id, {})
@@ -253,6 +283,540 @@ async def get_theme_evidence(
     )
 
 
-# Register tool with global registry
-_tool_instance = GetThemeEvidenceTool()
-register_tool(_tool_instance)
+class CitationContextItem(BaseModel):
+    """Full context for a specific citation.
+
+    Attributes:
+        citation_number: The [N] citation number.
+        document_title: Title of the source document.
+        full_text: Full chunk text (not truncated).
+        summary: RCS contextual summary.
+        relevance_score: RCS relevance score (0-10).
+        document_quality: Evidence strength score (1-5).
+        author_year: Author and year string.
+        url: Document URL if available.
+    """
+
+    citation_number: int
+    document_title: str
+    full_text: str
+    summary: str = ""
+    relevance_score: int = 0
+    document_quality: Optional[int] = None
+    author_year: str = ""
+    url: Optional[str] = None
+
+
+class GetCitationContextTool(BaseTool):
+    """Tool to retrieve full context for a specific citation number.
+
+    Useful during verification to check if a claim matches the cited evidence.
+    Returns the full chunk text and metadata for a given citation.
+    """
+
+    name = "get_citation_context"
+    description = (
+        "Get full context for a specific citation number [N]. "
+        "Use during verification to check if a claim matches the cited evidence. "
+        "Returns the full chunk text, summary, and document metadata."
+    )
+    max_results = 1
+
+    async def execute(
+        self,
+        state: Dict[str, Any],
+        citation_number: int,
+    ) -> ToolResult:
+        """Execute the get_citation_context tool.
+
+        Args:
+            state: Current synthesis state.
+            citation_number: The [N] citation number to look up.
+
+        Returns:
+            ToolResult with CitationContextItem.
+        """
+        # Get grounded citations from state
+        grounded_citations = state.get("grounded_citations") or []
+        all_scored_contexts: List[ScoredContext] = (
+            state.get("all_scored_contexts") or []
+        )
+        doc_scores: Dict[str, Dict[str, Any]] = state.get("doc_scores") or {}
+        doc_metadata: Dict[str, Dict[str, Any]] = state.get("doc_metadata") or {}
+
+        # Find the citation info
+        citation_info = None
+        for cit in grounded_citations:
+            if getattr(cit, "citation_number", 0) == citation_number:
+                citation_info = cit
+                break
+
+        if not citation_info:
+            return ToolResult.fail(f"Citation [{citation_number}] not found")
+
+        # Get document ID from citation
+        doc_id = getattr(citation_info, "analysis_document_id", None)
+        if not doc_id:
+            return ToolResult.fail(f"Citation [{citation_number}] has no document ID")
+
+        # Find scored context for this document (for full text)
+        matching_context = None
+        for ctx in all_scored_contexts:
+            if ctx.document_id == doc_id:
+                matching_context = ctx
+                break
+
+        # Build response
+        doc_meta = doc_metadata.get(doc_id, {})
+        doc_score_info = doc_scores.get(doc_id, {})
+
+        # Get supporting quote from citation or chunk text from context
+        full_text = getattr(citation_info, "supporting_quote", "") or ""
+        if not full_text and matching_context:
+            full_text = matching_context.chunk_text or ""
+
+        # Build author_year string
+        author = doc_meta.get("author_short") or getattr(
+            citation_info, "author_short", ""
+        )
+        year = doc_meta.get("year") or getattr(citation_info, "year", "")
+        author_year = f"{author}, {year}" if author and year else (author or str(year))
+
+        result = CitationContextItem(
+            citation_number=citation_number,
+            document_title=getattr(citation_info, "title", "")
+            or doc_meta.get("title", "Unknown"),
+            full_text=full_text,
+            summary=matching_context.summary if matching_context else "",
+            relevance_score=(
+                matching_context.relevance_score if matching_context else 0
+            ),
+            document_quality=doc_score_info.get("evidence_score"),
+            author_year=author_year,
+            url=getattr(citation_info, "url", None) or doc_meta.get("url"),
+        )
+
+        logger.info(
+            f"get_citation_context([{citation_number}]): "
+            f"found '{result.document_title}' ({len(full_text)} chars)"
+        )
+
+        return ToolResult.ok(result.model_dump())
+
+    def _get_parameters_schema(self) -> Dict[str, Any]:
+        """Get JSON schema for tool parameters."""
+        return {
+            "type": "object",
+            "properties": {
+                "citation_number": {
+                    "type": "integer",
+                    "description": (
+                        "The citation number [N] to look up. " "Example: 3 for [3]"
+                    ),
+                },
+            },
+            "required": ["citation_number"],
+        }
+
+
+# Functional interface for direct use
+async def get_citation_context(
+    state: Dict[str, Any],
+    citation_number: int,
+) -> ToolResult:
+    """Get full context for a specific citation number.
+
+    Convenience function wrapping GetCitationContextTool.
+
+    Args:
+        state: Current synthesis state.
+        citation_number: The [N] citation number to look up.
+
+    Returns:
+        ToolResult with citation context.
+    """
+    tool = GetCitationContextTool()
+    return await tool.execute(state, citation_number=citation_number)
+
+
+class InterventionOutcomeItem(BaseModel):
+    """Aggregated outcome data for an intervention.
+
+    Attributes:
+        intervention_name: Name of the intervention.
+        brief_description: One-sentence description.
+        effect_consensus: Overall effect direction (increase/decrease/mixed/no change/insufficient).
+        positive_count: Number of studies showing positive effects.
+        negative_count: Number of studies showing negative effects.
+        null_count: Number of studies showing null effects.
+        sample_effect_sizes: Example effect sizes from studies.
+        related_outcomes: List of outcome themes this intervention affects.
+        countries: Countries where intervention was studied.
+        study_types: Count of each study type (e.g., {"RCT": 3, "Systematic Review": 2}).
+        frequency: Number of documents mentioning this intervention.
+        supporting_doc_ids: Document UUIDs supporting this intervention.
+    """
+
+    intervention_name: str
+    brief_description: str = ""
+    effect_consensus: Optional[str] = None
+    positive_count: int = 0
+    negative_count: int = 0
+    null_count: int = 0
+    sample_effect_sizes: List[str] = []
+    related_outcomes: List[str] = []
+    countries: List[str] = []
+    study_types: Dict[str, int] = {}
+    frequency: int = 0
+    supporting_doc_ids: List[str] = []
+
+
+class GetInterventionOutcomesTool(BaseTool):
+    """Tool to get aggregated outcome data for interventions.
+
+    Queries pre-computed aggregated_interventions from synthesis state.
+    Returns rich outcome data including effect consensus, effect sizes,
+    related outcomes, and study types.
+    """
+
+    name = "get_intervention_outcomes"
+    description = (
+        "Get aggregated outcome data for interventions. "
+        "Returns effect consensus (positive/negative/mixed), effect sizes, "
+        "related outcomes, study types, and countries. "
+        "Use to populate the interventions table with rich outcome information."
+    )
+    max_results = 10
+
+    async def execute(
+        self,
+        state: Dict[str, Any],
+        intervention_name: Optional[str] = None,
+        max_results: Optional[int] = None,
+    ) -> ToolResult:
+        """Execute the get_intervention_outcomes tool.
+
+        Args:
+            state: Current synthesis state.
+            intervention_name: Optional filter by intervention name (fuzzy match).
+            max_results: Maximum interventions to return.
+
+        Returns:
+            ToolResult with list of InterventionOutcomeItem.
+        """
+        max_results = max_results or self.max_results
+
+        # Get aggregated interventions from state
+        aggregated_interventions = state.get("aggregated_interventions") or []
+
+        if not aggregated_interventions:
+            return ToolResult.ok([], fallback_used=True)
+
+        results: List[InterventionOutcomeItem] = []
+
+        for intervention in aggregated_interventions:
+            # If filter specified, do fuzzy match
+            if intervention_name:
+                name = getattr(intervention, "intervention_name", "")
+                if not name:
+                    continue
+                # Fuzzy match
+                ratio = fuzz.ratio(intervention_name.lower(), name.lower())
+                partial = fuzz.partial_ratio(intervention_name.lower(), name.lower())
+                if max(ratio, partial) < FUZZY_MATCH_THRESHOLD:
+                    continue
+
+            results.append(
+                InterventionOutcomeItem(
+                    intervention_name=getattr(intervention, "intervention_name", ""),
+                    brief_description=getattr(intervention, "brief_description", ""),
+                    effect_consensus=getattr(intervention, "effect_consensus", None),
+                    positive_count=getattr(intervention, "positive_count", 0),
+                    negative_count=getattr(intervention, "negative_count", 0),
+                    null_count=getattr(intervention, "null_count", 0),
+                    sample_effect_sizes=getattr(
+                        intervention, "sample_effect_sizes", []
+                    ),
+                    related_outcomes=getattr(intervention, "related_outcomes", []),
+                    countries=getattr(intervention, "countries", []),
+                    study_types=getattr(intervention, "study_types", {}),
+                    frequency=getattr(intervention, "frequency", 0),
+                    supporting_doc_ids=getattr(intervention, "supporting_doc_ids", []),
+                )
+            )
+
+            if len(results) >= max_results:
+                break
+
+        # Sort by frequency (most evidence first)
+        results.sort(key=lambda x: x.frequency, reverse=True)
+
+        logger.info(
+            f"get_intervention_outcomes('{intervention_name or 'all'}'): "
+            f"found {len(results)} interventions"
+        )
+
+        return ToolResult.ok([r.model_dump() for r in results])
+
+    def _get_parameters_schema(self) -> Dict[str, Any]:
+        """Get JSON schema for tool parameters."""
+        return {
+            "type": "object",
+            "properties": {
+                "intervention_name": {
+                    "type": "string",
+                    "description": (
+                        "Optional: filter by intervention name (fuzzy match). "
+                        "Leave empty to get all interventions sorted by evidence frequency."
+                    ),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum interventions to return.",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+            },
+            "required": [],
+        }
+
+
+class GetInterventionDetailsTool(BaseTool):
+    """Tool to extract richer delivery/features/subgroup detail for interventions.
+
+    Combines aggregated intervention data with scored contexts and document metadata
+    to surface delivery methods, target populations, subgroup effects, and example
+    effect sizes for interventions.
+    """
+
+    name = "get_intervention_details"
+    description = (
+        "Retrieve intervention delivery features, target populations, subgroup effects, "
+        "and effect-size snippets by combining aggregated intervention data with scored "
+        "contexts and document metadata."
+    )
+    max_results = 10
+    max_contexts_per_item = 5
+
+    FEATURE_KEYWORDS = {
+        "school": "School-based",
+        "family": "Family involvement",
+        "community": "Community-based",
+        "digital": "Digital/online delivery",
+        "home": "Home-based",
+        "clinic": "Clinic/primary care",
+        "policy": "Policy/regulatory",
+        "tax": "Fiscal/price measure",
+        "marketing": "Marketing/advertising control",
+        "physical activity": "Physical activity structured sessions",
+        "nutrition": "Nutrition education",
+        "behaviour": "Behavioural counselling",
+    }
+
+    POPULATION_KEYWORDS = {
+        "children": "Children",
+        "adolescent": "Adolescents",
+        "youth": "Adolescents",
+        "girls": "Girls",
+        "boys": "Boys",
+        "overweight": "Overweight/obese",
+        "obese": "Overweight/obese",
+        "low-income": "Low-income",
+        "deprived": "Deprived communities",
+    }
+
+    SUBGROUP_KEYWORDS = {
+        "girls": "More effective in girls",
+        "boys": "More effective in boys",
+        "younger": "More effective in younger children",
+        "older": "More effective in older children",
+        "overweight": "Greater effects in overweight/obese",
+        "obese": "Greater effects in overweight/obese",
+        "low-income": "Effects in low-income populations",
+        "deprived": "Effects in deprived settings",
+    }
+
+    async def execute(
+        self,
+        state: Dict[str, Any],
+        intervention_name: Optional[str] = None,
+        max_results: Optional[int] = None,
+    ) -> ToolResult:
+        max_results = max_results or self.max_results
+
+        aggregated_interventions = state.get("aggregated_interventions") or []
+        all_contexts: List[ScoredContext] = state.get("all_scored_contexts") or []
+        doc_citation_map: Dict[str, int] = state.get("doc_citation_map") or {}
+
+        if not aggregated_interventions and not all_contexts:
+            return ToolResult.ok([], fallback_used=True)
+
+        results: List[InterventionDetails] = []
+
+        for intervention in aggregated_interventions:
+            name = getattr(intervention, "intervention_name", "")
+            if not name:
+                continue
+
+            if intervention_name:
+                ratio = fuzz.ratio(intervention_name.lower(), name.lower())
+                partial = fuzz.partial_ratio(intervention_name.lower(), name.lower())
+                if max(ratio, partial) < FUZZY_MATCH_THRESHOLD:
+                    continue
+
+            supporting_doc_ids = getattr(intervention, "supporting_doc_ids", []) or []
+
+            matched_contexts = [
+                ctx
+                for ctx in all_contexts
+                if (not supporting_doc_ids or ctx.document_id in supporting_doc_ids)
+                and (
+                    name.lower() in (ctx.summary or "").lower()
+                    or name.lower() in (ctx.chunk_text or "").lower()
+                )
+            ]
+
+            if not matched_contexts and not supporting_doc_ids:
+                # Fallback: any context mentioning the intervention name
+                matched_contexts = [
+                    ctx
+                    for ctx in all_contexts
+                    if name.lower() in (ctx.summary or "").lower()
+                    or name.lower() in (ctx.chunk_text or "").lower()
+                ]
+
+            matched_contexts = matched_contexts[: self.max_contexts_per_item]
+
+            delivery_features = self._extract_delivery_features(matched_contexts)
+            target_population = self._extract_population(matched_contexts)
+            subgroup_effects = self._extract_subgroups(matched_contexts)
+
+            effect_sizes = list(getattr(intervention, "sample_effect_sizes", []) or [])
+            if not effect_sizes:
+                effect_sizes = self._extract_effect_sizes(matched_contexts)
+
+            supporting_citations = [
+                doc_citation_map[doc_id]
+                for doc_id in supporting_doc_ids
+                if doc_id in doc_citation_map
+            ]
+
+            results.append(
+                InterventionDetails(
+                    intervention_name=name,
+                    delivery_features=delivery_features,
+                    target_population=target_population,
+                    subgroup_effects=subgroup_effects,
+                    effect_sizes=effect_sizes,
+                    supporting_citations=supporting_citations,
+                )
+            )
+
+            if len(results) >= max_results:
+                break
+
+        logger.info(
+            f"get_intervention_details('{intervention_name or 'all'}'): "
+            f"found {len(results)} items"
+        )
+
+        return ToolResult.ok([r.model_dump() for r in results])
+
+    def _extract_delivery_features(self, contexts: List[ScoredContext]) -> List[str]:
+        feats: set = set()
+        for ctx in contexts:
+            text = f"{ctx.summary} {ctx.chunk_text}".lower()
+            for kw, label in self.FEATURE_KEYWORDS.items():
+                if kw in text:
+                    feats.add(label)
+        return list(feats)[:5]
+
+    def _extract_population(self, contexts: List[ScoredContext]) -> List[str]:
+        pops: set = set()
+        for ctx in contexts:
+            text = f"{ctx.summary} {ctx.chunk_text}".lower()
+            for kw, label in self.POPULATION_KEYWORDS.items():
+                if kw in text:
+                    pops.add(label)
+        return list(pops)[:5]
+
+    def _extract_subgroups(self, contexts: List[ScoredContext]) -> List[str]:
+        subs: set = set()
+        for ctx in contexts:
+            text = f"{ctx.summary} {ctx.chunk_text}".lower()
+            for kw, label in self.SUBGROUP_KEYWORDS.items():
+                if kw in text:
+                    subs.add(label)
+        return list(subs)[:5]
+
+    def _extract_effect_sizes(self, contexts: List[ScoredContext]) -> List[str]:
+        sizes: List[str] = []
+        for ctx in contexts:
+            text = f"{ctx.summary} {ctx.chunk_text}"
+            matches = re.findall(r"([-+]?\d+\.?\d*\s*(?:kg/m²|kg|%))", text)
+            for m in matches:
+                snippet = m.strip()
+                if snippet not in sizes:
+                    sizes.append(snippet)
+            if len(sizes) >= 5:
+                break
+        return sizes[:5]
+
+    def _get_parameters_schema(self) -> Dict[str, Any]:
+        """Get JSON schema for tool parameters."""
+        return {
+            "type": "object",
+            "properties": {
+                "intervention_name": {
+                    "type": "string",
+                    "description": (
+                        "Optional: filter by intervention name (fuzzy match). "
+                        "Leave empty to get all interventions sorted by evidence frequency."
+                    ),
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum interventions to return.",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+            },
+            "required": [],
+        }
+
+
+# Functional interface for direct use
+async def get_intervention_outcomes(
+    state: Dict[str, Any],
+    intervention_name: Optional[str] = None,
+    max_results: int = 10,
+) -> ToolResult:
+    """Get aggregated outcome data for interventions.
+
+    Convenience function wrapping GetInterventionOutcomesTool.
+
+    Args:
+        state: Current synthesis state.
+        intervention_name: Optional filter by intervention name.
+        max_results: Maximum interventions to return.
+
+    Returns:
+        ToolResult with list of intervention outcome data.
+    """
+    tool = GetInterventionOutcomesTool()
+    return await tool.execute(
+        state, intervention_name=intervention_name, max_results=max_results
+    )
+
+
+# Register tools with global registry
+_theme_evidence_tool = GetThemeEvidenceTool()
+_citation_context_tool = GetCitationContextTool()
+_intervention_outcomes_tool = GetInterventionOutcomesTool()
+_intervention_details_tool = GetInterventionDetailsTool()
+register_tool(_theme_evidence_tool)
+register_tool(_citation_context_tool)
+register_tool(_intervention_outcomes_tool)
+register_tool(_intervention_details_tool)

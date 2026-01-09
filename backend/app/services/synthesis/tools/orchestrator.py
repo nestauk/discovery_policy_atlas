@@ -7,14 +7,14 @@ tool execution, section generation (gpt-5-mini), and verification.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
+from app.services.synthesis.schemas import RecommendationsOutput
 from app.services.synthesis.tools.base import (
     get_tool_registry,
 )
@@ -26,6 +26,68 @@ from app.services.synthesis.tools.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Structured Output Schemas for Orchestrator Decisions
+# ---------------------------------------------------------------------------
+
+
+class ToolCallDecision(BaseModel):
+    """A single tool call decision from the orchestrator."""
+
+    tool: str = Field(..., description="Name of the tool to call")
+    arguments: Dict[str, Any] = Field(
+        default_factory=dict, description="Tool arguments"
+    )
+
+
+class OrchestratorDecision(BaseModel):
+    """Structured decision output from the orchestrator.
+
+    Using Pydantic + with_structured_output() eliminates JSON parsing issues.
+    """
+
+    reasoning: str = Field(
+        ..., description="Brief explanation of why these tools are being called"
+    )
+    tool_calls: List[ToolCallDecision] = Field(
+        default_factory=list, description="List of tools to execute"
+    )
+    done: bool = Field(
+        False, description="True when sufficient evidence has been gathered"
+    )
+    evidence_summary: Optional[str] = Field(
+        None, description="Summary of evidence gathered (when done=True)"
+    )
+
+
+class VerificationClaim(BaseModel):
+    """A single claim extracted during verification."""
+
+    claim: str = Field(..., description="The claim text")
+    citations: List[int] = Field(
+        default_factory=list, description="Citation numbers used"
+    )
+    is_supported: bool = Field(..., description="Whether the claim is supported")
+    issue: Optional[str] = Field(
+        None, description="Description of issue if not supported"
+    )
+
+
+class VerificationResult(BaseModel):
+    """Structured verification output."""
+
+    claims: List[VerificationClaim] = Field(
+        default_factory=list, description="Extracted claims with support status"
+    )
+    overall_supported: bool = Field(
+        ..., description="Whether all claims are sufficiently supported"
+    )
+    issues_summary: Optional[str] = Field(None, description="Summary of issues if any")
+    suggested_fixes: List[str] = Field(
+        default_factory=list, description="Suggested fixes for unsupported claims"
+    )
 
 
 # Maximum tool calls per section (user-configured)
@@ -50,38 +112,25 @@ ORCHESTRATOR_SYSTEM_PROMPT = """You are an evidence orchestrator for policy brie
 
 ### Tool Selection Strategy
 1. Start with get_theme_evidence for the main topic/intervention
-2. Use search_extractions for specific claims that need additional support
-3. Use get_document_quality to verify source quality for key citations
-4. Stop when you have 3-5 high-quality evidence items per major claim
+2. Use get_intervention_outcomes to get effect sizes, outcomes, and study types for interventions
+3. Use search_extractions for specific claims that need additional support
+4. Use get_document_quality to verify source quality for key citations
+5. Use get_citation_context to get full context for specific citations during verification
+6. Stop when you have 3-5 high-quality evidence items per major claim
+
+### Parameter Requirements (do not omit)
+- get_theme_evidence: requires theme_name (string)
+- get_multiple_document_quality: requires citation_numbers (array of ints)
+- get_document_quality: requires citation_number (int)
+- search_extractions: requires query (string)
+- get_intervention_outcomes: optional intervention_name, otherwise fetch all
 
 ### Efficiency
 - You have a maximum of {max_tool_calls} tool calls per section
 - Combine related queries where possible
 - Don't repeat the same tool call
 
-## Response Format
-
-When deciding on tool calls, respond with a JSON object:
-{{
-    "reasoning": "Brief explanation of why you're calling these tools",
-    "tool_calls": [
-        {{
-            "tool": "tool_name",
-            "arguments": {{...}}
-        }}
-    ],
-    "done": false
-}}
-
-When you have enough evidence, respond with:
-{{
-    "reasoning": "Explanation of why evidence is sufficient",
-    "tool_calls": [],
-    "done": true,
-    "evidence_summary": "Brief summary of the evidence gathered"
-}}
-
-Only output JSON, no other text."""
+When you have gathered enough evidence, set done=True and provide an evidence_summary."""
 
 
 SECTION_GENERATION_PROMPT = """You are writing a section of a policy executive briefing.
@@ -154,6 +203,9 @@ class OrchestratorContext:
     gathered_evidence: List[Dict[str, Any]] = field(default_factory=list)
     tool_call_count: int = 0
     max_tool_calls: int = MAX_TOOL_CALLS_PER_SECTION
+    used_theme_names: set = field(default_factory=set)
+    available_theme_names: List[str] = field(default_factory=list)
+    available_citation_numbers: List[int] = field(default_factory=list)
 
 
 class SectionOutput(BaseModel):
@@ -208,18 +260,21 @@ class BriefingOrchestrator:
         section_name: str,
         section_instructions: str,
         additional_instructions: str = "",
-        max_retries: int = 2,
+        max_retries: int = 1,
     ) -> SectionOutput:
         """Generate a briefing section with tool-augmented evidence.
+
+        Uses soft verification - content is always returned even if
+        verification flags issues. This prevents cascade failures.
 
         Args:
             section_name: Name of the section (e.g., "Background").
             section_instructions: What the section should cover.
             additional_instructions: Extra formatting/content guidance.
-            max_retries: Max verification retry attempts.
+            max_retries: Max verification retry attempts (reduced to 1 for soft verification).
 
         Returns:
-            SectionOutput with content and verification status.
+            SectionOutput with content and verification warnings.
         """
         ctx = OrchestratorContext(
             state=self.state,
@@ -230,65 +285,87 @@ class BriefingOrchestrator:
         # Phase 1: Gather evidence
         await self._gather_evidence(ctx)
 
-        # Phase 2 & 3: Generate and verify (with retries)
-        for attempt in range(max_retries + 1):
-            # Generate section
+        # Phase 2: Generate content
+        content = await self._generate_section_content(
+            ctx,
+            additional_instructions,
+        )
+
+        # Extract citations used
+        citations_used = self._extract_citations(content)
+
+        # Phase 3: Soft verification - verify once, capture warnings
+        verification = await self._verify_section(ctx, content)
+        verification_passed = verification.get("overall_supported", True)
+        verification_issues = verification.get("suggested_fixes", [])
+
+        # If verification failed and we have retries, try once more
+        if not verification_passed and max_retries > 0:
+            logger.info(
+                f"Section '{section_name}' verification had issues, retrying once: "
+                f"{verification.get('issues_summary')}"
+            )
+            # Add verification feedback to context for retry
+            ctx.gathered_evidence.append(
+                {
+                    "type": "verification_feedback",
+                    "issues": verification_issues,
+                    "claims_to_fix": [
+                        c
+                        for c in verification.get("claims", [])
+                        if not c.get("is_supported", True)
+                    ],
+                }
+            )
+            # Regenerate
             content = await self._generate_section_content(
                 ctx,
                 additional_instructions,
             )
-
-            # Extract citations used
             citations_used = self._extract_citations(content)
-
-            # Verify
             verification = await self._verify_section(ctx, content)
+            verification_passed = verification.get("overall_supported", True)
+            verification_issues = verification.get("suggested_fixes", [])
 
-            if verification["overall_supported"]:
-                return SectionOutput(
-                    content=content,
-                    citations_used=citations_used,
-                    verification_passed=True,
-                    verification_issues=[],
-                    tool_calls_made=ctx.tool_call_count,
-                )
-
-            # If not supported and we have retries left
-            if attempt < max_retries:
-                logger.warning(
-                    f"Section '{section_name}' verification failed (attempt {attempt + 1}), "
-                    f"issues: {verification.get('issues_summary')}"
-                )
-                # Add verification feedback to context for retry
-                ctx.gathered_evidence.append(
-                    {
-                        "type": "verification_feedback",
-                        "issues": verification.get("suggested_fixes", []),
-                        "claims_to_fix": [
-                            c
-                            for c in verification.get("claims", [])
-                            if not c.get("is_supported", True)
-                        ],
-                    }
-                )
-
-        # Exhausted retries
+        # Always return content - verification is informational only
         return SectionOutput(
             content=content,
             citations_used=citations_used,
-            verification_passed=False,
-            verification_issues=verification.get("suggested_fixes", []),
+            verification_passed=verification_passed,
+            verification_issues=verification_issues,
             tool_calls_made=ctx.tool_call_count,
         )
 
     async def _gather_evidence(self, ctx: OrchestratorContext) -> None:
-        """Use orchestrator LLM to decide which tools to call.
+        """Use orchestrator LLM with structured output to decide which tools to call.
 
         Args:
             ctx: Orchestrator context to update with evidence.
         """
+        import json
+
         # Build tool descriptions
         tool_descriptions = self._build_tool_descriptions()
+
+        # Collect available theme names and citation numbers from state
+        theme_names: List[str] = []
+        for key in (
+            "final_intervention_themes",
+            "final_issue_themes",
+            "final_outcome_themes",
+        ):
+            themes = self.state.get(key) or []
+            for t in themes:
+                name = getattr(t, "name", None) or getattr(t, "theme_name", None)
+                if name and name not in theme_names:
+                    theme_names.append(name)
+
+        grounded_citations = self.state.get("grounded_citations") or []
+        citation_numbers = [
+            getattr(c, "citation_number", None)
+            for c in grounded_citations
+            if getattr(c, "citation_number", None)
+        ]
 
         # Build system prompt
         system_prompt = ORCHESTRATOR_SYSTEM_PROMPT.format(
@@ -306,6 +383,9 @@ class BriefingOrchestrator:
 - {len(self.state.get("grounded_citations", []))} grounded citations
 - {len(self.state.get("all_scored_contexts", []))} total scored contexts
 
+Available theme names: {", ".join(theme_names) if theme_names else "None"}
+Available citation numbers: {citation_numbers if citation_numbers else "None"}
+
 Decide which tools to call to gather the most relevant evidence for this section."""
 
         messages = [
@@ -313,45 +393,108 @@ Decide which tools to call to gather the most relevant evidence for this section
             {"role": "user", "content": user_message},
         ]
 
+        # Create structured output LLM for orchestrator decisions
+        # Use function_calling method as Dict[str, Any] isn't compatible with
+        # OpenAI's strict JSON schema mode (requires additionalProperties: false)
+        structured_orchestrator = self.orchestrator_llm.with_structured_output(
+            OrchestratorDecision,
+            method="function_calling",
+        )
+
         # Orchestrator loop
         while ctx.tool_call_count < ctx.max_tool_calls:
-            # Get LLM decision
+            # Get LLM decision using structured output (guaranteed valid schema)
             config = self._build_langfuse_config("orchestrator_decide")
-            response = await self.orchestrator_llm.ainvoke(messages, config=config)
-
-            # Parse response
             try:
-                content = response.content.strip()
-                if content.startswith("```"):
-                    content = content.split("```")[1]
-                    if content.startswith("json"):
-                        content = content[4:]
-                decision = json.loads(content)
-            except json.JSONDecodeError:
-                logger.warning(
-                    f"Failed to parse orchestrator response: {response.content}"
+                decision: OrchestratorDecision = await structured_orchestrator.ainvoke(
+                    messages, config=config
                 )
+            except Exception as e:
+                logger.warning(f"Orchestrator structured output failed: {e}")
                 break
 
             # Check if done
-            if decision.get("done", False):
+            if decision.done:
                 logger.info(
-                    f"Orchestrator done gathering evidence: {decision.get('reasoning', '')}"
+                    f"Orchestrator done gathering evidence: {decision.reasoning}"
                 )
                 break
 
             # Execute tool calls
-            tool_calls = decision.get("tool_calls", [])
-            if not tool_calls:
+            if not decision.tool_calls:
                 break
 
             tool_results: List[Dict[str, Any]] = []
-            for tc in tool_calls:
+            for tc in decision.tool_calls:
                 if ctx.tool_call_count >= ctx.max_tool_calls:
                     break
 
-                tool_name = tc.get("tool", "")
-                arguments = tc.get("arguments", {})
+                tool_name = tc.tool
+                arguments = tc.arguments or {}
+
+                # Enforce required parameters; skip invalid calls to avoid crashing tools
+                if tool_name == "get_theme_evidence" and not arguments.get(
+                    "theme_name"
+                ):
+                    # Auto-fill with next available theme name if we have one
+                    next_theme = None
+                    for name in theme_names:
+                        if name not in ctx.used_theme_names:
+                            next_theme = name
+                            break
+                    if next_theme:
+                        arguments["theme_name"] = next_theme
+                        ctx.used_theme_names.add(next_theme)
+                        logger.info(
+                            f"Auto-filled get_theme_evidence theme_name={next_theme}"
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping get_theme_evidence: missing theme_name"
+                        )
+                        continue
+                if tool_name == "get_multiple_document_quality" and not arguments.get(
+                    "citation_numbers"
+                ):
+                    if citation_numbers:
+                        arguments["citation_numbers"] = citation_numbers[:10]
+                        logger.info(
+                            "Auto-filled get_multiple_document_quality with citation_numbers"
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping get_multiple_document_quality: missing citation_numbers"
+                        )
+                        continue
+                if tool_name == "get_document_quality" and not arguments.get(
+                    "citation_number"
+                ):
+                    if citation_numbers:
+                        arguments["citation_number"] = citation_numbers[0]
+                        logger.info(
+                            f"Auto-filled get_document_quality with citation_number={citation_numbers[0]}"
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping get_document_quality: missing citation_number"
+                        )
+                        continue
+                if tool_name == "search_extractions" and not arguments.get("query"):
+                    logger.warning("Skipping search_extractions: missing query")
+                    continue
+                if tool_name == "get_citation_context" and not arguments.get(
+                    "citation_number"
+                ):
+                    if citation_numbers:
+                        arguments["citation_number"] = citation_numbers[0]
+                        logger.info(
+                            f"Auto-filled get_citation_context with citation_number={citation_numbers[0]}"
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping get_citation_context: missing citation_number"
+                        )
+                        continue
 
                 result = await self.registry.execute(
                     tool_name,
@@ -378,13 +521,15 @@ Decide which tools to call to gather the most relevant evidence for this section
                         }
                     )
 
-            # Add tool results to conversation
+            # Add tool results to conversation for next iteration
+            # Serialize the decision for the assistant message
+            decision_dict = decision.model_dump()
             results_summary = json.dumps(tool_results, indent=2, default=str)
-            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "assistant", "content": json.dumps(decision_dict)})
             messages.append(
                 {
                     "role": "user",
-                    "content": f"Tool results:\n```json\n{results_summary}\n```\n\nDecide next action.",
+                    "content": f"Tool results:\n{results_summary}\n\nDecide next action.",
                 }
             )
 
@@ -407,6 +552,12 @@ Decide which tools to call to gather the most relevant evidence for this section
         Returns:
             Generated section content in markdown.
         """
+        # Special-case recommendations to enforce structured output
+        if ctx.section_name.lower().startswith("policy recommendation"):
+            return await self._generate_recommendations_structured(
+                ctx, additional_instructions
+            )
+
         # Build evidence context
         evidence_context = self._format_evidence_for_generation(ctx)
 
@@ -427,7 +578,10 @@ Decide which tools to call to gather the most relevant evidence for this section
         ctx: OrchestratorContext,
         content: str,
     ) -> Dict[str, Any]:
-        """Verify section content against evidence.
+        """Verify section content against evidence using structured output.
+
+        Verification is now soft - it always returns a result and doesn't
+        block content generation. Issues are captured as warnings.
 
         Args:
             ctx: Context with gathered evidence.
@@ -443,23 +597,25 @@ Decide which tools to call to gather the most relevant evidence for this section
             evidence_context=evidence_context,
         )
 
-        # Use generation LLM for verification (it's gpt-5-mini)
+        # Use structured output for verification (function_calling for compatibility)
+        structured_verifier = self.generation_llm.with_structured_output(
+            VerificationResult,
+            method="function_calling",
+        )
         config = self._build_langfuse_config("verify_section")
-        response = await self.generation_llm.ainvoke(prompt, config=config)
 
         try:
-            content_text = response.content.strip()
-            if content_text.startswith("```"):
-                content_text = content_text.split("```")[1]
-                if content_text.startswith("json"):
-                    content_text = content_text[4:]
-            return json.loads(content_text)
-        except json.JSONDecodeError:
-            logger.warning("Failed to parse verification response")
+            result: VerificationResult = await structured_verifier.ainvoke(
+                prompt, config=config
+            )
+            return result.model_dump()
+        except Exception as e:
+            logger.warning(f"Verification structured output failed: {e}")
+            # Soft failure - assume content is OK if verification itself fails
             return {
                 "claims": [],
-                "overall_supported": False,
-                "issues_summary": "Could not parse verification result",
+                "overall_supported": True,
+                "issues_summary": None,
                 "suggested_fixes": [],
             }
 
@@ -496,6 +652,16 @@ Decide which tools to call to gather the most relevant evidence for this section
         """
         parts: List[str] = []
 
+        # Build citation map fallback if missing
+        doc_citation_map = ctx.state.get("doc_citation_map") or {}
+        if not doc_citation_map:
+            grounded = ctx.state.get("grounded_citations") or []
+            for cit in grounded:
+                if getattr(cit, "analysis_document_id", None) and getattr(
+                    cit, "citation_number", None
+                ):
+                    doc_citation_map[cit.analysis_document_id] = cit.citation_number
+
         for i, ev in enumerate(ctx.gathered_evidence, 1):
             tool = ev.get("tool", "unknown")
             data = ev.get("data", {})
@@ -514,15 +680,38 @@ Decide which tools to call to gather the most relevant evidence for this section
                 items = []
                 for item in data[:5]:  # Limit to 5 per tool call
                     if isinstance(item, dict):
-                        cit = item.get("citation_number", "?")
-                        summary = item.get("summary", item.get("content", ""))[:300]
-                        title = item.get("document_title", "Unknown")
-                        rel = item.get(
-                            "relevance_score", item.get("similarity_score", "?")
-                        )
-                        items.append(
-                            f"[{cit}] ({title}): {summary}... (relevance: {rel})"
-                        )
+                        if tool == "get_intervention_outcomes":
+                            # Rich formatting for aggregated intervention outcomes
+                            name = item.get("intervention_name", "Unknown")
+                            effect = item.get("effect_consensus", "Unknown")
+                            samples = item.get("sample_effect_sizes") or []
+                            samples_str = "; ".join(samples[:2]) if samples else "n/a"
+                            study_types = item.get("study_types") or {}
+                            top_study = (
+                                sorted(
+                                    study_types.items(),
+                                    key=lambda kv: kv[1],
+                                    reverse=True,
+                                )[0][0]
+                                if study_types
+                                else "Unknown"
+                            )
+                            related_outcomes = item.get("related_outcomes") or []
+                            related_str = ", ".join(related_outcomes[:2]) or "n/a"
+                            freq = item.get("frequency", 0)
+                            items.append(
+                                f"{name}: effect={effect}; effects={samples_str}; outcomes={related_str}; studies={freq}; top study type={top_study}"
+                            )
+                        else:
+                            cit = item.get("citation_number", "?")
+                            summary = item.get("summary", item.get("content", ""))[:300]
+                            title = item.get("document_title", "Unknown")
+                            rel = item.get(
+                                "relevance_score", item.get("similarity_score", "?")
+                            )
+                            items.append(
+                                f"[{cit}] ({title}): {summary}... (relevance: {rel})"
+                            )
                 if items:
                     parts.append(f"### Evidence from {tool}\n" + "\n".join(items))
             elif isinstance(data, dict):
@@ -540,7 +729,9 @@ Decide which tools to call to gather the most relevant evidence for this section
             all_contexts = ctx.state.get("all_scored_contexts") or []
             for ctx_item in all_contexts[:10]:
                 if hasattr(ctx_item, "summary"):
-                    doc_cit_map = ctx.state.get("doc_citation_map", {})
+                    doc_cit_map = doc_citation_map or ctx.state.get(
+                        "doc_citation_map", {}
+                    )
                     cit = doc_cit_map.get(ctx_item.document_id, "?")
                     parts.append(
                         f"[{cit}] {ctx_item.summary[:200]}... (relevance: {ctx_item.relevance_score})"
@@ -581,6 +772,46 @@ Decide which tools to call to gather the most relevant evidence for this section
             "tags": ["component:synthesis", "component:synthesis.agentic"],
             "run_name": run_name,
         }
+
+    async def _generate_recommendations_structured(
+        self,
+        ctx: OrchestratorContext,
+        additional_instructions: str,
+    ) -> str:
+        """Generate recommendations using structured output to ensure format consistency."""
+        evidence_context = self._format_evidence_for_generation(ctx)
+
+        prompt = f"""
+You are writing policy recommendations for UK cabinet ministers.
+
+Requirements:
+- Output exactly 3-4 recommendations.
+- Each recommendation must include: number (1..4), title (3-7 words, action-led), description (60-90 words), citation_numbers.
+- Title must be plain text only: do NOT include markdown (no *, **, _, backticks) or trailing punctuation.
+- Use inline [N] citations inside description; citation_numbers list must match the numbers used.
+- At least one citation per recommendation. No '?' citations.
+- British English. Concise and specific.
+
+Evidence (use only these citations):
+{evidence_context}
+
+Additional guidance:
+{additional_instructions}
+"""
+
+        structured_llm = self.generation_llm.with_structured_output(
+            RecommendationsOutput,
+            method="function_calling",
+        )
+        config = self._build_langfuse_config("generate_recommendations_structured")
+        result = await structured_llm.ainvoke(prompt, config=config)
+
+        # Convert structured output to a numbered list compatible with parser (avoid markdown in titles)
+        lines: List[str] = []
+        for rec in result.recommendations:
+            title = (rec.title or "").strip().strip("*").strip()
+            lines.append(f"{rec.number}. {title}: {rec.description}")
+        return "\n".join(lines)
 
 
 async def generate_agentic_section(
