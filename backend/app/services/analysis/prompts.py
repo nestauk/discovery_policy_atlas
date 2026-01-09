@@ -415,7 +415,7 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 **Keywords**: "simulation", "model", "forecast", "projection", "computational model", "scenario analysis"
 
 ## 5. Policy Syntheses & Guidance Documents
-**Definition**: A policy synthesis or guidance document is a report whose primary aim is to aggregate, interpret, summarise, and translate existing evidence into actionable insights, guidance or recommendations for policymakers or practitioners, rather than to present new primary empirical findings. Documents aimed mainly at informing individual consumers, rather than policymakers or practitioners, should be treated as low-rigour contextual material rather than evidence. Such documents typically:
+**Definition**: A policy synthesis or guidance document is a report whose primary aim is to aggregate, interpret, summarise, and translate existing evidence into actionable insights, guidance or recommendations for policymakers or practitioners, rather than to present new primary empirical findings. Documents aimed mainly at informing individual consumers, rather than policymakers or practitioners, should go into the 'Other' category rather than be treated as evidence. Such documents typically:
 - Begin with a summary of the policy problem or question
 - Draw on evidence from multiple sources
 - Provide an integrated appraisal of that evidence
