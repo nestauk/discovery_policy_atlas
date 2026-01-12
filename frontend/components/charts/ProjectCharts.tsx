@@ -13,7 +13,7 @@ import {
 } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useAPI } from '@/lib/api'
+import { useAPI, fetchPublic } from '@/lib/api'
 import { Loader2, AlertCircle, ChevronDown, ChevronUp, Download } from 'lucide-react'
 
 // Register once
@@ -59,6 +59,7 @@ const toTitleCase = (str: string) => {
 interface ProjectChartsProps { 
   projectId: string
   projectTitle?: string
+  isPublicAccess?: boolean
 }
 interface ChartData {
   documents_by_year: Array<{ year: number; count: number }>
@@ -66,7 +67,7 @@ interface ChartData {
   documents_by_author: Array<{ author: string; count: number }>
 }
 
-export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
+export function ProjectCharts({ projectId, projectTitle, isPublicAccess = false }: ProjectChartsProps) {
   const [chartData, setChartData] = useState<ChartData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -93,7 +94,9 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       setLoading(true)
       setError(null)
       try {
-        const data = await fetchWithAuth(`/api/analysis-projects/${projectId}/charts-data`)
+        const data = isPublicAccess 
+          ? await fetchPublic(`/api/public/projects/${projectId}/charts-data`)
+          : await fetchWithAuth(`/api/analysis-projects/${projectId}/charts-data`)
         setChartData(data)
       } catch (err) {
         console.error('Failed to fetch chart data:', err)
@@ -106,7 +109,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
     }
     fetchChartData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId])
+  }, [projectId, isPublicAccess])
 
   if (loading) {
     return (

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { FolderOpen, Plus, Search, Edit, Trash2 } from 'lucide-react'
+import { FolderOpen, Plus, Search, Edit, Trash2, Globe, Copy, Check } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore, AnalysisProject } from '@/lib/analysisProjectStore'
@@ -40,8 +40,9 @@ export default function ProjectsPage() {
   const [projectForm, setProjectForm] = useState({ title: '', description: '' })
   const [isCreating, setIsCreating] = useState(false)
   const [editProjectDialog, setEditProjectDialog] = useState<AnalysisProject | null>(null)
-  const [editForm, setEditForm] = useState({ title: '', description: '' })
+  const [editForm, setEditForm] = useState({ title: '', description: '', is_public: false })
   const [showAllOrgProjects, setShowAllOrgProjects] = useState(false)
+  const [copiedLink, setCopiedLink] = useState(false)
 
   useEffect(() => {
     loadProjects()
@@ -112,8 +113,10 @@ export default function ProjectsPage() {
   const openEditDialog = (project: AnalysisProject) => {
     setEditForm({ 
       title: project.title, 
-      description: project.description || ''
+      description: project.description || '',
+      is_public: project.is_public || false
     })
+    setCopiedLink(false)
     setEditProjectDialog(project)
   }
 
@@ -123,17 +126,26 @@ export default function ProjectsPage() {
     try {
       const updatedProject = await updateAnalysisProject(editProjectDialog.id, {
         title: editForm.title.trim(),
-        description: editForm.description.trim() || undefined
+        description: editForm.description.trim() || undefined,
+        is_public: editForm.is_public
       })
       
       // Update in store
       setProjects(projects.map(p => p.id === editProjectDialog.id ? { ...p, ...updatedProject } : p))
       
-      setEditForm({ title: '', description: '' })
+      setEditForm({ title: '', description: '', is_public: false })
       setEditProjectDialog(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update project')
     }
+  }
+
+  const copyShareLink = () => {
+    if (!editProjectDialog) return
+    const url = `${window.location.origin}/projects/${editProjectDialog.id}`
+    navigator.clipboard.writeText(url)
+    setCopiedLink(true)
+    setTimeout(() => setCopiedLink(false), 2000)
   }
 
   // Get current user ID for filtering
@@ -278,10 +290,18 @@ export default function ProjectsPage() {
                           {project.status}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-400 mt-1">
-                        {new Date(project.created_at).toLocaleDateString()}
-                        {project.created_by_name && (
-                          <span className="ml-2">• {project.created_by_name}</span>
+                      <div className="text-xs text-slate-400 mt-1 flex items-center gap-2">
+                        <span>
+                          {new Date(project.created_at).toLocaleDateString()}
+                          {project.created_by_name && (
+                            <span className="ml-2">• {project.created_by_name}</span>
+                          )}
+                        </span>
+                        {project.is_public && (
+                          <span className="inline-flex items-center gap-1 text-blue-600">
+                            <Globe className="h-3 w-3" />
+                            Public
+                          </span>
                         )}
                       </div>
                     </div>
@@ -385,6 +405,54 @@ export default function ProjectsPage() {
                     placeholder="Brief description of your research goals..."
                     rows={2}
                   />
+                </div>
+                
+                {/* Public sharing section */}
+                <div className="border-t pt-4 mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4 text-slate-500" />
+                      <label htmlFor="is-public-switch" className="text-sm font-medium">
+                        Make project public
+                      </label>
+                    </div>
+                    <Switch
+                      id="is-public-switch"
+                      checked={editForm.is_public}
+                      onCheckedChange={(checked) => setEditForm({ ...editForm, is_public: checked })}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Public projects can be viewed by anyone with the link, without signing in.
+                  </p>
+                  
+                  {editForm.is_public && editProjectDialog && (
+                    <div className="flex gap-2">
+                      <Input 
+                        readOnly
+                        value={`${typeof window !== 'undefined' ? window.location.origin : ''}/projects/${editProjectDialog.id}`}
+                        className="text-xs bg-slate-50"
+                      />
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={copyShareLink}
+                        className="flex-shrink-0"
+                      >
+                        {copiedLink ? (
+                          <>
+                            <Check className="h-4 w-4 mr-1" />
+                            Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-4 w-4 mr-1" />
+                            Copy
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 
                 <div className="flex gap-2 justify-end">

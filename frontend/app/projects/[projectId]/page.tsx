@@ -20,10 +20,10 @@ import {
   Download
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
-import { useAPI } from '@/lib/api'
-import { useAuth } from '@clerk/nextjs'
+import { useAPI, fetchPublic } from '@/lib/api'
+import { useAuth, useUser } from '@clerk/nextjs'
 import { SynthesisSummary } from '@/types/search'
-import { ExecutiveBriefing } from '../../results/ExecutiveBriefing'
+import { ExecutiveBriefing } from '../../(main)/results/ExecutiveBriefing'
 import { ChatInterface } from '@/components/chatbot/ChatInterface'
 import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
 import { ProjectCharts } from '@/components/charts/ProjectCharts'
@@ -85,11 +85,10 @@ export default function ProjectResultsPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
+  const { isSignedIn, isLoaded: userLoaded } = useUser()
   
-  // Get projectId from URL params
   const projectId = params.projectId as string
   
-  // Get tab state from URL query params, with defaults and validation
   const tabParam = searchParams.get('tab')
   const validTabs: TabType[] = ['summary', 'evidence', 'assistant']
   const urlTab: TabType = validTabs.includes(tabParam as TabType) ? (tabParam as TabType) : 'summary'
@@ -109,33 +108,46 @@ export default function ProjectResultsPage() {
   const lastRefreshTimeRef = useRef<number>(0)
   const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
+  const [isPublicAccess, setIsPublicAccess] = useState(false)
   
-  // Relevance filtering state
   const [showRelevantOnly, setShowRelevantOnly] = useState(true)
-  
-  // Column visibility state
   const [showAdditionalColumns, setShowAdditionalColumns] = useState(false)
-  
-  // Documents download state
   const [isPreparingDocumentsDownload, setIsPreparingDocumentsDownload] = useState(false)
   
-  // Interventions view state
   const [interventionsGroupByIssues, setInterventionsGroupByIssues] = useState(false)
   const [interventionsSortBy, setInterventionsSortBy] = useState<'frequency' | 'impact' | 'evidence'>('frequency')
   const [isPreparingInterventionsDownload, setIsPreparingInterventionsDownload] = useState(false)
   
-  // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
   const [interventions, setInterventions] = useState<InterventionData[]>([])
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState<string | null>(null)
   const [projectLoading, setProjectLoading] = useState(false)
+  const projectLoadedRef = useRef<string | null>(null)
 
   const { activeProject, setActiveProject } = useAnalysisProjectStore()
-  const { fetchWithAuth, getAnalysisProject, getProjectInterventions } = useAPI()
+  const { fetchWithAuth, getAnalysisProject } = useAPI()
   const { getToken } = useAuth()
 
-  // Update URL when tab changes (without full navigation)
+  // Determine if we're in public access mode - use isSignedIn directly to avoid race conditions
+  const effectivePublicAccess = userLoaded && !isSignedIn
+  
+  useEffect(() => {
+    if (effectivePublicAccess) {
+      setIsPublicAccess(true)
+    }
+  }, [effectivePublicAccess])
+
+  // Helper to fetch data (uses public or authenticated endpoints based on mode)
+  // Use effectivePublicAccess directly to avoid race conditions with state updates
+  const fetchData = useCallback(async (endpoint: string) => {
+    if (effectivePublicAccess) {
+      return fetchPublic(`api/public/projects/${projectId}${endpoint}`)
+    } else {
+      return fetchWithAuth(`api/analysis-projects/${projectId}${endpoint}`)
+    }
+  }, [effectivePublicAccess, projectId, fetchWithAuth])
+
   const updateUrl = useCallback((tab: TabType, subtab?: EvidenceSubTabType) => {
     const params = new URLSearchParams()
     if (tab !== 'summary') {
@@ -149,46 +161,77 @@ export default function ProjectResultsPage() {
     router.replace(newUrl, { scroll: false })
   }, [projectId, router])
 
-  // Handle tab changes
   const handleTabChange = useCallback((tab: string) => {
     const newTab = tab as TabType
-    // When switching to evidence tab, default to interventions if not already on evidence
+    // Assistant tab not available in public view
+    if (isPublicAccess && newTab === 'assistant') return
     const subtab = newTab === 'evidence' && urlTab !== 'evidence' ? 'interventions' : urlSubTab
     updateUrl(newTab, subtab)
-  }, [updateUrl, urlSubTab, urlTab])
+  }, [updateUrl, urlSubTab, urlTab, isPublicAccess])
 
   const handleSubTabChange = useCallback((subtab: EvidenceSubTabType) => {
     updateUrl('evidence', subtab)
   }, [updateUrl])
 
-  // Load project from API if not in store or different project
+  // Load project from API
   useEffect(() => {
-    const loadProjectIfNeeded = async () => {
-      if (!projectId) {
-        setError('No project ID provided')
-        return
-      }
+    const loadProject = async () => {
+      if (!projectId || !userLoaded) return
       
-      // If we already have this project in store, no need to fetch
+      // Skip if we already have this project loaded or are loading it
       if (activeProject?.id === projectId) return
+      if (projectLoadedRef.current === projectId) return
       
+      projectLoadedRef.current = projectId
       setProjectLoading(true)
       setError(null)
+      
       try {
-        const projectData = await getAnalysisProject(projectId)
-        if (projectData?.project) {
-          setActiveProject(projectData.project)
+        if (effectivePublicAccess) {
+          // Try public endpoint
+          const data = await fetchPublic(`api/public/projects/${projectId}`)
+          if (data?.project) {
+            setActiveProject(data.project)
+          } else {
+            setError('Project not found or not public')
+            projectLoadedRef.current = null
+          }
         } else {
-          setError('Project not found')
+          // Authenticated endpoint
+          const projectData = await getAnalysisProject(projectId)
+          if (projectData?.project) {
+            setActiveProject(projectData.project)
+          } else {
+            setError('Project not found')
+            projectLoadedRef.current = null
+          }
         }
       } catch (err) {
         console.error('Failed to load project:', err)
         const errorMessage = err instanceof Error ? err.message : 'Failed to load project'
+        
+        // If authenticated request fails with 401/403, try public endpoint
+        if (!effectivePublicAccess && (errorMessage.includes('401') || errorMessage.includes('403'))) {
+          try {
+            const data = await fetchPublic(`api/public/projects/${projectId}`)
+            if (data?.project) {
+              setActiveProject(data.project)
+              setIsPublicAccess(true)
+              setProjectLoading(false)
+              return
+            }
+          } catch {
+            // Public access also failed
+          }
+        }
+        
+        projectLoadedRef.current = null
         setError(errorMessage)
-        // If it's a 404, redirect to projects list after a delay
         if (errorMessage.includes('404') || errorMessage.includes('not found')) {
           setTimeout(() => {
-            router.push('/projects')
+            if (isSignedIn) {
+              router.push('/projects')
+            }
           }, 2000)
         }
       } finally {
@@ -196,12 +239,12 @@ export default function ProjectResultsPage() {
       }
     }
     
-    loadProjectIfNeeded()
-  }, [projectId, activeProject?.id, getAnalysisProject, setActiveProject, router])
+    loadProject()
+  }, [projectId, userLoaded, effectivePublicAccess]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Define data loading functions
+  // Load documents and interventions
   const loadData = useCallback(async () => {
-    if (hasLoadedData || loadingData) return
+    if (hasLoadedData || loadingData || !userLoaded) return
 
     if (!projectId) {
       console.log('No project ID, cannot load data')
@@ -215,15 +258,18 @@ export default function ProjectResultsPage() {
 
     try {
       const [docsResponse, interventionsResponse] = await Promise.all([
-        fetchWithAuth(`/api/analysis-projects/${projectId}/documents`),
-        getProjectInterventions(projectId).catch(error => {
+        fetchData('/documents').catch(error => {
+          console.warn('Failed to load documents:', error)
+          return { documents: [] }
+        }),
+        fetchData('/interventions').catch(error => {
           console.warn('Failed to load interventions:', error)
           return { interventions: [] }
         })
       ])
       
-      setDocuments(docsResponse.documents || [])
-      setInterventions(interventionsResponse.interventions || [])
+      setDocuments(docsResponse?.documents || [])
+      setInterventions(interventionsResponse?.interventions || [])
     } catch (error) {
       console.error('Failed to load project data:', error)
       setDataError(error instanceof Error ? error.message : 'Failed to load data')
@@ -231,7 +277,7 @@ export default function ProjectResultsPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [hasLoadedData, loadingData, projectId, fetchWithAuth, getProjectInterventions])
+  }, [hasLoadedData, loadingData, projectId, fetchData, userLoaded])
 
   const refreshData = useCallback(async () => {
     const now = Date.now()
@@ -252,15 +298,18 @@ export default function ProjectResultsPage() {
 
     try {
       const [docsResponse, interventionsResponse] = await Promise.all([
-        fetchWithAuth(`/api/analysis-projects/${projectId}/documents`),
-        getProjectInterventions(projectId).catch(error => {
+        fetchData('/documents').catch(error => {
+          console.warn('Failed to refresh documents:', error)
+          return { documents: [] }
+        }),
+        fetchData('/interventions').catch(error => {
           console.warn('Failed to refresh interventions:', error)
           return { interventions: [] }
         })
       ])
       
-      setDocuments(docsResponse.documents || [])
-      setInterventions(interventionsResponse.interventions || [])
+      setDocuments(docsResponse?.documents || [])
+      setInterventions(interventionsResponse?.interventions || [])
       if (!hasLoadedData) {
         setHasLoadedData(true)
       }
@@ -270,10 +319,10 @@ export default function ProjectResultsPage() {
     } finally {
       setLoadingData(false)
     }
-  }, [projectId, fetchWithAuth, getProjectInterventions, hasLoadedData])
+  }, [projectId, fetchData, hasLoadedData])
 
   const handleDownloadDocumentsCSV = useCallback(async () => {
-    if (!projectId) return
+    if (!projectId || isPublicAccess) return
     
     setIsPreparingDocumentsDownload(true)
     
@@ -330,10 +379,10 @@ export default function ProjectResultsPage() {
     } finally {
       setIsPreparingDocumentsDownload(false)
     }
-  }, [projectId, fetchWithAuth, getToken, activeProject?.title])
+  }, [projectId, fetchWithAuth, getToken, activeProject?.title, isPublicAccess])
   
   const handleDownloadInterventionsCSV = useCallback(async () => {
-    if (!projectId) return
+    if (!projectId || isPublicAccess) return
     
     setIsPreparingInterventionsDownload(true)
     
@@ -377,7 +426,7 @@ export default function ProjectResultsPage() {
     } finally {
       setIsPreparingInterventionsDownload(false)
     }
-  }, [projectId, fetchWithAuth, getToken, activeProject?.title])
+  }, [projectId, fetchWithAuth, getToken, activeProject?.title, isPublicAccess])
 
   // Reset flags when project changes
   useEffect(() => {
@@ -387,8 +436,9 @@ export default function ProjectResultsPage() {
     setDocuments([])
     setInterventions([])
     setSummaryData(null)
-    navigatorStatsProjectIdRef.current = null // Reset navigator stats ref
-    summaryLoadedRef.current = null // Reset summary ref
+    navigatorStatsProjectIdRef.current = null
+    summaryLoadedRef.current = null
+    projectLoadedRef.current = null
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current)
       pollingIntervalRef.current = null
@@ -408,10 +458,18 @@ export default function ProjectResultsPage() {
     }
   }, [analysisComplete])
 
-  // Start polling when project ID is available
+  // Start polling when project ID is available (only for authenticated users)
   useEffect(() => {
-    if (!projectId) {
-      console.log('No project ID, skipping polling setup')
+    if (!projectId || !userLoaded) {
+      console.log('No project ID or user not loaded, skipping polling setup')
+      return
+    }
+
+    // Don't poll for public access or if not signed in - just load data once
+    if (effectivePublicAccess) {
+      console.log('Public access - loading data once without polling')
+      loadData()
+      setAnalysisComplete(true)
       return
     }
 
@@ -439,9 +497,13 @@ export default function ProjectResultsPage() {
       try {
         console.log(`Checking status for project: ${projectId}`)
         const projectData = await getAnalysisProject(projectId)
+        
+        if (!projectData?.project) {
+          console.warn('No project data returned from API')
+          return true // Stop polling if we can't get project data
+        }
+        
         const project = projectData.project
-
-        // Use project from API directly, not stale activeProject
         setActiveProject(project)
 
         console.log(`Project status: ${project.status}`)
@@ -527,33 +589,29 @@ export default function ProjectResultsPage() {
       }
       hasStartedPollingRef.current = null
     }
-  }, [projectId, analysisComplete]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, analysisComplete, userLoaded, effectivePublicAccess]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load data when navigating to a project
   useEffect(() => {
-    if (projectId && !hasLoadedData && !loadingData) {
+    if (projectId && !hasLoadedData && !loadingData && userLoaded) {
       console.log('Initial load for project:', projectId)
       loadData()
     }
-  }, [projectId, hasLoadedData, loadingData, loadData])
+  }, [projectId, hasLoadedData, loadingData, userLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Track which project/tab combination we've loaded summary for
   const summaryLoadedRef = useRef<string | null>(null)
 
   // Fetch summary when Summary tab is opened
   useEffect(() => {
     const fetchSummary = async () => {
       if (urlTab !== 'summary') {
-        // Reset ref when not on summary tab
         summaryLoadedRef.current = null
         return
       }
-      if (!projectId) return
+      if (!projectId || !userLoaded) return
       
-      // Create a unique key for this project/tab combination
       const summaryKey = `${projectId}-${urlTab}`
       
-      // Skip if we've already loaded summary for this project/tab
       if (summaryLoadedRef.current === summaryKey) return
       
       if (isLoadingSummary) return
@@ -562,7 +620,7 @@ export default function ProjectResultsPage() {
       setIsLoadingSummary(true)
       try {
         console.log('[ResultsPage] Fetching summary for project:', projectId)
-        const data = await fetchWithAuth(`api/analysis-projects/${projectId}/summary`)
+        const data = await fetchData('/summary')
         console.log('[ResultsPage] Summary data received:', {
           hasExecutiveBriefing: !!data.executive_briefing,
           briefingLength: data.executive_briefing?.length || 0,
@@ -573,17 +631,14 @@ export default function ProjectResultsPage() {
       } catch (err) {
         console.error('Failed to fetch summary data', err)
         setSummaryData(null)
-        // Reset ref on error so we can retry
         summaryLoadedRef.current = null
       } finally {
         setIsLoadingSummary(false)
       }
     }
     fetchSummary()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlTab, projectId])
+  }, [urlTab, projectId, userLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Navigator stats for summary tab
   const [navigatorStats, setNavigatorStats] = useState({
     interventionGroupCount: null as number | null,
     interventionCount: null as number | null,
@@ -591,20 +646,18 @@ export default function ProjectResultsPage() {
     error: null as string | null,
   })
   
-  // Track which project we've loaded stats for to prevent re-fetching
   const navigatorStatsProjectIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     async function fetchNavigatorStats() {
-      if (!projectId) return
+      if (!projectId || !userLoaded) return
       
-      // Skip if we've already loaded stats for this project
       if (navigatorStatsProjectIdRef.current === projectId) return
       
       navigatorStatsProjectIdRef.current = projectId
       setNavigatorStats(prev => ({ ...prev, loading: true, error: null }))
       try {
-        const response = await fetchWithAuth(`/api/analysis-projects/${projectId}/issue-intervention-navigator`)
+        const response = await fetchData('/issue-intervention-navigator')
         const interventionThemeNames = new Set<string>()
         const interventionNames = new Set<string>()
         if (response?.issue_themes) {
@@ -630,18 +683,15 @@ export default function ProjectResultsPage() {
           loading: false,
           error: (err as Error)?.message || 'Failed to load intervention stats',
         })
-        // Reset ref on error so we can retry
         navigatorStatsProjectIdRef.current = null
       }
     }
     fetchNavigatorStats()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId])
+  }, [projectId, userLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const overtonCount = documents.filter(doc => doc.source === 'overton').length
   const openalexCount = documents.filter(doc => doc.source === 'openalex').length
 
-  // Create study strength and sample size mappings
   const { studyStrengthMapping, sampleSizeMapping } = useMemo(() => {
     const strengthMapping: Record<string, string> = {}
     const sizeMapping: Record<string, number> = {}
@@ -695,7 +745,6 @@ export default function ProjectResultsPage() {
     }
   }, [interventions])
 
-  // Calculate progress
   const progressInfo = useMemo(() => {
     if (!projectId || !activeProject) {
       return { stage: 'idle', progress: 0, text: 'No project selected' }
@@ -749,7 +798,6 @@ export default function ProjectResultsPage() {
     return { stage: 'unknown', progress: 0, text: 'Unknown status' }
   }, [projectId, activeProject, documents])
 
-  // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
       const conclusion = doc.extraction_results?.conclusion
@@ -794,8 +842,7 @@ export default function ProjectResultsPage() {
     }
   }, [documents, showRelevantOnly, studyStrengthMapping, sampleSizeMapping])
 
-  // Show loading state while fetching project
-  if (projectLoading) {
+  if (projectLoading || !userLoaded) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
@@ -818,8 +865,7 @@ export default function ProjectResultsPage() {
                 <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
               )}
             </h1>
-            {/* Progress Indicator */}
-            {projectId && activeProject && (
+            {projectId && activeProject && !isPublicAccess && (
               <div className="flex items-center gap-3 mt-2 mb-3">
                 <div className="flex items-center gap-2">
                   <div className="w-32 bg-slate-200 rounded-full h-2">
@@ -838,8 +884,8 @@ export default function ProjectResultsPage() {
               </div>
             )}
           </div>
-          {/* Search Plan Settings Button */}
-          {projectId && activeProject?.search_query && (
+          {/* Search Plan Settings Button - only for authenticated users */}
+          {projectId && activeProject?.search_query && !isPublicAccess && (
             <SearchPlanModal project={activeProject} />
           )}
         </div>
@@ -860,15 +906,17 @@ export default function ProjectResultsPage() {
                       Error Loading Project
                     </div>
                     <p className="text-red-700 text-sm">{error}</p>
-                    <Button 
-                      onClick={() => router.push('/projects')} 
-                      size="sm" 
-                      variant="outline" 
-                      className="mt-3"
-                    >
-                      <ArrowLeft className="h-4 w-4 mr-2" />
-                      Back to Projects
-                    </Button>
+                    {isSignedIn && (
+                      <Button 
+                        onClick={() => router.push('/projects')} 
+                        size="sm" 
+                        variant="outline" 
+                        className="mt-3"
+                      >
+                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        Back to Projects
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -885,16 +933,18 @@ export default function ProjectResultsPage() {
               <p className="text-slate-600 mb-6">
                 Please select a project or start a new analysis to view results.
               </p>
-              <div className="flex gap-3 justify-center">
-                <Button onClick={() => router.push('/projects')} variant="outline">
-                  <FileText className="h-4 w-4 mr-2" />
-                  View Projects
-                </Button>
-                <Button onClick={() => router.push('/search')}>
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Start New Search
-                </Button>
-              </div>
+              {isSignedIn && (
+                <div className="flex gap-3 justify-center">
+                  <Button onClick={() => router.push('/projects')} variant="outline">
+                    <FileText className="h-4 w-4 mr-2" />
+                    View Projects
+                  </Button>
+                  <Button onClick={() => router.push('/search')}>
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Start New Search
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -903,7 +953,7 @@ export default function ProjectResultsPage() {
         {projectId && !error && (
           <Tabs value={urlTab} onValueChange={handleTabChange} className="h-full flex flex-col">
             <div className="px-6 pt-4">
-              <TabsList className="!grid w-full grid-cols-3">
+              <TabsList className={`!grid w-full ${isPublicAccess ? 'grid-cols-2' : 'grid-cols-3'}`}>
                 <TabsTrigger value="summary" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   Summary
@@ -912,10 +962,12 @@ export default function ProjectResultsPage() {
                   <BookOpen className="h-4 w-4" />
                   Evidence
                 </TabsTrigger>
-                <TabsTrigger value="assistant" className="flex items-center gap-2">
-                  <Bot className="h-4 w-4" />
-                  Assistant
-                </TabsTrigger>
+                {!isPublicAccess && (
+                  <TabsTrigger value="assistant" className="flex items-center gap-2">
+                    <Bot className="h-4 w-4" />
+                    Assistant
+                  </TabsTrigger>
+                )}
               </TabsList>
             </div>
 
@@ -971,7 +1023,7 @@ export default function ProjectResultsPage() {
                           updateUrl('evidence', 'documents')
                         }}
                       />
-                      <ProjectCharts projectId={projectId} projectTitle={activeProject?.title} />
+                      <ProjectCharts projectId={projectId} projectTitle={activeProject?.title} isPublicAccess={isPublicAccess} />
                     </div>
                   )}
                   {!isLoadingSummary && !summaryData && (
@@ -1034,19 +1086,21 @@ export default function ProjectResultsPage() {
                             />
                           </div>
                           
-                          {/* Documents Download Button */}
-                          <div className="flex items-center gap-2">
-                            <Button
-                              onClick={handleDownloadDocumentsCSV}
-                              disabled={isPreparingDocumentsDownload || documents.length === 0}
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-2"
-                            >
-                              <Download className="h-4 w-4" />
-                              {isPreparingDocumentsDownload ? 'Downloading...' : 'Download'}
-                            </Button>
-                          </div>
+                          {/* Documents Download Button - only for authenticated users */}
+                          {!isPublicAccess && (
+                            <div className="flex items-center gap-2">
+                              <Button
+                                onClick={handleDownloadDocumentsCSV}
+                                disabled={isPreparingDocumentsDownload || documents.length === 0}
+                                variant="outline"
+                                size="sm"
+                                className="flex items-center gap-2"
+                              >
+                                <Download className="h-4 w-4" />
+                                {isPreparingDocumentsDownload ? 'Downloading...' : 'Download'}
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       )}
                       
@@ -1077,19 +1131,21 @@ export default function ProjectResultsPage() {
                             </select>
                           </div>
                           
-                          {/* Interventions Download Button */}
-                          <div className="flex items-center gap-2">
-                            <Button
-                              onClick={handleDownloadInterventionsCSV}
-                              disabled={isPreparingInterventionsDownload}
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-2"
-                            >
-                              <Download className="h-4 w-4" />
-                              {isPreparingInterventionsDownload ? 'Downloading...' : 'Download'}
-                            </Button>
-                          </div>
+                          {/* Interventions Download Button - only for authenticated users */}
+                          {!isPublicAccess && (
+                            <div className="flex items-center gap-2">
+                              <Button
+                                onClick={handleDownloadInterventionsCSV}
+                                disabled={isPreparingInterventionsDownload}
+                                variant="outline"
+                                size="sm"
+                                className="flex items-center gap-2"
+                              >
+                                <Download className="h-4 w-4" />
+                                {isPreparingInterventionsDownload ? 'Downloading...' : 'Download'}
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1104,8 +1160,9 @@ export default function ProjectResultsPage() {
                         onViewModeChange={(mode) => setInterventionsGroupByIssues(mode === 'grouped')}
                         sortBy={interventionsSortBy}
                         onSortByChange={setInterventionsSortBy}
-                        onDownload={handleDownloadInterventionsCSV}
+                        onDownload={isPublicAccess ? undefined : handleDownloadInterventionsCSV}
                         isPreparingDownload={isPreparingInterventionsDownload}
+                        isPublicAccess={isPublicAccess}
                       />
                     </div>
                   )}
@@ -1153,20 +1210,23 @@ export default function ProjectResultsPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="assistant" className="m-0 h-[600px]">
-                <ChatInterface 
-                  autoFocus={urlTab === 'assistant'}
-                  placeholder="Ask about the evidence in this project..."
-                  className="h-full"
-                />
-              </TabsContent>
+              {!isPublicAccess && (
+                <TabsContent value="assistant" className="m-0 h-[600px]">
+                  <ChatInterface 
+                    autoFocus={urlTab === 'assistant'}
+                    placeholder="Ask about the evidence in this project..."
+                    className="h-full"
+                  />
+                </TabsContent>
+              )}
             </div>
           </Tabs>
         )}
       </div>
 
-      {/* Floating Chatbot Widget */}
-      <ChatbotWidget />
+      {/* Floating Chatbot Widget - only for authenticated users */}
+      {!isPublicAccess && <ChatbotWidget />}
     </div>
   )
 }
+

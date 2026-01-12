@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
-import { useAPI } from '@/lib/api'
+import { useAPI, fetchPublic } from '@/lib/api'
 import { useAuth } from '@clerk/nextjs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -72,6 +72,7 @@ interface InterventionsNavigatorProps {
   onSortByChange?: (sortBy: 'frequency' | 'impact' | 'evidence') => void
   onDownload?: () => void
   isPreparingDownload?: boolean
+  isPublicAccess?: boolean
 }
 
 export function InterventionsNavigator({ 
@@ -81,7 +82,8 @@ export function InterventionsNavigator({
   sortBy: externalSortBy,
   onSortByChange,
   onDownload,
-  isPreparingDownload: externalIsPreparingDownload
+  isPreparingDownload: externalIsPreparingDownload,
+  isPublicAccess = false
 }: InterventionsNavigatorProps) {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth } = useAPI()
@@ -115,7 +117,9 @@ export function InterventionsNavigator({
     setError(null)
     
     try {
-      const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/issue-intervention-navigator`)
+      const response = isPublicAccess
+        ? await fetchPublic(`/api/public/projects/${activeProject.id}/issue-intervention-navigator`)
+        : await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/issue-intervention-navigator`)
       console.log('Navigator API response:', response)
       console.log('Number of issue themes:', response?.issue_themes?.length || 0)
       if (response?.issue_themes?.length > 0) {
@@ -129,7 +133,7 @@ export function InterventionsNavigator({
     } finally {
       setLoading(false)
     }
-  }, [activeProject?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeProject?.id, isPublicAccess]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!activeProject?.id) return
@@ -144,7 +148,9 @@ export function InterventionsNavigator({
       
       setLoadingFallback(true)
       try {
-        const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/interventions`)
+        const response = isPublicAccess
+          ? await fetchPublic(`/api/public/projects/${activeProject.id}/interventions`)
+          : await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/interventions`)
         setFallbackInterventions(response.interventions || [])
       } catch (err) {
         console.error('Failed to load fallback interventions:', err)
@@ -155,7 +161,7 @@ export function InterventionsNavigator({
     }
     
     loadFallback()
-  }, [activeProject?.id, data]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeProject?.id, data, isPublicAccess]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleIssue = useCallback((themeName: string) => {
     setExpandedIssues(prev => {

@@ -1,6 +1,32 @@
 import { useAuth } from "@clerk/nextjs";
 import { AnalysisProject } from "./analysisProjectStore";
 
+// Public fetch - no authentication required (for public project pages)
+export const fetchPublic = async (url: string, options: RequestInit = {}) => {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+  const cleanUrl = url.replace(/^\//, '');
+  const fullUrl = `${cleanBaseUrl}/${cleanUrl}`;
+
+  console.log(`Public API call: ${options.method || 'GET'} ${fullUrl}`);
+
+  const headers = new Headers(options.headers as HeadersInit);
+  headers.set('Content-Type', 'application/json');
+
+  const response = await fetch(fullUrl, {
+    ...options,
+    headers,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`Public API error:`, response.status, errorText);
+    throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+};
+
 // Standalone auth fetch to allow usage from non-React files (e.g., Zustand stores)
 export const fetchWithAuthExternal = async (
   url: string,
