@@ -1,0 +1,30 @@
+# Outputs (all subdirectories and file types)
+outputs/
+outputs_experiments/
+!outputs/.gitkeep
+
+# Large input files (keep structure but ignore data)
+inputs/**/*.csv
+!inputs/.gitkeep
+
+# Experiment results
+experiments/*.csv
+
+# Plot images
+plots/*.png
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log

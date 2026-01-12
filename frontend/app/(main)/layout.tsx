@@ -11,6 +11,7 @@ import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
+import { OrganizationManager } from '@/components/OrganizationManager'
 
 const getResultsHref = (activeProjectId?: string) => 
   activeProjectId ? `/projects/${activeProjectId}` : '/projects'
@@ -225,7 +226,7 @@ export default function AgentLayout({
 
         {/* User */}
         <div className="p-4 border-t border-slate-100">
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3">
             <div className="flex-shrink-0">
               <UserButton 
                 appearance={{
@@ -238,10 +239,11 @@ export default function AgentLayout({
                 }}
               />
             </div>
-            <div className="flex-1 min-w-0 flex items-center">
+            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
               <p className="text-sm font-medium text-slate-900 truncate leading-none">
                 {user?.firstName || user?.emailAddresses?.[0]?.emailAddress || 'User'}
               </p>
+              <OrganizationManager />
             </div>
           </div>
         </div>
