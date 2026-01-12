@@ -178,7 +178,7 @@ INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
             """Task: Extract 2–6 ACTIVE INTERVENTIONS/PROGRAMS evaluated or proposed, that are the main focus of the study.
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","study_type":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
@@ -189,17 +189,6 @@ Rules:
 - DO NOT include interventions that were not studied in the document, are not the main focus and just mentioned in passing.
 - If information is missing for a field, return "null" for the field.
 
-Study Type (Maryland Scientific Methods Scale - indicate only the letter):
-   a) purely cross-sectional study
-   b) Study measures outcome pre and post
-   c) purely cross-sectional study, uses control variables
-   d) Study measures outcome pre and post
-   e) Comparison of outcomes in treated group
-   f) Quasi-experimental study
-   g) Randomised controlled trial
-   h) Meta-analysis
-   i) Not a trial, but rather a policy recommendation paper or a theoretical modelling study
-   j) Not a scientific study, but a news article, opinion piece or government announcement
 
 Population Fields:
 - population_intervened: Who received the intervention (e.g., "college students", "adults with depression")

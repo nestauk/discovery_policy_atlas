@@ -25,16 +25,18 @@ SR_ISSUES_PROMPT = ChatPromptTemplate.from_messages(
         ("system", EXTRACTION_SYSTEM_PROMPT),
         (
             "human",
-            """Extract 1–3 REVIEW QUESTIONS or EVIDENCE GAPS from this systematic review.
+            """Extract 1–3 PROBLEM STATEMENTS/ISSUES from this systematic review.
 
 Schema:
 {{"issues":[{{"idx":0,"label":"...","explanation":"...","supporting_quote":"..."}}], "coverage_note":"string|null"}}
 
 Rules:
-- Focus on REVIEW QUESTIONS (e.g., "effectiveness of CBT for depression")
-- Capture language like "The aim of this review was..." or "We sought to determine..."
-- DO NOT include individual study findings
-- explanation: 1-2 sentences contextualizing the review question
+- MECE: Merge overlaps; avoid duplicates; prefer concise scientific labels.
+- Focus on BROADER PROBLEMS that motivated the research (e.g., "high autism rates", "lack of early interventions", "poor treatment outcomes").
+- DO NOT include study-specific findings or results (e.g., "this study found no effect") - those belong in results.
+- AVOID generic research gaps like "need for more research" - focus on real-world problems.
+- explanation: Provide 1-2 sentences contextualizing the issue beyond the quote (based on the information in the systematic review).
+- Keep only concrete issues explicitly supported by the text.
 
 Paper text:
 {full_text}""",
@@ -47,16 +49,24 @@ SR_INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
         ("system", EXTRACTION_SYSTEM_PROMPT),
         (
             "human",
-            """Extract 2–6 INTERVENTION CATEGORIES reviewed in this systematic review.
+            """Extract 2–6 INTERVENTION CATEGORIES that are reviewed and form the main focus of this systematic review..
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","study_type":"h","country":"...|null","population_intervened":"...|null","population_demographics":"...|null","sample_size":"...|null","comparator":"...|null","supporting_quote":"..."}}], "coverage_note":"string"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","geographic_scope":"...","population_intervened":"[...]","evidence_volume":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
 
 Rules:
-- Extract INTERVENTION CATEGORIES as grouped in the review (not individual studies)
-- Examples: "CBT-based interventions", "Parent training programs"
-- study_type should be "h" (meta-analysis)
-- comparator: What the category is compared against (e.g., "usual care")
+- MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
+- Focus exclusively on ACTIVE INTERVENTION CATEGORIES only (i.e. treatments, programmes, or policies under evaluation) 
+- DO NOT include control groups, placebo groups, or "no intervention" conditions as interventions.
+- Include attention control arms only if they involve active components (e.g., alternative treatments).
+- Intervention descriptions must paraphrase only information explicitly stated in the supporting quote. Do not infer mechanisms, intensity, duration, or effectiveness.
+- Extract INTERVENTION CATEGORIES as grouped in the review (not individual studies).
+- DO NOT include interventions that are not evaluated, are not a primary focus, or are mentioned only in passing.
+- If required information for a field is not reported at the category level, return "null" for that field.
+
+Population Fields:
+- population_intervened: The population(s) targeted across included studies within the intervention category (e.g. “adults with depression”, “children and adolescents”). Use abstracted labels; do not infer specifics.
+- evidence_volume: The volume of evidence supporting the intervention category (e.g. “5 RCTs”, “12 studies”), only if explicitly reported.
 
 Paper text:
 {full_text}""",
@@ -75,13 +85,18 @@ Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","summary_statistic":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"..."}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","aggregate_effect_size_type":"...|null","aggregate_effect_size":"...|null","aggregate_uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"..."}}]}}
 
 Rules:
-- Focus on AGGREGATED REVIEW-LEVEL RESULTS, not per-study data
-- Extract pooled effect sizes with confidence intervals
+- MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
+- Focus on AGGREGATED REVIEW-LEVEL RESULTS for this intervention category, not per-study data
+- Focus on PRIMARY pooled/meta-analytic results emphasized in the review.
+- Each result should correspond to a single pooled or aggregate effect estimate.
+- Extract pooled or aggregate effect sizes with confidence intervals
 - Capture heterogeneity measures (I², τ²) when reported
-- summary_statistic: Type of pooled estimate (e.g., "pooled OR", "SMD")
+- aggregate_effect_size_type: Type of pooled estimate (e.g., "pooled OR", "SMD")
+- Include direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect, "mixed_or_unclear" for conflicting or ambiguous results.
+- population_measured: Who was measured for this specific result (may be subset of intervention population).
 
 Paper text:
 {full_text}""",
