@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 import logging
+import os
 from datetime import datetime
 import uuid
 from typing import Optional, List
@@ -35,6 +36,85 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 
+# Organization slug that has access to all projects (dev/admin org)
+ADMIN_ORG_SLUG = "nesta-dev"
+
+
+def can_access_all_projects(user: CurrentUser) -> bool:
+    """Check if user belongs to an admin org that can see all projects."""
+    return user.organization_slug == ADMIN_ORG_SLUG
+
+
+def can_access_project(
+    user: CurrentUser, project_org_id: str | None, project_created_by: str | None = None
+) -> bool:
+    """Check if user can access a specific project based on organization.
+
+    Args:
+        user: Current authenticated user
+        project_org_id: Organization ID of the project
+        project_created_by: User ID who created the project
+    """
+    # Admin org can access everything
+    if can_access_all_projects(user):
+        return True
+
+    # Creators can always access their own projects (regardless of org assignment)
+    if project_created_by == user.user_id:
+        return True
+
+    # Everyone can access demo org projects
+    demo_org_id = os.getenv("DEMO_ORG_ID")
+    if demo_org_id and project_org_id == demo_org_id:
+        return True
+
+    # User can access projects from their own org
+    if user.organization_id and user.organization_id == project_org_id:
+        return True
+
+    return False
+
+
+def get_project_with_auth_check(
+    project_id: str, user: CurrentUser, select: str = "*"
+) -> dict:
+    """Fetch a project and verify the user has access to it.
+
+    Args:
+        project_id: The project UUID
+        user: The current authenticated user
+        select: Columns to select (default: all)
+
+    Returns:
+        The project data dict
+
+    Raises:
+        HTTPException: 404 if not found, 403 if access denied
+    """
+    # Always need organization_id and created_by_user_id for auth check
+    auth_fields = "organization_id, created_by_user_id"
+    if select != "*" and "organization_id" not in select:
+        select = f"{select}, {auth_fields}"
+
+    result = (
+        vectorization_service.supabase.table("analysis_projects")
+        .select(select)
+        .eq("id", project_id)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = result.data[0]
+
+    if not can_access_project(
+        user, project.get("organization_id"), project.get("created_by_user_id")
+    ):
+        raise HTTPException(status_code=403, detail="Access denied to this project")
+
+    return project
+
 
 # END-I - INFO REGION END
 
@@ -62,18 +142,11 @@ async def get_synthesis_summary(
     try:
         from app.services.synthesis.logbook import get_synthesis_status
 
-        # Check project status first
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("status")
-            .eq("id", project_id)
-            .execute()
+        # Check project exists and user has access
+        project = get_project_with_auth_check(
+            project_id, current_user, "status, organization_id"
         )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-
-        project_status = project_result.data[0].get("status")
+        project_status = project.get("status")
 
         # Check if synthesis is already cached
         cached = await read_cached_summary(project_id)
@@ -142,14 +215,19 @@ async def get_synthesis_summary(
 @router.get("")
 @router.get("/")
 async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_user)):
-    """Get all analysis projects"""
+    """Get analysis projects filtered by user's organization."""
     try:
-        result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("*")
-            .order("created_at", desc=True)
-            .execute()
-        )
+        # Use database function for filtering (centralizes authorization logic)
+        result = vectorization_service.supabase.rpc(
+            "get_user_projects",
+            {
+                "p_user_id": current_user.user_id,
+                "p_organization_id": current_user.organization_id,
+                "p_organization_slug": current_user.organization_slug,
+                "p_demo_org_id": os.getenv("DEMO_ORG_ID"),
+                "p_admin_org_slug": ADMIN_ORG_SLUG,
+            },
+        ).execute()
 
         projects = []
         for project_data in result.data:
@@ -166,6 +244,7 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
                     "created_at": project_data["created_at"],
                     "created_by_user_id": project_data.get("created_by_user_id"),
                     "created_by_name": project_data.get("created_by_name"),
+                    "organization_id": project_data.get("organization_id"),
                 }
             )
 
@@ -200,6 +279,7 @@ async def create_analysis_project(
             "created_at": datetime.utcnow().isoformat(),
             "created_by_user_id": current_user.user_id,
             "created_by_name": current_user.name,
+            "organization_id": current_user.organization_id,
         }
 
         result = (
@@ -225,6 +305,7 @@ async def create_analysis_project(
             "created_at": created_project["created_at"],
             "created_by_user_id": created_project.get("created_by_user_id"),
             "created_by_name": created_project.get("created_by_name"),
+            "organization_id": created_project.get("organization_id"),
         }
 
     except HTTPException:
@@ -240,18 +321,8 @@ async def get_analysis_project(
 ):
     """Get a specific analysis project with documents and extractions"""
     try:
-        # Get project
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("*")
-            .eq("id", project_id)
-            .execute()
-        )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-
-        project = project_result.data[0]
+        # Get project with authorization check
+        project = get_project_with_auth_check(project_id, current_user)
 
         # Get documents
         docs_result = (
@@ -291,6 +362,7 @@ async def get_analysis_project(
                 "created_at": project["created_at"],
                 "created_by_user_id": project.get("created_by_user_id"),
                 "created_by_name": project.get("created_by_name"),
+                "organization_id": project.get("organization_id"),
                 "search_query": project.get("search_query"),
             },
             "documents": documents,
@@ -314,6 +386,9 @@ async def update_analysis_project(
 ):
     """Update an analysis project"""
     try:
+        # Check authorization first
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
         # Build update data
         update_data = {}
 
@@ -358,6 +433,7 @@ async def update_analysis_project(
             "created_at": updated_project["created_at"],
             "created_by_user_id": updated_project.get("created_by_user_id"),
             "created_by_name": updated_project.get("created_by_name"),
+            "organization_id": updated_project.get("organization_id"),
         }
 
     except HTTPException:
@@ -373,16 +449,8 @@ async def delete_analysis_project(
 ):
     """Delete an analysis project and all its data"""
     try:
-        # Check if project exists
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("id")
-            .eq("id", project_id)
-            .execute()
-        )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
+        # Check authorization (also verifies project exists)
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
 
         # Clean up chunks that reference analysis_documents from this project
         try:
@@ -546,16 +614,8 @@ async def run_analysis_for_project(
         from app.services.analysis.schemas import RunConfig
         from app.core.config import settings
 
-        # Check if project exists
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("*")
-            .eq("id", project_id)
-            .execute()
-        )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
+        # Check authorization (also verifies project exists)
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
 
         # Build run config from request (query comes from search, not from project)
         query = request.get("query", "").strip()
@@ -727,6 +787,9 @@ async def get_project_documents(
 ):
     """Get all documents for an analysis project"""
     try:
+        # Check authorization
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
         docs_result = (
             vectorization_service.supabase.table("analysis_documents")
             .select("*")
@@ -1323,17 +1386,8 @@ async def chat_with_project(
 ) -> ChatResponse:
     """Chat with the analysis project using RAG over collected evidence."""
     try:
-        # Verify project exists and user has access
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("id")
-            .eq("id", project_id)
-            .single()
-            .execute()
-        )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
+        # Check authorization
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
 
         # Generate chat response using the chatbot service
         response = await chatbot_service.chat(project_id, request)

@@ -1,4 +1,5 @@
 import os
+import time
 from dotenv import load_dotenv
 from typing import Optional
 from fastapi import HTTPException, Depends
@@ -23,18 +24,41 @@ if not CLERK_SECRET_KEY:
 JWKS_URL = f"{CLERK_JWT_ISSUER}/.well-known/jwks.json"
 jwks_client = PyJWKClient(JWKS_URL)
 
+# Simple in-memory cache for user details (fallback if not in JWT)
+# Format: {user_id: (email, name, timestamp)}
+_user_cache: dict[str, tuple[Optional[str], Optional[str], float]] = {}
+_CACHE_TTL_SECONDS = 3600  # 1 hour
+
 
 class CurrentUser:
     def __init__(
-        self, user_id: str, email: Optional[str] = None, name: Optional[str] = None
+        self,
+        user_id: str,
+        email: Optional[str] = None,
+        name: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        organization_slug: Optional[str] = None,
+        organization_role: Optional[str] = None,
     ):
         self.user_id = user_id
         self.email = email
         self.name = name
+        self.organization_id = organization_id
+        self.organization_slug = organization_slug
+        self.organization_role = organization_role
 
 
-async def fetch_user_from_clerk(user_id: str) -> tuple[Optional[str], Optional[str]]:
-    """Fetch user details from Clerk API"""
+async def fetch_user_from_clerk_cached(
+    user_id: str
+) -> tuple[Optional[str], Optional[str]]:
+    """Fetch user details from Clerk API with caching."""
+    # Check cache first
+    if user_id in _user_cache:
+        email, name, timestamp = _user_cache[user_id]
+        if time.time() - timestamp < _CACHE_TTL_SECONDS:
+            return email, name
+
+    # Fetch from API
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -52,7 +76,6 @@ async def fetch_user_from_clerk(user_id: str) -> tuple[Optional[str], Optional[s
                 email_addresses = user_data.get("email_addresses", [])
                 email = None
                 if email_addresses:
-                    # Get the primary email or first email
                     primary_email = next(
                         (
                             addr
@@ -70,23 +93,18 @@ async def fetch_user_from_clerk(user_id: str) -> tuple[Optional[str], Optional[s
 
                 name = None
                 if first_name or last_name:
-                    name_parts = []
-                    if first_name:
-                        name_parts.append(first_name)
-                    if last_name:
-                        name_parts.append(last_name)
+                    name_parts = [n for n in [first_name, last_name] if n]
                     name = " ".join(name_parts) if name_parts else None
                 elif email:
-                    # Fallback to email prefix
                     name = email.split("@")[0]
 
+                # Cache the result
+                _user_cache[user_id] = (email, name, time.time())
                 return email, name
             else:
-                print(f"Failed to fetch user from Clerk API: {response.status_code}")
                 return None, None
 
-    except Exception as e:
-        print(f"Error fetching user from Clerk API: {e}")
+    except Exception:
         return None, None
 
 
@@ -135,21 +153,48 @@ async def get_current_user(
             # Fallback to email if no name is available
             name = email.split("@")[0]  # Use email prefix as display name
 
-        # If we don't have email or name from JWT, fetch from Clerk API
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: no user ID")
+
+        # If we don't have email or name from JWT, fetch from Clerk API (cached)
         if not email or not name:
-            print(
-                f"JWT missing user details, fetching from Clerk API for user: {user_id}"
-            )
-            api_email, api_name = await fetch_user_from_clerk(user_id)
+            api_email, api_name = await fetch_user_from_clerk_cached(user_id)
             if not email and api_email:
                 email = api_email
             if not name and api_name:
                 name = api_name
 
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token: no user ID")
+        # Extract organization info from JWT (Clerk Organizations)
+        # Clerk may put org info in 'o' claim as nested object, or as top-level org_id/org_slug/org_role
+        organization_id = payload.get("org_id")
+        organization_slug = payload.get("org_slug")
+        organization_role = payload.get("org_role")
 
-        return CurrentUser(user_id=user_id, email=email, name=name)
+        # Check for nested 'o' claim (Clerk's default org structure)
+        org_claim = payload.get("o")
+        if org_claim and isinstance(org_claim, dict):
+            organization_id = organization_id or org_claim.get("id")
+            organization_slug = (
+                organization_slug or org_claim.get("slg") or org_claim.get("slug")
+            )
+            organization_role = (
+                organization_role or org_claim.get("rol") or org_claim.get("role")
+            )
+
+        # Only warn if org is missing (don't log every successful request)
+        if not organization_id:
+            print(
+                f"WARNING: No org_id in JWT for user {user_id}. User may not have an active organization."
+            )
+
+        return CurrentUser(
+            user_id=user_id,
+            email=email,
+            name=name,
+            organization_id=organization_id,
+            organization_slug=organization_slug,
+            organization_role=organization_role,
+        )
 
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")

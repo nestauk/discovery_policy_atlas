@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore, AnalysisProject } from '@/lib/analysisProjectStore'
 import { Switch } from '@/components/ui/switch'
-import { useUser } from '@clerk/nextjs'
+import { useUser, useOrganization } from '@clerk/nextjs'
 
 export default function ProjectsPage() {
   const router = useRouter()
@@ -33,6 +33,7 @@ export default function ProjectsPage() {
     setError
   } = useAnalysisProjectStore()
   const { user } = useUser()
+  const { organization } = useOrganization()
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [showInfoDialog, setShowInfoDialog] = useState(false)
@@ -40,7 +41,7 @@ export default function ProjectsPage() {
   const [isCreating, setIsCreating] = useState(false)
   const [editProjectDialog, setEditProjectDialog] = useState<AnalysisProject | null>(null)
   const [editForm, setEditForm] = useState({ title: '', description: '' })
-  const [showMyProjectsOnly, setShowMyProjectsOnly] = useState(false)
+  const [showAllOrgProjects, setShowAllOrgProjects] = useState(false)
 
   useEffect(() => {
     loadProjects()
@@ -134,25 +135,28 @@ export default function ProjectsPage() {
     }
   }
 
-  // Determine the user's full name, email, and email username for filtering
+  // Get current user ID for filtering
+  const currentUserId = user?.id || ''
   const currentUserFullName = user?.fullName || ''
   const currentUserEmail = user?.emailAddresses?.[0]?.emailAddress || ''
   const currentUserEmailUsername = currentUserEmail.split('@')[0] || ''
 
-  // Filter projects if toggle is on (match by full name, email, or email username)
-  const displayedProjects = showMyProjectsOnly
-    ? projects.filter(
-        p =>
-          p.created_by_name === currentUserFullName ||
-          p.created_by_name === currentUserEmail ||
-          p.created_by_name === currentUserEmailUsername
+  // Default: show only user's own projects. When toggled, show all org projects.
+  const displayedProjects = showAllOrgProjects
+    ? projects
+    : projects.filter(p => 
+        // Match by user ID (preferred) or fallback to name matching
+        p.created_by_user_id === currentUserId ||
+        p.created_by_name === currentUserFullName ||
+        p.created_by_name === currentUserEmail ||
+        p.created_by_name === currentUserEmailUsername
       )
-    : projects
 
-  // Helper: can the current user delete this project?
-  const canDeleteProject = (project: AnalysisProject) => {
-    if (currentUserFullName === 'Karlis Kanders') return true
+  // Helper: can the current user edit/delete this project?
+  const canModifyProject = (project: AnalysisProject) => {
+    // Match by user ID (preferred) or fallback to name matching
     return (
+      project.created_by_user_id === currentUserId ||
       project.created_by_name === currentUserFullName ||
       project.created_by_name === currentUserEmail ||
       project.created_by_name === currentUserEmailUsername
@@ -173,16 +177,18 @@ export default function ProjectsPage() {
           <div className="flex items-center justify-between mb-8">
             <h2 className="text-xl font-semibold text-slate-900"></h2>
             <div className="flex gap-2 items-center">
-              <div className="flex items-center gap-2 mr-2">
-                <Switch
-                  checked={showMyProjectsOnly}
-                  onCheckedChange={setShowMyProjectsOnly}
-                  id="show-my-projects-switch"
-                />
-                <label htmlFor="show-my-projects-switch" className="text-sm text-slate-700 select-none cursor-pointer">
-                  Show my projects
-                </label>
-              </div>
+              {organization && (
+                <div className="flex items-center gap-2 mr-2">
+                  <Switch
+                    checked={showAllOrgProjects}
+                    onCheckedChange={setShowAllOrgProjects}
+                    id="show-all-org-projects-switch"
+                  />
+                  <label htmlFor="show-all-org-projects-switch" className="text-sm text-slate-700 select-none cursor-pointer">
+                    Show all org projects
+                  </label>
+                </div>
+              )}
               <Button 
                 onClick={() => setShowInfoDialog(true)}
                 variant="outline"
@@ -231,7 +237,7 @@ export default function ProjectsPage() {
                         <span className="truncate max-w-[180px]">{project.title}</span>
                       </div>
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        {canDeleteProject(project) && (
+                        {canModifyProject(project) && (
                           <Button 
                             variant="ghost" 
                             size="sm"
@@ -240,7 +246,7 @@ export default function ProjectsPage() {
                             <Edit className="h-3 w-3" />
                           </Button>
                         )}
-                        {canDeleteProject(project) && (
+                        {canModifyProject(project) && (
                           <Button 
                             variant="ghost" 
                             size="sm"
