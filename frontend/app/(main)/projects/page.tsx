@@ -142,10 +142,12 @@ export default function ProjectsPage() {
   const currentUserEmail = user?.emailAddresses?.[0]?.emailAddress || ''
   const currentUserEmailUsername = currentUserEmail.split('@')[0] || ''
 
-  // Default: show only user's own projects. When toggled, show all org projects.
+  // Default: show only user's own projects + demo projects. When toggled, show all org projects.
   const displayedProjects = showAllOrgProjects
     ? projects
     : projects.filter(p => 
+        // Always show demo projects
+        p.is_demo ||
         // Match by user ID (preferred) or fallback to name matching
         p.created_by_user_id === currentUserId ||
         p.created_by_name === currentUserFullName ||
@@ -262,7 +264,7 @@ export default function ProjectsPage() {
                   <CardContent>
                     <div className="mb-4">
                       <p className="text-sm text-slate-600 mb-2">
-                        {project.description || 'Analysis project ready for search queries'}
+                        {project.description || ''}
                       </p>
                       <div className="flex items-center justify-between text-xs text-slate-500">
                         <span className="flex items-center gap-1">

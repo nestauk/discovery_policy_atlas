@@ -219,6 +219,8 @@ async def get_synthesis_summary(
 async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_user)):
     """Get analysis projects filtered by user's organization."""
     try:
+        demo_org_id = os.getenv("DEMO_ORG_ID")
+
         # Use database function for filtering (centralizes authorization logic)
         result = vectorization_service.supabase.rpc(
             "get_user_projects",
@@ -226,13 +228,14 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
                 "p_user_id": current_user.user_id,
                 "p_organization_id": current_user.organization_id,
                 "p_organization_slug": current_user.organization_slug,
-                "p_demo_org_id": os.getenv("DEMO_ORG_ID"),
+                "p_demo_org_id": demo_org_id,
                 "p_admin_org_slug": ADMIN_ORG_SLUG,
             },
         ).execute()
 
         projects = []
         for project_data in result.data:
+            project_org_id = project_data.get("organization_id")
             projects.append(
                 {
                     "id": str(project_data["id"]),
@@ -246,7 +249,9 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
                     "created_at": project_data["created_at"],
                     "created_by_user_id": project_data.get("created_by_user_id"),
                     "created_by_name": project_data.get("created_by_name"),
-                    "organization_id": project_data.get("organization_id"),
+                    "organization_id": project_org_id,
+                    "is_demo": demo_org_id is not None
+                    and project_org_id == demo_org_id,
                 }
             )
 
