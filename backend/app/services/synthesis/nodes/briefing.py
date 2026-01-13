@@ -7,14 +7,12 @@ mandatory verification to generate grounded executive briefings.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.services.synthesis.state import SynthesisState, ScoredContext
@@ -34,7 +32,6 @@ from app.services.synthesis.tools.orchestrator import (
     BriefingOrchestrator,
     SectionOutput,
 )
-from app.services.synthesis.tools.models import GENERATION_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -77,21 +74,29 @@ Create a concise interventions table. Include 4-6 rows covering distinct interve
 IMPORTANT: Use the get_intervention_outcomes tool to retrieve aggregated outcome data 
 (effect sizes, effect consensus, study types) for the interventions table.
 
+ALSO IMPORTANT: Use the get_top_studies tool for each intervention type to identify 1-2 top studies
+(ranked by evidence strength and predicted impact) and to extract a concrete implementation example
+for the 'Key Study' column.
+
 For each row provide:
 1. Intervention Type (3-6 words): Clear category name (e.g., "Combined Diet and Activity Programs")
 2. Context/Features (15-25 words): Delivery method, setting, key components, notable features
    Example: "School-based with family involvement; integrates nutrition education and structured PA"
-3. Impact & Outcomes (20-30 words): Effectiveness on key outcomes WITH effect sizes from the evidence
-   Example: "Modest BMI reduction (−0.15 to −0.3 kg/m²); more effective in already-overweight children"
-4. Sources: [N] citation references
+3. Key Study (25-40 words): A concrete implementation example drawn from the top-ranked study:
+   what was done, where/setting (country/city where available; study setting may differ from publication location), duration/intensity, and key components. Include [N] citation(s).
+4. Impact & Outcomes (30-50 words): Start with the key study findings (specific outcomes/effect sizes),
+   then briefly describe the broader evidence base in this category (direction, consistency, caveats).
+5. Sources: [N] citation references
 
 Ensure each row covers a meaningfully different intervention approach.
 """,
         "additional": (
             "Output a markdown table with header exactly: "
-            "| Intervention | Context & Features | Impact & Outcomes | Sources |\n"
+            "| Intervention | Context & Features | Key Study | Impact & Outcomes | Sources |\n"
             "Make Context rich with implementation details (delivery method, setting, components). "
-            "Make Impact specific with effect sizes, outcome measures, and effect direction (positive/negative/mixed) from get_intervention_outcomes. "
+            "Make Key Study a concrete implementation example from get_top_studies (ranked by evidence_score + impact_score). "
+            "Make Impact & Outcomes specific with effect sizes/outcome measures from the key study, then a short synthesis of the broader category evidence. "
+            "For readability inside the table cell, separate 'Key example outcomes' and 'Broader evidence' with a blank line (two newlines). "
             "Prefer 3-4 high-impact, well-evidenced interventions per dominant themes rather than broad lists."
         ),
     },
@@ -120,7 +125,10 @@ Provide exactly 3-4 actionable recommendations. Each must have:
 """,
         "additional": (
             "Return as numbered items; keep lines clean (no stray asterisks). "
-            "Use [N] citation format only."
+            "Use [N] citation format only. "
+            "Avoid evidence drift: distinguish clearly between (a) what the evidence supports (intervention components that work) "
+            "and (b) implementation options (delivery channels, organisational models) where the evidence does not uniquely favour one. "
+            "If you propose an implementation option beyond the evidence, label it explicitly as an option/assumption and keep it conditional."
         ),
     },
 }
@@ -186,6 +194,26 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         if research_question:
             instructions = f"Research Question: {research_question}\n\n{instructions}"
 
+        # Inject user intent (population/outcomes) to tailor generation without displaying it explicitly.
+        target_population = state.get("target_population") or []
+        target_outcomes = state.get("target_outcomes") or []
+        pop_str = (
+            ", ".join([p for p in target_population if p]) if target_population else ""
+        )
+        out_str = (
+            ", ".join([o for o in target_outcomes if o]) if target_outcomes else ""
+        )
+        if pop_str or out_str:
+            intent_lines = []
+            if pop_str:
+                intent_lines.append(f"Target population: {pop_str}")
+            if out_str:
+                intent_lines.append(f"Target outcomes: {out_str}")
+            intent_lines.append(
+                "Use these to prioritise and frame evidence (but do not add a separate section or explicitly display this metadata in the output)."
+            )
+            instructions = "\n".join(intent_lines) + "\n\n" + instructions
+
         additional = section_config.get("additional", "") + additional_extra
 
         try:
@@ -228,7 +256,8 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     # Interventions with dynamic limits and tool guidance
     inter_extra = (
         f"Aim for {limits['max_interventions']} rows, prioritising high-impact, well-evidenced interventions. "
-        "Use get_intervention_outcomes for effect sizes and get_intervention_details for delivery features and subgroups."
+        "Use get_intervention_outcomes for effect sizes; get_top_studies for concrete key-study implementation examples; "
+        "and get_intervention_details for delivery features and subgroups."
     )
     await _run_section("interventions", additional_extra=f" {inter_extra}")
 
@@ -272,6 +301,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         state.get("doc_scores") or {},
         state.get("all_scored_contexts") or [],
         state.get("doc_citation_map") or {},
+        state.get("doc_metadata") or {},
         synthesis_outputs,
         limits,
     )
@@ -344,6 +374,7 @@ async def _build_structured_briefing(
     doc_scores: Dict[str, Dict[str, Any]],
     all_scored_contexts: List[ScoredContext],
     doc_citation_map: Dict[str, int],
+    doc_metadata: Dict[str, Dict[str, Any]],
     synthesis_outputs: List[Tuple[str, SectionOutput]],
     limits: Dict[str, int],
 ) -> StructuredBriefing:
@@ -464,14 +495,14 @@ async def _build_structured_briefing(
     # Parse synthesis sections (if any)
     synthesis_sections = _parse_synthesis_sections(synthesis_outputs)
 
-    # Build top citations with LLM-generated contextual reasons
+    # Build top citations (use precomputed document top_line, no LLM reason generation)
     top_citations = await _build_top_citations_async(
         grounded_citations,
         section_outputs,
         doc_scores,
         all_scored_contexts,
         doc_citation_map,
-        research_question,
+        doc_metadata,
         max_citations=limits.get("max_top_citations", 8),
     )
 
@@ -532,15 +563,40 @@ def _parse_intervention_table(
         # Parse data row
         cells = [c.strip() for c in line.split("|")[1:-1]]
         if len(cells) >= 2:
-            # Extract citation numbers from the row
+            # Extract citation numbers from the entire row (including Sources column if present)
             citation_nums = _extract_citation_numbers(line)
+
+            # Support both legacy 4-col and new 5-col formats:
+            # - Legacy: | Intervention | Context & Features | Impact & Outcomes | Sources |
+            # - New:    | Intervention | Context & Features | Key Study | Impact & Outcomes | Sources |
+            intervention_name = cells[0] if len(cells) > 0 else ""
+            context = cells[1] if len(cells) > 1 else ""
+
+            key_study_description = ""
+            impact_narrative = ""
+
+            if len(cells) >= 5:
+                # New format (Key Study + Impact)
+                key_study_description = cells[2] if len(cells) > 2 else ""
+                impact_narrative = cells[3] if len(cells) > 3 else ""
+            else:
+                # Legacy format (Impact in third column)
+                impact_narrative = cells[2] if len(cells) > 2 else ""
+
+            # Prefer to capture the primary key study citation from the Key Study cell
+            key_study_citation: Optional[int] = None
+            if key_study_description:
+                key_cits = _extract_citation_numbers(key_study_description)
+                key_study_citation = key_cits[0] if key_cits else None
 
             rows.append(
                 InterventionTableRow(
-                    intervention_name=cells[0] if len(cells) > 0 else "",
+                    intervention_name=intervention_name,
                     citation_numbers=citation_nums,
-                    context=cells[1] if len(cells) > 1 else "",
-                    impact_narrative=cells[2] if len(cells) > 2 else "",
+                    context=context,
+                    key_study_description=key_study_description,
+                    key_study_citation=key_study_citation,
+                    impact_narrative=impact_narrative,
                     outcome_effects=[],  # Could be populated from intervention data
                 )
             )
@@ -575,7 +631,8 @@ def _extract_citation_numbers(text: str) -> List[int]:
     import re
 
     matches = re.findall(r"\[(\d+)\]", text)
-    return [int(m) for m in matches]
+    # Treat [0] as invalid/placeholder and drop it to avoid broken citation links.
+    return [int(m) for m in matches if int(m) > 0]
 
 
 def _parse_recommendations(content: str) -> List[RecommendationItem]:
@@ -603,6 +660,41 @@ def _parse_recommendations(content: str) -> List[RecommendationItem]:
     current_rec_lines: List[str] = []
     current_rec_number = 0
 
+    def _parse_rec_block(rec_number: int, rec_lines: List[str]) -> None:
+        """Parse a recommendation block into structured fields."""
+        if not rec_lines:
+            return
+        # Preserve newlines for detecting Implementation option marker
+        joined = "\n".join(rec_lines).strip()
+
+        # Extract implementation option (if present)
+        impl = ""
+        remaining_lines: List[str] = []
+        for ln in joined.splitlines():
+            s = ln.strip()
+            if not s:
+                continue
+            lowered = s.lower()
+            if lowered.startswith("implementation option:"):
+                impl = s.split(":", 1)[1].strip() if ":" in s else ""
+            elif lowered.startswith("- implementation option:"):
+                impl = s.split(":", 1)[1].strip() if ":" in s else ""
+            else:
+                remaining_lines.append(s)
+
+        full_text = " ".join(remaining_lines)
+        title, description = _split_recommendation(full_text)
+        citations = _extract_citation_numbers((description or "") + " " + (impl or ""))
+        recommendations.append(
+            RecommendationItem(
+                number=rec_number,
+                title=title,
+                description=description,
+                implementation_option=impl,
+                citation_numbers=citations,
+            )
+        )
+
     for line in lines:
         stripped = line.strip()
 
@@ -611,43 +703,20 @@ def _parse_recommendations(content: str) -> List[RecommendationItem]:
         if match:
             # Save previous recommendation
             if current_rec_lines:
-                full_text = " ".join(current_rec_lines)
-                title, description = _split_recommendation(full_text)
-                citations = _extract_citation_numbers(full_text)
-                recommendations.append(
-                    RecommendationItem(
-                        number=current_rec_number,
-                        title=title,
-                        description=description,
-                        citation_numbers=citations,
-                    )
-                )
+                _parse_rec_block(current_rec_number, current_rec_lines)
 
             # Start new recommendation - extract number and remaining text
             current_rec_number = int(match.group(1))
             # Remove the number prefix and any trailing ** from title
             remaining = stripped[match.end() :].lstrip("* ").rstrip("*")
             current_rec_lines = [remaining] if remaining else []
-        elif stripped.startswith("-") and current_rec_lines:
-            # Sub-item (Why, Strength, Implementation) - append to current
-            current_rec_lines.append(stripped)
         elif current_rec_lines and stripped:
-            # Continuation of current recommendation
+            # Continuation line (including implementation option line)
             current_rec_lines.append(stripped)
 
     # Add last recommendation
     if current_rec_lines:
-        full_text = " ".join(current_rec_lines)
-        title, description = _split_recommendation(full_text)
-        citations = _extract_citation_numbers(full_text)
-        recommendations.append(
-            RecommendationItem(
-                number=current_rec_number,
-                title=title,
-                description=description,
-                citation_numbers=citations,
-            )
-        )
+        _parse_rec_block(current_rec_number, current_rec_lines)
 
     # Log if no recommendations found
     if not recommendations and content.strip():
@@ -826,19 +895,8 @@ Guidance:
 
 
 # =============================================================================
-# TOP CITATIONS SELECTION AND REASON GENERATION
+# TOP CITATIONS SELECTION (uses analysis_documents.top_line; no LLM reason generation)
 # =============================================================================
-
-
-class CitationReasonOutput(BaseModel):
-    """Structured output for citation reason generation."""
-
-    reason: str = Field(
-        ...,
-        description=(
-            "A concise reason explaining why this source is important for the policy briefing"
-        ),
-    )
 
 
 def _rank_citations(
@@ -913,139 +971,16 @@ def _rank_citations(
     return ranked
 
 
-async def _generate_citation_reasons_batch(
-    citations: List[CitationInfo],
-    research_question: str,
-    section_outputs: Dict[str, SectionOutput],
-) -> Dict[int, str]:
-    """Generate LLM-powered reasons for why each citation is important.
-
-    Args:
-        citations: Citations to generate reasons for.
-        research_question: The original research question.
-        section_outputs: Generated briefing sections for context.
-
-    Returns:
-        Mapping of citation_number to generated reason.
-    """
-    if not citations:
-        return {}
-
-    # Build context summary from sections
-    sections_summary = []
-    for name, output in section_outputs.items():
-        if output.content:
-            # Truncate to avoid token limits
-            preview = (
-                output.content[:300] + "..."
-                if len(output.content) > 300
-                else output.content
-            )
-            sections_summary.append(f"**{name.title()}**: {preview}")
-
-    briefing_context = (
-        "\n".join(sections_summary)
-        if sections_summary
-        else "Policy intervention analysis."
-    )
-
-    llm = ChatOpenAI(
-        model=GENERATION_MODEL,
-        temperature=0.3,
-        max_tokens=300,  # keep concise; we manually truncate below
-    )
-    structured_llm = llm.with_structured_output(
-        CitationReasonOutput,
-        method="function_calling",
-    )
-
-    async def generate_single_reason(cit: CitationInfo) -> Tuple[int, str]:
-        """Generate reason for a single citation."""
-        prompt = f"""You are helping create an executive policy briefing. Generate 1–2 sentences (~150 characters) explaining why this source is important for the briefing.
-
-RESEARCH QUESTION: {research_question}
-
-SOURCE:
-- Title: {cit.title or 'Unknown'}
-- Author: {cit.author_short or 'Unknown'}, {cit.year or 'n.d.'}
-- Key quote: "{(cit.supporting_quote or '')[:200]}"
-
-BRIEFING CONTEXT:
-{briefing_context[:500]}
-
-Write ONE sentence explaining what unique evidence or perspective this source contributes to answering the research question. Focus on the specific contribution, not generic descriptions."""
-
-        try:
-            result = await structured_llm.ainvoke(prompt)
-            reason_text = result.reason.strip()
-        except Exception as e:
-            logger.warning(
-                f"Failed to generate reason for citation {cit.citation_number}: {e}"
-            )
-            # Fallback attempt: plain text generation then truncate
-            try:
-                raw = await llm.ainvoke(prompt + "\nReturn 1-2 sentences.")
-                reason_text = (
-                    raw.content.strip() if hasattr(raw, "content") else str(raw).strip()
-                )
-            except Exception as e2:
-                logger.warning(
-                    f"Plain-text reason fallback failed for citation {cit.citation_number}: {e2}"
-                )
-            return (cit.citation_number, _fallback_reason(cit))
-
-        if len(reason_text) > 200:
-            reason_text = reason_text[:200].rstrip() + "..."
-
-        return (cit.citation_number, reason_text)
-
-    # Run in parallel with concurrency limit
-    tasks = [generate_single_reason(cit) for cit in citations]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    reasons: Dict[int, str] = {}
-    for result in results:
-        if isinstance(result, tuple):
-            cit_num, reason = result
-            reasons[cit_num] = reason
-        # Skip exceptions - they'll use fallback when building citations
-
-    return reasons
-
-
-def _fallback_reason(citation: CitationInfo) -> str:
-    """Generate a simple fallback reason when LLM fails.
-
-    Args:
-        citation: The citation info object.
-
-    Returns:
-        A basic reason based on document characteristics.
-    """
-    title = (citation.title or "").lower()
-
-    if "systematic review" in title or "meta-analysis" in title:
-        return "Synthesises evidence across multiple studies."
-    elif "guideline" in title or "guidance" in title:
-        return "Provides evidence-based recommendations."
-    elif "who" in title or "world health" in title:
-        return "WHO guidance on policy approaches."
-    elif "review" in title:
-        return "Reviews relevant research literature."
-    else:
-        return "Contributes to the evidence base."
-
-
 async def _build_top_citations_async(
     grounded_citations: List[CitationInfo],
     section_outputs: Dict[str, SectionOutput],
     doc_scores: Dict[str, Dict[str, Any]],
     all_scored_contexts: List[ScoredContext],
     doc_citation_map: Dict[str, int],
-    research_question: str,
+    doc_metadata: Dict[str, Dict[str, Any]],
     max_citations: int = 8,
 ) -> List[TopCitationItem]:
-    """Build top citations with LLM-generated contextual reasons.
+    """Build top citations using precomputed document 'top_line' (no LLM reason generation).
 
     Selects the most important citations based on usage, quality, and relevance,
     then generates meaningful reasons explaining each source's contribution.
@@ -1056,7 +991,7 @@ async def _build_top_citations_async(
         doc_scores: Document quality scores.
         all_scored_contexts: RCS-scored contexts.
         doc_citation_map: Document UUID to citation number mapping.
-        research_question: The original research question.
+        doc_metadata: Document metadata keyed by doc_uuid (should include 'top_line').
         max_citations: Maximum citations to include.
 
     Returns:
@@ -1071,20 +1006,20 @@ async def _build_top_citations_async(
         doc_citation_map,
     )
 
+    # Build reverse mapping: citation_number -> doc_uuid
+    cit_to_doc = {v: k for k, v in doc_citation_map.items()}
+
     # Select top citations
     top_citations_data = [cit for cit, _ in ranked[:max_citations]]
-
-    # Generate reasons via LLM
-    reasons = await _generate_citation_reasons_batch(
-        top_citations_data,
-        research_question,
-        section_outputs,
-    )
 
     # Build final citation items
     top_citations = []
     for cit in top_citations_data:
-        reason = reasons.get(cit.citation_number, _fallback_reason(cit))
+        doc_uuid = cit_to_doc.get(cit.citation_number) if cit.citation_number else None
+        reason = ""
+        if doc_uuid:
+            reason = (doc_metadata.get(doc_uuid, {}) or {}).get("top_line") or ""
+        reason = reason.strip()
 
         top_citations.append(
             TopCitationItem(

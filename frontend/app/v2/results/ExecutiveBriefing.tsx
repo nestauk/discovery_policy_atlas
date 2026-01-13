@@ -90,6 +90,12 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
       
       const citNum = parseInt(match[1], 10);
       const citInfo = lookupCitation(citNum);
+
+      // If citations are back-to-back like "...[3][4][5]", insert spacing between them
+      const last = parts[parts.length - 1];
+      if (match.index === lastIndex && last && typeof last !== 'string') {
+        parts.push(' ');
+      }
       
       parts.push(
         <CitationLink
@@ -162,12 +168,12 @@ function CitationLink({ citationKey, citationNumber, citationInfo, onCitationCli
 
   const linkElement = url ? (
     <a href={url} target="_blank" rel="noopener noreferrer" onClick={handleClick}
-       className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer font-medium transition-colors">
+       className="inline-flex items-center text-blue-600 hover:text-blue-800 hover:underline cursor-pointer font-medium transition-colors mx-0.5">
       {displayText}
     </a>
   ) : (
     <span onClick={handleClick}
-          className={`text-blue-600 font-medium ${onCitationClick && docId ? 'cursor-pointer hover:underline' : ''}`}>
+          className={`inline-flex items-center text-blue-600 font-medium mx-0.5 ${onCitationClick && docId ? 'cursor-pointer hover:underline' : ''}`}>
       {displayText}
     </span>
   );
@@ -238,7 +244,12 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div>
           <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Sources</div>
-          <div className="font-semibold text-slate-800">{coverage.total_sources} documents</div>
+          <div className="font-semibold text-slate-800">
+            {(coverage.total_synthesised ?? coverage.total_sources)} synthesised
+          </div>
+          <div className="text-slate-600 text-xs mt-0.5">
+            Screened: {(coverage.total_screened ?? coverage.total_sources)}
+          </div>
         </div>
         <div>
           <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Source Types</div>
@@ -347,13 +358,22 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
     const parts = renderCitations(text, prefix);
     return parts.map((part, i) => {
       if (typeof part !== 'string') return part;
+      // Convert newlines to <br/> for readability (used e.g. to separate key outcomes vs broader evidence)
+      const lines = part.split('\n');
       // Handle **bold** markdown
-      const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
-      return boldParts.map((bp, j) => {
-        if (bp.startsWith('**') && bp.endsWith('**')) {
-          return <strong key={`${i}-${j}`} className="font-semibold text-slate-800">{bp.slice(2, -2)}</strong>;
+      return lines.flatMap((line, lineIdx) => {
+        const boldParts = line.split(/(\*\*[^*]+\*\*)/g);
+        const rendered = boldParts.map((bp, j) => {
+          if (bp.startsWith('**') && bp.endsWith('**')) {
+            return <strong key={`${i}-${lineIdx}-${j}`} className="font-semibold text-slate-800">{bp.slice(2, -2)}</strong>;
+          }
+          return bp;
+        });
+        // Add a <br/> between lines (but not after the last line)
+        if (lineIdx < lines.length - 1) {
+          rendered.push(<br key={`${i}-${lineIdx}-br`} />);
         }
-        return bp;
+        return rendered;
       });
     });
   };
@@ -365,10 +385,11 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '18%'}}>Intervention</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '22%'}}>Context</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '45%'}}>Impact & Outcomes</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '15%'}}>Sources</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '16%'}}>Intervention</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '20%'}}>Context</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '22%'}}>Key study</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '30%'}}>Impact & Outcomes</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider" style={{width: '12%'}}>Sources</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-slate-200">
@@ -393,6 +414,27 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                     </div>
                   )}
                   </div>
+                </td>
+                <td className="px-4 py-3">
+                  {row.key_study_description ? (
+                    <div className="text-sm text-slate-700">
+                      {renderFormattedText(row.key_study_description, `ks-${idx}`)}
+                      {typeof row.key_study_citation === 'number'
+                        && row.key_study_citation > 0
+                        && !row.key_study_description.includes(`[${row.key_study_citation}]`) && (
+                          <span className="ml-1">
+                            <CitationLink
+                              citationKey={`[${row.key_study_citation}]`}
+                              citationNumber={row.key_study_citation}
+                              citationInfo={lookupCitation(row.key_study_citation)}
+                              onCitationClick={onCitationClick}
+                            />
+                          </span>
+                        )}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-slate-400 italic">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   {/* Impact narrative */}
@@ -469,6 +511,17 @@ function RecommendationsList({ recommendations, renderCitations }: {
             <div className="flex-1">
               <div className="font-semibold text-slate-800">{rec.title}</div>
               <p className="text-sm text-slate-700 mt-1">{renderCitations(rec.description, `rec-${rec.number}`)}</p>
+              {rec.implementation_option && (
+                <div className="mt-3 pt-3 border-t border-blue-200">
+                  <div className="flex items-start gap-2">
+                    <ChevronRight className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-slate-700">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-blue-700">Implementation option</span>
+                      <div className="mt-1">{renderCitations(rec.implementation_option, `rec-${rec.number}-impl`)}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -486,16 +539,19 @@ function SynthesisSections({ sections, renderCitations }: {
   return (
     <div className="mb-6 space-y-4">
       {sections.map((section, idx) => (
-        <div key={idx} className="bg-white border border-slate-200 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-slate-800 mb-2">{section.title}</h3>
+        <div key={idx} className="bg-white border border-slate-200 rounded-lg">
+          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+            <Lightbulb className="h-4 w-4 text-blue-600" />
+            <h3 className="text-base font-semibold text-slate-800">{section.title}</h3>
+          </div>
           {section.content_type === 'bullets' ? (
-            <ul className="list-disc pl-5 space-y-1 text-slate-700">
+            <ul className="px-4 py-3 list-disc list-inside space-y-2 text-slate-700 leading-relaxed">
               {section.bullets.map((b, i) => (
                 <li key={i}>{renderCitations(b, `synth-${idx}-b-${i}`)}</li>
               ))}
             </ul>
           ) : (
-            <div className="space-y-2 text-slate-700">
+            <div className="px-4 py-3 space-y-3 text-slate-700 leading-relaxed">
               {section.paragraphs.map((p, i) => (
                 <p key={i}>{renderCitations(p, `synth-${idx}-p-${i}`)}</p>
               ))}
@@ -585,7 +641,8 @@ export function ExecutiveBriefing({
     const rich = (text?: string) => {
       const safe = sanitize(text);
       const withBold = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-      return linkCitations(withBold);
+      const withBreaks = withBold.replace(/\n/g, "<br/>");
+      return linkCitations(withBreaks);
     };
 
     const badgeForDirection = (direction: string) => {
@@ -641,6 +698,14 @@ export function ExecutiveBriefing({
               <div class="card-value">${rich(row.context)}</div>
               </div>
               ${
+                row.key_study_description
+                  ? `<div class="card-row">
+                      <div class="card-label">Key study</div>
+                      <div class="card-value">${rich(row.key_study_description)}</div>
+                    </div>`
+                  : ""
+              }
+              ${
                 row.impact_narrative
                   ? `<div class="card-row">
                       <div class="card-label">Impact</div>
@@ -689,6 +754,11 @@ export function ExecutiveBriefing({
               <div>
                 <div class="chip-title">${rich(r.title)}</div>
                 <div class="chip-body">${rich(r.description)}</div>
+                ${
+                  r.implementation_option
+                    ? `<div class="chip-impl">${rich(r.implementation_option)}</div>`
+                    : ""
+                }
               </div>
             </div>`
             )
@@ -717,6 +787,8 @@ export function ExecutiveBriefing({
         .join(", ") || "Various";
       const countryEntries = Object.entries(evidenceCoverage.countries || {}).sort((a, b) => b[1] - a[1]);
       const topCountries = countryEntries.slice(0, 3).map(([c]) => sanitize(c)).join(", ") || "Unknown";
+      const synthesised = (evidenceCoverage.total_synthesised ?? evidenceCoverage.total_sources);
+      const screened = (evidenceCoverage.total_screened ?? evidenceCoverage.total_sources);
       return `
         <div class="card">
           <div class="card-title">Evidence Base</div>
@@ -724,7 +796,8 @@ export function ExecutiveBriefing({
           <div class="snapshot-grid">
             <div>
               <div class="label">Sources</div>
-              <div class="value">${evidenceCoverage.total_sources} documents</div>
+              <div class="value">${synthesised} synthesised</div>
+              <div class="value" style="font-size:10px;color:#64748b;">Screened: ${screened}</div>
             </div>
             <div>
               <div class="label">Study Types</div>
@@ -850,6 +923,7 @@ export function ExecutiveBriefing({
             .chip-num { width:24px; height:24px; border-radius:9999px; background:#2563eb; color:#fff; font-weight:700; display:flex; align-items:center; justify-content:center; font-size:12px; }
             .chip-title { font-weight:700; color:#0f172a; }
             .chip-body { color:#1f2937; font-size:14px; margin-top:4px; }
+            .chip-impl { margin-top:8px; padding-top:8px; border-top:1px solid #bfdbfe; color:#1f2937; font-size:13px; }
             .pill { text-decoration:none; background:#e0f2fe; color:#1d4ed8; }
             .pill-inline { text-decoration:none; color:#1d4ed8; font-weight:600; }
             .question-text { font-size:14px; color:#0f172a; font-weight:600; }

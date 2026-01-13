@@ -101,6 +101,8 @@ export interface SearchParams {
 
   export interface EvidenceCoverageSnapshot {
     total_sources: number
+    total_screened?: number
+    total_synthesised?: number
     study_types: Record<string, number>
     source_types: Record<string, number>
     countries: Record<string, number>
@@ -139,6 +141,8 @@ export interface SearchParams {
     intervention_name: string
     citation_numbers: number[]
     context: string
+    key_study_description?: string
+    key_study_citation?: number
   delivery_features?: string[]
   subgroup_effects?: string[]
     impact_narrative: string
@@ -149,6 +153,7 @@ export interface SearchParams {
     number: number
     title: string
     description: string
+    implementation_option?: string
     citation_numbers: number[]
   }
 
@@ -195,13 +200,8 @@ export interface SynthesisSection {
   export interface SynthesisSummary {
     executive_briefing: string
     structured_briefing?: StructuredBriefing  // New structured output
-    structured_briefing?: StructuredBriefing  // New structured output
     key_issues: KeyIssue[]
     interventions: PolicyIntervention[]
-    // Enhanced fields
-    outcome_themes?: OutcomeTheme[]
-    evidence_coverage?: EvidenceCoverageSnapshot
-    citation_map?: Record<string, CitationInfo>
     // Enhanced fields
     outcome_themes?: OutcomeTheme[]
     evidence_coverage?: EvidenceCoverageSnapshot

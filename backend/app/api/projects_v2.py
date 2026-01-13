@@ -17,6 +17,7 @@ from app.services.synthesis.schemas import (
     Finding,
     ThematicGroup,
     EvidenceItem,
+    EvidenceCoverageSnapshot,
 )
 from app.services.synthesis.findings import get_findings
 from app.services.synthesis.logbook import read_cached_summary
@@ -78,6 +79,47 @@ async def get_synthesis_summary(
         # Check if synthesis is already cached
         cached = await read_cached_summary(project_id)
         if cached:
+            # Normalise evidence coverage counts to reflect screening outcomes, even for older cached runs.
+            try:
+                screened_res = (
+                    vectorization_service.supabase.table("analysis_documents")
+                    .select("id", count="exact")
+                    .eq("analysis_project_id", project_id)
+                    .execute()
+                )
+                total_screened = (
+                    screened_res.count
+                    if hasattr(screened_res, "count")
+                    else len(screened_res.data or [])
+                )
+                synthesised_res = (
+                    vectorization_service.supabase.table("analysis_documents")
+                    .select("id", count="exact")
+                    .eq("analysis_project_id", project_id)
+                    .eq("is_relevant", True)
+                    .execute()
+                )
+                total_synthesised = (
+                    synthesised_res.count
+                    if hasattr(synthesised_res, "count")
+                    else len(synthesised_res.data or [])
+                )
+
+                if cached.evidence_coverage:
+                    cached.evidence_coverage.total_screened = total_screened
+                    cached.evidence_coverage.total_synthesised = total_synthesised
+                    # Keep total_sources aligned with "screened" for consistent semantics in UI/PDF.
+                    cached.evidence_coverage.total_sources = total_screened
+                else:
+                    cached.evidence_coverage = EvidenceCoverageSnapshot(
+                        total_sources=total_screened,
+                        total_screened=total_screened,
+                        total_synthesised=total_synthesised,
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to compute screened/synthesised counts for project {project_id}: {e}"
+                )
             return cached
 
         # If analysis still running or synthesising, return appropriate response

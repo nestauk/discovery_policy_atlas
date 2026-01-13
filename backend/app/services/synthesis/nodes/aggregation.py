@@ -34,6 +34,20 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     raw_extractions = state.get("raw_extractions") or []
     doc_metadata = state.get("doc_metadata") or {}
 
+    total_screened = len(doc_metadata)
+    # Prefer explicit screening flag when present; fall back to "synthesised == screened" if unknown
+    relevant_flags = [
+        d.get("is_relevant")
+        for d in (doc_metadata.values() or [])
+        if isinstance(d, dict)
+    ]
+    if any(f is True for f in relevant_flags) or any(
+        f is False for f in relevant_flags
+    ):
+        total_synthesised = sum(1 for f in relevant_flags if f is True)
+    else:
+        total_synthesised = total_screened
+
     study_types: Counter = Counter()
     countries: Counter = Counter()
     source_types: Counter = Counter()
@@ -82,7 +96,11 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     }
 
     coverage = EvidenceCoverageSnapshot(
-        total_sources=len(doc_metadata),
+        # Keep total_sources as the overall evidence-base size (screened),
+        # and expose synthesised separately for UI.
+        total_sources=total_screened,
+        total_screened=total_screened,
+        total_synthesised=total_synthesised,
         study_types=filtered_study_types,
         source_types=dict(source_types),
         countries=filtered_countries,

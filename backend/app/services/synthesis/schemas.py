@@ -203,6 +203,33 @@ class InterventionTableRow(BaseModel):
             "notable features (e.g., 'School-based with family involvement')"
         ),
     )
+    key_study_description: str = Field(
+        "",
+        description=(
+            "Concrete implementation details from the top-ranked study in this intervention "
+            "category (what was done, where, duration/intensity), suitable for the 'Key Study' column."
+        ),
+    )
+    key_study_citation: Optional[int] = Field(
+        None,
+        description=(
+            "Citation number [N] for the key study described in key_study_description, if available."
+        ),
+    )
+    population_applicability: str = Field(
+        "",
+        description=(
+            "How this intervention applies to the target population (as specified by the user at search time). "
+            "Used to tailor synthesis; may be left empty if not applicable."
+        ),
+    )
+    outcome_relevance: str = Field(
+        "",
+        description=(
+            "How this intervention maps to the target outcomes (as specified by the user at search time). "
+            "Used to tailor synthesis; may be left empty if not applicable."
+        ),
+    )
     delivery_features: List[str] = Field(
         default_factory=list,
         description="Key delivery attributes (e.g., school-based, family involvement, duration/intensity).",
@@ -234,6 +261,13 @@ class RecommendationItem(BaseModel):
     description: str = Field(
         ...,
         description="Full recommendation text with evidence and citations in [N] format",
+    )
+    implementation_option: str = Field(
+        "",
+        description=(
+            "Optional implementation option / delivery suggestion that extrapolates beyond the evidence base. "
+            "Should be explicitly labelled as an option and written conditionally."
+        ),
     )
     citation_numbers: List[int] = Field(
         default_factory=list, description="List of citation numbers used in description"
@@ -325,6 +359,13 @@ class EvidenceCoverageSnapshot(BaseModel):
 
     total_sources: int = Field(
         ..., description="Total number of unique source documents"
+    )
+    total_screened: Optional[int] = Field(
+        None, description="Number of documents screened (all retrieved candidates)"
+    )
+    total_synthesised: Optional[int] = Field(
+        None,
+        description="Number of documents synthesised (documents that passed screening / marked relevant)",
     )
     study_types: Dict[str, int] = Field(default_factory=dict)
     source_types: Dict[str, int] = Field(

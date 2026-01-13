@@ -91,7 +91,8 @@ class VerificationResult(BaseModel):
 
 
 # Maximum tool calls per section (user-configured)
-MAX_TOOL_CALLS_PER_SECTION = 5
+# Increased to support per-row evidence gathering for richer intervention tables.
+MAX_TOOL_CALLS_PER_SECTION = 10
 
 
 ORCHESTRATOR_SYSTEM_PROMPT = """You are an evidence orchestrator for policy briefings. Your role is to:
@@ -113,6 +114,7 @@ ORCHESTRATOR_SYSTEM_PROMPT = """You are an evidence orchestrator for policy brie
 ### Tool Selection Strategy
 1. Start with get_theme_evidence for the main topic/intervention
 2. Use get_intervention_outcomes to get effect sizes, outcomes, and study types for interventions
+3. Use get_top_studies to identify the strongest studies for a specific intervention category (ranked by evidence strength and predicted impact)
 3. Use search_extractions for specific claims that need additional support
 4. Use get_document_quality to verify source quality for key citations
 5. Use get_citation_context to get full context for specific citations during verification
@@ -124,6 +126,7 @@ ORCHESTRATOR_SYSTEM_PROMPT = """You are an evidence orchestrator for policy brie
 - get_document_quality: requires citation_number (int)
 - search_extractions: requires query (string)
 - get_intervention_outcomes: optional intervention_name, otherwise fetch all
+- get_top_studies: requires intervention_name (string)
 
 ### Efficiency
 - You have a maximum of {max_tool_calls} tool calls per section
@@ -283,7 +286,11 @@ class BriefingOrchestrator:
         )
 
         # Phase 1: Gather evidence
-        await self._gather_evidence(ctx)
+        if ctx.section_name.lower().startswith("policy interventions analysis"):
+            # Interventions table benefits from row-by-row evidence gathering.
+            await self._gather_interventions_table_evidence(ctx)
+        else:
+            await self._gather_evidence(ctx)
 
         # Phase 2: Generate content
         content = await self._generate_section_content(
@@ -367,6 +374,14 @@ class BriefingOrchestrator:
             if getattr(c, "citation_number", None)
         ]
 
+        # Collect available intervention category names (for parameter auto-fill)
+        intervention_names: List[str] = []
+        aggregated_interventions = self.state.get("aggregated_interventions") or []
+        for it in aggregated_interventions:
+            name = getattr(it, "intervention_name", None)
+            if name and name not in intervention_names:
+                intervention_names.append(name)
+
         # Build system prompt
         system_prompt = ORCHESTRATOR_SYSTEM_PROMPT.format(
             tool_descriptions=tool_descriptions,
@@ -384,6 +399,7 @@ class BriefingOrchestrator:
 - {len(self.state.get("all_scored_contexts", []))} total scored contexts
 
 Available theme names: {", ".join(theme_names) if theme_names else "None"}
+Available intervention names: {", ".join(intervention_names) if intervention_names else "None"}
 Available citation numbers: {citation_numbers if citation_numbers else "None"}
 
 Decide which tools to call to gather the most relevant evidence for this section."""
@@ -496,6 +512,27 @@ Decide which tools to call to gather the most relevant evidence for this section
                         )
                         continue
 
+                if tool_name == "get_top_studies" and not arguments.get(
+                    "intervention_name"
+                ):
+                    # Auto-fill with next available intervention name if we have one
+                    next_intervention = None
+                    for name in intervention_names:
+                        if name not in ctx.used_theme_names:
+                            next_intervention = name
+                            break
+                    if next_intervention:
+                        arguments["intervention_name"] = next_intervention
+                        ctx.used_theme_names.add(next_intervention)
+                        logger.info(
+                            f"Auto-filled get_top_studies intervention_name={next_intervention}"
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping get_top_studies: missing intervention_name"
+                        )
+                        continue
+
                 result = await self.registry.execute(
                     tool_name,
                     ctx.state,
@@ -535,6 +572,100 @@ Decide which tools to call to gather the most relevant evidence for this section
 
         logger.info(
             f"Evidence gathering complete: {ctx.tool_call_count} tool calls, "
+            f"{len(ctx.gathered_evidence)} evidence items"
+        )
+
+    async def _gather_interventions_table_evidence(
+        self, ctx: OrchestratorContext
+    ) -> None:
+        """Gather evidence for interventions table, separately per row.
+
+        This ensures the generator has distinct evidence blocks for each intervention row,
+        rather than relying on a single aggregate tool call.
+        """
+        # Increase tool-call budget for this section to allow per-row retrieval.
+        ctx.max_tool_calls = max(ctx.max_tool_calls, 25)
+
+        # 1) Get the top intervention categories (sorted by frequency by the tool)
+        base = await self.registry.execute(
+            "get_intervention_outcomes", ctx.state, max_results=10
+        )
+        ctx.tool_call_count += 1
+        if base.success and base.data:
+            ctx.gathered_evidence.append(
+                {"tool": "get_intervention_outcomes", "data": base.data}
+            )
+        else:
+            logger.warning(
+                f"Interventions evidence gather failed at baseline: {base.error or 'no data'}"
+            )
+            return
+
+        outcomes: List[Dict[str, Any]] = (
+            base.data if isinstance(base.data, list) else []
+        )
+        if not outcomes:
+            return
+
+        desired_rows = min(6, max(4, len(outcomes)))
+        selected = outcomes[:desired_rows]
+
+        # 2) For each row, gather evidence separately
+        for item in selected:
+            if ctx.tool_call_count >= ctx.max_tool_calls:
+                break
+
+            intervention_name = (item.get("intervention_name") or "").strip()
+            if not intervention_name:
+                continue
+
+            # Per-row aggregated outcomes
+            res_out = await self.registry.execute(
+                "get_intervention_outcomes",
+                ctx.state,
+                intervention_name=intervention_name,
+                max_results=1,
+            )
+            ctx.tool_call_count += 1
+            if res_out.success and res_out.data:
+                ctx.gathered_evidence.append(
+                    {"tool": "get_intervention_outcomes", "data": res_out.data}
+                )
+
+            if ctx.tool_call_count >= ctx.max_tool_calls:
+                break
+
+            # Per-row key studies (ranked by doc_scores)
+            res_top = await self.registry.execute(
+                "get_top_studies",
+                ctx.state,
+                intervention_name=intervention_name,
+                max_results=2,
+            )
+            ctx.tool_call_count += 1
+            if res_top.success and res_top.data:
+                ctx.gathered_evidence.append(
+                    {"tool": "get_top_studies", "data": res_top.data}
+                )
+
+            if ctx.tool_call_count >= ctx.max_tool_calls:
+                break
+
+            # Per-row delivery/subgroup enrichment (optional)
+            res_details = await self.registry.execute(
+                "get_intervention_details",
+                ctx.state,
+                intervention_name=intervention_name,
+                max_results=1,
+            )
+            ctx.tool_call_count += 1
+            if res_details.success and res_details.data:
+                ctx.gathered_evidence.append(
+                    {"tool": "get_intervention_details", "data": res_details.data}
+                )
+
+        logger.info(
+            f"Interventions evidence gathering complete: {ctx.tool_call_count} tool calls, "
             f"{len(ctx.gathered_evidence)} evidence items"
         )
 
@@ -702,6 +833,22 @@ Decide which tools to call to gather the most relevant evidence for this section
                             items.append(
                                 f"{name}: effect={effect}; effects={samples_str}; outcomes={related_str}; studies={freq}; top study type={top_study}"
                             )
+                        elif tool == "get_top_studies":
+                            cit_raw = item.get("citation_number")
+                            cit = (
+                                str(cit_raw)
+                                if isinstance(cit_raw, int) and cit_raw > 0
+                                else None
+                            )
+                            title = item.get("title", "Unknown")
+                            evs = item.get("evidence_strength", "?")
+                            imp = item.get("predicted_impact", "?")
+                            rel = item.get("relevance_score", "?")
+                            summary = (item.get("key_context_summary") or "")[:260]
+                            prefix = f"[{cit}] " if cit else ""
+                            items.append(
+                                f"{prefix}{title} (evidence={evs}/5, impact={imp}/5, relevance={rel}): {summary}..."
+                            )
                         else:
                             cit = item.get("citation_number", "?")
                             summary = item.get("summary", item.get("content", ""))[:300]
@@ -786,11 +933,12 @@ You are writing policy recommendations for UK cabinet ministers.
 
 Requirements:
 - Output exactly 3-4 recommendations.
-- Each recommendation must include: number (1..4), title (3-7 words, action-led), description (60-90 words), citation_numbers.
+- Each recommendation must include: number (1..4), title (3-7 words, action-led), description (60-90 words), implementation_option (25-60 words), citation_numbers.
 - Title must be plain text only: do NOT include markdown (no *, **, _, backticks) or trailing punctuation.
-- Use inline [N] citations inside description; citation_numbers list must match the numbers used.
+- Description must be evidence-backed and use inline [N] citations; citation_numbers list must match the numbers used across BOTH description and implementation_option.
 - At least one citation per recommendation. No '?' citations.
 - British English. Concise and specific.
+- implementation_option must be explicitly framed as an option/suggestion (conditional language) and must not claim it is directly proven if it is an extrapolation.
 
 Evidence (use only these citations):
 {evidence_context}
@@ -810,7 +958,13 @@ Additional guidance:
         lines: List[str] = []
         for rec in result.recommendations:
             title = (rec.title or "").strip().strip("*").strip()
-            lines.append(f"{rec.number}. {title}: {rec.description}")
+            impl = (getattr(rec, "implementation_option", "") or "").strip()
+            if impl:
+                lines.append(
+                    f"{rec.number}. {title}: {rec.description}\nImplementation option: {impl}"
+                )
+            else:
+                lines.append(f"{rec.number}. {title}: {rec.description}")
         return "\n".join(lines)
 
 

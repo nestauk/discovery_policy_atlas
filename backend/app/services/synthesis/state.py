@@ -68,6 +68,10 @@ class SynthesisState(TypedDict, total=False):
     project_id: str
     research_question: str
 
+    # User intent (captured at search time; used to tailor synthesis)
+    target_population: List[str]  # e.g., ["Children"]
+    target_outcomes: List[str]  # e.g., ["body weight/size reduction"]
+
     # Raw data
     raw_extractions: List[Dict]
     doc_metadata: Dict[str, Dict[str, Any]]
