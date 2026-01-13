@@ -3,32 +3,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
-import { useAuth } from '@clerk/nextjs'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
-import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
-import { NavigatorInterventionsTable } from '@/components/interventions/NavigatorInterventionsTable'
-import { type InterventionData } from '@/components/interventions/InterventionsTable'
-
-interface IssueTheme {
-  theme_name: string
-  description: string
-  frequency: number
-  related_interventions: InterventionTheme[]
-}
-
-interface InterventionTheme {
-  theme_name: string
-  description: string
-  impact_summary?: string
-  frequency: number
-  avg_impact_score?: number
-  avg_evidence_score?: number
-  detailed_interventions?: DetailedIntervention[]
-}
+import { Loader2, Target, AlertTriangle } from 'lucide-react'
+import { ThemeList, type ThemeListItem } from './ThemeList'
+import { ThemeDetailView } from './ThemeDetailView'
 
 interface DetailedIntervention {
   name: string
@@ -60,53 +38,88 @@ interface DetailedIntervention {
   }>
 }
 
+interface InterventionTheme {
+  theme_name: string
+  description: string
+  impact_summary?: string
+  frequency: number
+  avg_impact_score?: number
+  avg_evidence_score?: number
+  detailed_interventions?: DetailedIntervention[]
+}
+
+interface IssueTheme {
+  theme_name: string
+  description: string
+  frequency: number
+  related_interventions: InterventionTheme[]
+}
+
 interface NavigatorData {
   issue_themes: IssueTheme[]
 }
 
 interface InterventionsNavigatorProps {
   showHeader?: boolean
-  viewMode?: 'grouped' | 'all'
-  onViewModeChange?: (mode: 'grouped' | 'all') => void
-  sortBy?: 'frequency' | 'impact' | 'evidence'
-  onSortByChange?: (sortBy: 'frequency' | 'impact' | 'evidence') => void
-  onDownload?: () => void
-  isPreparingDownload?: boolean
+}
+
+function RangeFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  const tiers = ['Very low', 'Low', 'Moderate', 'High', 'Very high']
+  const shown = tiers[Math.max(0, Math.min(4, value - 1))]
+
+  return (
+    <div className="flex-1 min-w-[180px]">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-medium text-gray-700">{label}</div>
+        <div className="text-xs text-gray-500">{shown}+</div>
+      </div>
+      <input
+        type="range"
+        min={1}
+        max={5}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+      />
+      <div className="flex justify-between text-xs text-gray-400 mt-1">
+        <span>Very low</span>
+        <span>Very high</span>
+      </div>
+    </div>
+  )
 }
 
 export function InterventionsNavigator({ 
-  showHeader = true,
-  viewMode: externalViewMode,
-  onViewModeChange,
-  sortBy: externalSortBy,
-  onSortByChange,
-  onDownload,
-  isPreparingDownload: externalIsPreparingDownload
+  showHeader = true
 }: InterventionsNavigatorProps) {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth } = useAPI()
-  const { getToken } = useAuth()
   
   const [data, setData] = useState<NavigatorData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
-  const [expandedInterventions, setExpandedInterventions] = useState<Set<string>>(new Set())
   
-  // Fallback state for extracted interventions (when synthesis is not done)
-  const [fallbackInterventions, setFallbackInterventions] = useState<InterventionData[] | null>(null)
-  const [loadingFallback, setLoadingFallback] = useState(false)
+  const [selectedTheme, setSelectedTheme] = useState<ThemeListItem | null>(null)
   
-  // Use external state if provided, otherwise use internal state
-  const [internalViewMode, setInternalViewMode] = useState<'grouped' | 'all'>('all')
-  const [internalSortBy, setInternalSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
-  const [internalIsPreparingDownload, setInternalIsPreparingDownload] = useState(false)
+  const [sortBy, _setSortBy] = useState<'impact' | 'evidence'>('evidence')
+  const [minImpact, setMinImpact] = useState(1)
+  const [minEvidence, setMinEvidence] = useState(1)
+  const [issueThemeFilter, setIssueThemeFilter] = useState<string>('All')
   
-  const viewMode = externalViewMode ?? internalViewMode
-  const setViewMode = onViewModeChange ?? setInternalViewMode
-  const sortBy = externalSortBy ?? internalSortBy
-  const setSortBy = onSortByChange ?? setInternalSortBy
-  const isPreparingDownload = externalIsPreparingDownload ?? internalIsPreparingDownload
+  const issueThemeOptions = useMemo(() => {
+    if (!data) return ['All']
+    const themes = data.issue_themes.map(t => t.theme_name)
+    return ['All', ...themes]
+  }, [data])
 
   const loadNavigatorData = useCallback(async () => {
     if (!activeProject?.id) return
@@ -116,12 +129,6 @@ export function InterventionsNavigator({
     
     try {
       const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/issue-intervention-navigator`)
-      console.log('Navigator API response:', response)
-      console.log('Number of issue themes:', response?.issue_themes?.length || 0)
-      if (response?.issue_themes?.length > 0) {
-        console.log('First issue theme:', response.issue_themes[0])
-        console.log('First intervention (if any):', response.issue_themes[0]?.related_interventions?.[0])
-      }
       setData(response as NavigatorData)
     } catch (err) {
       console.error('Failed to load navigator data:', err)
@@ -134,244 +141,100 @@ export function InterventionsNavigator({
   useEffect(() => {
     if (!activeProject?.id) return
     loadNavigatorData()
-  }, [activeProject?.id, loadNavigatorData])
-  
-  // Load fallback interventions if navigator data is empty
-  useEffect(() => {
-    const loadFallback = async () => {
-      if (!activeProject?.id) return
-      if (!data || data.issue_themes.length > 0) return // Only load if navigator is empty
-      
-      setLoadingFallback(true)
-      try {
-        const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/interventions`)
-        setFallbackInterventions(response.interventions || [])
-      } catch (err) {
-        console.error('Failed to load fallback interventions:', err)
-        setFallbackInterventions([])
-      } finally {
-        setLoadingFallback(false)
-      }
-    }
-    
-    loadFallback()
-  }, [activeProject?.id, data]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeProject?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleIssue = useCallback((themeName: string) => {
-    setExpandedIssues(prev => {
-      const newExpanded = new Set(prev)
-      if (newExpanded.has(themeName)) {
-        newExpanded.delete(themeName)
-      } else {
-        newExpanded.add(themeName)
-      }
-      return newExpanded
-    })
-  }, [])
-
-  const toggleIntervention = useCallback((themeName: string) => {
-    setExpandedInterventions(prev => {
-      const newExpanded = new Set(prev)
-      if (newExpanded.has(themeName)) {
-        newExpanded.delete(themeName)
-      } else {
-        newExpanded.add(themeName)
-      }
-      return newExpanded
-    })
-  }, [])
-
-  const handleDownloadCSV = useCallback(async () => {
-    // Use external handler if provided
-    if (onDownload) {
-      onDownload()
-      return
-    }
-    
-    // Otherwise use internal download logic
-    if (!activeProject?.id) return
-    
-    setInternalIsPreparingDownload(true)
-    
-    try {
-      const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/download/interventions-csv`)
-      
-      if (response.download_key) {
-        const token = await getToken()
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
-        
-        const downloadResponse = await fetch(`${cleanBaseUrl}/api/download/${response.download_key}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'text/csv',
-          },
-        })
-        
-        if (downloadResponse.ok) {
-          const projectName = activeProject?.title || 'project'
-          const cleanProjectName = projectName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')
-          const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_')
-          const filename = `${cleanProjectName}_interventions_${timestamp}.csv`
-
-          const blob = await downloadResponse.blob()
-          const url = window.URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = filename
-          document.body.appendChild(a)
-          a.click()
-          window.URL.revokeObjectURL(url)
-          document.body.removeChild(a)
-        } else {
-          alert('Failed to download file')
-        }
-      }
-    } catch (err) {
-      console.error('Failed to download CSV:', err)
-      alert('Failed to download CSV. Please try again.')
-    } finally {
-      setInternalIsPreparingDownload(false)
-    }
-  }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken, onDownload])
-
-  const renderStars = useCallback((score?: number) => {
-    if (!score) return null
-    return (
-      <div className="flex items-center gap-1">
-        <div className="flex">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Star
-              key={i}
-              className={`h-3 w-3 ${
-                i <= Math.round(score) ? 'fill-yellow-400 text-yellow-400' : 'text-slate-300'
-              }`}
-            />
-          ))}
-        </div>
-        <span className="text-xs text-slate-600">{score.toFixed(1)}</span>
-      </div>
-    )
-  }, [])
-
-  const sortInterventions = useCallback((interventions: InterventionTheme[]) => {
-    return [...interventions].sort((a, b) => {
-      switch (sortBy) {
-        case 'impact':
-          return (b.avg_impact_score || 0) - (a.avg_impact_score || 0)
-        case 'evidence':
-          return (b.avg_evidence_score || 0) - (a.avg_evidence_score || 0)
-        case 'frequency':
-        default:
-          return (b.detailed_interventions?.length || 0) - (a.detailed_interventions?.length || 0)
-      }
-    })
-  }, [sortBy])
-
-  const getAllInterventions = useMemo(() => {
+  const allInterventionThemes = useMemo(() => {
     if (!data) return []
     
-    const interventionsMap = new Map()
+    const interventionsMap = new Map<string, {
+      theme_name: string
+      description: string
+      impact_summary?: string
+      frequency: number
+      impact_scores: number[]
+      evidence_scores: number[]
+      detailed_interventions: DetailedIntervention[]
+    }>()
     
-    data.issue_themes.forEach(issue => {
+    const filteredIssues = issueThemeFilter === 'All' 
+      ? data.issue_themes 
+      : data.issue_themes.filter(t => t.theme_name === issueThemeFilter)
+    
+    filteredIssues.forEach(issue => {
       issue.related_interventions.forEach(intervention => {
         const key = intervention.theme_name
-        if (interventionsMap.has(key)) {
-          const existing = interventionsMap.get(key)
+        const existing = interventionsMap.get(key)
+        
+        if (existing) {
           existing.frequency += intervention.frequency
-          if (intervention.avg_impact_score) {
+          if (intervention.avg_impact_score != null) {
             existing.impact_scores.push(intervention.avg_impact_score)
           }
-          if (intervention.avg_evidence_score) {
+          if (intervention.avg_evidence_score != null) {
             existing.evidence_scores.push(intervention.avg_evidence_score)
           }
-          // Keep the first impact_summary we encounter (if current doesn't have one)
           if (!existing.impact_summary && intervention.impact_summary) {
             existing.impact_summary = intervention.impact_summary
           }
-          // Deduplicate detailed interventions by name
           const newDetails = intervention.detailed_interventions || []
           newDetails.forEach(detail => {
-            const exists = existing.detailed_interventions.some((d: DetailedIntervention) => d.name === detail.name)
+            const detailDocId = detail.source_documents?.[0]?.doc_id || ''
+            const detailDocTitle = detail.source_documents?.[0]?.title || ''
+            const exists = existing.detailed_interventions.some(d => {
+              const dDocId = d.source_documents?.[0]?.doc_id || ''
+              const dDocTitle = d.source_documents?.[0]?.title || ''
+              return d.name === detail.name && (dDocId === detailDocId || dDocTitle === detailDocTitle)
+            })
             if (!exists) {
               existing.detailed_interventions.push(detail)
             }
           })
         } else {
           interventionsMap.set(key, {
-            ...intervention,
-            impact_scores: intervention.avg_impact_score ? [intervention.avg_impact_score] : [],
-            evidence_scores: intervention.avg_evidence_score ? [intervention.avg_evidence_score] : [],
+            theme_name: intervention.theme_name,
+            description: intervention.description,
+            impact_summary: intervention.impact_summary,
+            frequency: intervention.frequency,
+            impact_scores: intervention.avg_impact_score != null ? [intervention.avg_impact_score] : [],
+            evidence_scores: intervention.avg_evidence_score != null ? [intervention.avg_evidence_score] : [],
             detailed_interventions: [...(intervention.detailed_interventions || [])]
           })
         }
       })
     })
     
-    const interventions = Array.from(interventionsMap.values()).map(intervention => ({
-      ...intervention,
+    return Array.from(interventionsMap.values()).map(intervention => ({
+      theme_name: intervention.theme_name,
+      description: intervention.description,
+      impact_summary: intervention.impact_summary,
+      frequency: intervention.frequency,
       avg_impact_score: intervention.impact_scores.length > 0 
-        ? intervention.impact_scores.reduce((a: number, b: number) => a + b, 0) / intervention.impact_scores.length 
+        ? intervention.impact_scores.reduce((a, b) => a + b, 0) / intervention.impact_scores.length 
         : undefined,
       avg_evidence_score: intervention.evidence_scores.length > 0
-        ? intervention.evidence_scores.reduce((a: number, b: number) => a + b, 0) / intervention.evidence_scores.length
-        : undefined
+        ? intervention.evidence_scores.reduce((a, b) => a + b, 0) / intervention.evidence_scores.length
+        : undefined,
+      detailed_interventions: intervention.detailed_interventions
     }))
-    
-    return sortInterventions(interventions)
-  }, [data, sortInterventions])
+  }, [data, issueThemeFilter])
 
-  const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
-    return detailedInterventions.map((detail) => ({
-      name: detail.name,
-      type: detail.type || 'Unknown',
-      country: detail.country || 'Unknown',
-      description: detail.description,
-      result_count: detail.results?.length || 0,
-      results_summary: (detail.results || []).map(result => ({
-        outcome: result.outcome_variable || 'Outcome',
-        direction: result.effect_direction || 'unknown',
-        effect_size: result.effect_size,
-        effect_size_type: undefined,
-        p_value: result.p_value,
-        uncertainty: result.uncertainty,
-        result_text: result.result_text,
-        supporting_quote: undefined,
-        population_measured: result.population_measured,
-        subgroup_or_dose: result.subgroup_or_dose,
-      })),
-      total_sample_size: detail.sample_size || null,
-      documents: detail.source_documents?.map(doc => ({
-        doc_id: doc.doc_id || '',
-        title: doc.title || 'Unknown',
-        source: doc.source || 'Unknown',
-        landing_page_url: doc.landing_page_url || detail.document_url,
-      })) || [],
-      impact_score: detail.impact_score,
-      evidence_score: detail.evidence_score,
-      impact_justification: detail.impact_justification,
-      evidence_justification: detail.evidence_justification,
-    }))
-  }, [])
-  
-  // Convert fallback interventions to navigator format
-  const convertFallbackToNavigatorFormat = useCallback((interventions: InterventionData[]) => {
-    return interventions.map((intervention) => ({
-      name: intervention.name,
-      type: intervention.type,
-      country: intervention.country,
-      description: intervention.description,
-      result_count: intervention.result_count,
-      results_summary: intervention.results_summary,
-      total_sample_size: intervention.total_sample_size,
-      documents: intervention.documents,
-      // These fields might not be present in fallback data, but include them if available
-      impact_score: undefined,
-      evidence_score: undefined,
-      impact_justification: undefined,
-      evidence_justification: undefined,
-    }))
-  }, [])
+  const selectedThemeInterventions = useMemo(() => {
+    if (!selectedTheme || !data) return []
+    
+    const filteredIssues = issueThemeFilter === 'All' 
+      ? data.issue_themes 
+      : data.issue_themes.filter(t => t.theme_name === issueThemeFilter)
+    
+    const matching: InterventionTheme[] = []
+    filteredIssues.forEach(issue => {
+      issue.related_interventions.forEach(intervention => {
+        if (intervention.theme_name === selectedTheme.theme_name) {
+          matching.push(intervention)
+        }
+      })
+    })
+    return matching
+  }, [selectedTheme, data, issueThemeFilter])
 
   if (!activeProject) {
     return (
@@ -385,55 +248,58 @@ export function InterventionsNavigator({
     )
   }
 
+  if (selectedTheme) {
+    const aggregated = allInterventionThemes.find(t => t.theme_name === selectedTheme.theme_name)
+    
+    return (
+      <div className="flex flex-col h-full">
+        <ThemeDetailView
+          themeName={selectedTheme.theme_name}
+          themeDescription={aggregated?.description || selectedTheme.description}
+          avgImpactScore={aggregated?.avg_impact_score ?? selectedTheme.avg_impact_score ?? undefined}
+          avgEvidenceScore={aggregated?.avg_evidence_score ?? selectedTheme.avg_evidence_score ?? undefined}
+          interventions={selectedThemeInterventions}
+          onBack={() => setSelectedTheme(null)}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header - only show on standalone page */}
       {showHeader && (
         <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="standalone-group-by-issues" className="text-sm text-slate-700">
-                  Group by issues
-                </Label>
-                <Switch
-                  id="standalone-group-by-issues"
-                  checked={viewMode === 'grouped'}
-                  onCheckedChange={(checked) => setViewMode(checked ? 'grouped' : 'all')}
-                />
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Label className="text-sm text-slate-700">Sort by:</Label>
-                <select 
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as 'frequency' | 'impact' | 'evidence')}
-                  className="text-sm border rounded px-2 py-1 bg-white"
+          <div className="bg-white border border-gray-100 rounded-xl p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <RangeFilter 
+                label="Min Impact" 
+                value={minImpact} 
+                onChange={setMinImpact} 
+              />
+              <RangeFilter 
+                label="Min Evidence" 
+                value={minEvidence} 
+                onChange={setMinEvidence} 
+              />
+              <div className="flex-1 min-w-[180px]">
+                <div className="text-sm font-medium text-gray-700 mb-2">Issue theme</div>
+                <select
+                  value={issueThemeFilter}
+                  onChange={(e) => setIssueThemeFilter(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="impact">Impact</option>
-                  <option value="evidence">Evidence</option>
-                  <option value="frequency">Frequency</option>
+                  {issueThemeOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
                 </select>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={handleDownloadCSV}
-                  disabled={isPreparingDownload || !data || data.issue_themes.length === 0}
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-2"
-                >
-                  <Download className="h-4 w-4" />
-                  {isPreparingDownload ? 'Downloading...' : 'Download'}
-                </Button>
               </div>
             </div>
           </div>
         </div>
       )}
       
-      {/* Content */}
       <div className="flex-1">
         {loading && (
           <div className="flex items-center justify-center py-12">
@@ -449,250 +315,32 @@ export function InterventionsNavigator({
             <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-slate-900 mb-2">Error Loading Data</h3>
             <p className="text-slate-600">{error}</p>
-            <div className="flex gap-2 mt-4 justify-center">
-              <Button onClick={loadNavigatorData}>
-                Try Again
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={async () => {
-                  try {
-                    const debugResponse = await fetchWithAuth(`/api/analysis-projects/${activeProject?.id}/debug-themes`)
-                    console.log('Debug themes response:', debugResponse)
-                  } catch (err) {
-                    console.error('Debug failed:', err)
-                  }
-                }}
-              >
-                Debug Themes
-              </Button>
-            </div>
+            <Button onClick={loadNavigatorData} className="mt-4">
+              Try Again
+            </Button>
           </div>
         )}
 
-        {data && (
-          <div className="space-y-6">
+        {data && !loading && !error && (
+          <>
             {data.issue_themes.length === 0 ? (
-              loadingFallback ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="text-center">
-                    <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-                    <p className="text-slate-600">Loading extracted interventions...</p>
-                  </div>
-                </div>
-              ) : fallbackInterventions && fallbackInterventions.length > 0 ? (
-                <div className="space-y-4">
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-2 text-sm text-slate-600 mb-2">
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                        <span>Synthesis pending - showing extracted interventions (ungrouped)</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <NavigatorInterventionsTable 
-                    interventions={convertFallbackToNavigatorFormat(fallbackInterventions)} 
-                  />
-                </div>
-              ) : (
-                <Card>
-                  <CardContent className="p-8 text-center">
-                    <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-slate-900 mb-2">No Interventions Found</h3>
-                    <p className="text-slate-600">
-                      This happens when documents are still being processed.
-                    </p>
-                  </CardContent>
-                </Card>
-              )
-            ) : viewMode === 'all' ? (
-              <div className="space-y-4">
-                {getAllInterventions.map((intervention) => (
-                  <Card key={intervention.theme_name} className="overflow-hidden">
-                    <CardHeader className="pb-2">
-                      <div 
-                        className="flex items-center justify-between cursor-pointer"
-                        onClick={() => toggleIntervention(`all-${intervention.theme_name}`)}
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3">
-                            <h5 className="font-medium text-lg">{intervention.theme_name}</h5>
-                          </div>
-                          {expandedInterventions.has(`all-${intervention.theme_name}`) && (
-                            <div className="mt-1 space-y-1">
-                              <p className="text-sm text-slate-600">{intervention.description}</p>
-                              {intervention.impact_summary && (
-                                <p className="text-sm text-slate-600">
-                                  <span className="font-semibold">Impact: </span>
-                                  {intervention.impact_summary}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        
-                        <div className="flex items-start gap-4 ml-4">
-                          {intervention.avg_impact_score && (
-                            <div className="text-right">
-                              <div className="text-xs text-slate-500">Impact:</div>
-                              {renderStars(intervention.avg_impact_score)}
-                            </div>
-                          )}
-                          {intervention.avg_evidence_score && (
-                            <div className="text-right">
-                              <div className="text-xs text-slate-500">Evidence:</div>
-                              {renderStars(intervention.avg_evidence_score)}
-                            </div>
-                          )}
-                          <div className="text-right">
-                            <div className="text-xs text-slate-500">Frequency:</div>
-                            <div className="flex items-center gap-1 justify-end">
-                              <span className="text-xs text-slate-600 text-right">{intervention.detailed_interventions?.length || 0}</span>
-                            </div>
-                          </div>
-                          <div className="ml-2">
-                            {expandedInterventions.has(`all-${intervention.theme_name}`) ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </CardHeader>
-
-                    {expandedInterventions.has(`all-${intervention.theme_name}`) && (
-                      <CardContent className="pt-0">
-                        {intervention.detailed_interventions?.length ? (
-                          <div className="space-y-3">
-                            <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                            <NavigatorInterventionsTable 
-                              interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                            />
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-600">
-                            <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    )}
-                  </Card>
-                ))}
+              <div className="bg-white border border-gray-100 rounded-xl p-8 text-center">
+                <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-900 mb-2">No Interventions Found</h3>
+                <p className="text-slate-600">
+                  This happens when documents are still being processed or synthesis has not completed.
+                </p>
               </div>
             ) : (
-              data.issue_themes.map((issue) => (
-                <Card key={issue.theme_name} className="overflow-hidden">
-                  <CardHeader className="pb-3">
-                    <div 
-                      className="flex items-center justify-between cursor-pointer"
-                      onClick={() => toggleIssue(issue.theme_name)}
-                    >
-                      <div className="flex-1">
-                        <CardTitle className="text-lg flex items-center gap-3">
-                          {issue.theme_name}
-                          <Badge variant="secondary">{issue.frequency} documents</Badge>
-                        </CardTitle>
-                        {expandedIssues.has(issue.theme_name) && (
-                          <p className="text-slate-600 mt-2">{issue.description}</p>
-                        )}
-                      </div>
-                      <div className="ml-4">
-                        {expandedIssues.has(issue.theme_name) ? (
-                          <ChevronDown className="h-5 w-5" />
-                        ) : (
-                          <ChevronRight className="h-5 w-5" />
-                        )}
-                      </div>
-                    </div>
-                  </CardHeader>
-
-                  {expandedIssues.has(issue.theme_name) && (
-                    <CardContent className="pt-0">
-                      <div className="space-y-4">
-                        <h4 className="font-medium text-slate-900 flex items-center gap-2">
-                          Interventions:
-                        </h4>
-                        
-                        {sortInterventions(issue.related_interventions).map((intervention) => (
-                          <Card key={intervention.theme_name} className="ml-6">
-                            <CardHeader className="pb-2">
-                              <div 
-                                className="flex items-center justify-between cursor-pointer"
-                                onClick={() => toggleIntervention(`${issue.theme_name}-${intervention.theme_name}`)}
-                              >
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-3">
-                                    <h5 className="font-medium">{intervention.theme_name}</h5>
-                                  </div>
-                                  {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
-                                    <div className="mt-1 space-y-1">
-                                      <p className="text-sm text-slate-600">{intervention.description}</p>
-                                      {intervention.impact_summary && (
-                                        <p className="text-sm text-slate-600">
-                                          <span className="font-semibold">Impact: </span>
-                                          {intervention.impact_summary}
-                                        </p>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                                
-                                <div className="flex items-start gap-4 ml-4">
-                                  {intervention.avg_impact_score && (
-                                    <div className="text-right">
-                                      <div className="text-xs text-slate-500">Impact:</div>
-                                      {renderStars(intervention.avg_impact_score)}
-                                    </div>
-                                  )}
-                                  {intervention.avg_evidence_score && (
-                                    <div className="text-right">
-                                      <div className="text-xs text-slate-500">Evidence:</div>
-                                      {renderStars(intervention.avg_evidence_score)}
-                                    </div>
-                                  )}
-                                  <div className="text-right">
-                                    <div className="text-xs text-slate-500">Frequency:</div>
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs text-slate-600">{intervention.detailed_interventions?.length || 0}</span>
-                                    </div>
-                                  </div>
-                                  <div className="ml-2">
-                                    {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) ? (
-                                      <ChevronDown className="h-4 w-4" />
-                                    ) : (
-                                      <ChevronRight className="h-4 w-4" />
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </CardHeader>
-
-                            {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
-                              <CardContent className="pt-0">
-                                {intervention.detailed_interventions?.length ? (
-                                  <div className="space-y-3">
-                                    <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                                    <NavigatorInterventionsTable 
-                                      interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                                    />
-                                  </div>
-                                ) : (
-                                  <div className="text-sm text-slate-600">
-                                    <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents.</p>
-                                  </div>
-                                )}
-                              </CardContent>
-                            )}
-                          </Card>
-                        ))}
-                      </div>
-                    </CardContent>
-                  )}
-                </Card>
-              ))
+              <ThemeList
+                themes={allInterventionThemes}
+                onSelectTheme={setSelectedTheme}
+                sortBy={sortBy}
+                minImpact={minImpact}
+                minEvidence={minEvidence}
+              />
             )}
-          </div>
+          </>
         )}
       </div>
     </div>
