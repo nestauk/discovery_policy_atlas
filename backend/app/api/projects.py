@@ -92,9 +92,11 @@ def get_project_with_auth_check(
         HTTPException: 404 if not found, 403 if access denied
     """
     # Always need organization_id and created_by_user_id for auth check
-    auth_fields = "organization_id, created_by_user_id"
-    if select != "*" and "organization_id" not in select:
-        select = f"{select}, {auth_fields}"
+    if select != "*":
+        if "organization_id" not in select:
+            select = f"{select}, organization_id"
+        if "created_by_user_id" not in select:
+            select = f"{select}, created_by_user_id"
 
     result = (
         vectorization_service.supabase.table("analysis_projects")
