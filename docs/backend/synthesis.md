@@ -52,11 +52,13 @@ Phase 3: AGGREGATION
 
 Phase 4: RAG RETRIEVAL
          ├── retrieve_evidence_for_themes
-         └── retrieve_evidence_for_issues
+         ├── retrieve_evidence_for_issues
+         └── retrieve_evidence_for_outcomes
 
 Phase 5: CONTEXTUAL SUMMARISATION (RCS)
          ├── apply_rcs_to_theme_evidence
-         └── apply_rcs_to_issue_evidence
+         ├── apply_rcs_to_issue_evidence
+         └── apply_rcs_to_outcome_evidence
 
 Phase 6: BRIEFING GENERATION
          └── generate_briefing (tool-augmented with verification)
@@ -99,7 +101,7 @@ Deterministic aggregation to support both retrieval and UI:
 
 ### Phase 4: RAG retrieval
 
-**Nodes**: `retrieve_evidence_for_themes`, `retrieve_evidence_for_issues`
+**Nodes**: `retrieve_evidence_for_themes`, `retrieve_evidence_for_issues`, `retrieve_evidence_for_outcomes`
 
 Retrieves supporting evidence chunks from the vector store:
 
@@ -108,7 +110,7 @@ Retrieves supporting evidence chunks from the vector store:
 
 ### Phase 5: Contextual summarisation (RCS)
 
-**Nodes**: `apply_rcs_to_theme_evidence`, `apply_rcs_to_issue_evidence`
+**Nodes**: `apply_rcs_to_theme_evidence`, `apply_rcs_to_issue_evidence`, `apply_rcs_to_outcome_evidence`
 
 RCS improves evidence quality by:
 
@@ -143,14 +145,14 @@ Tool-augmented generation with mandatory verification:
         ↓                                    ↑
 ┌─────────────────────────────────────────────────────────┐
 │ TOOL EXECUTOR                                           │
-│ - get_theme_evidence(theme)                             │
-│ - get_intervention_outcomes(intervention_name?)         │
+│ - get_theme_evidence(theme_name)                        │
 │ - get_top_studies(intervention_name)                    │
-│ - get_intervention_details(intervention_name?)          │
+│ - get_intervention_outcomes(intervention_name)          │
+│ - get_intervention_details(intervention_name)           │
+│ - get_citation_context(citation_number)                 │
 │ - search_extractions(query)                             │
 │ - get_document_quality(citation_number)                 │
 │ - get_multiple_document_quality(citation_numbers)       │
-│ - get_citation_context(citation_number)                 │
 │ - verify_claim_support(claim, cited_numbers?)           │
 │ - verify_multiple_claims(claims=[...])                  │
 └─────────────────────────────────────────────────────────┘
@@ -290,5 +292,4 @@ backend/app/services/synthesis/
 
 ## See also
 
-- [RCS_ARCHITECTURE.md](../../backend/app/services/synthesis/RCS_ARCHITECTURE.md) — detailed RCS documentation
-- [AGENTIC_BRIEFING_PLAN.md](../../backend/app/services/synthesis/AGENTIC_BRIEFING_PLAN.md) — original agentic briefing design
+- This document is the canonical overview of the current synthesis pipeline.
