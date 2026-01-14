@@ -20,10 +20,7 @@ from app.services.synthesis.tools.base import (
     ToolResult,
     register_tool,
 )
-from app.services.synthesis.tools.models import (
-    VERIFICATION_MODEL,
-    VERIFICATION_TEMPERATURE,
-)
+from app.services.synthesis.tools.models import VERIFICATION_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +197,6 @@ class VerifyClaimSupportTool(BaseTool):
         """
         llm = ChatOpenAI(
             model=VERIFICATION_MODEL,
-            temperature=VERIFICATION_TEMPERATURE,
         )
 
         prompt = f"""You are a verification assistant. Your task is to check whether a claim is properly supported by the provided evidence.

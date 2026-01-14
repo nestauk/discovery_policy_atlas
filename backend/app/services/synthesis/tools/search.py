@@ -69,6 +69,101 @@ class SearchExtractionsTool(BaseTool):
     )
     max_results = 5
 
+    def _rcs_search(
+        self,
+        query: str,
+        contexts: List[ScoredContext],
+        doc_citation_map: Dict[str, int],
+        max_results: int,
+    ) -> List[SearchResultItem]:
+        query_words = set(query.lower().split())
+        scored_matches: List[tuple] = []
+
+        for ctx in contexts:
+            summary_words = set(ctx.summary.lower().split())
+            overlap = len(query_words & summary_words)
+            if overlap:
+                score = overlap * 0.3 + ctx.relevance_score * 0.7
+                scored_matches.append((ctx, score))
+
+        if not scored_matches:
+            return []
+
+        scored_matches.sort(key=lambda x: x[1], reverse=True)
+        results: List[SearchResultItem] = []
+        seen_docs: set = set()
+
+        for ctx, score in scored_matches[: max_results * 2]:
+            if ctx.document_id in seen_docs:
+                continue
+            seen_docs.add(ctx.document_id)
+            cit_num = doc_citation_map.get(ctx.document_id)
+            if not cit_num:
+                continue
+            results.append(
+                SearchResultItem(
+                    summary=ctx.summary,
+                    citation_number=cit_num,
+                    document_title=ctx.document_title,
+                    document_id=ctx.document_id,
+                    similarity_score=score / 10,
+                    content=ctx.chunk_text[:500] if ctx.chunk_text else "",
+                    chunk_id=ctx.chunk_id,
+                )
+            )
+            if len(results) >= max_results:
+                break
+
+        return results
+
+    async def _live_search(
+        self,
+        query: str,
+        project_id: str,
+        doc_citation_map: Dict[str, int],
+        doc_metadata: Dict[str, Dict[str, Any]],
+        max_results: int,
+    ) -> List[SearchResultItem]:
+        raw_chunks = await vectorization_service.search_similar_content(
+            query=query,
+            project_id=project_id,
+            match_threshold=0.5,
+            match_count=max_results * 3,
+        )
+
+        if not raw_chunks:
+            return []
+
+        results: List[SearchResultItem] = []
+        seen_docs: set = set()
+
+        for chunk in raw_chunks:
+            doc_uuid = str(chunk.get("document_id", ""))
+            if doc_uuid in seen_docs:
+                continue
+            seen_docs.add(doc_uuid)
+
+            cit_num = doc_citation_map.get(doc_uuid)
+            meta = doc_metadata.get(doc_uuid, {})
+            title = meta.get("title") or chunk.get("title", "Unknown")
+
+            results.append(
+                SearchResultItem(
+                    summary="",
+                    citation_number=cit_num,
+                    document_title=title,
+                    document_id=doc_uuid,
+                    similarity_score=float(chunk.get("similarity", 0)),
+                    content=str(chunk.get("content", ""))[:500],
+                    chunk_id=str(chunk.get("id", "")),
+                )
+            )
+
+            if len(results) >= max_results:
+                break
+
+        return results
+
     async def execute(
         self,
         state: Dict[str, Any],
@@ -102,103 +197,29 @@ class SearchExtractionsTool(BaseTool):
         )
 
         # First, try to find relevant pre-computed RCS contexts
-        # This is more efficient than live search if we have RCS data
+        rcs_results = []
         if all_scored_contexts:
-            # Simple keyword matching on summaries
-            query_words = set(query.lower().split())
-            scored_matches: List[tuple] = []
-
-            for ctx in all_scored_contexts:
-                summary_words = set(ctx.summary.lower().split())
-                overlap = len(query_words & summary_words)
-                if overlap > 0:
-                    # Score by overlap and relevance
-                    score = overlap * 0.3 + ctx.relevance_score * 0.7
-                    scored_matches.append((ctx, score))
-
-            if scored_matches:
-                # Sort by score descending
-                scored_matches.sort(key=lambda x: x[1], reverse=True)
-
-                results: List[SearchResultItem] = []
-                seen_docs: set = set()
-
-                for ctx, score in scored_matches[: max_results * 2]:
-                    if ctx.document_id in seen_docs:
-                        continue
-                    seen_docs.add(ctx.document_id)
-
-                    cit_num = doc_citation_map.get(ctx.document_id)
-                    if not cit_num:
-                        continue
-
-                    results.append(
-                        SearchResultItem(
-                            summary=ctx.summary,
-                            citation_number=cit_num,
-                            document_title=ctx.document_title,
-                            document_id=ctx.document_id,
-                            similarity_score=score / 10,  # Normalise
-                            content=ctx.chunk_text[:500] if ctx.chunk_text else "",
-                            chunk_id=ctx.chunk_id,
-                        )
-                    )
-
-                    if len(results) >= max_results:
-                        break
-
-                if results:
-                    logger.info(
-                        f"search_extractions('{query[:50]}...'): "
-                        f"found {len(results)} from RCS contexts"
-                    )
-                    return ToolResult.ok(
-                        [r.model_dump() for r in results],
-                        fallback_used=False,
-                    )
+            rcs_results = self._rcs_search(
+                query, all_scored_contexts, doc_citation_map, max_results
+            )
+            if rcs_results:
+                logger.info(
+                    f"search_extractions('{query[:50]}...'): "
+                    f"found {len(rcs_results)} from RCS contexts"
+                )
+                return ToolResult.ok(
+                    [r.model_dump() for r in rcs_results], fallback_used=False
+                )
 
         # Fallback: perform live vector search
         try:
-            raw_chunks = await vectorization_service.search_similar_content(
+            results = await self._live_search(
                 query=query,
                 project_id=project_id,
-                match_threshold=0.5,
-                match_count=max_results * 3,  # Fetch more for filtering
+                doc_citation_map=doc_citation_map,
+                doc_metadata=doc_metadata,
+                max_results=max_results,
             )
-
-            if not raw_chunks:
-                return ToolResult.ok([], fallback_used=True)
-
-            results: List[SearchResultItem] = []
-            seen_docs: set = set()
-
-            for chunk in raw_chunks:
-                doc_uuid = str(chunk.get("document_id", ""))
-                if doc_uuid in seen_docs:
-                    continue
-                seen_docs.add(doc_uuid)
-
-                cit_num = doc_citation_map.get(doc_uuid)
-
-                # Get document metadata
-                meta = doc_metadata.get(doc_uuid, {})
-                title = meta.get("title") or chunk.get("title", "Unknown")
-
-                results.append(
-                    SearchResultItem(
-                        summary="",  # No RCS summary for live search
-                        citation_number=cit_num,
-                        document_title=title,
-                        document_id=doc_uuid,
-                        similarity_score=float(chunk.get("similarity", 0)),
-                        content=str(chunk.get("content", ""))[:500],
-                        chunk_id=str(chunk.get("id", "")),
-                    )
-                )
-
-                if len(results) >= max_results:
-                    break
-
             logger.info(
                 f"search_extractions('{query[:50]}...'): "
                 f"found {len(results)} from live search"

@@ -21,11 +21,6 @@ GENERATION_MODEL = "gpt-5-mini"
 # Uses gpt-4.1-mini for cost efficiency on high-volume scoring
 RCS_MODEL = "gpt-4.1-mini"
 
-# Model temperature settings
-ORCHESTRATOR_TEMPERATURE = 0.0  # Deterministic tool selection
-VERIFICATION_TEMPERATURE = 0.0  # Deterministic verification
-GENERATION_TEMPERATURE = 0.3  # Slight creativity for prose
-
 
 def get_model_config() -> dict:
     """Get the full model configuration as a dictionary.
@@ -36,18 +31,14 @@ def get_model_config() -> dict:
     return {
         "orchestrator": {
             "model": ORCHESTRATOR_MODEL,
-            "temperature": ORCHESTRATOR_TEMPERATURE,
         },
         "verification": {
             "model": VERIFICATION_MODEL,
-            "temperature": VERIFICATION_TEMPERATURE,
         },
         "generation": {
             "model": GENERATION_MODEL,
-            "temperature": GENERATION_TEMPERATURE,
         },
         "rcs": {
             "model": RCS_MODEL,
-            "temperature": 0.0,
         },
     }

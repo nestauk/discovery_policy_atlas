@@ -20,9 +20,7 @@ from app.services.synthesis.tools.base import (
 )
 from app.services.synthesis.tools.models import (
     ORCHESTRATOR_MODEL,
-    ORCHESTRATOR_TEMPERATURE,
     GENERATION_MODEL,
-    GENERATION_TEMPERATURE,
 )
 
 logger = logging.getLogger(__name__)
@@ -291,11 +289,9 @@ class BriefingOrchestrator:
         # Initialise LLMs
         self.orchestrator_llm = ChatOpenAI(
             model=ORCHESTRATOR_MODEL,
-            temperature=ORCHESTRATOR_TEMPERATURE,
         )
         self.generation_llm = ChatOpenAI(
             model=GENERATION_MODEL,
-            temperature=GENERATION_TEMPERATURE,
         )
 
     async def generate_section(
@@ -800,8 +796,8 @@ Row requirements (4-6 rows):
 - Impact & Outcomes:
   - Start with key-study outcomes/effect sizes using get_top_studies.extracted_outcomes.
   - If extracted_outcomes contains any non-empty effect_size values, you MUST include at least one effect_size verbatim (e.g., "15.01%") and name the outcome_variable.
-  - If effect_size is empty but extracted_outcomes includes numeric details in result_text or supporting_quote, you MUST include at least one concrete number from those fields.
-  - If no numeric detail is available at all, explicitly say "No quantified effect size reported" and give the direction and outcome name.
+  - If effect_size is empty but extracted_outcomes includes numeric details in result_text or supporting_quote, include at least one concrete number from those fields.
+  - If no numerical details are available, include at least one non-numerical detail from the extracted_outcomes.
   - Then add 1-2 sentences on broader evidence in the theme (direction, consistency, caveats).
   - Include [N] citations for both the key-study outcomes and the broader evidence statements.
 - Sources: compact [N] citations used in the row (deduplicate).
