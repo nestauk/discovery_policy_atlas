@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -74,6 +74,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
   const [showCountriesData, setShowCountriesData] = useState(false)
   const [showAuthorsData, setShowAuthorsData] = useState(false)
   const { fetchWithAuth } = useAPI()
+  const chartsLoadedProjectIdRef = useRef<string | null>(null)
 
   // Global minimal styling (Jobs-style: clean, high-contrast, no clutter)
   useMemo(() => {
@@ -84,6 +85,11 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
   useEffect(() => {
     const fetchChartData = async () => {
       if (!projectId) return
+      
+      // Skip if we've already loaded charts for this project
+      if (chartsLoadedProjectIdRef.current === projectId) return
+      
+      chartsLoadedProjectIdRef.current = projectId
       setLoading(true)
       setError(null)
       try {
@@ -92,12 +98,15 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       } catch (err) {
         console.error('Failed to fetch chart data:', err)
         setError('Failed to load chart data')
+        // Reset ref on error so we can retry
+        chartsLoadedProjectIdRef.current = null
       } finally {
         setLoading(false)
       }
     }
     fetchChartData()
-  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
 
   if (loading) {
     return (

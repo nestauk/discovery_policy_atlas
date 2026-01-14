@@ -1,9 +1,10 @@
 """Testing utilities and R&D experiments."""
-from pathlib import Path
 import logging
+from pathlib import Path
 
-# Define project base directory
-TESTING_DIR = Path(__file__).resolve().parents[0]
+# Define project directories
+TESTING_DIR = Path(__file__).resolve().parent
+BACKEND_DIR = TESTING_DIR.parent
 
 # Configure logging
 logging.basicConfig(

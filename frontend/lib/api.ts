@@ -1,7 +1,21 @@
 import { useAuth } from "@clerk/nextjs";
-import { Project } from "./projectStore";
 import { AnalysisProject } from "./analysisProjectStore";
-import { ThematicGroup, EvidenceItem } from './evidenceStore';
+
+export const pingBackend = async (): Promise<boolean> => {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+  
+  try {
+    const response = await fetch(`${cleanBaseUrl}/health`, { 
+      method: 'GET',
+      cache: 'no-store'
+    });
+    return response.ok;
+  } catch (error) {
+    console.log('Backend ping failed (server may be waking up):', error);
+    return false;
+  }
+};
 
 // Standalone auth fetch to allow usage from non-React files (e.g., Zustand stores)
 export const fetchWithAuthExternal = async (
@@ -64,22 +78,6 @@ export const fetchWithAuthExternal = async (
   return isStreaming ? response : response.json();
 };
 
-// Standalone Evidence tab functions (exported for non-React usage)
-export async function getThematicGroups(
-  projectId: string,
-  themeType: 'intervention' | 'issue'
-): Promise<ThematicGroup[]> {
-  return fetchWithAuthExternal(`api/analysis-projects/${projectId}/thematic-groups?theme_type=${themeType}`);
-}
-
-export async function getThematicGroupItems(
-  projectId: string,
-  themeId: string,
-  itemType: 'intervention' | 'issue'
-): Promise<EvidenceItem[]> {
-  return fetchWithAuthExternal(`api/analysis-projects/${projectId}/thematic-groups/${themeId}/items?item_type=${itemType}`);
-}
-
 export function useAPI() {
   const { getToken } = useAuth();
   
@@ -140,50 +138,6 @@ export function useAPI() {
     return isStreaming ? response : response.json();
   };
 
-  // Project API functions
-  const getProjects = async (): Promise<{ projects: Project[], total: number }> => {
-    return fetchWithAuth('projects/');
-  };
-
-  const createProject = async (project: { name: string; description?: string }): Promise<Project> => {
-    return fetchWithAuth('projects/', {
-      method: 'POST',
-      body: JSON.stringify(project),
-    });
-  };
-
-  const updateProject = async (projectId: string, updates: { name?: string; description?: string }): Promise<Project> => {
-    return fetchWithAuth(`projects/${projectId}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  };
-
-  const deleteProject = async (projectId: string): Promise<void> => {
-    return fetchWithAuth(`projects/${projectId}`, {
-      method: 'DELETE',
-    });
-  };
-
-  const getProject = async (projectId: string): Promise<Project> => {
-    return fetchWithAuth(`projects/${projectId}`);
-  };
-
-  const getProjectDocuments = async (projectId: string): Promise<{ documents: Record<string, unknown>[], total: number }> => {
-    return fetchWithAuth(`projects/${projectId}/documents`);
-  };
-
-  const updateProjectStats = async (projectId: string): Promise<{ message: string; evidence_count: number }> => {
-    return fetchWithAuth(`projects/${projectId}/update-stats`, {
-      method: 'POST',
-    });
-  };
-
-  // Advanced RAG functions (insights are now automatically generated)
-  const checkEvidenceStatus = async (projectId: string) => {
-    return fetchWithAuth(`api/agent/evidence-status/${projectId}`);
-  };
-
   // Analysis Project API functions
   const getAnalysisProjects = async (): Promise<{ projects: AnalysisProject[], total: number }> => {
     return fetchWithAuth('api/analysis-projects');
@@ -241,30 +195,6 @@ export function useAPI() {
     return fetchWithAuth(`api/analysis-projects/${projectId}/interventions`);
   };
 
-  // Evidence tab endpoints
-  // In-hook wrappers use hook-scoped fetchWithAuth for consistency in components
-  const getThematicGroupsInHook = async (
-    projectId: string,
-    themeType: 'intervention' | 'issue'
-  ): Promise<ThematicGroup[]> => {
-    return fetchWithAuth(`api/analysis-projects/${projectId}/thematic-groups?theme_type=${themeType}`);
-  };
-
-  const getThematicGroupItemsInHook = async (
-    projectId: string,
-    themeId: string,
-    itemType: 'intervention' | 'issue'
-  ): Promise<EvidenceItem[]> => {
-    return fetchWithAuth(`api/analysis-projects/${projectId}/thematic-groups/${themeId}/items?item_type=${itemType}`);
-  };
-
-  const generateSubQuestions = async (researchQuestion: string): Promise<{ research_question: string; sub_questions: string[] }> => {
-    return fetchWithAuth('api/agent/generate-sub-questions', {
-      method: 'POST',
-      body: JSON.stringify({ research_question: researchQuestion, max_questions: 3 }),
-    });
-  };
-
   const generatePopulationOptions = async (researchQuestion: string): Promise<{ research_question: string; population_options: string[] }> => {
     return fetchWithAuth('api/analysis-projects/generate-population-options', {
       method: 'POST',
@@ -279,48 +209,10 @@ export function useAPI() {
     });
   };
 
-  const generateAdditionalQuestions = async (
-    researchQuestion: string,
-    populationSelected: string[],
-    outcomeSelected: string[]
-  ): Promise<{ research_question: string; additional_questions: string[] }> => {
-    return fetchWithAuth('api/analysis-projects/generate-additional-questions', {
-      method: 'POST',
-      body: JSON.stringify({
-        research_question: researchQuestion,
-        population_selected: populationSelected,
-        outcome_selected: outcomeSelected,
-        max_questions: 2,
-      }),
-    });
-  };
-
-  const getAnalysisFindings = async (
-    projectId: string,
-    params: { intervention_name?: string; issue_theme?: string }
-  ) => {
-    const qs = new URLSearchParams();
-    if (params.intervention_name) qs.set('intervention_name', params.intervention_name);
-    if (params.issue_theme) qs.set('issue_theme', params.issue_theme);
-    const url = `api/analysis-projects/${projectId}/findings${qs.toString() ? `?${qs.toString()}` : ''}`;
-    return fetchWithAuth(url);
-  };
-  
-  
   return { 
     fetchWithAuth, 
-    getProjects, 
-    createProject,
-    generateSubQuestions,
     generatePopulationOptions,
     generateOutcomeOptions,
-    generateAdditionalQuestions, 
-    updateProject, 
-    deleteProject, 
-    getProject, 
-    getProjectDocuments,
-    updateProjectStats,
-    checkEvidenceStatus,
     // Analysis projects
     getAnalysisProjects,
     createAnalysisProject,
@@ -331,10 +223,5 @@ export function useAPI() {
     rerunSynthesisForProject,
     getDocumentExtraction,
     getProjectInterventions,
-    // Evidence tab
-    getThematicGroups: getThematicGroupsInHook,
-    getThematicGroupItems: getThematicGroupItemsInHook,
-    // Agent features
-    getAnalysisFindings
   };
 }

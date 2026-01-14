@@ -1,127 +1,83 @@
 'use client'
 
-import { useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { Bot, X, MessageCircle } from 'lucide-react'
+import { Card, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Tooltip } from '@/components/ui/tooltip'
-import { 
-  MessageCircle, 
-  Minimize2, 
-  Bot
-} from 'lucide-react'
-import { useChatbotStore } from '@/lib/chatbotStore'
-import { ChatInterface } from '@/components/chatbot/ChatInterface'
+import { AnimatePresence, motion } from 'framer-motion'
+import { ChatInterface } from './ChatInterface'
+import { useChatStore } from '@/lib/chatStore'
+import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
+
 
 interface ChatbotWidgetProps {
-  isOpen: boolean
-  onToggle: () => void
-  researchQuestion?: string
+  className?: string
 }
 
-export function ChatbotWidget({ isOpen, onToggle, researchQuestion }: ChatbotWidgetProps) {
-  const { 
-    messages, 
-    setMessages, 
-    setResearchQuestion,
-    evidenceSearchReady
-  } = useChatbotStore()
+export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
+  const { isOpen, setIsOpen } = useChatStore()
+  const { activeProject } = useAnalysisProjectStore()
 
-  // Initialize with welcome message if research question is provided
-  useEffect(() => {
-    if (researchQuestion && messages.length === 0) {
-      setResearchQuestion(researchQuestion)
-      setMessages([
-        {
-          id: '1',
-          role: 'assistant',
-          content: `I'm here to help you explore evidence for your research question: "${researchQuestion}". What specific aspects would you like to investigate?`,
-          timestamp: new Date()
-        }
-      ])
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [researchQuestion, messages.length]) // setters are stable from Zustand store
+  if (!activeProject) {
+    return null // Don't show widget if no project is selected
+  }
 
   return (
     <>
-      <style jsx>{`
-        .hide-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-        .hide-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-      `}</style>
-      
-      {/* Floating Minimized Button */}
+      {/* Floating Chat Button */}
       <AnimatePresence>
         {!isOpen && (
           <motion.div
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0, opacity: 0 }}
-            className="fixed bottom-6 right-6 z-50"
+            className={`fixed bottom-6 right-6 z-50 ${className}`}
           >
-            <Tooltip content="Open Policy Assistant">
-              <Button
-                onClick={onToggle}
-                className="h-14 w-14 rounded-full bg-blue-600 hover:bg-blue-700 shadow-lg"
-              >
-                <MessageCircle className="h-6 w-6 text-white" />
-              </Button>
-            </Tooltip>
+            <Button
+              onClick={() => setIsOpen(true)}
+              className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
+            >
+              <MessageCircle className="h-6 w-6" />
+            </Button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Expanded Chatbot */}
+      {/* Chat Widget */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ scale: 0.8, opacity: 0, y: 20 }}
+            initial={{ scale: 0, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.8, opacity: 0, y: 20 }}
-            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed bottom-6 right-6 z-50 w-100 h-[480px] max-w-[calc(100vw-3rem)]"
+            exit={{ scale: 0, opacity: 0, y: 20 }}
+            className={`fixed bottom-6 right-6 z-50 ${className}`}
           >
-            <Card className="h-full shadow-2xl border-0">
-              <CardHeader className="py-0 px-3">
+            <Card className="w-96 h-[500px] shadow-xl border-0">
+              <CardHeader className="p-3 bg-blue-600 text-white">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-5 h-5 bg-blue-600 rounded-md flex items-center justify-center">
-                      <Bot className="h-3 w-3 text-white" />
+                  <div className="flex items-end gap-2">
+                    <div className="w-10 h-10 bg-white/0 rounded-full flex items-center justify-center">
+                      <Bot className="h-6 w-6" />
                     </div>
-                    <span className="text-sm font-medium text-slate-900">Policy Assistant</span>
+                    <h3 className="text-base font-medium">Policy Assistant</h3>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {evidenceSearchReady && (
-                      <Tooltip content="Evidence search is ready">
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      </Tooltip>
-                    )}
-                    <Tooltip content="Minimize chat">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={onToggle}
-                        className="h-7 w-7 p-0 hover:bg-slate-100"
-                      >
-                        <Minimize2 className="h-3 w-3" />
-                      </Button>
-                    </Tooltip>
-                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsOpen(false)}
+                    className="text-white hover:bg-white/20 h-8 w-8 p-0"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
                 </div>
               </CardHeader>
               
-              <CardContent className="p-0 h-[420px]">
+              <div className="h-[420px]">
                 <ChatInterface 
-                  enableAutoScroll={isOpen} // Only auto-scroll when widget is open
-                  placeholder="Ask about policy evidence, research findings, or specific interventions..."
+                  placeholder="Ask about the evidence..."
                   className="h-full"
+                  showHeader={false}
                 />
-              </CardContent>
+              </div>
             </Card>
           </motion.div>
         )}
