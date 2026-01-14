@@ -11,7 +11,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -20,13 +20,18 @@ from app.services.synthesis.schemas import (
     StructuredBriefing,
     BackgroundSection,
     CoreAnswer,
-    InterventionTableRow,
-    RecommendationItem,
-    SynthesisSection,
     SynthesisSectionProposal,
     CitationInfo,
     EvidenceSnapshotRow,
     TopCitationItem,
+)
+from app.services.synthesis.nodes.briefing_utils import (
+    parse_intervention_table,
+    parse_recommendations,
+    parse_synthesis_sections,
+    strip_leading_label,
+    strip_inline_labels,
+    clean_rec_title,
 )
 from app.services.synthesis.tools.orchestrator import (
     BriefingOrchestrator,
@@ -397,32 +402,6 @@ async def _build_structured_briefing(
         StructuredBriefing object matching frontend schema.
     """
 
-    def _strip_leading_label(text: str, labels: List[str]) -> str:
-        """Strip any leading meta-labels like 'Directive:' from generated text."""
-        if not text:
-            return ""
-        cleaned = text.strip()
-        for label in labels:
-            cleaned = re.sub(rf"^\s*{re.escape(label)}\s*", "", cleaned, flags=re.I)
-        return cleaned.strip()
-
-    def _strip_inline_labels(text: str, labels: List[str]) -> str:
-        """Remove inline meta-labels like 'Synthesis:' that sometimes appear mid-paragraph."""
-        if not text:
-            return ""
-        cleaned = text
-        for label in labels:
-            cleaned = re.sub(rf"\b{re.escape(label)}\s*", "", cleaned, flags=re.I)
-        return cleaned.strip()
-
-    def _clean_rec_title(title: str) -> str:
-        """Normalise recommendation titles to plain text (no stray markdown)."""
-        cleaned = (title or "").strip()
-        cleaned = cleaned.strip("*").strip()
-        # Remove any trailing punctuation/markdown artefacts that frequently occur
-        cleaned = re.sub(r"[*_`]+$", "", cleaned).strip()
-        return cleaned
-
     # Fallback mapping if none provided
     if not doc_citation_map:
         for cit in grounded_citations:
@@ -445,9 +424,9 @@ async def _build_structured_briefing(
             answer_text = " ".join(sentences[:-1]).strip() or full_content
 
     # Strip meta-labels if the model included them anyway
-    answer_text = _strip_leading_label(answer_text, ["Core answer:", "Core answer"])
-    answer_text = _strip_inline_labels(answer_text, ["Synthesis:", "Synthesis"])
-    directive = _strip_leading_label(directive, ["Directive:", "Directive"])
+    answer_text = strip_leading_label(answer_text, ["Core answer:", "Core answer"])
+    answer_text = strip_inline_labels(answer_text, ["Synthesis:", "Synthesis"])
+    directive = strip_leading_label(directive, ["Directive:", "Directive"])
 
     core_answer = CoreAnswer(
         query=research_question or "Policy intervention analysis",
@@ -471,7 +450,7 @@ async def _build_structured_briefing(
     int_output = section_outputs.get(
         "interventions", SectionOutput(content="", citations_used=[])
     )
-    all_intervention_rows = _parse_intervention_table(int_output.content, interventions)
+    all_intervention_rows = parse_intervention_table(int_output.content, interventions)
 
     # Filter out null/empty rows and limit to top N by citation count
     intervention_rows = [
@@ -490,14 +469,14 @@ async def _build_structured_briefing(
     rec_output = section_outputs.get(
         "recommendations", SectionOutput(content="", citations_used=[])
     )
-    recommendation_items = _parse_recommendations(rec_output.content)
+    recommendation_items = parse_recommendations(rec_output.content)
     max_recs = limits.get("max_recommendations", len(recommendation_items))
     recommendation_items = recommendation_items[:max_recs]
     for rec in recommendation_items:
-        rec.title = _clean_rec_title(rec.title)
+        rec.title = clean_rec_title(rec.title)
 
     # Parse synthesis sections (if any)
-    synthesis_sections = _parse_synthesis_sections(synthesis_outputs)
+    synthesis_sections = parse_synthesis_sections(synthesis_outputs)
 
     # Build top citations (use precomputed document top_line, no LLM reason generation)
     top_citations = await _build_top_citations_async(
@@ -528,291 +507,6 @@ async def _build_structured_briefing(
         top_citations=top_citations,
         follow_up_suggestions=[],
     )
-
-
-def _parse_intervention_table(
-    content: str, interventions: List
-) -> List[InterventionTableRow]:
-    """Parse intervention table from markdown content.
-
-    Falls back to using aggregated interventions if parsing fails.
-
-    Args:
-        content: Markdown table content.
-        interventions: Fallback intervention data.
-
-    Returns:
-        List of InterventionTableRow objects matching frontend schema.
-    """
-    rows: List[InterventionTableRow] = []
-
-    # Try to parse markdown table
-    lines = content.strip().split("\n")
-    table_started = False
-
-    for line in lines:
-        if "|" not in line:
-            continue
-
-        # Skip header separator
-        if set(line.replace("|", "").replace("-", "").replace(" ", "")) == set():
-            table_started = True
-            continue
-
-        if not table_started:
-            # Skip header row
-            table_started = True
-            continue
-
-        # Parse data row.
-        # Be robust to markdown tables that omit a trailing pipe at line end.
-        # Example valid rows:
-        # - | a | b | c |
-        # - | a | b | c
-        stripped = line.strip()
-        if stripped.startswith("|"):
-            stripped = stripped[1:]
-        if stripped.endswith("|"):
-            stripped = stripped[:-1]
-        cells = [c.strip() for c in stripped.split("|")]
-        if len(cells) >= 2:
-            # Extract citation numbers from the entire row (including Sources column if present)
-            citation_nums = _extract_citation_numbers(line)
-
-            # Support both legacy 4-col and new 5-col formats:
-            # - Legacy: | Intervention | Context & Features | Impact & Outcomes | Sources |
-            # - New:    | Intervention | Context & Features | Key Study | Impact & Outcomes | Sources |
-            intervention_name = cells[0] if len(cells) > 0 else ""
-            context = cells[1] if len(cells) > 1 else ""
-
-            key_study_description = ""
-            impact_narrative = ""
-
-            if len(cells) >= 5:
-                # New format (Key Study + Impact)
-                key_study_description = cells[2] if len(cells) > 2 else ""
-                impact_narrative = cells[3] if len(cells) > 3 else ""
-            else:
-                # Legacy format (Impact in third column)
-                impact_narrative = cells[2] if len(cells) > 2 else ""
-
-            # Prefer to capture the primary key study citation from the Key Study cell
-            key_study_citation: Optional[int] = None
-            if key_study_description:
-                key_cits = _extract_citation_numbers(key_study_description)
-                key_study_citation = key_cits[0] if key_cits else None
-
-            rows.append(
-                InterventionTableRow(
-                    intervention_name=intervention_name,
-                    citation_numbers=citation_nums,
-                    context=context,
-                    key_study_description=key_study_description,
-                    key_study_citation=key_study_citation,
-                    impact_narrative=impact_narrative,
-                    outcome_effects=[],  # Could be populated from intervention data
-                )
-            )
-
-    # Fallback to aggregated interventions if no rows parsed
-    if not rows and interventions:
-        for intervention in interventions[:10]:
-            rows.append(
-                InterventionTableRow(
-                    intervention_name=getattr(
-                        intervention, "intervention_name", "Unknown"
-                    ),
-                    citation_numbers=[],
-                    context=getattr(intervention, "brief_description", ""),
-                    impact_narrative="",
-                    outcome_effects=[],
-                )
-            )
-
-    return rows
-
-
-def _extract_citation_numbers(text: str) -> List[int]:
-    """Extract [N] citation numbers from text.
-
-    Args:
-        text: Text containing citations.
-
-    Returns:
-        List of citation numbers like [1, 3, 5].
-    """
-    import re
-
-    matches = re.findall(r"\[(\d+)\]", text)
-    # Treat [0] as invalid/placeholder and drop it to avoid broken citation links.
-    return [int(m) for m in matches if int(m) > 0]
-
-
-def _parse_recommendations(content: str) -> List[RecommendationItem]:
-    """Parse recommendations from numbered list content.
-
-    Handles multiple formats:
-    - **1. Title**: Description
-    - 1. Title: Description
-    - 1) Title: Description
-
-    Args:
-        content: Markdown numbered list content.
-
-    Returns:
-        List of RecommendationItem objects matching frontend schema.
-    """
-    import re
-
-    recommendations: List[RecommendationItem] = []
-
-    # Pattern matches: **1. or 1. or 1) at line start (with optional leading whitespace)
-    rec_pattern = re.compile(r"^(?:\*\*)?(\d+)[.\)]\s*")
-
-    lines = content.strip().split("\n")
-    current_rec_lines: List[str] = []
-    current_rec_number = 0
-
-    def _parse_rec_block(rec_number: int, rec_lines: List[str]) -> None:
-        """Parse a recommendation block into structured fields."""
-        if not rec_lines:
-            return
-        # Preserve newlines for detecting Implementation option marker
-        joined = "\n".join(rec_lines).strip()
-
-        # Extract implementation option (if present)
-        impl = ""
-        remaining_lines: List[str] = []
-        for ln in joined.splitlines():
-            s = ln.strip()
-            if not s:
-                continue
-            lowered = s.lower()
-            if lowered.startswith("implementation option:"):
-                impl = s.split(":", 1)[1].strip() if ":" in s else ""
-            elif lowered.startswith("- implementation option:"):
-                impl = s.split(":", 1)[1].strip() if ":" in s else ""
-            else:
-                remaining_lines.append(s)
-
-        full_text = " ".join(remaining_lines)
-        title, description = _split_recommendation(full_text)
-        citations = _extract_citation_numbers((description or "") + " " + (impl or ""))
-        recommendations.append(
-            RecommendationItem(
-                number=rec_number,
-                title=title,
-                description=description,
-                implementation_option=impl,
-                citation_numbers=citations,
-            )
-        )
-
-    for line in lines:
-        stripped = line.strip()
-
-        # Check if line starts a new numbered recommendation
-        match = rec_pattern.match(stripped)
-        if match:
-            # Save previous recommendation
-            if current_rec_lines:
-                _parse_rec_block(current_rec_number, current_rec_lines)
-
-            # Start new recommendation - extract number and remaining text
-            current_rec_number = int(match.group(1))
-            # Remove the number prefix and any trailing ** from title
-            remaining = stripped[match.end() :].lstrip("* ").rstrip("*")
-            current_rec_lines = [remaining] if remaining else []
-        elif current_rec_lines and stripped:
-            # Continuation line (including implementation option line)
-            current_rec_lines.append(stripped)
-
-    # Add last recommendation
-    if current_rec_lines:
-        _parse_rec_block(current_rec_number, current_rec_lines)
-
-    # Log if no recommendations found
-    if not recommendations and content.strip():
-        logger.warning(
-            f"Failed to parse recommendations from content "
-            f"({len(content)} chars, first 200: {content[:200]})"
-        )
-
-    return recommendations
-
-
-def _parse_synthesis_sections(
-    synthesis_outputs: List[Tuple[str, SectionOutput]]
-) -> List[SynthesisSection]:
-    """Convert synthesis section outputs into structured sections."""
-    sections: List[SynthesisSection] = []
-
-    for title, output in synthesis_outputs:
-        content = (output.content or "").strip()
-        if not content:
-            continue
-
-        lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
-
-        # Drop any leading line that simply repeats the title
-        lowered_title = title.lower().rstrip(":")
-        while lines and (
-            lines[0].lower().rstrip(":") == lowered_title
-            or lines[0].lower().startswith(lowered_title)
-        ):
-            lines.pop(0)
-
-        bullet_lines = [ln for ln in lines if ln.startswith("-") or ln.startswith("*")]
-
-        if bullet_lines and len(bullet_lines) >= max(2, int(0.6 * len(lines))):
-            bullets = [ln.lstrip("-* ").strip() for ln in bullet_lines]
-            sections.append(
-                SynthesisSection(
-                    title=title,
-                    content_type="bullets",
-                    bullets=bullets,
-                    citation_numbers_used=output.citations_used,
-                )
-            )
-        else:
-            paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
-            if not paragraphs and lines:
-                paragraphs = [" ".join(lines)]
-
-            sections.append(
-                SynthesisSection(
-                    title=title,
-                    content_type="paragraphs",
-                    paragraphs=paragraphs,
-                    citation_numbers_used=output.citations_used,
-                )
-            )
-
-    return sections
-
-
-def _split_recommendation(text: str) -> tuple:
-    """Split recommendation text into title and description.
-
-    Args:
-        text: Full recommendation text.
-
-    Returns:
-        Tuple of (title, description).
-    """
-    # Look for a colon or period to split title from description
-    if ":" in text[:60]:
-        parts = text.split(":", 1)
-        return parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
-    elif ". " in text[:60]:
-        parts = text.split(". ", 1)
-        return parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""
-    else:
-        # Use first few words as title
-        words = text.split()
-        title = " ".join(words[:6])
-        description = " ".join(words[6:]) if len(words) > 6 else ""
-        return title, description
 
 
 class SynthesisSectionDecision(BaseModel):

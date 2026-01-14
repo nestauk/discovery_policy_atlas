@@ -313,6 +313,96 @@ def generate_theme_question(
 # =============================================================================
 
 
+async def _apply_rcs_to_evidence(
+    *,
+    state: SynthesisState,
+    evidence_key: str,
+    aggregate_items: List[Any],
+    name_attr: str,
+    description_attr: str,
+    result_key: str,
+    collect_all_contexts: bool = False,
+    existing_contexts: Optional[List[ScoredContext]] = None,
+    existing_gaps: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Shared RCS application for theme/issue/outcome evidence."""
+    evidence = state.get(evidence_key) or {}
+    research_question = state.get("research_question", "")
+    rcs_config = state.get("rcs_config") or RCSConfig()
+
+    item_lookup = {
+        getattr(item, name_attr): item
+        for item in aggregate_items
+        if getattr(item, name_attr, None)
+    }
+
+    results: List[ThemeEvidence] = []
+    all_scored_contexts: List[ScoredContext] = list(existing_contexts or [])
+    themes_with_gaps: List[str] = list(existing_gaps or [])
+
+    for theme_id, chunks in evidence.items():
+        if not chunks:
+            themes_with_gaps.append(theme_id)
+            continue
+
+        item = item_lookup.get(theme_id)
+        theme_description = getattr(item, description_attr, "") if item else ""
+
+        theme_question = generate_theme_question(
+            theme_name=theme_id,
+            theme_description=theme_description,
+            research_question=research_question,
+        )
+
+        scored_contexts = await contextual_summarise_batch(
+            chunks=chunks,
+            question=theme_question,
+            theme_id=theme_id,
+            theme_name=theme_id,
+            concurrency=rcs_config.rcs_concurrency,
+            state=state,
+        )
+
+        filtered_contexts = [
+            c
+            for c in scored_contexts
+            if c.relevance_score >= rcs_config.score_threshold
+        ]
+        filtered_contexts.sort(key=lambda c: c.relevance_score, reverse=True)
+        filtered_contexts = filtered_contexts[: rcs_config.max_contexts_per_theme]
+
+        high_quality = [
+            c
+            for c in filtered_contexts
+            if c.relevance_score >= rcs_config.high_quality_threshold
+        ]
+        evidence_sufficient = len(high_quality) >= rcs_config.min_high_quality_per_theme
+        if not evidence_sufficient:
+            themes_with_gaps.append(theme_id)
+
+        results.append(
+            ThemeEvidence(
+                theme_id=theme_id,
+                theme_name=theme_id,
+                theme_description=theme_description,
+                theme_question=theme_question,
+                scored_contexts=filtered_contexts,
+                total_chunks_retrieved=len(chunks),
+                total_chunks_scored=len(scored_contexts),
+                high_quality_count=len(high_quality),
+                evidence_sufficient=evidence_sufficient,
+            )
+        )
+        if collect_all_contexts:
+            all_scored_contexts.extend(filtered_contexts)
+
+    response: Dict[str, Any] = {result_key: results}
+    if collect_all_contexts:
+        response["all_scored_contexts"] = all_scored_contexts
+        response["themes_with_gaps"] = themes_with_gaps
+    return response
+
+
 async def apply_rcs_to_theme_evidence(
     state: SynthesisState,
 ) -> Dict[str, Any]:
@@ -329,94 +419,28 @@ async def apply_rcs_to_theme_evidence(
     """
     print("--- Applying Contextual Summarisation (RCS) to Theme Evidence ---")
 
-    theme_evidence = state.get("theme_evidence") or {}
-    interventions = state.get("aggregated_interventions") or []
-    research_question = state.get("research_question", "")
+    response = await _apply_rcs_to_evidence(
+        state=state,
+        evidence_key="theme_evidence",
+        aggregate_items=state.get("aggregated_interventions") or [],
+        name_attr="intervention_name",
+        description_attr="brief_description",
+        result_key="scored_theme_evidence",
+        collect_all_contexts=True,
+    )
 
-    # Get RCS config with defaults
-    rcs_config = state.get("rcs_config") or RCSConfig()
-
-    # Build intervention lookup for descriptions
-    intervention_lookup = {i.intervention_name: i for i in interventions}
-
-    scored_theme_evidence: List[ThemeEvidence] = []
-    all_scored_contexts: List[ScoredContext] = []
-    themes_with_gaps: List[str] = []
-
-    for theme_id, chunks in theme_evidence.items():
-        if not chunks:
-            themes_with_gaps.append(theme_id)
-            continue
-
-        # Get intervention details for theme question
-        intervention = intervention_lookup.get(theme_id)
-        theme_description = intervention.brief_description if intervention else ""
-
-        # Generate theme-specific question for RCS
-        theme_question = generate_theme_question(
-            theme_name=theme_id,
-            theme_description=theme_description,
-            research_question=research_question,
-        )
-
-        # Apply RCS to all chunks for this theme
-        scored_contexts = await contextual_summarise_batch(
-            chunks=chunks,
-            question=theme_question,
-            theme_id=theme_id,
-            theme_name=theme_id,
-            concurrency=rcs_config.rcs_concurrency,
-            state=state,
-        )
-
-        # Filter by score threshold
-        filtered_contexts = [
-            c
-            for c in scored_contexts
-            if c.relevance_score >= rcs_config.score_threshold
-        ]
-
-        # Sort by score and limit
-        filtered_contexts.sort(key=lambda c: c.relevance_score, reverse=True)
-        filtered_contexts = filtered_contexts[: rcs_config.max_contexts_per_theme]
-
-        # Calculate quality metrics
-        high_quality = [
-            c
-            for c in filtered_contexts
-            if c.relevance_score >= rcs_config.high_quality_threshold
-        ]
-        evidence_sufficient = len(high_quality) >= rcs_config.min_high_quality_per_theme
-
-        if not evidence_sufficient:
-            themes_with_gaps.append(theme_id)
-
-        theme_evidence_obj = ThemeEvidence(
-            theme_id=theme_id,
-            theme_name=theme_id,
-            theme_description=theme_description,
-            theme_question=theme_question,
-            scored_contexts=filtered_contexts,
-            total_chunks_retrieved=len(chunks),
-            total_chunks_scored=len(scored_contexts),
-            high_quality_count=len(high_quality),
-            evidence_sufficient=evidence_sufficient,
-        )
-
-        scored_theme_evidence.append(theme_evidence_obj)
-        all_scored_contexts.extend(filtered_contexts)
-
-    # Log summary
+    scored_theme_evidence = response.get("scored_theme_evidence", [])
     total_high_quality = sum(te.high_quality_count for te in scored_theme_evidence)
+    themes_with_gaps = response.get("themes_with_gaps", [])
+    all_scored_contexts = response.get("all_scored_contexts", [])
+
     print(
         f"RCS complete: {len(all_scored_contexts)} scored contexts, "
         f"{total_high_quality} high-quality, {len(themes_with_gaps)} themes with gaps"
     )
 
     return {
-        "scored_theme_evidence": scored_theme_evidence,
-        "all_scored_contexts": all_scored_contexts,
-        "themes_with_gaps": themes_with_gaps,
+        **response,
         "rcs_iterations_run": 1,
     }
 
@@ -436,75 +460,21 @@ async def apply_rcs_to_issue_evidence(
     """
     print("--- Applying Contextual Summarisation (RCS) to Issue Evidence ---")
 
-    issue_evidence = state.get("issue_evidence") or {}
-    issues = state.get("aggregated_issues") or []
-    research_question = state.get("research_question", "")
+    response = await _apply_rcs_to_evidence(
+        state=state,
+        evidence_key="issue_evidence",
+        aggregate_items=state.get("aggregated_issues") or [],
+        name_attr="issue_theme",
+        description_attr="summary_description",
+        result_key="scored_issue_evidence",
+    )
 
-    rcs_config = state.get("rcs_config") or RCSConfig()
-
-    # Build issue lookup
-    issue_lookup = {i.issue_theme: i for i in issues}
-
-    scored_issue_evidence: List[ThemeEvidence] = []
-
-    for theme_id, chunks in issue_evidence.items():
-        if not chunks:
-            continue
-
-        issue = issue_lookup.get(theme_id)
-        theme_description = issue.summary_description if issue else ""
-
-        theme_question = generate_theme_question(
-            theme_name=theme_id,
-            theme_description=theme_description,
-            research_question=research_question,
-        )
-
-        scored_contexts = await contextual_summarise_batch(
-            chunks=chunks,
-            question=theme_question,
-            theme_id=theme_id,
-            theme_name=theme_id,
-            concurrency=rcs_config.rcs_concurrency,
-            state=state,
-        )
-
-        filtered_contexts = [
-            c
-            for c in scored_contexts
-            if c.relevance_score >= rcs_config.score_threshold
-        ]
-        filtered_contexts.sort(key=lambda c: c.relevance_score, reverse=True)
-        filtered_contexts = filtered_contexts[: rcs_config.max_contexts_per_theme]
-
-        high_quality = [
-            c
-            for c in filtered_contexts
-            if c.relevance_score >= rcs_config.high_quality_threshold
-        ]
-
-        theme_evidence_obj = ThemeEvidence(
-            theme_id=theme_id,
-            theme_name=theme_id,
-            theme_description=theme_description,
-            theme_question=theme_question,
-            scored_contexts=filtered_contexts,
-            total_chunks_retrieved=len(chunks),
-            total_chunks_scored=len(scored_contexts),
-            high_quality_count=len(high_quality),
-            evidence_sufficient=len(high_quality)
-            >= rcs_config.min_high_quality_per_theme,
-        )
-
-        scored_issue_evidence.append(theme_evidence_obj)
-
+    scored_issue_evidence = response.get("scored_issue_evidence", [])
     print(
         f"RCS for issues complete: {len(scored_issue_evidence)} issue themes processed"
     )
 
-    return {
-        "scored_issue_evidence": scored_issue_evidence,
-    }
+    return response
 
 
 async def apply_rcs_to_outcome_evidence(
@@ -523,82 +493,21 @@ async def apply_rcs_to_outcome_evidence(
     """
     print("--- Applying Contextual Summarisation (RCS) to Outcome Evidence ---")
 
-    outcome_evidence = state.get("outcome_evidence") or {}
-    outcomes = state.get("aggregated_outcomes") or []
-    research_question = state.get("research_question", "")
-
-    rcs_config = state.get("rcs_config") or RCSConfig()
-
-    # Build outcome lookup for descriptions
-    outcome_lookup = {o.outcome_name: o for o in outcomes}
-
-    scored_outcome_evidence: List[ThemeEvidence] = []
-    all_scored_contexts: List[ScoredContext] = list(
-        state.get("all_scored_contexts") or []
+    response = await _apply_rcs_to_evidence(
+        state=state,
+        evidence_key="outcome_evidence",
+        aggregate_items=state.get("aggregated_outcomes") or [],
+        name_attr="outcome_name",
+        description_attr="outcome_description",
+        result_key="scored_outcome_evidence",
+        collect_all_contexts=True,
+        existing_contexts=state.get("all_scored_contexts") or [],
+        existing_gaps=state.get("themes_with_gaps") or [],
     )
-    themes_with_gaps: List[str] = list(state.get("themes_with_gaps") or [])
 
-    for theme_id, chunks in outcome_evidence.items():
-        if not chunks:
-            themes_with_gaps.append(theme_id)
-            continue
-
-        out = outcome_lookup.get(theme_id)
-        theme_description = getattr(out, "outcome_description", "") if out else ""
-
-        theme_question = generate_theme_question(
-            theme_name=theme_id,
-            theme_description=theme_description,
-            research_question=research_question,
-        )
-
-        scored_contexts = await contextual_summarise_batch(
-            chunks=chunks,
-            question=theme_question,
-            theme_id=theme_id,
-            theme_name=theme_id,
-            concurrency=rcs_config.rcs_concurrency,
-            state=state,
-        )
-
-        filtered_contexts = [
-            c
-            for c in scored_contexts
-            if c.relevance_score >= rcs_config.score_threshold
-        ]
-        filtered_contexts.sort(key=lambda c: c.relevance_score, reverse=True)
-        filtered_contexts = filtered_contexts[: rcs_config.max_contexts_per_theme]
-
-        high_quality = [
-            c
-            for c in filtered_contexts
-            if c.relevance_score >= rcs_config.high_quality_threshold
-        ]
-        evidence_sufficient = len(high_quality) >= rcs_config.min_high_quality_per_theme
-        if not evidence_sufficient:
-            themes_with_gaps.append(theme_id)
-
-        scored_outcome_evidence.append(
-            ThemeEvidence(
-                theme_id=theme_id,
-                theme_name=theme_id,
-                theme_description=theme_description,
-                theme_question=theme_question,
-                scored_contexts=filtered_contexts,
-                total_chunks_retrieved=len(chunks),
-                total_chunks_scored=len(scored_contexts),
-                high_quality_count=len(high_quality),
-                evidence_sufficient=evidence_sufficient,
-            )
-        )
-        all_scored_contexts.extend(filtered_contexts)
-
+    scored_outcome_evidence = response.get("scored_outcome_evidence", [])
     print(
         f"RCS for outcomes complete: {len(scored_outcome_evidence)} outcome themes processed"
     )
 
-    return {
-        "scored_outcome_evidence": scored_outcome_evidence,
-        "all_scored_contexts": all_scored_contexts,
-        "themes_with_gaps": themes_with_gaps,
-    }
+    return response

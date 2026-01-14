@@ -441,6 +441,94 @@ class BriefingOrchestrator:
             max_tool_calls=ctx.max_tool_calls,
         )
 
+        def _prepare_arguments(
+            tool_name: str, arguments: Dict[str, Any]
+        ) -> Optional[Dict[str, Any]]:
+            """Normalise and auto-fill tool arguments; return None to skip."""
+            args = dict(arguments or {})
+
+            if tool_name == "get_theme_evidence" and not args.get("theme_name"):
+                sec = (ctx.section_name or "").lower()
+                if "outcome" in sec:
+                    candidates = outcome_theme_names
+                elif "issue" in sec or "challenge" in sec or "barrier" in sec:
+                    candidates = issue_theme_names
+                elif "intervention" in sec or "recommendation" in sec:
+                    candidates = intervention_theme_names
+                else:
+                    candidates = intervention_theme_names or theme_names
+
+                next_theme = None
+                for name in candidates:
+                    if name not in ctx.used_theme_names:
+                        next_theme = name
+                        break
+                if next_theme:
+                    args["theme_name"] = next_theme
+                    ctx.used_theme_names.add(next_theme)
+                    logger.info(
+                        f"Auto-filled get_theme_evidence theme_name={next_theme}"
+                    )
+                else:
+                    logger.warning("Skipping get_theme_evidence: missing theme_name")
+                    return None
+
+            if tool_name == "get_multiple_document_quality" and not args.get(
+                "citation_numbers"
+            ):
+                logger.warning(
+                    "Skipping get_multiple_document_quality: missing citation_numbers"
+                )
+                return None
+
+            if tool_name == "get_document_quality" and not args.get("citation_number"):
+                if citation_numbers:
+                    args["citation_number"] = citation_numbers[0]
+                    logger.info(
+                        f"Auto-filled get_document_quality with citation_number={citation_numbers[0]}"
+                    )
+                else:
+                    logger.warning(
+                        "Skipping get_document_quality: missing citation_number"
+                    )
+                    return None
+
+            if tool_name == "search_extractions" and not args.get("query"):
+                logger.warning("Skipping search_extractions: missing query")
+                return None
+
+            if tool_name == "get_citation_context" and not args.get("citation_number"):
+                if citation_numbers:
+                    args["citation_number"] = citation_numbers[0]
+                    logger.info(
+                        f"Auto-filled get_citation_context with citation_number={citation_numbers[0]}"
+                    )
+                else:
+                    logger.warning(
+                        "Skipping get_citation_context: missing citation_number"
+                    )
+                    return None
+
+            if tool_name == "get_top_studies" and not args.get("intervention_name"):
+                next_intervention = None
+                for name in intervention_names:
+                    if name not in ctx.used_theme_names:
+                        next_intervention = name
+                        break
+                if next_intervention:
+                    args["intervention_name"] = next_intervention
+                    ctx.used_theme_names.add(next_intervention)
+                    logger.info(
+                        f"Auto-filled get_top_studies intervention_name={next_intervention}"
+                    )
+                else:
+                    logger.warning(
+                        "Skipping get_top_studies: missing intervention_name"
+                    )
+                    return None
+
+            return args
+
         # Initial user message
         user_message = f"""## Section: {ctx.section_name}
 {ctx.section_instructions}
@@ -499,7 +587,7 @@ Decide which tools to call to gather the most relevant evidence for this section
                     break
 
                 tool_name = tc.tool
-                arguments = tc.arguments or {}
+                arguments = _prepare_arguments(tool_name, tc.arguments or {})
 
                 # Phase 1 is evidence gathering only. Verification is handled separately
                 # in `_verify_section()`; do not allow verification tools here even if
@@ -509,98 +597,8 @@ Decide which tools to call to gather the most relevant evidence for this section
                         f"Skipping {tool_name}: verification tools are not allowed during evidence gathering"
                     )
                     continue
-
-                # Enforce required parameters; skip invalid calls to avoid crashing tools
-                if tool_name == "get_theme_evidence" and not arguments.get(
-                    "theme_name"
-                ):
-                    # Auto-fill theme_name in a branch-aware way to avoid "no theme match"
-                    # fallbacks caused by mixing intervention/issue/outcome theme names.
-                    sec = (ctx.section_name or "").lower()
-                    if "outcome" in sec:
-                        candidates = outcome_theme_names
-                    elif "issue" in sec or "challenge" in sec or "barrier" in sec:
-                        candidates = issue_theme_names
-                    elif "intervention" in sec or "recommendation" in sec:
-                        candidates = intervention_theme_names
-                    else:
-                        candidates = intervention_theme_names or theme_names
-
-                    next_theme = None
-                    for name in candidates:
-                        if name not in ctx.used_theme_names:
-                            next_theme = name
-                            break
-                    if next_theme:
-                        arguments["theme_name"] = next_theme
-                        ctx.used_theme_names.add(next_theme)
-                        logger.info(
-                            f"Auto-filled get_theme_evidence theme_name={next_theme}"
-                        )
-                    else:
-                        logger.warning(
-                            "Skipping get_theme_evidence: missing theme_name"
-                        )
-                        continue
-                if tool_name == "get_multiple_document_quality" and not arguments.get(
-                    "citation_numbers"
-                ):
-                    # Do not auto-fill broad ranges; this tool should only be used when
-                    # the caller specifies the citations to inspect.
-                    logger.warning(
-                        "Skipping get_multiple_document_quality: missing citation_numbers"
-                    )
+                if arguments is None:
                     continue
-                if tool_name == "get_document_quality" and not arguments.get(
-                    "citation_number"
-                ):
-                    if citation_numbers:
-                        arguments["citation_number"] = citation_numbers[0]
-                        logger.info(
-                            f"Auto-filled get_document_quality with citation_number={citation_numbers[0]}"
-                        )
-                    else:
-                        logger.warning(
-                            "Skipping get_document_quality: missing citation_number"
-                        )
-                        continue
-                if tool_name == "search_extractions" and not arguments.get("query"):
-                    logger.warning("Skipping search_extractions: missing query")
-                    continue
-                if tool_name == "get_citation_context" and not arguments.get(
-                    "citation_number"
-                ):
-                    if citation_numbers:
-                        arguments["citation_number"] = citation_numbers[0]
-                        logger.info(
-                            f"Auto-filled get_citation_context with citation_number={citation_numbers[0]}"
-                        )
-                    else:
-                        logger.warning(
-                            "Skipping get_citation_context: missing citation_number"
-                        )
-                        continue
-
-                if tool_name == "get_top_studies" and not arguments.get(
-                    "intervention_name"
-                ):
-                    # Auto-fill with next available intervention name if we have one
-                    next_intervention = None
-                    for name in intervention_names:
-                        if name not in ctx.used_theme_names:
-                            next_intervention = name
-                            break
-                    if next_intervention:
-                        arguments["intervention_name"] = next_intervention
-                        ctx.used_theme_names.add(next_intervention)
-                        logger.info(
-                            f"Auto-filled get_top_studies intervention_name={next_intervention}"
-                        )
-                    else:
-                        logger.warning(
-                            "Skipping get_top_studies: missing intervention_name"
-                        )
-                        continue
 
                 result = await self.registry.execute(
                     tool_name,

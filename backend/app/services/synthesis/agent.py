@@ -55,8 +55,6 @@ def create_synthesis_workflow():
     workflow = StateGraph(SynthesisState)
 
     # Phase 1: Load
-
-    # Phase 1: Load
     workflow.add_node("load_raw_extractions", load_raw_extractions)
     workflow.add_node("create_canonical_concepts", create_canonical_concepts)
 
@@ -175,7 +173,6 @@ class SynthesisAgent:
                 .eq("id", project_id)
                 .execute()
             )
-            return result.data[0].get("created_by_user_id") if result.data else None
             return result.data[0].get("created_by_user_id") if result.data else None
         except Exception:
             return None

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 
 from pydantic import BaseModel, Field
 from rapidfuzz import fuzz
@@ -30,6 +30,24 @@ logger = logging.getLogger(__name__)
 
 # Minimum fuzzy match ratio to consider a theme match
 FUZZY_MATCH_THRESHOLD = 60
+
+
+def _best_fuzzy_match(
+    target: str, options: List[Any], key: Callable[[Any], str]
+) -> tuple[Optional[Any], int]:
+    """Return best fuzzy match for target from options."""
+    best_item = None
+    best_score = 0
+    target_l = target.lower().strip()
+    for opt in options:
+        value = key(opt) or ""
+        ratio = fuzz.ratio(target_l, value.lower())
+        partial = fuzz.partial_ratio(target_l, value.lower())
+        score = max(ratio, partial)
+        if score > best_score:
+            best_score = score
+            best_item = opt
+    return best_item, best_score
 
 
 class ThemeEvidenceItem(BaseModel):
@@ -121,21 +139,9 @@ class GetThemeEvidenceTool(BaseTool):
                 matching_contexts.extend(te.scored_contexts)
 
         if not matching_contexts:
-            # Second pass: fuzzy matching using rapidfuzz
-            best_match_score = 0
-            best_match_theme = None
-            for te in all_evidence:
-                if te.theme_name:
-                    # Calculate fuzzy ratio
-                    ratio = fuzz.ratio(theme_name_lower, te.theme_name.lower())
-                    partial_ratio = fuzz.partial_ratio(
-                        theme_name_lower, te.theme_name.lower()
-                    )
-                    best_ratio = max(ratio, partial_ratio)
-                    if best_ratio > best_match_score:
-                        best_match_score = best_ratio
-                        best_match_theme = te
-
+            best_match_theme, best_match_score = _best_fuzzy_match(
+                theme_name_lower, all_evidence, key=lambda te: te.theme_name or ""
+            )
             if best_match_theme and best_match_score >= FUZZY_MATCH_THRESHOLD:
                 logger.info(
                     f"Fuzzy matched '{theme_name}' to '{best_match_theme.theme_name}' "
@@ -540,18 +546,18 @@ class GetInterventionOutcomesTool(BaseTool):
 
         results: List[InterventionOutcomeItem] = []
 
-        for intervention in aggregated_interventions:
-            # If filter specified, do fuzzy match
-            if intervention_name:
-                name = getattr(intervention, "intervention_name", "")
-                if not name:
-                    continue
-                # Fuzzy match
-                ratio = fuzz.ratio(intervention_name.lower(), name.lower())
-                partial = fuzz.partial_ratio(intervention_name.lower(), name.lower())
-                if max(ratio, partial) < FUZZY_MATCH_THRESHOLD:
-                    continue
+        filtered_interventions = aggregated_interventions
+        if intervention_name:
+            match, score = _best_fuzzy_match(
+                intervention_name,
+                aggregated_interventions,
+                key=lambda i: getattr(i, "intervention_name", "") or "",
+            )
+            filtered_interventions = (
+                [match] if match and score >= FUZZY_MATCH_THRESHOLD else []
+            )
 
+        for intervention in filtered_interventions:
             results.append(
                 InterventionOutcomeItem(
                     intervention_name=getattr(intervention, "intervention_name", ""),
@@ -688,16 +694,20 @@ class GetInterventionDetailsTool(BaseTool):
 
         results: List[InterventionDetails] = []
 
-        for intervention in aggregated_interventions:
+        if intervention_name:
+            match, score = _best_fuzzy_match(
+                intervention_name,
+                aggregated_interventions,
+                key=lambda i: getattr(i, "intervention_name", "") or "",
+            )
+            candidates = [match] if match and score >= FUZZY_MATCH_THRESHOLD else []
+        else:
+            candidates = aggregated_interventions
+
+        for intervention in candidates:
             name = getattr(intervention, "intervention_name", "")
             if not name:
                 continue
-
-            if intervention_name:
-                ratio = fuzz.ratio(intervention_name.lower(), name.lower())
-                partial = fuzz.partial_ratio(intervention_name.lower(), name.lower())
-                if max(ratio, partial) < FUZZY_MATCH_THRESHOLD:
-                    continue
 
             supporting_doc_ids = getattr(intervention, "supporting_doc_ids", []) or []
             # Normalise to internal doc UUIDs (all_scored_contexts/document_id and doc_citation_map are UUID-keyed)
@@ -938,18 +948,11 @@ class GetTopStudiesTool(BaseTool):
                 doc_uuid_to_countries[doc_uuid].append(country)
 
         # Find the best matching intervention category (by name)
-        best_match = None
-        best_score = 0
-        for intervention in aggregated_interventions:
-            name = getattr(intervention, "intervention_name", "") or ""
-            if not name:
-                continue
-            ratio = fuzz.ratio(intervention_name.lower(), name.lower())
-            partial = fuzz.partial_ratio(intervention_name.lower(), name.lower())
-            score = max(ratio, partial)
-            if score > best_score:
-                best_score = score
-                best_match = intervention
+        best_match, best_score = _best_fuzzy_match(
+            intervention_name,
+            aggregated_interventions,
+            key=lambda i: getattr(i, "intervention_name", "") or "",
+        )
 
         supporting_doc_ids: List[str] = []
         fallback_used = False

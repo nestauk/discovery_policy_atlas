@@ -464,20 +464,9 @@ class SynthesisSummary(BaseModel):
     outcome_themes: List[OutcomeTheme] = Field(default_factory=list)
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = Field(None)
     citation_map: Dict[str, CitationInfo] = Field(default_factory=dict)
-    """Container for the executive briefing and aggregated tables."""
-
-    executive_briefing: str = Field("", description="Legacy markdown (deprecated)")
-    structured_briefing: Optional[StructuredBriefing] = Field(None)
-    key_issues: List[KeyIssue] = Field(default_factory=list)
-    interventions: List[PolicyIntervention] = Field(default_factory=list)
-    outcome_themes: List[OutcomeTheme] = Field(default_factory=list)
-    evidence_coverage: Optional[EvidenceCoverageSnapshot] = Field(None)
-    citation_map: Dict[str, CitationInfo] = Field(default_factory=dict)
 
 
 class Finding(BaseModel):
-    """Drill-down finding for intervention/issue detail views."""
-
     """Drill-down finding for intervention/issue detail views."""
 
     SourceTitle: str
@@ -493,11 +482,6 @@ class Finding(BaseModel):
     EffectSize: Optional[str] = None
     PValue: Optional[str] = None
     Uncertainty: Optional[str] = None
-    Evidence: List[str] = Field(default_factory=list)
-
-    # =============================================================================
-    # EVIDENCE VIEW (Used by frontend Evidence tab)
-    # =============================================================================
     Evidence: List[str] = Field(default_factory=list)
 
 
