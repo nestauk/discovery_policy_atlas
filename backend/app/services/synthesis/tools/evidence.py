@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rapidfuzz import fuzz
 
 from app.services.synthesis.schemas import (
@@ -55,7 +55,8 @@ class ThemeEvidenceItem(BaseModel):
 class GetThemeEvidenceTool(BaseTool):
     """Tool to retrieve RCS-scored evidence for a specific theme.
 
-    Queries pre-computed scored_theme_evidence and scored_issue_evidence
+    Queries pre-computed scored_theme_evidence, scored_issue_evidence, and
+    scored_outcome_evidence
     from the synthesis state. Filters by relevance score and deduplicates
     by document.
     """
@@ -96,12 +97,17 @@ class GetThemeEvidenceTool(BaseTool):
         scored_issue_evidence: List[ThemeEvidence] = (
             state.get("scored_issue_evidence") or []
         )
+        scored_outcome_evidence: List[ThemeEvidence] = (
+            state.get("scored_outcome_evidence") or []
+        )
         doc_citation_map: Dict[str, int] = state.get("doc_citation_map") or {}
         doc_scores: Dict[str, Dict[str, Any]] = state.get("doc_scores") or {}
         doc_metadata: Dict[str, Dict[str, Any]] = state.get("doc_metadata") or {}
 
-        # Search both theme and issue evidence
-        all_evidence = scored_theme_evidence + scored_issue_evidence
+        # Search theme, issue, and outcome evidence
+        all_evidence = (
+            scored_theme_evidence + scored_issue_evidence + scored_outcome_evidence
+        )
 
         # Find matching theme using fuzzy matching
         matching_contexts: List[ScoredContext] = []
@@ -851,6 +857,14 @@ class TopStudyItem(BaseModel):
     url: Optional[str] = None
     key_context_chunk_text: str = ""
     study_location: str = ""
+    extracted_outcomes: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Structured outcome results extracted from upstream analysis_extractions for this "
+            "document, filtered to intervention_idx values that belong to the requested "
+            "intervention theme (option C)."
+        ),
+    )
 
 
 class GetTopStudiesTool(BaseTool):
@@ -900,6 +914,7 @@ class GetTopStudiesTool(BaseTool):
         doc_citation_map: Dict[str, int] = state.get("doc_citation_map") or {}
         all_contexts: List[ScoredContext] = state.get("all_scored_contexts") or []
         raw_extractions = state.get("raw_extractions") or []
+        final_intervention_themes = state.get("final_intervention_themes") or []
         # External doc_id -> internal doc_uuid (doc_metadata is keyed by doc_uuid)
         doc_id_to_uuid: Dict[str, str] = {}
         for doc_uuid, meta in (doc_metadata or {}).items():
@@ -1008,6 +1023,143 @@ class GetTopStudiesTool(BaseTool):
 
         ranked_doc_ids = sorted(candidates, key=_rank_tuple, reverse=True)[:max_results]
 
+        def _extract_key_study_outcomes(doc_uuid: str) -> List[Dict[str, Any]]:
+            """Extract structured outcomes for a key study document for the requested theme.
+
+            Uses upstream analysis_extractions fields (already in state.raw_extractions) and
+            matches results by intervention_idx for interventions that belong to the theme
+            within this document (option C).
+            """
+            # 1) Find matching intervention theme by name (exact/partial, then fuzzy).
+            theme = None
+            name_lower = intervention_name.lower().strip()
+            for t in final_intervention_themes:
+                t_name = (
+                    getattr(t, "name", None)
+                    or getattr(t, "theme_name", None)
+                    or getattr(t, "intervention_name", None)
+                    or ""
+                )
+                if t_name and t_name.lower().strip() == name_lower:
+                    theme = t
+                    break
+
+            if theme is None:
+                best = None
+                best_score_local = 0
+                for t in final_intervention_themes:
+                    t_name = (
+                        getattr(t, "name", None)
+                        or getattr(t, "theme_name", None)
+                        or getattr(t, "intervention_name", None)
+                        or ""
+                    )
+                    if not t_name:
+                        continue
+                    ratio = fuzz.ratio(name_lower, t_name.lower())
+                    partial = fuzz.partial_ratio(name_lower, t_name.lower())
+                    score = max(ratio, partial)
+                    if score > best_score_local:
+                        best_score_local = score
+                        best = t
+                if best and best_score_local >= FUZZY_MATCH_THRESHOLD:
+                    theme = best
+
+            if theme is None:
+                return []
+
+            concepts = getattr(theme, "concepts", None) or []
+            concept_ids: set = set()
+            for c in concepts:
+                cid = getattr(c, "id", None) or (
+                    c.get("id") if isinstance(c, dict) else None
+                )
+                if cid:
+                    concept_ids.add(str(cid))
+
+            if not concept_ids:
+                return []
+
+            # 2) For this document, collect intervention_idx values for intervention extractions
+            # that belong to this theme.
+            idxs: set = set()
+            for ext in raw_extractions:
+                if not isinstance(ext, dict):
+                    continue
+                if ext.get("type") != "intervention":
+                    continue
+                if str(ext.get("doc_uuid") or "") != str(doc_uuid):
+                    continue
+                if str(ext.get("id") or "") not in concept_ids:
+                    continue
+                idx = ext.get("intervention_idx")
+                if idx is None:
+                    continue
+                try:
+                    idxs.add(int(idx))
+                except (TypeError, ValueError):
+                    continue
+
+            if not idxs:
+                return []
+
+            # 3) Collect result extractions for all matching idxs (option C).
+            seen: set = set()
+            outcomes: List[Dict[str, Any]] = []
+            for ext in raw_extractions:
+                if not isinstance(ext, dict):
+                    continue
+                if ext.get("type") != "result":
+                    continue
+                if str(ext.get("doc_uuid") or "") != str(doc_uuid):
+                    continue
+                idx = ext.get("intervention_idx")
+                try:
+                    idx_int = int(idx) if idx is not None else None
+                except (TypeError, ValueError):
+                    idx_int = None
+                if idx_int is None or idx_int not in idxs:
+                    continue
+
+                outcome_var = str(ext.get("outcome_variable") or "").strip()
+                effect_dir = str(ext.get("effect_direction") or "").strip()
+                effect_size = str(ext.get("effect_size") or "").strip()
+                if effect_size.lower() in {"null", "none", "n/a"}:
+                    effect_size = ""
+
+                item = {
+                    "intervention_idx": idx_int,
+                    "outcome_variable": outcome_var,
+                    "effect_direction": effect_dir,
+                    "effect_size": effect_size,
+                    "effect_size_type": str(ext.get("effect_size_type") or "").strip(),
+                    "population_measured": str(
+                        ext.get("population_measured") or ""
+                    ).strip(),
+                    "subgroup_or_dose": str(ext.get("subgroup_or_dose") or "").strip(),
+                    "supporting_quote": str(ext.get("supporting_quote") or "").strip(),
+                    "result_text": str(ext.get("result_text") or "").strip(),
+                }
+                key = (
+                    item["intervention_idx"],
+                    item["outcome_variable"],
+                    item["effect_direction"],
+                    item["effect_size"],
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                outcomes.append(item)
+
+            # Prefer explicit effect sizes, then keep a small capped set.
+            outcomes.sort(
+                key=lambda o: (
+                    0 if (o.get("effect_size") or "").strip() else 1,
+                    (o.get("outcome_variable") or "").lower(),
+                )
+            )
+            return outcomes[:8]
+
         results: List[TopStudyItem] = []
         for doc_id in ranked_doc_ids:
             meta = doc_metadata.get(doc_id, {}) or {}
@@ -1039,6 +1191,7 @@ class GetTopStudiesTool(BaseTool):
                         (ctx.chunk_text or "")[:600] if ctx else ""
                     ),
                     study_location=", ".join(doc_uuid_to_countries.get(doc_id, [])[:2]),
+                    extracted_outcomes=_extract_key_study_outcomes(doc_id),
                 )
             )
 

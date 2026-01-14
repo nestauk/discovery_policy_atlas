@@ -505,3 +505,100 @@ async def apply_rcs_to_issue_evidence(
     return {
         "scored_issue_evidence": scored_issue_evidence,
     }
+
+
+async def apply_rcs_to_outcome_evidence(
+    state: SynthesisState,
+) -> Dict[str, Any]:
+    """Apply RCS to existing outcome_evidence to create scored contexts.
+
+    This mirrors apply_rcs_to_theme_evidence/apply_rcs_to_issue_evidence, but uses
+    outcome themes so outcome-related sections can draw from pre-scored evidence.
+
+    Args:
+        state: Current workflow state with outcome_evidence populated.
+
+    Returns:
+        State update with scored_outcome_evidence (and updated all_scored_contexts).
+    """
+    print("--- Applying Contextual Summarisation (RCS) to Outcome Evidence ---")
+
+    outcome_evidence = state.get("outcome_evidence") or {}
+    outcomes = state.get("aggregated_outcomes") or []
+    research_question = state.get("research_question", "")
+
+    rcs_config = state.get("rcs_config") or RCSConfig()
+
+    # Build outcome lookup for descriptions
+    outcome_lookup = {o.outcome_name: o for o in outcomes}
+
+    scored_outcome_evidence: List[ThemeEvidence] = []
+    all_scored_contexts: List[ScoredContext] = list(
+        state.get("all_scored_contexts") or []
+    )
+    themes_with_gaps: List[str] = list(state.get("themes_with_gaps") or [])
+
+    for theme_id, chunks in outcome_evidence.items():
+        if not chunks:
+            themes_with_gaps.append(theme_id)
+            continue
+
+        out = outcome_lookup.get(theme_id)
+        theme_description = getattr(out, "outcome_description", "") if out else ""
+
+        theme_question = generate_theme_question(
+            theme_name=theme_id,
+            theme_description=theme_description,
+            research_question=research_question,
+        )
+
+        scored_contexts = await contextual_summarise_batch(
+            chunks=chunks,
+            question=theme_question,
+            theme_id=theme_id,
+            theme_name=theme_id,
+            concurrency=rcs_config.rcs_concurrency,
+            state=state,
+        )
+
+        filtered_contexts = [
+            c
+            for c in scored_contexts
+            if c.relevance_score >= rcs_config.score_threshold
+        ]
+        filtered_contexts.sort(key=lambda c: c.relevance_score, reverse=True)
+        filtered_contexts = filtered_contexts[: rcs_config.max_contexts_per_theme]
+
+        high_quality = [
+            c
+            for c in filtered_contexts
+            if c.relevance_score >= rcs_config.high_quality_threshold
+        ]
+        evidence_sufficient = len(high_quality) >= rcs_config.min_high_quality_per_theme
+        if not evidence_sufficient:
+            themes_with_gaps.append(theme_id)
+
+        scored_outcome_evidence.append(
+            ThemeEvidence(
+                theme_id=theme_id,
+                theme_name=theme_id,
+                theme_description=theme_description,
+                theme_question=theme_question,
+                scored_contexts=filtered_contexts,
+                total_chunks_retrieved=len(chunks),
+                total_chunks_scored=len(scored_contexts),
+                high_quality_count=len(high_quality),
+                evidence_sufficient=evidence_sufficient,
+            )
+        )
+        all_scored_contexts.extend(filtered_contexts)
+
+    print(
+        f"RCS for outcomes complete: {len(scored_outcome_evidence)} outcome themes processed"
+    )
+
+    return {
+        "scored_outcome_evidence": scored_outcome_evidence,
+        "all_scored_contexts": all_scored_contexts,
+        "themes_with_gaps": themes_with_gaps,
+    }

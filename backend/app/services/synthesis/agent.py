@@ -29,8 +29,10 @@ from app.services.synthesis.nodes import (
     build_aggregated_tables,
     retrieve_evidence_for_themes,
     retrieve_evidence_for_issues,
+    retrieve_evidence_for_outcomes,
     apply_rcs_to_theme_evidence,
     apply_rcs_to_issue_evidence,
+    apply_rcs_to_outcome_evidence,
     generate_briefing,
 )
 from app.services.synthesis.schemas import RCSConfig
@@ -70,10 +72,12 @@ def create_synthesis_workflow():
     # Phase 4: RAG Retrieval
     workflow.add_node("retrieve_evidence_for_themes", retrieve_evidence_for_themes)
     workflow.add_node("retrieve_evidence_for_issues", retrieve_evidence_for_issues)
+    workflow.add_node("retrieve_evidence_for_outcomes", retrieve_evidence_for_outcomes)
 
     # Phase 5: Contextual Summarisation (RCS)
     workflow.add_node("apply_rcs_to_theme_evidence", apply_rcs_to_theme_evidence)
     workflow.add_node("apply_rcs_to_issue_evidence", apply_rcs_to_issue_evidence)
+    workflow.add_node("apply_rcs_to_outcome_evidence", apply_rcs_to_outcome_evidence)
 
     # Phase 6: Briefing (tool-augmented with mandatory verification)
     workflow.add_node("generate_briefing", generate_briefing)
@@ -98,11 +102,13 @@ def create_synthesis_workflow():
     workflow.add_edge("retrieve_evidence_for_themes", "retrieve_evidence_for_issues")
 
     # RCS processing after RAG retrieval
-    workflow.add_edge("retrieve_evidence_for_issues", "apply_rcs_to_theme_evidence")
+    workflow.add_edge("retrieve_evidence_for_issues", "retrieve_evidence_for_outcomes")
+    workflow.add_edge("retrieve_evidence_for_outcomes", "apply_rcs_to_theme_evidence")
     workflow.add_edge("apply_rcs_to_theme_evidence", "apply_rcs_to_issue_evidence")
+    workflow.add_edge("apply_rcs_to_issue_evidence", "apply_rcs_to_outcome_evidence")
 
     # Briefing generation
-    workflow.add_edge("apply_rcs_to_issue_evidence", "generate_briefing")
+    workflow.add_edge("apply_rcs_to_outcome_evidence", "generate_briefing")
     workflow.add_edge("generate_briefing", END)
 
     return workflow.compile()

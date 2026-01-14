@@ -90,6 +90,46 @@ class VerificationResult(BaseModel):
     )
 
 
+class InterventionTableRowOutput(BaseModel):
+    """Structured output for a single interventions table row.
+
+    The LLM provides prose per cell; we render the markdown table deterministically.
+    """
+
+    intervention_name: str = Field(
+        ..., description="Short intervention category name (3-10 words)."
+    )
+    context: str = Field(
+        ...,
+        description="Context & Features cell prose (implementation setting, delivery, components).",
+    )
+    key_study_description: str = Field(
+        ...,
+        description=(
+            "Key Study cell prose (concrete implementation example) with [N] citations."
+        ),
+    )
+    impact_narrative: str = Field(
+        ...,
+        description=(
+            "Impact & Outcomes cell prose. Must start with key-study outcomes/effect sizes (use "
+            "get_top_studies.extracted_outcomes), then briefly summarise broader evidence in the theme."
+        ),
+    )
+    sources: str = Field(
+        ...,
+        description="Sources cell: a compact list of [N] citations used across the row.",
+    )
+
+
+class InterventionsTableOutput(BaseModel):
+    """Structured output for the interventions table section."""
+
+    rows: List[InterventionTableRowOutput] = Field(
+        ..., description="4-6 intervention rows for the interventions table."
+    )
+
+
 # Maximum tool calls per section (user-configured)
 # Increased to support per-row evidence gathering for richer intervention tables.
 MAX_TOOL_CALLS_PER_SECTION = 10
@@ -354,18 +394,31 @@ class BriefingOrchestrator:
         # Build tool descriptions
         tool_descriptions = self._build_tool_descriptions()
 
-        # Collect available theme names and citation numbers from state
-        theme_names: List[str] = []
-        for key in (
-            "final_intervention_themes",
-            "final_issue_themes",
-            "final_outcome_themes",
-        ):
-            themes = self.state.get(key) or []
-            for t in themes:
-                name = getattr(t, "name", None) or getattr(t, "theme_name", None)
-                if name and name not in theme_names:
-                    theme_names.append(name)
+        # Collect theme names by branch. Phase-1 tool auto-fill must be branch-aware
+        # to avoid passing issue/outcome names into intervention-evidence tools.
+        intervention_theme_names: List[str] = []
+        issue_theme_names: List[str] = []
+        outcome_theme_names: List[str] = []
+
+        for t in self.state.get("final_intervention_themes") or []:
+            name = getattr(t, "name", None) or getattr(t, "theme_name", None)
+            if name and name not in intervention_theme_names:
+                intervention_theme_names.append(name)
+
+        for t in self.state.get("final_issue_themes") or []:
+            name = getattr(t, "name", None) or getattr(t, "theme_name", None)
+            if name and name not in issue_theme_names:
+                issue_theme_names.append(name)
+
+        for t in self.state.get("final_outcome_themes") or []:
+            name = getattr(t, "name", None) or getattr(t, "theme_name", None)
+            if name and name not in outcome_theme_names:
+                outcome_theme_names.append(name)
+
+        # Default theme list (used only when we cannot infer branch intent)
+        theme_names: List[str] = (
+            intervention_theme_names + issue_theme_names + outcome_theme_names
+        )
 
         grounded_citations = self.state.get("grounded_citations") or []
         citation_numbers = [
@@ -448,13 +501,33 @@ Decide which tools to call to gather the most relevant evidence for this section
                 tool_name = tc.tool
                 arguments = tc.arguments or {}
 
+                # Phase 1 is evidence gathering only. Verification is handled separately
+                # in `_verify_section()`; do not allow verification tools here even if
+                # the LLM attempts to call them.
+                if tool_name in {"verify_claim_support", "verify_multiple_claims"}:
+                    logger.warning(
+                        f"Skipping {tool_name}: verification tools are not allowed during evidence gathering"
+                    )
+                    continue
+
                 # Enforce required parameters; skip invalid calls to avoid crashing tools
                 if tool_name == "get_theme_evidence" and not arguments.get(
                     "theme_name"
                 ):
-                    # Auto-fill with next available theme name if we have one
+                    # Auto-fill theme_name in a branch-aware way to avoid "no theme match"
+                    # fallbacks caused by mixing intervention/issue/outcome theme names.
+                    sec = (ctx.section_name or "").lower()
+                    if "outcome" in sec:
+                        candidates = outcome_theme_names
+                    elif "issue" in sec or "challenge" in sec or "barrier" in sec:
+                        candidates = issue_theme_names
+                    elif "intervention" in sec or "recommendation" in sec:
+                        candidates = intervention_theme_names
+                    else:
+                        candidates = intervention_theme_names or theme_names
+
                     next_theme = None
-                    for name in theme_names:
+                    for name in candidates:
                         if name not in ctx.used_theme_names:
                             next_theme = name
                             break
@@ -472,16 +545,12 @@ Decide which tools to call to gather the most relevant evidence for this section
                 if tool_name == "get_multiple_document_quality" and not arguments.get(
                     "citation_numbers"
                 ):
-                    if citation_numbers:
-                        arguments["citation_numbers"] = citation_numbers[:10]
-                        logger.info(
-                            "Auto-filled get_multiple_document_quality with citation_numbers"
-                        )
-                    else:
-                        logger.warning(
-                            "Skipping get_multiple_document_quality: missing citation_numbers"
-                        )
-                        continue
+                    # Do not auto-fill broad ranges; this tool should only be used when
+                    # the caller specifies the citations to inspect.
+                    logger.warning(
+                        "Skipping get_multiple_document_quality: missing citation_numbers"
+                    )
+                    continue
                 if tool_name == "get_document_quality" and not arguments.get(
                     "citation_number"
                 ):
@@ -689,6 +758,12 @@ Decide which tools to call to gather the most relevant evidence for this section
                 ctx, additional_instructions
             )
 
+        # Special-case interventions table: structured output + deterministic table rendering
+        if ctx.section_name.lower().startswith("policy interventions analysis"):
+            return await self._generate_interventions_table_structured(
+                ctx, additional_instructions
+            )
+
         # Build evidence context
         evidence_context = self._format_evidence_for_generation(ctx)
 
@@ -703,6 +778,82 @@ Decide which tools to call to gather the most relevant evidence for this section
         response = await self.generation_llm.ainvoke(prompt, config=config)
 
         return response.content.strip()
+
+    async def _generate_interventions_table_structured(
+        self,
+        ctx: OrchestratorContext,
+        additional_instructions: str,
+    ) -> str:
+        """Generate interventions table using structured output then render deterministically."""
+        evidence_context = self._format_evidence_for_generation(ctx)
+
+        prompt = f"""
+You are writing the "Key Interventions" table for an executive policy briefing.
+
+Output requirements:
+- Produce exactly a markdown table with header:
+  | Intervention | Context & Features | Key Study | Impact & Outcomes | Sources |
+- The content for each cell MUST be produced via the structured schema (rows), then the system will render the table.
+
+Row requirements (4-6 rows):
+- Intervention: short, plain category label (not a paragraph).
+- Context & Features: concise implementation details (setting, delivery, components).
+- Key Study: concrete implementation example drawn from get_top_studies. Include concise implementation details (setting, delivery, components). Name country(s)/location that the study took place in if available. Include [N] citations. 
+- Impact & Outcomes:
+  - Start with key-study outcomes/effect sizes using get_top_studies.extracted_outcomes.
+  - If extracted_outcomes contains any non-empty effect_size values, you MUST include at least one effect_size verbatim (e.g., "15.01%") and name the outcome_variable.
+  - If effect_size is empty but extracted_outcomes includes numeric details in result_text or supporting_quote, you MUST include at least one concrete number from those fields.
+  - If no numeric detail is available at all, explicitly say "No quantified effect size reported" and give the direction and outcome name.
+  - Then add 1-2 sentences on broader evidence in the theme (direction, consistency, caveats).
+  - Include [N] citations for both the key-study outcomes and the broader evidence statements.
+- Sources: compact [N] citations used in the row (deduplicate).
+
+Citation rules:
+- ONLY use [N] citations from Evidence below.
+- Do not invent citation numbers.
+
+Evidence:
+{evidence_context}
+
+Additional guidance:
+{additional_instructions}
+"""
+
+        structured_llm = self.generation_llm.with_structured_output(
+            InterventionsTableOutput,
+            method="function_calling",
+        )
+        config = self._build_langfuse_config("generate_interventions_table_structured")
+        result: InterventionsTableOutput = await structured_llm.ainvoke(
+            prompt, config=config
+        )
+
+        # Deterministic markdown rendering (avoid LLM table formatting failures)
+        lines: List[str] = []
+        lines.append(
+            "| Intervention | Context & Features | Key Study | Impact & Outcomes | Sources |"
+        )
+        lines.append("|---|---|---|---|---|")
+        for r in result.rows:
+            # Replace newlines inside cells to keep markdown stable; use <br/>-like via newline escaped
+            def _cell(s: str) -> str:
+                s = (s or "").strip()
+                return s.replace("\n", "<br/><br/>")
+
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        _cell(r.intervention_name),
+                        _cell(r.context),
+                        _cell(r.key_study_description),
+                        _cell(r.impact_narrative),
+                        _cell(r.sources),
+                    ]
+                )
+                + " |"
+            )
+        return "\n".join(lines).strip()
 
     async def _verify_section(
         self,
@@ -756,7 +907,16 @@ Decide which tools to call to gather the most relevant evidence for this section
         Returns:
             Formatted string of tool descriptions.
         """
-        tools = self.registry.get_all()
+        # Phase 1 is evidence gathering only. Verification is handled separately
+        # in `_verify_section()` using structured output.
+        excluded_tools = {
+            "verify_claim_support",
+            "verify_multiple_claims",
+            # Avoid wasted calls: this is redundant with other evidence outputs and is
+            # frequently auto-filled with broad citation ranges when present.
+            "get_multiple_document_quality",
+        }
+        tools = [t for t in self.registry.get_all() if t.name not in excluded_tools]
         descriptions = []
         for tool in tools:
             schema = tool.get_schema()

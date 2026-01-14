@@ -78,6 +78,10 @@ ALSO IMPORTANT: Use the get_top_studies tool for each intervention type to ident
 (ranked by evidence strength and predicted impact) and to extract a concrete implementation example
 for the 'Key Study' column.
 
+NOTE: get_top_studies also returns structured extracted outcomes/effect sizes for the key study
+(from upstream result extractions), which you should use for the 'Key study outcomes' part of
+the Impact & Outcomes cell.
+
 For each row provide:
 1. Intervention Type (3-6 words): Clear category name (e.g., "Combined Diet and Activity Programs")
 2. Context/Features (15-25 words): Delivery method, setting, key components, notable features
@@ -560,8 +564,17 @@ def _parse_intervention_table(
             table_started = True
             continue
 
-        # Parse data row
-        cells = [c.strip() for c in line.split("|")[1:-1]]
+        # Parse data row.
+        # Be robust to markdown tables that omit a trailing pipe at line end.
+        # Example valid rows:
+        # - | a | b | c |
+        # - | a | b | c
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            stripped = stripped[1:]
+        if stripped.endswith("|"):
+            stripped = stripped[:-1]
+        cells = [c.strip() for c in stripped.split("|")]
         if len(cells) >= 2:
             # Extract citation numbers from the entire row (including Sources column if present)
             citation_nums = _extract_citation_numbers(line)

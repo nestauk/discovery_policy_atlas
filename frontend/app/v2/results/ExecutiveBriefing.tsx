@@ -358,8 +358,11 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
     const parts = renderCitations(text, prefix);
     return parts.map((part, i) => {
       if (typeof part !== 'string') return part;
+      // Normalise any literal <br/> strings coming from backend-generated table cells
+      // into real newlines for consistent rendering.
+      const normalised = part.replace(/<br\s*\/?>/gi, '\n');
       // Convert newlines to <br/> for readability (used e.g. to separate key outcomes vs broader evidence)
-      const lines = part.split('\n');
+      const lines = normalised.split('\n');
       // Handle **bold** markdown
       return lines.flatMap((line, lineIdx) => {
         const boldParts = line.split(/(\*\*[^*]+\*\*)/g);
@@ -639,7 +642,8 @@ export function ExecutiveBriefing({
       });
 
     const rich = (text?: string) => {
-      const safe = sanitize(text);
+      const normalised = (text || "").replace(/<br\s*\/?>/gi, "\n");
+      const safe = sanitize(normalised);
       const withBold = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
       const withBreaks = withBold.replace(/\n/g, "<br/>");
       return linkCitations(withBreaks);

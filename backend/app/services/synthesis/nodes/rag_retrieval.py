@@ -294,3 +294,50 @@ async def retrieve_evidence_for_issues(state: SynthesisState) -> SynthesisState:
         "chunk_to_citation": ctx.chunk_to_citation,
         "doc_citation_map": ctx.doc_citation_map,
     }
+
+
+async def retrieve_evidence_for_outcomes(state: SynthesisState) -> SynthesisState:
+    """Retrieve document chunks for outcome themes using constrained RAG.
+
+    Args:
+        state: Current workflow state with aggregated_outcomes.
+
+    Returns:
+        State update with outcome_evidence and updated citations.
+    """
+    print("--- RAG: Retrieving Evidence for Outcomes (Constrained) ---")
+
+    ctx = RetrievalContext(
+        project_id=state.get("project_id", ""),
+        doc_metadata=state.get("doc_metadata") or {},
+        doc_scores=state.get("doc_scores") or {},
+        extraction_quotes=state.get("extraction_quotes") or {},
+        theme_to_doc_uuids=state.get("theme_to_doc_uuids") or {},
+        grounded_citations=list(state.get("grounded_citations") or []),
+        chunk_to_citation=dict(state.get("chunk_to_citation") or {}),
+        doc_citation_map=dict(state.get("doc_citation_map") or {}),
+        seen_chunks=set(state.get("chunk_to_citation", {}).keys()),
+    )
+
+    outcomes = state.get("aggregated_outcomes") or []
+    outcome_evidence: Dict[str, List[RetrievedChunk]] = {}
+    total_constrained = 0
+
+    for out in outcomes:
+        theme_id = out.outcome_name
+        query = f"{theme_id} {out.outcome_description or ''}"[:400]
+
+        chunks, constrained = await _retrieve_for_theme(
+            theme_id, query, ctx, match_count=20, max_results=6
+        )
+        outcome_evidence[theme_id] = chunks
+        total_constrained += constrained
+
+    print(f"Constrained outcome retrieval: {total_constrained} chunks passed filter")
+
+    return {
+        "outcome_evidence": outcome_evidence,
+        "grounded_citations": ctx.grounded_citations,
+        "chunk_to_citation": ctx.chunk_to_citation,
+        "doc_citation_map": ctx.doc_citation_map,
+    }

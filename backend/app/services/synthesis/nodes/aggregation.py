@@ -363,6 +363,14 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 uuids.append(meta["doc_uuid"])
         theme_to_doc_uuids[t.name] = list(set(uuids))
 
+    for t in final_outcome_themes:
+        uuids = []
+        for c in t.concepts:
+            meta = ex_metadata.get(c.id, {})
+            if meta.get("doc_uuid"):
+                uuids.append(meta["doc_uuid"])
+        theme_to_doc_uuids[t.name] = list(set(uuids))
+
     print(
         f"Built {len(issues)} issues, {len(interventions)} interventions, {len(outcomes)} outcomes"
     )

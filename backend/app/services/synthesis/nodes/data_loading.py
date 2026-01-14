@@ -134,11 +134,18 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 **base,
                 "type": "intervention",
                 "intervention_name": str(row.get("label") or raw.get("name") or ""),
+                "intervention_idx": raw.get("idx"),
                 "study_type": normalize_study_type(str(raw_st)),
                 "country": str(raw.get("country") or ""),
                 "description": str(
                     row.get("description") or raw.get("description") or ""
                 ),
+                "supporting_quote": str(raw.get("supporting_quote") or ""),
+                "population_intervened": str(raw.get("population_intervened") or ""),
+                "population_demographics": str(
+                    raw.get("population_demographics") or ""
+                ),
+                "sample_size": str(raw.get("sample_size") or ""),
             }
         elif et == "issue":
             return {
@@ -158,6 +165,14 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 ),
                 "effect_direction": str(raw.get("effect_direction") or ""),
                 "effect_size": str(raw.get("effect_size") or ""),
+                "effect_size_type": str(raw.get("effect_size_type") or ""),
+                "p_value": raw.get("p_value"),
+                "uncertainty": raw.get("uncertainty"),
+                "intervention_idx": raw.get("intervention_idx"),
+                "subgroup_or_dose": str(raw.get("subgroup_or_dose") or ""),
+                "population_measured": str(raw.get("population_measured") or ""),
+                "result_text": str(raw.get("result_text") or ""),
+                "supporting_quote": str(raw.get("supporting_quote") or ""),
             }
         return {**base, "type": et}
 
