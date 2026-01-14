@@ -3,6 +3,7 @@ import './globals.css'
 import 'antd/dist/reset.css'
 import { ClerkProvider } from "@clerk/nextjs";
 import { ConditionalHeader } from '@/components/LayoutWrapper';
+import { PostHogUserIdentifier } from '@/lib/posthog';
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -24,8 +25,10 @@ export default function RootLayout({
       </head>
       <body className={inter.className}>
         <ClerkProvider>
-          <ConditionalHeader />
-          {children}
+          <PostHogUserIdentifier>
+            <ConditionalHeader />
+            {children}
+          </PostHogUserIdentifier>
         </ClerkProvider>
       </body>
     </html>

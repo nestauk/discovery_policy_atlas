@@ -1,0 +1,50 @@
+import posthog from 'posthog-js'
+
+// Environment variable flags (set in .env.local)
+// NEXT_PUBLIC_POSTHOG_ANONYMOUS=true  -> Don't identify users (anonymous by default)
+// NEXT_PUBLIC_POSTHOG_SESSION_RECORDING=false -> Disable session recording
+export const POSTHOG_ANONYMOUS = process.env.NEXT_PUBLIC_POSTHOG_ANONYMOUS === 'true'
+export const POSTHOG_SESSION_RECORDING = process.env.NEXT_PUBLIC_POSTHOG_SESSION_RECORDING !== 'false'
+
+// Prevent multiple initializations if this module is imported multiple times
+let initialized = false
+
+// Only initialize on client-side (not during SSR)
+if (typeof window !== 'undefined' && !initialized) {
+  const posthogKey = process.env.NEXT_PUBLIC_POSTHOG_KEY
+  const posthogHost = process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://eu.i.posthog.com'
+
+  if (posthogKey) {
+    initialized = true
+    posthog.init(posthogKey, {
+      api_host: posthogHost,
+      defaults: '2025-11-30',
+      person_profiles: 'identified_only',
+      autocapture: true,
+      capture_pageview: true,
+      capture_pageleave: true,
+      disable_session_recording: !POSTHOG_SESSION_RECORDING,
+      session_recording: {
+        maskAllInputs: true,
+        maskTextSelector: '[data-posthog-mask]',
+        blockSelector: '[data-posthog-block]',
+        maskTextFn: (text) => {
+          if (text.length > 10) {
+            return text.substring(0, 3) + '...' + text.substring(text.length - 3)
+          }
+          return '***'
+        },
+        recordCrossOriginIframes: false,
+      },
+      loaded: () => {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[PostHog] Initialized', {
+            anonymous: POSTHOG_ANONYMOUS,
+            sessionRecording: POSTHOG_SESSION_RECORDING,
+          })
+        }
+      },
+    })
+  }
+}
+
