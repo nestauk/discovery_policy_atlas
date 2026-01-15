@@ -255,3 +255,22 @@ async def process_outcome_themes(state: SynthesisState) -> SynthesisState:
     await _critique_themes(themes, rq, state, "outcome")
     finals = await _map_concepts_to_themes(concepts, themes, state, "outcome")
     return {"discovered_outcome_themes": themes, "final_outcome_themes": finals}
+
+
+async def process_risk_themes(state: SynthesisState) -> SynthesisState:
+    """Process risk theme discovery, critique, and mapping.
+
+    Args:
+        state: Current workflow state.
+
+    Returns:
+        State update with discovered_risk_themes and final_risk_themes.
+    """
+    rq = state.get("research_question") or "Not specified"
+    concepts = state.get("risk_concepts") or []
+    if not concepts:
+        return {"discovered_risk_themes": [], "final_risk_themes": []}
+    themes = await _discover_themes(concepts, rq, state, "risk")
+    await _critique_themes(themes, rq, state, "risk")
+    finals = await _map_concepts_to_themes(concepts, themes, state, "risk")
+    return {"discovered_risk_themes": themes, "final_risk_themes": finals}

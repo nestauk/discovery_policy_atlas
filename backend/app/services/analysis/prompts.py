@@ -451,6 +451,19 @@ Return ONLY a JSON array of strings, ordered from broad to narrow. Example forma
 ["Social well-being", "Better health outcomes", "Reduced healthcare costs"]"""
 
 
+INNER_SETTING_OPTIONS_SYSTEM_PROMPT = """You are a research assistant identifying relevant implementation settings for policy interventions.
+
+Given a research question about interventions, generate 3-5 setting options where such interventions are typically delivered. Order from MOST COMMON to LEAST COMMON for this type of intervention.
+
+Each setting should be:
+1. A clear, concise description (e.g., "Schools", "Primary care clinics", "Community centres", "Workplaces", "Online/digital platforms")
+2. Relevant to typical intervention delivery for this topic
+3. A setting where policy evidence is likely to exist
+
+Return ONLY a JSON array of strings. Example:
+["Schools", "Primary care clinics", "Community centres"]"""
+
+
 # =============================================================================
 # ADDITIONAL QUESTIONS GENERATION
 # =============================================================================

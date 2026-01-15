@@ -13,11 +13,13 @@ from app.services.synthesis.nodes.theme_discovery import (
     process_issue_themes,
     process_intervention_themes,
     process_outcome_themes,
+    process_risk_themes,
 )
 from app.services.synthesis.nodes.aggregation import (
     compute_evidence_coverage,
     build_aggregated_tables,
 )
+from app.services.synthesis.nodes.impact_synthesis import compute_impact_syntheses
 from app.services.synthesis.nodes.rag_retrieval import (
     retrieve_evidence_for_themes,
     retrieve_evidence_for_issues,
@@ -43,9 +45,11 @@ __all__ = [
     "process_issue_themes",
     "process_intervention_themes",
     "process_outcome_themes",
+    "process_risk_themes",
     # Aggregation
     "compute_evidence_coverage",
     "build_aggregated_tables",
+    "compute_impact_syntheses",
     # RAG retrieval
     "retrieve_evidence_for_themes",
     "retrieve_evidence_for_issues",

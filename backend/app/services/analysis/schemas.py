@@ -61,6 +61,7 @@ class SearchContext(BaseModel):
     screening_factors: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=list)
     geography: List[str] = Field(default_factory=list)
+    inner_setting: Optional[str] = None
     time_preset: Optional[str] = None
     time_from: Optional[str] = None
     time_to: Optional[str] = None
@@ -87,6 +88,16 @@ class OutcomeOptionsRequest(BaseModel):
 class OutcomeOptionsResponse(BaseModel):
     research_question: str
     outcome_options: List[str]  # Ordered from broad to narrow
+
+
+class InnerSettingOptionsRequest(BaseModel):
+    research_question: str
+    max_options: int = 5
+
+
+class InnerSettingOptionsResponse(BaseModel):
+    research_question: str
+    inner_setting_options: List[str]
 
 
 class AdditionalQuestionsRequest(BaseModel):

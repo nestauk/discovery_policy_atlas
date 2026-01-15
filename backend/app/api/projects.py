@@ -29,6 +29,8 @@ from app.services.analysis.schemas import (
     PopulationOptionsResponse,
     OutcomeOptionsRequest,
     OutcomeOptionsResponse,
+    InnerSettingOptionsRequest,
+    InnerSettingOptionsResponse,
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
@@ -2397,6 +2399,32 @@ async def generate_outcome_options(
 
     return OutcomeOptionsResponse(
         research_question=request.research_question, outcome_options=outcome_options
+    )
+
+
+@router.post(
+    "/generate-inner-setting-options", response_model=InnerSettingOptionsResponse
+)
+async def generate_inner_setting_options(
+    request: InnerSettingOptionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate inner setting options for a research question using AI"""
+    service = SearchWizardService()
+    inner_setting_options = await service.generate_inner_setting_options(
+        research_question=request.research_question,
+        max_options=request.max_options,
+        user_id=current_user.user_id,
+    )
+
+    if not inner_setting_options:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate inner setting options"
+        )
+
+    return InnerSettingOptionsResponse(
+        research_question=request.research_question,
+        inner_setting_options=inner_setting_options,
     )
 
 

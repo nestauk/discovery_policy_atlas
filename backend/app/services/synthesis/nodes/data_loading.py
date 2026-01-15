@@ -50,11 +50,15 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     search_query = (proj_res.data[0].get("search_query") or {}) if proj_res.data else {}
     target_population = search_query.get("population") or []
     target_outcomes = search_query.get("outcome") or []
+    target_geography = search_query.get("geography") or ["UK"]
+    target_inner_setting = search_query.get("inner_setting")
     # Normalise to list[str]
     if isinstance(target_population, str):
         target_population = [target_population]
     if isinstance(target_outcomes, str):
         target_outcomes = [target_outcomes]
+    if isinstance(target_geography, str):
+        target_geography = [target_geography]
 
     # Fetch document metadata including extraction_results for scores
     docs_res = (
@@ -124,9 +128,12 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         """Convert extraction row to uniform format."""
         et = str(row.get("extraction_type") or "")
         raw = row.get("raw_data") or {}
+        doc_uuid = str(row.get("analysis_document_id") or "")
+        doc_id = doc_metadata.get(doc_uuid, {}).get("doc_id") if doc_uuid else None
         base = {
             "id": str(row.get("id")),
-            "doc_uuid": str(row.get("analysis_document_id") or ""),
+            "doc_uuid": doc_uuid,
+            "doc_id": doc_id,
         }
         if et == "intervention":
             raw_st = raw.get("study_type") or raw.get("type") or ""
@@ -146,6 +153,9 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                     raw.get("population_demographics") or ""
                 ),
                 "sample_size": str(raw.get("sample_size") or ""),
+                "inner_setting": str(raw.get("inner_setting") or ""),
+                "resource_intensity": str(raw.get("resource_intensity") or ""),
+                "delivery_complexity": str(raw.get("delivery_complexity") or ""),
             }
         elif et == "issue":
             return {
@@ -176,6 +186,15 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 "population_measured": str(raw.get("population_measured") or ""),
                 "result_text": str(raw.get("result_text") or ""),
                 "supporting_quote": str(raw.get("supporting_quote") or ""),
+                "negative_impact_flag": raw.get("negative_impact_flag"),
+            }
+        elif et == "conclusion":
+            return {
+                **base,
+                "type": "conclusion",
+                "predicted_impact": raw.get("predicted_impact") or {},
+                "evidence_strength": raw.get("evidence_strength") or {},
+                "supporting_quote": str(raw.get("supporting_quote") or ""),
             }
         return {**base, "type": et}
 
@@ -192,6 +211,8 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         "research_question": research_question,
         "target_population": target_population,
         "target_outcomes": target_outcomes,
+        "target_geography": target_geography,
+        "target_inner_setting": target_inner_setting,
         "doc_metadata": doc_metadata,
         "doc_scores": doc_scores,
         "extraction_to_doc": extraction_to_doc,
@@ -211,6 +232,7 @@ async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
     issue_concepts: List[Concept] = []
     intervention_concepts: List[Concept] = []
     outcome_concepts: List[Concept] = []
+    risk_concepts: List[Concept] = []
 
     for ext in state.get("raw_extractions") or []:
         if ext.get("issue_label"):
@@ -226,12 +248,34 @@ async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
             effect_dir = ext.get("direction") or ext.get("effect_direction", "")
             desc = f"Outcome: {ext.get('outcome_variable', '')}. Effect: {effect_dir}"
             outcome_concepts.append(Concept(id=ext["id"], canonical_description=desc))
+        if ext.get("type") == "conclusion":
+            predicted_impact = ext.get("predicted_impact") or {}
+            risks = predicted_impact.get("risks_identified") or []
+            for i, risk in enumerate(risks):
+                if risk and isinstance(risk, str):
+                    risk_concepts.append(
+                        Concept(
+                            id=f"{ext.get('id', '')}_risk_{i}",
+                            canonical_description=f"Risk: {risk}",
+                        )
+                    )
+        if ext.get("type") == "result" and ext.get("negative_impact_flag") is True:
+            outcome = ext.get("outcome_variable", "")
+            if outcome:
+                risk_concepts.append(
+                    Concept(
+                        id=ext.get("id", ""),
+                        canonical_description=f"Negative outcome risk: {outcome}",
+                    )
+                )
 
     print(
-        f"Created {len(issue_concepts)} issue, {len(intervention_concepts)} intervention, {len(outcome_concepts)} outcome concepts"
+        f"Created {len(issue_concepts)} issue, {len(intervention_concepts)} intervention, "
+        f"{len(outcome_concepts)} outcome, {len(risk_concepts)} risk concepts"
     )
     return {
         "issue_concepts": issue_concepts,
         "intervention_concepts": intervention_concepts,
         "outcome_concepts": outcome_concepts,
+        "risk_concepts": risk_concepts,
     }

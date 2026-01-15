@@ -383,6 +383,52 @@ class EvidenceCoverageSnapshot(BaseModel):
 # =============================================================================
 
 
+VerdictType = Literal[
+    "high_confidence_positive",
+    "high_confidence_negative",
+    "contested",
+    "ineffective",
+    "lean_positive",
+    "lean_negative",
+    "insufficient_evidence",
+    "probable_contribution",
+]
+
+
+SemanticMagnitudeType = Literal[
+    "transformational",
+    "substantial",
+    "moderate",
+    "marginal",
+    "unknown",
+]
+
+
+CausalityClaimType = Literal["attribution", "contribution", "correlation"]
+
+
+class TransferabilityBreakdown(BaseModel):
+    """Per-dimension transferability scores."""
+
+    inner_setting: str
+    population: str
+    geography: str
+    resource_intensity: str
+    delivery_complexity: str
+    notes: Dict[str, str] = Field(default_factory=dict)
+
+
+class RiskTheme(BaseModel):
+    """LLM-clustered risk theme (stored in synthesis_themes with type='risk')."""
+
+    theme_name: str
+    summary_description: str
+    frequency: int
+    source_doc_ids: List[str] = Field(default_factory=list)
+    has_harm_warning: bool = False
+    linked_intervention_theme_id: Optional[str] = None
+
+
 class OutcomeTheme(BaseModel):
     """Clustered outcome theme with aggregated effect data."""
 
@@ -397,6 +443,13 @@ class OutcomeTheme(BaseModel):
     sample_effect_sizes: List[str] = Field(default_factory=list)
     frequency: int = Field(0)
     source_doc_ids: List[str] = Field(default_factory=list)
+    verdict_label: Optional[VerdictType] = Field(None)
+    verdict_description: Optional[str] = Field(None)
+    discord_flag: bool = Field(False)
+    discord_reason: Optional[str] = Field(None)
+    predicted_magnitude: Optional[SemanticMagnitudeType] = Field(None)
+    magnitude_confidence: Optional[str] = Field(None)
+    intervention_theme_id: Optional[str] = Field(None)
 
 
 class InterventionDetails(BaseModel):
@@ -453,6 +506,11 @@ class PolicyIntervention(BaseModel):
     countries: List[str] = Field(default_factory=list)
     study_types: Dict[str, int] = Field(default_factory=dict)
     related_outcomes: List[str] = Field(default_factory=list)
+    transferability_rating: Optional[str] = Field(None)
+    transferability_note: Optional[str] = Field(None)
+    transferability_breakdown: Optional[TransferabilityBreakdown] = Field(None)
+    primary_causal_mechanism: Optional[CausalityClaimType] = Field(None)
+    causal_mechanism_detail: Optional[str] = Field(None)
 
 
 class SynthesisSummary(BaseModel):

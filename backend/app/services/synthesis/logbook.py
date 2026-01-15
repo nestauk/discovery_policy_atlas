@@ -131,6 +131,11 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                     sample_effect_sizes=t.get("sample_effect_sizes") or [],
                     countries=t.get("countries") or [],
                     study_types=t.get("study_types") or {},
+                    transferability_rating=t.get("transferability_rating"),
+                    transferability_note=t.get("transferability_note"),
+                    transferability_breakdown=t.get("transferability_breakdown"),
+                    primary_causal_mechanism=t.get("primary_causal_mechanism"),
+                    causal_mechanism_detail=t.get("causal_mechanism_detail"),
                 )
             )
 
@@ -149,6 +154,13 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                     sample_effect_sizes=ot.get("sample_effect_sizes") or [],
                     frequency=ot.get("frequency") or 0,
                     source_doc_ids=ot.get("source_doc_ids") or [],
+                    verdict_label=ot.get("verdict_label"),
+                    verdict_description=ot.get("verdict_description"),
+                    discord_flag=ot.get("discord_flag") or False,
+                    discord_reason=ot.get("discord_reason"),
+                    predicted_magnitude=ot.get("predicted_magnitude"),
+                    magnitude_confidence=ot.get("magnitude_confidence"),
+                    intervention_theme_id=ot.get("intervention_theme_id"),
                 )
             )
 
@@ -288,12 +300,14 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
 
     # Build theme->extraction mappings
     theme_to_ex_ids: Dict[str, List[str]] = {}
-    for branch in ["issue", "intervention", "outcome"]:
+    for branch in ["issue", "intervention", "outcome", "risk"]:
         for ft in final_state.get(f"final_{branch}_themes") or []:
-            name = ft["name"] if isinstance(ft, dict) else getattr(ft, "name", None)
-            concepts = (
-                ft["concepts"] if isinstance(ft, dict) else getattr(ft, "concepts", [])
-            )
+            if isinstance(ft, dict):
+                name = ft.get("name") or ft.get("theme_name")
+                concepts = ft.get("concepts", [])
+            else:
+                name = getattr(ft, "name", None) or getattr(ft, "theme_name", None)
+                concepts = getattr(ft, "concepts", [])
             if name:
                 theme_to_ex_ids[name] = _dedupe(
                     [c["id"] if isinstance(c, dict) else c.id for c in (concepts or [])]
@@ -330,15 +344,17 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             )
 
     # Write intervention themes
+    intervention_id_by_name: Dict[str, str] = {}
     for intv in final_state.get("aggregated_interventions") or []:
         intv_dict = intv.model_dump() if hasattr(intv, "model_dump") else intv
         theme_id = str(uuid.uuid4())
+        intervention_name = intv_dict.get("intervention_name")
         supabase.table("synthesis_themes").insert(
             {
                 "id": theme_id,
                 "synthesis_run_id": run_id,
                 "theme_type": "intervention",
-                "theme_name": intv_dict.get("intervention_name"),
+                "theme_name": intervention_name,
                 "summary_description": intv_dict.get("brief_description"),
                 "impact_summary": intv_dict.get("impact_summary"),
                 "frequency": intv_dict.get("frequency", 0),
@@ -350,11 +366,19 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "sample_effect_sizes": intv_dict.get("sample_effect_sizes", []),
                 "countries": intv_dict.get("countries", []),
                 "study_types": intv_dict.get("study_types", {}),
+                "transferability_rating": intv_dict.get("transferability_rating"),
+                "transferability_note": intv_dict.get("transferability_note"),
+                "transferability_breakdown": intv_dict.get("transferability_breakdown"),
+                "primary_causal_mechanism": intv_dict.get("primary_causal_mechanism"),
+                "causal_mechanism_detail": intv_dict.get("causal_mechanism_detail"),
                 "created_at": datetime.utcnow().isoformat(),
             }
         ).execute()
 
-        for ex_id in theme_to_ex_ids.get(intv_dict.get("intervention_name", ""), []):
+        if intervention_name:
+            intervention_id_by_name[intervention_name] = theme_id
+
+        for ex_id in theme_to_ex_ids.get(intervention_name or "", []):
             theme_assignments.append(
                 {
                     "id": str(uuid.uuid4()),
@@ -370,6 +394,9 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
     for out in final_state.get("aggregated_outcomes") or []:
         out_dict = out.model_dump() if hasattr(out, "model_dump") else out
         outcome_id = str(uuid.uuid4())
+        intervention_link = out_dict.get("intervention_theme_id")
+        if intervention_link in intervention_id_by_name:
+            intervention_link = intervention_id_by_name[intervention_link]
         supabase.table("synthesis_outcome_themes").insert(
             {
                 "id": outcome_id,
@@ -383,6 +410,13 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "sample_effect_sizes": out_dict.get("sample_effect_sizes", []),
                 "frequency": out_dict.get("frequency", 0),
                 "source_doc_ids": out_dict.get("source_doc_ids", []),
+                "verdict_label": out_dict.get("verdict_label"),
+                "verdict_description": out_dict.get("verdict_description"),
+                "discord_flag": out_dict.get("discord_flag", False),
+                "discord_reason": out_dict.get("discord_reason"),
+                "predicted_magnitude": out_dict.get("predicted_magnitude"),
+                "magnitude_confidence": out_dict.get("magnitude_confidence"),
+                "intervention_theme_id": intervention_link,
                 "created_at": datetime.utcnow().isoformat(),
             }
         ).execute()
@@ -406,6 +440,28 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
     if outcome_assignments:
         unique = _dedupe_assignments(outcome_assignments, "synthesis_outcome_theme_id")
         supabase.table("outcome_theme_assignments").insert(unique).execute()
+
+    # Write risk themes
+    for risk in final_state.get("final_risk_themes") or []:
+        risk_dict = risk.model_dump() if hasattr(risk, "model_dump") else risk
+        risk_theme_id = str(uuid.uuid4())
+        linked = risk_dict.get("linked_intervention_theme_id")
+        if linked in intervention_id_by_name:
+            linked = intervention_id_by_name[linked]
+        supabase.table("synthesis_themes").insert(
+            {
+                "id": risk_theme_id,
+                "synthesis_run_id": run_id,
+                "theme_type": "risk",
+                "theme_name": risk_dict.get("theme_name"),
+                "summary_description": risk_dict.get("summary_description"),
+                "frequency": risk_dict.get("frequency", 0),
+                "source_doc_ids": risk_dict.get("source_doc_ids", []),
+                "has_harm_warning": risk_dict.get("has_harm_warning", False),
+                "linked_intervention_theme_id": linked,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+        ).execute()
 
 
 def _dedupe(items: List[str]) -> List[str]:

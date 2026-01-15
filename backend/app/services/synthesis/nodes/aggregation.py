@@ -8,7 +8,8 @@ from themes.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Dict, List
+from typing import Dict, List, Tuple
+import re
 
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState
@@ -19,6 +20,29 @@ from app.services.synthesis.schemas import (
     PolicyIntervention,
     OutcomeTheme,
 )
+
+
+def select_representative_effect_sizes(
+    candidates: List[Tuple[str, int, bool]], max_samples: int = 5
+) -> List[str]:
+    """Select representative effect sizes prioritising quality and numeric values."""
+    if not candidates:
+        return []
+
+    sorted_candidates = sorted(candidates, key=lambda x: (x[1], x[2]), reverse=True)
+    selected: List[str] = []
+    seen_prefixes = set()
+
+    for text, _quality, _has_number in sorted_candidates:
+        if len(selected) >= max_samples:
+            break
+        prefix = text[:30].lower()
+        if prefix in seen_prefixes:
+            continue
+        selected.append(text)
+        seen_prefixes.add(prefix)
+
+    return selected
 
 
 async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
@@ -127,6 +151,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     final_intervention_themes = state.get("final_intervention_themes") or []
     final_outcome_themes = state.get("final_outcome_themes") or []
     raw_extractions = state.get("raw_extractions") or []
+    doc_scores = state.get("doc_scores") or {}
 
     project_id = state.get("project_id", "")
     supabase = vectorization_service.supabase
@@ -228,9 +253,10 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
 
         # Aggregate effect counts and sizes from result extractions
         pos, neg, null = 0, 0, 0
-        effect_sizes: List[str] = []
+        effect_size_candidates: List[Tuple[str, int, bool]] = []
         related_outcomes: List[str] = []
         for doc_uuid in doc_uuids:
+            quality_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
             for result_ext in doc_to_results.get(doc_uuid, []):
                 # Support both 'direction' (new schema) and 'effect_direction' (legacy)
                 effect_dir = (
@@ -238,14 +264,17 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                     or result_ext.get("effect_direction", "")
                 ).lower()
                 if effect_dir in ("increase", "positive"):
-                    pos += 1
+                    pos += quality_score
                 elif effect_dir in ("decrease", "negative"):
-                    neg += 1
+                    neg += quality_score
                 elif effect_dir in ("null", "none", "no effect"):
-                    null += 1
+                    null += quality_score
                 effect_size = result_ext.get("effect_size", "")
                 if effect_size and len(effect_size) > 2:
-                    effect_sizes.append(effect_size[:100])
+                    has_number = bool(re.search(r"\d", effect_size))
+                    effect_size_candidates.append(
+                        (effect_size[:100], quality_score, has_number)
+                    )
                 outcome_var = result_ext.get("outcome_variable", "")
                 if outcome_var and outcome_var not in related_outcomes:
                     related_outcomes.append(outcome_var)
@@ -276,7 +305,9 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 positive_count=pos,
                 negative_count=neg,
                 null_count=null,
-                sample_effect_sizes=effect_sizes[:5],
+                sample_effect_sizes=select_representative_effect_sizes(
+                    effect_size_candidates
+                ),
                 countries=sorted(countries_set),
                 study_types=dict(study_types_counter),
                 related_outcomes=related_outcomes[:10],
@@ -298,18 +329,19 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             doc_id = meta.get("doc_id")
             if doc_id:
                 doc_ids.add(doc_id)
-            # Support both 'direction' (new schema) and 'effect_direction' (legacy)
-            effect_dir = raw_ext.get("direction") or raw_ext.get("effect_direction")
+            effect_dir = raw_ext.get("effect_direction")
+            doc_uuid = meta.get("doc_uuid", "")
+            quality_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
             if effect_dir == "increase":
-                pos += 1
+                pos += quality_score
                 if doc_id:
                     doc_effect_list.setdefault(doc_id, []).append("positive")
             elif effect_dir == "decrease":
-                neg += 1
+                neg += quality_score
                 if doc_id:
                     doc_effect_list.setdefault(doc_id, []).append("negative")
             elif effect_dir == "null":
-                null += 1
+                null += quality_score
                 if doc_id:
                     doc_effect_list.setdefault(doc_id, []).append("null")
 
