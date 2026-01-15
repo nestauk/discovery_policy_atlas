@@ -19,6 +19,12 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger(__name__)
 
 
+class ParsingError(Exception):
+    """Exception raised when parsing fails with a user-friendly message."""
+
+    pass
+
+
 def should_skip_large_pdf(
     file_size_bytes: int, page_count: int = None
 ) -> tuple[bool, str | None]:
@@ -88,7 +94,7 @@ class ParsingService:
             should_skip, skip_reason = should_skip_large_pdf(file_size)
             if should_skip:
                 logger.warning("Skipping PDF %s: %s", doc_id, skip_reason)
-                return None
+                raise ParsingError(skip_reason)
 
         try:
             # Run parsing in executor to avoid blocking event loop
@@ -114,7 +120,9 @@ class ParsingService:
 
         except asyncio.TimeoutError:
             logger.warning("Parsing timeout for %s after %.1fs", doc_id, timeout)
-            return None
+            raise ParsingError(f"Parsing timed out after {timeout:.0f} seconds")
+        except ParsingError:
+            raise  # Re-raise user-friendly parsing errors
         except Exception as e:
             logger.warning("Parsing failed for %s: %s", doc_id, e)
             return None
@@ -123,16 +131,19 @@ class ParsingService:
         """
         Parse PDF file and extract text.
 
-        Checks page count after opening and raises exception if too large.
+        Truncates to MAX_PDF_PAGES if the document exceeds the limit.
         """
         doc = fitz.open(path)
 
-        # Check page count after opening
+        # Check page count after opening - truncate if too large
         page_count = len(doc)
+        pages_to_parse = min(page_count, settings.MAX_PDF_PAGES)
         if page_count > settings.MAX_PDF_PAGES:
-            doc.close()
-            raise ValueError(
-                f"PDF has {page_count} pages, exceeding limit of {settings.MAX_PDF_PAGES}"
+            logger.warning(
+                "PDF %s has %d pages, truncating to first %d pages",
+                doc_id,
+                page_count,
+                settings.MAX_PDF_PAGES,
             )
 
         page_spans = []
@@ -140,7 +151,8 @@ class ParsingService:
         char_offset = 0
 
         try:
-            for i, page in enumerate(doc):
+            for i in range(pages_to_parse):
+                page = doc[i]
                 txt = page.get_text("text")
                 texts.append(txt)
                 start = char_offset
