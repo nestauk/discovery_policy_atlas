@@ -6,11 +6,18 @@ workflow for low confidence or Phase 2 categories.
 """
 
 import logging
+import re
 from typing import Optional
 
 from .base import BaseExtractionWorkflow
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_category(category: str) -> str:
+    """Strip leading number prefix (e.g., '1. ' from '1. Systematic Review')."""
+    return re.sub(r"^\d+\.\s*", "", category)
+
 
 # Evidence categories that use SR workflow
 SR_CATEGORIES = {
@@ -77,15 +84,18 @@ class WorkflowFactory:
         from .rct import RCTExtractionWorkflow
         from .sr import SRExtractionWorkflow
 
+        # Normalize category (strip number prefix like "1. ")
+        normalized_category = normalize_category(evidence_category)
+
         # Check for filtered categories
-        if evidence_category in FILTERED_CATEGORIES:
+        if normalized_category in FILTERED_CATEGORIES:
             raise ValueError(
                 f"Category '{evidence_category}' should be filtered before extraction"
             )
 
         # Determine workflow type based on category and confidence
         workflow_type = WorkflowFactory._resolve_workflow_type(
-            evidence_category, confidence
+            normalized_category, confidence
         )
 
         # Create and return appropriate workflow

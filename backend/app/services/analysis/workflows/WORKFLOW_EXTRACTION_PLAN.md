@@ -85,7 +85,7 @@ class InterventionItem(BaseModel):
     description: str
     study_type: str
     country: Optional[str] = None
-    population_intervened: Optional[str] = None
+    population_intervened: Optional[List[str]] = None
     population_demographics: Optional[str] = None
     sample_size: Optional[str] = None
     comparator: Optional[str] = None  # NEW: Add to base

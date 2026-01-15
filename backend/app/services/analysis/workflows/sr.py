@@ -52,7 +52,7 @@ SR_INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
             """Extract 2–6 INTERVENTION CATEGORIES that are reviewed and form the main focus of this systematic review..
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","geographic_scope":"...","population_intervened":"[...]","evidence_volume":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","geographic_scope":"...","population_intervened":["..."]|null,"evidence_volume":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
@@ -65,7 +65,7 @@ Rules:
 - If required information for a field is not reported at the category level, return "null" for that field.
 
 Population Fields:
-- population_intervened: The population(s) targeted across included studies within the intervention category (e.g. “adults with depression”, “children and adolescents”). Use abstracted labels; do not infer specifics.
+- population_intervened: The population(s) targeted across included studies within the intervention category (e.g. ["adults with depression", "children and adolescents"]). Use abstracted labels; do not infer specifics.
 - evidence_volume: The volume of evidence supporting the intervention category (e.g. “5 RCTs”, “12 studies”), only if explicitly reported.
 
 Paper text:
@@ -79,24 +79,45 @@ SR_RESULTS_PROMPT = ChatPromptTemplate.from_messages(
         ("system", EXTRACTION_SYSTEM_PROMPT),
         (
             "human",
-            """For ONLY the intervention category below, extract 1–5 POOLED/META-ANALYTIC RESULTS.
+            """For ONLY the intervention category below, extract POOLED/META-ANALYTIC RESULTS.
 
 Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","aggregate_effect_size_type":"...|null","aggregate_effect_size":"...|null","aggregate_uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"..."}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","n_studies":int|null,"sample_size":int|null,"stratum_type":"...|null","stratum_value":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"..."}}]}}
 
 Rules:
-- MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
+- Extract SEPARATE RESULT ROWS for each stratum (subgroup analysis, follow-up period, setting variant, etc.)
 - Focus on AGGREGATED REVIEW-LEVEL RESULTS for this intervention category, not per-study data
-- Focus on PRIMARY pooled/meta-analytic results emphasized in the review.
-- Each result should correspond to a single pooled or aggregate effect estimate.
-- Extract pooled or aggregate effect sizes with confidence intervals
-- Capture heterogeneity measures (I², τ²) when reported
-- aggregate_effect_size_type: Type of pooled estimate (e.g., "pooled OR", "SMD")
-- Include direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect, "mixed_or_unclear" for conflicting or ambiguous results.
-- population_measured: Who was measured for this specific result (may be subset of intervention population).
+- Each result row should correspond to a single pooled or aggregate effect estimate for ONE stratum
+
+IMPORTANT - Outcome Variable vs Stratum:
+- outcome_variable: The BASE outcome measure ONLY (e.g., "BMI", "weight", "blood pressure") - DO NOT include time points or subgroup info here
+- stratum_type + stratum_value: Captures the CONDITIONS under which the result applies (e.g., follow-up period, age group, setting)
+- WRONG: outcome_variable="BMI at 12 months"
+- CORRECT: outcome_variable="BMI", stratum_type="follow-up period", stratum_value="12 months"
+- WRONG: outcome_variable="BMI short term"
+- CORRECT: outcome_variable="BMI", stratum_type="follow-up period", stratum_value="short term"
+
+Sample Size Fields (IMPORTANT - extract these when mentioned in the text):
+- n_studies: Number of studies pooled for this result (k), as an INTEGER (e.g., 3, not "3 studies")
+- sample_size: Total participants across pooled studies (N), as an INTEGER (e.g., 605, not "605 participants")
+- Look for phrases like "X studies", "k=X", "N=X", "X participants", "sample of X"
+
+Stratum Fields (captures how results vary within an intervention):
+- stratum_type: The dimension of variation (e.g., "follow-up period", "age subgroup", "setting", "intervention variant", "dosage", "comparison type")
+- stratum_value: The specific value for this stratum (e.g., "12 months", "short term", "children 5-11 years", "school-based", "high dose")
+
+Effect Size Fields:
+- effect_size_type: Type of pooled estimate (e.g., "SMD", "pooled OR", "RR", "MD")
+- effect_size: The numeric value (e.g., "-0.11", "0.85")
+- uncertainty: Confidence interval (e.g., "95% CI -0.21 to -0.01")
+- heterogeneity_I2: I² statistic if reported (e.g., "45%")
+- tau2: τ² (between-study variance) if reported
+
+Direction:
+- "increase" for improvements/increases, "decrease" for reductions, "null" for no significant effect, "mixed_or_unclear" for conflicting results
 
 Paper text:
 {full_text}""",
