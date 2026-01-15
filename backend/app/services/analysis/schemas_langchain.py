@@ -7,7 +7,7 @@ and workflow-specific nullable fields.
 """
 
 from typing import List, Optional, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class IssueItem(BaseModel):
@@ -36,9 +36,8 @@ class InterventionItem(BaseModel):
     name: str
     type: str
     description: str
-    study_type: str  # Maryland Scientific Methods Scale (a-h)
     country: Optional[str] = None
-    population_intervened: Optional[str] = None
+    population_intervened: Optional[List[str]] = None
     population_demographics: Optional[str] = None
     sample_size: Optional[str] = None  # Total sample size for this intervention
     # NEW: Comparator/control condition (useful for both RCT and SR)
@@ -48,6 +47,21 @@ class InterventionItem(BaseModel):
         Literal["trial_intervention", "intervention_category", "policy_measure"]
     ] = None
     supporting_quote: str
+
+    @field_validator("population_intervened", mode="before")
+    @classmethod
+    def _normalize_population_intervened(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)):
+            cleaned = [str(v).strip() for v in value if str(v).strip()]
+            return cleaned or None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned or cleaned.lower() in {"null", "none"}:
+                return None
+            return [cleaned]
+        return value
 
 
 class MappingItem(BaseModel):
@@ -83,6 +97,15 @@ class ResultItem(BaseModel):
     heterogeneity_I2: Optional[str] = None  # I² statistic
     tau2: Optional[str] = None  # τ² (between-study variance)
     summary_statistic: Optional[str] = None  # e.g., "pooled OR", "SMD"
+    n_studies: Optional[int] = None  # Number of studies pooled (k)
+    sample_size: Optional[int] = None  # Total participants across pooled studies (N)
+
+    # Stratum fields (for SR subgroup analyses - each result row = one stratum)
+    stratum_type: Optional[
+        str
+    ] = None  # e.g., "follow-up period", "age subgroup", "setting"
+    stratum_value: Optional[str] = None  # e.g., "12 months", "children 5-11 years"
+    is_primary_stratum: Optional[bool] = None  # True if this is the main/overall result
 
     # Policy-specific field (nullable, constrained qualitative scale)
     impact_magnitude: Optional[
