@@ -16,6 +16,8 @@ interface NavigatorInterventionData {
   type: string
   country: string
   description: string
+  evidence_category?: string
+  is_systematic_review?: boolean
   result_count: number
   results_summary: Array<{
     outcome: string
@@ -33,6 +35,12 @@ interface NavigatorInterventionData {
     tau2?: string
     summary_statistic?: string
     estimate_level?: string
+    // Sample size fields
+    n_studies?: number
+    sample_size?: number
+    // Stratum fields
+    stratum_type?: string
+    stratum_value?: string
   }>
   total_sample_size: number | null
   documents: Array<{
@@ -164,14 +172,17 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
     <div className="space-y-2">
       {/* Header */}
       <div className="grid grid-cols-12 gap-4 px-4 py-3 bg-gray-50 rounded-lg border text-sm font-medium text-gray-700">
-        <div className="col-span-3">
+        <div className="col-span-2">
           <SortButton field="name">Intervention</SortButton>
         </div>
-        <div className="col-span-2">
+        <div className="col-span-1">
           <SortButton field="country">Country</SortButton>
         </div>
         <div className="col-span-2">
           <SortButton field="type">Type</SortButton>
+        </div>
+        <div className="col-span-2">
+          Evidence Category
         </div>
         <div className="col-span-1">
           <SortButton field="impact_score">Impact</SortButton>
@@ -193,36 +204,81 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
           <Card key={interventionKey} className="border-gray-200">
             <CardContent className="p-0">
               {/* Main Row */}
-              <div 
+              <div
                 className="grid grid-cols-12 gap-4 px-4 py-3 cursor-pointer hover:bg-gray-50"
                 onClick={() => toggleRowExpansion(interventionKey)}
               >
-                <div className="col-span-3">
+                <div className="col-span-2">
                   <div>
                     <h3 className="font-medium text-gray-900 text-sm">{intervention.name}</h3>
                   </div>
                 </div>
-                
-                <div className="col-span-2">
+
+                <div className="col-span-1">
                   <span className="text-sm text-gray-700">
                     {intervention.country && intervention.country !== 'Unknown' ? intervention.country : '—'}
                   </span>
                 </div>
-                
+
                 <div className="col-span-2">
                   <span className="text-sm text-gray-700">
                     {intervention.type && intervention.type !== 'Unknown' ? intervention.type : '—'}
                   </span>
                 </div>
-                
+
+                <div className="col-span-2">
+                  {(() => {
+                    const category = intervention.evidence_category
+                    if (!category) {
+                      return <span className="text-gray-400 text-xs">—</span>
+                    }
+
+                    // Color coding by evidence strength (matching Documents tab)
+                    const categoryColors: Record<string, { bg: string; text: string }> = {
+                      'Systematic Review and Meta-Analysis': { bg: 'bg-[#0F294A]', text: 'text-white' },
+                      'RCTs and Quasi-Experimental Studies': { bg: 'bg-[#9A1BBE]', text: 'text-white' },
+                      'Observational Research Studies': { bg: 'bg-[#0000FF]', text: 'text-white' },
+                      'Modelling & Simulation': { bg: 'bg-[#18A48C]', text: 'text-white' },
+                      'Policy Syntheses & Guidance Documents': { bg: 'bg-[#97D9E3]', text: 'text-gray-900' },
+                      'Qualitative & Contextual Evidence': { bg: 'bg-[#A59BEE]', text: 'text-gray-900' },
+                      'Expert Opinion and Commentary': { bg: 'bg-[#F6A4B7]', text: 'text-gray-900' },
+                      'Unknown / Insufficient information': { bg: 'bg-[#f8f5f4]', text: 'text-gray-700' },
+                    }
+
+                    const colors = categoryColors[category] || { bg: 'bg-gray-100', text: 'text-gray-700' }
+
+                    // Short display names
+                    const shortNames: Record<string, string> = {
+                      'Systematic Review and Meta-Analysis': 'Systematic Review',
+                      'RCTs and Quasi-Experimental Studies': 'RCT/Quasi-Exp',
+                      'Observational Research Studies': 'Observational',
+                      'Modelling & Simulation': 'Modelling',
+                      'Policy Syntheses & Guidance Documents': 'Policy Guidance',
+                      'Qualitative & Contextual Evidence': 'Qualitative',
+                      'Expert Opinion and Commentary': 'Expert Opinion',
+                      'Unknown / Insufficient information': 'Unknown',
+                    }
+
+                    const displayName = shortNames[category] || category
+
+                    return (
+                      <Tooltip content={category}>
+                        <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} cursor-help whitespace-normal leading-tight`}>
+                          {displayName}
+                        </span>
+                      </Tooltip>
+                    )
+                  })()}
+                </div>
+
                 <div className="col-span-1">
                   {renderRating(
-                    intervention.impact_score, 
+                    intervention.impact_score,
                     intervention.impact_justification,
                     'Predicted impact of this intervention based on reported outcomes'
                   )}
                 </div>
-                
+
                 <div className="col-span-2">
                   {renderRating(
                     intervention.evidence_score,
@@ -230,7 +286,7 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                     'Quality of evidence supporting this intervention based on study design and methodology'
                   )}
                 </div>
-                
+
                 <div className="col-span-2 text-center">
                   {intervention.total_sample_size != null && intervention.total_sample_size > 0 ? (
                     <span className="text-sm text-gray-700">
@@ -257,89 +313,123 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                     {intervention.results_summary && intervention.results_summary.length > 0 && (
                       <div>
                         <div className="space-y-3">
-                          {intervention.results_summary.map((result, idx) => (
-                            <div key={idx} className="bg-white rounded p-3 border">
-                              <div className="flex items-start justify-between mb-2">
-                                {result.result_text ? (
-                                  <Tooltip content={result.result_text}>
-                                    <span className="text-sm font-medium text-gray-900 cursor-help">
-                                      {result.outcome}
+                          {intervention.results_summary.map((result, idx) => {
+                            const isSystematicReview = intervention.is_systematic_review === true
+                            // Build outcome title with stratum
+                            const outcomeTitle = result.stratum_value
+                              ? `${result.outcome} — ${result.stratum_value}`
+                              : result.outcome
+
+                            return (
+                              <div key={idx} className="bg-white rounded p-3 border">
+                                <div className="flex items-start justify-between mb-2">
+                                  <div className="flex-1">
+                                    {result.result_text ? (
+                                      <Tooltip content={result.result_text}>
+                                        <span className="text-sm font-medium text-gray-900 cursor-help">
+                                          {outcomeTitle}
+                                        </span>
+                                      </Tooltip>
+                                    ) : (
+                                      <span className="text-sm font-medium text-gray-900">{outcomeTitle}</span>
+                                    )}
+                                    {/* Stratum type as subtle label if present */}
+                                    {result.stratum_type && (
+                                      <span className="ml-2 text-xs text-gray-500">
+                                        ({result.stratum_type})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-xs ${
+                                      result.direction === 'increase' ? 'bg-green-50 text-green-700 border-green-200' :
+                                      result.direction === 'decrease' ? 'bg-red-50 text-red-700 border-red-200' :
+                                      'bg-gray-50 text-gray-700 border-gray-200'
+                                    }`}
+                                  >
+                                    {result.direction}
+                                  </Badge>
+                                </div>
+
+                                {/* k/N sample size row for SR */}
+                                {isSystematicReview && (result.n_studies || result.sample_size) && (
+                                  <div className="text-xs text-gray-600 mb-2">
+                                    {result.n_studies && (
+                                      <span className="mr-3">k = {result.n_studies} studies</span>
+                                    )}
+                                    {result.sample_size && (
+                                      <span>N = {result.sample_size.toLocaleString()}</span>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Additional details - labels and fields based on evidence category */}
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                                  <div>
+                                    <span className="font-medium text-gray-600">
+                                      {isSystematicReview ? 'Aggregate Effect Size' : 'Effect Size'}
+                                      {result.effect_size_type && result.effect_size_type !== 'null' ? ` (${result.effect_size_type})` : ''}:{' '}
                                     </span>
-                                  </Tooltip>
-                                ) : (
-                                  <span className="text-sm font-medium text-gray-900">{result.outcome}</span>
-                                )}
-                                <Badge 
-                                  variant="outline" 
-                                  className={`text-xs ${
-                                    result.direction === 'increase' ? 'bg-green-50 text-green-700 border-green-200' :
-                                    result.direction === 'decrease' ? 'bg-red-50 text-red-700 border-red-200' :
-                                    'bg-gray-50 text-gray-700 border-gray-200'
-                                  }`}
-                                >
-                                  {result.direction}
-                                </Badge>
-                              </div>
-                              
-                              {/* Additional details */}
-                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                                <div>
-                                  <span className="font-medium text-gray-600">
-                                    Effect Size{result.summary_statistic && result.summary_statistic !== 'null' ? ` (${result.summary_statistic})` : ''}:{' '}
-                                  </span>
-                                  {result.effect_size && result.effect_size !== 'null' ? (
-                                    <span className="text-gray-600">{result.effect_size}</span>
-                                  ) : (
-                                    <span className="text-gray-400 italic">n/a</span>
-                                  )}
-                                </div>
-                                <div>
-                                  <span className="font-medium text-gray-600">P-value: </span>
-                                  {result.p_value && result.p_value !== 'null' ? (
-                                    <span className="text-gray-600">{result.p_value}</span>
-                                  ) : (
-                                    <span className="text-gray-400 italic">n/a</span>
-                                  )}
-                                </div>
-                                <div>
-                                  <span className="font-medium text-gray-600">Uncertainty: </span>
-                                  {result.uncertainty && result.uncertainty !== 'null' ? (
-                                    <span className="text-gray-600">±{result.uncertainty}</span>
-                                  ) : (
-                                    <span className="text-gray-400 italic">n/a</span>
-                                  )}
-                                </div>
-                                {/* SR-specific: heterogeneity measures for pooled results (always show for SRs) */}
-                                {result.estimate_level === 'pooled' && (
-                                  <>
+                                    {result.effect_size && result.effect_size !== 'null' ? (
+                                      <span className="text-gray-600">{result.effect_size}</span>
+                                    ) : (
+                                      <span className="text-gray-400 italic">n/a</span>
+                                    )}
+                                  </div>
+                                  {/* Hide P-value for Systematic Reviews */}
+                                  {!isSystematicReview && (
                                     <div>
-                                      <span className="font-medium text-gray-600">I²: </span>
-                                      {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? (
-                                        <span className="text-gray-600">{result.heterogeneity_I2}</span>
+                                      <span className="font-medium text-gray-600">P-value: </span>
+                                      {result.p_value && result.p_value !== 'null' ? (
+                                        <span className="text-gray-600">{result.p_value}</span>
                                       ) : (
                                         <span className="text-gray-400 italic">n/a</span>
                                       )}
                                     </div>
-                                    <div>
-                                      <span className="font-medium text-gray-600">τ²: </span>
-                                      {result.tau2 && result.tau2 !== 'null' ? (
-                                        <span className="text-gray-600">{result.tau2}</span>
-                                      ) : (
-                                        <span className="text-gray-400 italic">n/a</span>
-                                      )}
-                                    </div>
-                                  </>
+                                  )}
+                                  <div>
+                                    <span className="font-medium text-gray-600">
+                                      {isSystematicReview ? 'Aggregate Uncertainty' : 'Uncertainty'}:{' '}
+                                    </span>
+                                    {result.uncertainty && result.uncertainty !== 'null' ? (
+                                      <span className="text-gray-600">±{result.uncertainty}</span>
+                                    ) : (
+                                      <span className="text-gray-400 italic">n/a</span>
+                                    )}
+                                  </div>
+                                  {/* SR-specific: heterogeneity measures for Systematic Reviews */}
+                                  {isSystematicReview && (
+                                    <>
+                                      <div>
+                                        <span className="font-medium text-gray-600">I²: </span>
+                                        {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? (
+                                          <span className="text-gray-600">{result.heterogeneity_I2}</span>
+                                        ) : (
+                                          <span className="text-gray-400 italic">n/a</span>
+                                        )}
+                                      </div>
+                                      <div>
+                                        <span className="font-medium text-gray-600">τ²: </span>
+                                        {result.tau2 && result.tau2 !== 'null' ? (
+                                          <span className="text-gray-600">{result.tau2}</span>
+                                        ) : (
+                                          <span className="text-gray-400 italic">n/a</span>
+                                        )}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+
+                                {/* Population info */}
+                                {result.population_measured && (
+                                  <div className="mt-2 text-xs text-gray-600">
+                                    <div><span className="font-medium">Population:</span> {result.population_measured}</div>
+                                  </div>
                                 )}
                               </div>
-                              
-                              {/* Population info */}
-                              {result.population_measured && (
-                                <div className="mt-2 text-xs text-gray-600">
-                                  <div><span className="font-medium">Population:</span> {result.population_measured}</div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       </div>
                     )}

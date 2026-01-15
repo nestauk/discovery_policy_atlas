@@ -35,7 +35,8 @@ interface DetailedIntervention {
   description: string
   type?: string
   country?: string
-  study_type?: string
+  evidence_category?: string
+  is_systematic_review?: boolean
   sample_size?: number | null
   impact_score?: number
   evidence_score?: number
@@ -58,6 +59,12 @@ interface DetailedIntervention {
     tau2?: string
     summary_statistic?: string
     estimate_level?: string
+    // Sample size fields
+    n_studies?: number
+    sample_size?: number
+    // Stratum fields
+    stratum_type?: string
+    stratum_value?: string
   }>
   source_documents: Array<{
     doc_id?: string
@@ -334,13 +341,15 @@ export function InterventionsNavigator({
       type: detail.type || 'Unknown',
       country: detail.country || 'Unknown',
       description: detail.description,
+      evidence_category: detail.evidence_category,
+      is_systematic_review: detail.is_systematic_review,
       result_count: detail.results?.length || 0,
       results_summary: (detail.results || []).map(result => ({
         outcome: result.outcome_variable || 'Outcome',
         // Support both 'direction' (new schema) and 'effect_direction' (legacy)
         direction: result.direction || result.effect_direction || 'unknown',
         effect_size: result.effect_size,
-        effect_size_type: undefined,
+        effect_size_type: result.effect_size_type,
         p_value: result.p_value,
         uncertainty: result.uncertainty,
         result_text: result.result_text,
@@ -352,6 +361,12 @@ export function InterventionsNavigator({
         tau2: result.tau2,
         summary_statistic: result.summary_statistic,
         estimate_level: result.estimate_level,
+        // Sample size fields
+        n_studies: result.n_studies,
+        sample_size: result.sample_size,
+        // Stratum fields
+        stratum_type: result.stratum_type,
+        stratum_value: result.stratum_value,
       })),
       total_sample_size: detail.sample_size || null,
       documents: detail.source_documents?.map(doc => ({
@@ -374,6 +389,8 @@ export function InterventionsNavigator({
       type: intervention.type,
       country: intervention.country,
       description: intervention.description,
+      evidence_category: intervention.evidence_category,
+      is_systematic_review: intervention.is_systematic_review,
       result_count: intervention.result_count,
       results_summary: intervention.results_summary,
       total_sample_size: intervention.total_sample_size,
