@@ -1,14 +1,15 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 import tempfile
 import logging
 from pathlib import Path
 import uuid
+import json
 
 from app.core.auth import get_current_user, CurrentUser
-from app.services.analysis.parse import ParsingService
+from app.services.analysis.parse import ParsingService, ParsingError
 from app.services.analysis.normalize import normalize_text
-from app.services.analysis.workflow_langchain import ExtractionWorkflow
+from app.services.analysis.workflows.factory import WorkflowFactory
 from app.services.analysis.prompts import (
     ISSUES_PROMPT,
     INTERVENTIONS_PROMPT,
@@ -16,12 +17,74 @@ from app.services.analysis.prompts import (
     RESULTS_PROMPT,
     CONCLUSIONS_PROMPT,
     EXTRACTION_SYSTEM_PROMPT,
+    EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT,
 )
 from app.core.config import settings
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def classify_evidence_category(text: str) -> Tuple[str, float]:
+    """Classify a document's evidence category from its text.
+
+    Args:
+        text: The document text (can be abstract or full text)
+
+    Returns:
+        Tuple of (evidence_category, confidence_score)
+    """
+    # Use first ~3000 chars for classification (abstract + intro usually)
+    classification_text = text[:3000] if len(text) > 3000 else text
+
+    llm = ChatOpenAI(
+        model=settings.LLM_MODEL,
+        temperature=0.0,
+    )
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT),
+            (
+                "human",
+                f"""Classify the following document:
+
+**Text excerpt**: {classification_text}
+
+Return your classification as JSON with these fields:
+- evidence_category: One of the 9 categories
+- evidence_confidence: Float 0.0-1.0
+- evidence_category_reasoning: Brief explanation""",
+            ),
+        ]
+    )
+
+    try:
+        chain = prompt | llm
+        response = await chain.ainvoke({})
+
+        # Parse the JSON response
+        content = response.content
+        # Try to extract JSON from the response
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0]
+        elif "```" in content:
+            content = content.split("```")[1].split("```")[0]
+
+        result = json.loads(content.strip())
+        category = result.get("evidence_category", "Unknown / Insufficient information")
+        confidence = float(result.get("evidence_confidence", 0.5))
+
+        logger.info(
+            f"Evidence classification: {category} (confidence: {confidence:.2f})"
+        )
+        return category, confidence
+
+    except Exception as e:
+        logger.warning(f"Evidence classification failed: {e}, defaulting to RCT")
+        return "RCTs and Quasi-Experimental Studies", 0.5
 
 
 def create_custom_prompt(
@@ -44,14 +107,35 @@ def create_custom_prompt(
 
 async def run_extraction_with_custom_prompts(
     text: str, custom_prompts: Optional[Dict[str, str]] = None
-):
-    """Run extraction with optional custom prompts - simplified approach"""
-    workflow = ExtractionWorkflow(model=settings.LLM_MODEL, temperature=0.0)
+) -> Tuple:
+    """Run extraction with optional custom prompts and auto-detected workflow.
 
-    # If no custom prompts, use standard workflow
+    Returns:
+        Tuple of (extraction_result, evidence_category, confidence)
+    """
+    doc_id = f"test_{uuid.uuid4().hex[:8]}"
+
+    # Step 1: Classify evidence category
+    evidence_category, confidence = await classify_evidence_category(text)
+
+    # If no custom prompts, use WorkflowFactory to auto-select workflow
     if not custom_prompts:
-        doc_id = f"test_{uuid.uuid4().hex[:8]}"
-        return await workflow.run(doc_id, text)
+        try:
+            workflow = WorkflowFactory.create(
+                evidence_category=evidence_category,
+                confidence=confidence,
+                model=settings.LLM_MODEL,
+            )
+            result = await workflow.run(doc_id, text, evidence_category, confidence)
+            return result, evidence_category, confidence
+        except ValueError as e:
+            # Handle filtered categories by using RCT fallback
+            logger.warning(f"WorkflowFactory error: {e}, using RCT fallback")
+            from app.services.analysis.workflows.rct import RCTExtractionWorkflow
+
+            workflow = RCTExtractionWorkflow(model=settings.LLM_MODEL)
+            result = await workflow.run(doc_id, text, evidence_category, confidence)
+            return result, evidence_category, confidence
 
     # For custom prompts, we'll run each stage manually with custom prompts
     from app.services.analysis.schemas_langchain import (
@@ -62,9 +146,13 @@ async def run_extraction_with_custom_prompts(
         ConclusionsExtraction,
         DocumentExtractionBundle,
     )
+    from app.services.analysis.workflows.rct import RCTExtractionWorkflow
     import json
 
     doc_id = f"test_{uuid.uuid4().hex[:8]}"
+
+    # Create a workflow instance to use its llm and json_parser
+    workflow = RCTExtractionWorkflow(model=settings.LLM_MODEL)
 
     # Stage 1: Issues
     issues_prompt = (
@@ -173,13 +261,17 @@ async def run_extraction_with_custom_prompts(
     )
     conclusions_extraction = ConclusionsExtraction(**conclusions_result)
 
-    return DocumentExtractionBundle(
-        paper_id=doc_id,
-        issues=issues_extraction.issues,
-        interventions=interventions_extraction.interventions,
-        mappings=mappings_extraction.mappings,
-        results=all_results,
-        conclusion=conclusions_extraction.conclusion,
+    return (
+        DocumentExtractionBundle(
+            paper_id=doc_id,
+            issues=issues_extraction.issues,
+            interventions=interventions_extraction.interventions,
+            mappings=mappings_extraction.mappings,
+            results=all_results,
+            conclusion=conclusions_extraction.conclusion,
+        ),
+        evidence_category,
+        confidence,
     )
 
 
@@ -291,8 +383,17 @@ async def test_extraction(
             raise HTTPException(status_code=400, detail="No text could be extracted")
 
         # Run extraction workflow
-        extraction_result = await run_extraction_with_custom_prompts(
+        (
+            extraction_result,
+            evidence_category,
+            evidence_confidence,
+        ) = await run_extraction_with_custom_prompts(
             extracted_text, parsed_custom_prompts
+        )
+
+        # Determine if this is a systematic review (handle number prefix from classification)
+        is_systematic_review = (
+            "Systematic Review and Meta-Analysis" in evidence_category
         )
 
         # Format response to match the expected format for DocumentDetailView
@@ -308,6 +409,8 @@ async def test_extraction(
                 else extracted_text,
                 "is_relevant": True,
                 "extraction_status": "completed",
+                "evidence_category": evidence_category,
+                "is_systematic_review": is_systematic_review,
             },
             "extraction": {
                 "issues": [issue.model_dump() for issue in extraction_result.issues],
@@ -332,6 +435,9 @@ async def test_extraction(
                     "text_length": len(extracted_text),
                     "extraction_time": "live",
                     "custom_prompts_used": parsed_custom_prompts is not None,
+                    "evidence_category": evidence_category,
+                    "evidence_confidence": evidence_confidence,
+                    "workflow_used": extraction_result.workflow_used,
                 },
             },
         }
@@ -340,6 +446,8 @@ async def test_extraction(
 
     except HTTPException:
         raise
+    except ParsingError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Test extraction failed: {e}")
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
