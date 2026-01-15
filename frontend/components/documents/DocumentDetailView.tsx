@@ -36,7 +36,6 @@ interface DocumentDetailResult {
       description?: string
       type?: string
       country?: string
-      study_type?: string
       sample_size?: string
       supporting_quote?: string
       addresses_issues?: number[]
@@ -58,6 +57,13 @@ interface DocumentDetailResult {
         tau2?: string
         summary_statistic?: string
         estimate_level?: string
+        // SR sample size fields
+        n_studies?: number
+        sample_size?: number
+        // Stratum fields (for SR subgroup analyses)
+        stratum_type?: string
+        stratum_value?: string
+        is_primary_stratum?: boolean
       }>
     }>
     mappings?: unknown[]
@@ -82,9 +88,10 @@ interface DocumentDetailResult {
 
 interface DocumentDetailViewProps {
   extraction: DocumentDetailResult['extraction']
+  isSystematicReview?: boolean
 }
 
-export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
+export function DocumentDetailView({ extraction, isSystematicReview = false }: DocumentDetailViewProps) {
   const [openSections, setOpenSections] = useState({
     issues: true,
     interventions: true,
@@ -190,11 +197,6 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                               📍 {intervention.country}
                             </Badge>
                           )}
-                          {intervention.study_type && (
-                            <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700">
-                              Study: {intervention.study_type}
-                            </Badge>
-                          )}
                       {intervention.sample_size && intervention.sample_size !== 'null' && (
                         <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700">
                           Sample: {intervention.sample_size}
@@ -225,33 +227,55 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                         </h6>
                         <div className="space-y-2">
                           {intervention.results.map((result, resultIndex: number) => (
-                            <div key={resultIndex} className="bg-green-50 border-l-4 border-green-200 p-2 rounded">
-                              <div className="flex items-center gap-2 mb-1">
+                            <div
+                              key={resultIndex}
+                              className="bg-green-50 border-l-4 border-green-200 p-2 rounded"
+                            >
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
                                 <span className="font-medium text-green-900 text-sm">
                                   {result.outcome_variable}
                                 </span>
+                                {/* Stratum badge for subgroup analyses */}
+                                {result.stratum_type && result.stratum_value && (
+                                  <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
+                                    {result.stratum_type}: {result.stratum_value}
+                                  </Badge>
+                                )}
                                 {/* Support both 'direction' (new schema) and 'effect_direction' (legacy) */}
                                 <Badge variant="outline" className="text-xs bg-green-100 text-green-700">
                                   {result.direction || result.effect_direction}
                                 </Badge>
                               </div>
-                              
+
+                              {/* Sample size info for SR */}
+                              {isSystematicReview && (result.n_studies || result.sample_size) && (
+                                <div className="flex gap-3 text-xs text-green-700 mb-1">
+                                  {result.n_studies && (
+                                    <span>k = {result.n_studies} studies</span>
+                                  )}
+                                  {result.sample_size && (
+                                    <span>N = {result.sample_size.toLocaleString()}</span>
+                                  )}
+                                </div>
+                              )}
+
                               {/* Quantitative measures */}
                               {((result.effect_size && result.effect_size !== 'null') || (result.p_value && result.p_value !== 'null') || (result.uncertainty && result.uncertainty !== 'null') || (result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null')) && (
                                 <div className="flex flex-wrap gap-3 text-xs text-green-800 mb-1">
                                   {result.effect_size && result.effect_size !== 'null' && (
                                     <span>
-                                      Effect{result.summary_statistic && result.summary_statistic !== 'null' ? ` (${result.summary_statistic})` : ''}: {result.effect_size}
+                                      {isSystematicReview ? 'Aggregate Effect' : 'Effect'}{result.summary_statistic && result.summary_statistic !== 'null' ? ` (${result.summary_statistic})` : ''}: {result.effect_size}
                                     </span>
                                   )}
-                                  {result.p_value && result.p_value !== 'null' && (
+                                  {/* Hide p-value for SRs */}
+                                  {!isSystematicReview && result.p_value && result.p_value !== 'null' && (
                                     <span>p = {result.p_value}</span>
                                   )}
                                   {result.uncertainty && result.uncertainty !== 'null' && (
-                                    <span>CI: {result.uncertainty}</span>
+                                    <span>{isSystematicReview ? 'Aggregate CI' : 'CI'}: {result.uncertainty}</span>
                                   )}
-                                  {/* SR-specific: heterogeneity measures for pooled results (always show for SRs) */}
-                                  {result.estimate_level === 'pooled' && (
+                                  {/* SR-specific: heterogeneity measures (always show for SRs) */}
+                                  {isSystematicReview && (
                                     <>
                                       <span>
                                         I²: {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? result.heterogeneity_I2 : <span className="text-green-600 italic">n/a</span>}
@@ -262,6 +286,13 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                                     </>
                                   )}
                                 </div>
+                              )}
+
+                              {/* Population measured */}
+                              {result.population_measured && result.population_measured !== 'null' && (
+                                <p className="text-xs text-green-700 mb-1">
+                                  Population: {result.population_measured}
+                                </p>
                               )}
 
                               {result.result_text && (
