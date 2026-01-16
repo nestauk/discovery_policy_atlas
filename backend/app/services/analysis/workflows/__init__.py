@@ -9,10 +9,12 @@ from .routing import create_workflow
 from .base import BaseExtractionWorkflow
 from .rct import RCTExtractionWorkflow
 from .sr import SRExtractionWorkflow
+from .policy import PolicyExtractionWorkflow
 
 __all__ = [
     "create_workflow",
     "BaseExtractionWorkflow",
     "RCTExtractionWorkflow",
     "SRExtractionWorkflow",
+    "PolicyExtractionWorkflow",
 ]

@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 # Evidence categories that use SR workflow
 SR_CATEGORIES = {"Systematic Review and Meta-Analysis"}
 
+# Evidence categories that use Policy workflow
+POLICY_CATEGORIES = {
+    "Policy Syntheses & Guidance Documents",
+    "Qualitative & Contextual Evidence",
+    "Expert Opinion and Commentary",
+}
+
 # Categories that should be filtered out (not processed)
 FILTERED_CATEGORIES = {"Other (Non-evidence documents)"}
 
@@ -54,6 +61,7 @@ def create_workflow(
     # Import here to avoid circular imports
     from .rct import RCTExtractionWorkflow
     from .sr import SRExtractionWorkflow
+    from .policy import PolicyExtractionWorkflow
 
     normalized_category = _normalize_category(evidence_category)
 
@@ -67,6 +75,13 @@ def create_workflow(
         "policy_project_id": policy_project_id,
         "policy_user_id": policy_user_id,
     }
+
+    # Policy workflow - no confidence fallback
+    if normalized_category in POLICY_CATEGORIES:
+        logger.info(
+            f"Creating Policy workflow for '{evidence_category}' (confidence: {confidence:.2f})"
+        )
+        return PolicyExtractionWorkflow(**kwargs)
 
     # Use SR workflow for systematic reviews with sufficient confidence
     use_sr = normalized_category in SR_CATEGORIES and confidence >= CONFIDENCE_THRESHOLD
