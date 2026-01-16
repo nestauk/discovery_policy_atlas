@@ -1087,6 +1087,10 @@ async def get_project_interventions(
                         "type": intervention.get("type", "Unknown"),
                         "country": intervention.get("country", "Unknown"),
                         "description": intervention.get("description", ""),
+                        "implementation_level": intervention.get(
+                            "implementation_level"
+                        ),
+                        "responsible_actor": intervention.get("responsible_actor"),
                         "evidence_category": evidence_cat,
                         "evidence_category_rank": get_evidence_category_rank(
                             evidence_cat
@@ -1128,9 +1132,12 @@ async def get_project_interventions(
                 # Add results summaries with detailed information
                 for result in intervention_results:
                     outcome = result.get("outcome_variable", "Unknown outcome")
-                    # Support both 'direction' (new schema) and 'effect_direction' (legacy) field names
-                    direction = result.get("direction") or result.get(
-                        "effect_direction", "unknown"
+                    # Support direction fields across workflows
+                    direction = (
+                        result.get("direction")
+                        or result.get("impact_direction")
+                        or result.get("effect_direction")
+                        or "unknown"
                     )
                     if outcome and outcome != "Unknown outcome":
                         result_detail = {
@@ -1144,6 +1151,13 @@ async def get_project_interventions(
                             "supporting_quote": result.get("supporting_quote"),
                             "population_measured": result.get("population_measured"),
                             "subgroup_or_dose": result.get("subgroup_or_dose"),
+                            "impact_direction": result.get("impact_direction"),
+                            "impact_magnitude": result.get("impact_magnitude"),
+                            "claim_text": result.get("claim_text"),
+                            "claim_type": result.get("claim_type"),
+                            "evidence_basis": result.get("evidence_basis"),
+                            "uncertainty_language": result.get("uncertainty_language"),
+                            "population_targeted": result.get("population_targeted"),
                             "n_studies": result.get("n_studies"),
                             "sample_size": result.get("sample_size"),
                             "stratum_type": result.get("stratum_type"),
@@ -1656,7 +1670,31 @@ async def get_issue_intervention_navigator(
                                                             "direction"
                                                         )
                                                         or result.get(
+                                                            "impact_direction"
+                                                        )
+                                                        or result.get(
                                                             "effect_direction"
+                                                        ),
+                                                        "impact_direction": result.get(
+                                                            "impact_direction"
+                                                        ),
+                                                        "impact_magnitude": result.get(
+                                                            "impact_magnitude"
+                                                        ),
+                                                        "claim_text": result.get(
+                                                            "claim_text"
+                                                        ),
+                                                        "claim_type": result.get(
+                                                            "claim_type"
+                                                        ),
+                                                        "evidence_basis": result.get(
+                                                            "evidence_basis"
+                                                        ),
+                                                        "uncertainty_language": result.get(
+                                                            "uncertainty_language"
+                                                        ),
+                                                        "population_targeted": result.get(
+                                                            "population_targeted"
                                                         ),
                                                         "effect_size": result.get(
                                                             "effect_size"
@@ -1716,6 +1754,12 @@ async def get_issue_intervention_navigator(
                                         ),
                                         "type": raw_data.get("type", "Unknown"),
                                         "country": raw_data.get("country"),
+                                        "implementation_level": raw_data.get(
+                                            "implementation_level"
+                                        ),
+                                        "responsible_actor": raw_data.get(
+                                            "responsible_actor"
+                                        ),
                                         "evidence_category": evidence_cat,
                                         "is_systematic_review": evidence_cat
                                         == "Systematic Review and Meta-Analysis",
