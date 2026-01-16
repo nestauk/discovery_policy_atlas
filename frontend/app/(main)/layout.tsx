@@ -255,7 +255,7 @@ export default function AgentLayout({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col ml-64 bg-white">
+      <div className="flex-1 flex flex-col ml-64">
         {children}
       </div>
 
