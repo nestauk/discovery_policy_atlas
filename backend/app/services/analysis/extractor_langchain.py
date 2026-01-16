@@ -15,7 +15,7 @@ import pandas as pd
 import tiktoken
 
 from app.core.config import settings
-from .workflow_langchain import ExtractionWorkflow
+from .workflows import create_workflow
 from .storage import AnalysisStorageService
 
 logger = logging.getLogger(__name__)
@@ -72,12 +72,6 @@ class LangChainExtractorService:
     def __init__(self, config: LangChainExtractionConfig):
         self.config = config
         self.export_dir = Path(config.export_dir)
-        self.workflow = ExtractionWorkflow(
-            model=config.model,
-            temperature=config.temperature,
-            policy_project_id=config.project_id,
-            policy_user_id=config.user_id,
-        )
         # Initialize storage service for interim storage
         self.storage_service = AnalysisStorageService() if config.project_id else None
         # No need to create extractions directory - we'll create consolidated JSON directly
@@ -197,7 +191,14 @@ class LangChainExtractorService:
                 if pd.isna(evidence_confidence):
                     evidence_confidence = 1.0
 
-                extraction = await self.workflow.run(
+                workflow = create_workflow(
+                    evidence_category=evidence_category,
+                    confidence=float(evidence_confidence),
+                    model=self.config.model,
+                    policy_project_id=self.config.project_id,
+                    policy_user_id=self.config.user_id,
+                )
+                extraction = await workflow.run(
                     doc_id, doc_text, evidence_category, float(evidence_confidence)
                 )
 

@@ -9,7 +9,7 @@ import json
 from app.core.auth import get_current_user, CurrentUser
 from app.services.analysis.parse import ParsingService, ParsingError
 from app.services.analysis.normalize import normalize_text
-from app.services.analysis.workflows.factory import WorkflowFactory
+from app.services.analysis.workflows import create_workflow
 from app.services.analysis.prompts import (
     ISSUES_PROMPT,
     INTERVENTIONS_PROMPT,
@@ -118,10 +118,10 @@ async def run_extraction_with_custom_prompts(
     # Step 1: Classify evidence category
     evidence_category, confidence = await classify_evidence_category(text)
 
-    # If no custom prompts, use WorkflowFactory to auto-select workflow
+    # If no custom prompts, use create_workflow to auto-select workflow
     if not custom_prompts:
         try:
-            workflow = WorkflowFactory.create(
+            workflow = create_workflow(
                 evidence_category=evidence_category,
                 confidence=confidence,
                 model=settings.LLM_MODEL,
@@ -130,7 +130,7 @@ async def run_extraction_with_custom_prompts(
             return result, evidence_category, confidence
         except ValueError as e:
             # Handle filtered categories by using RCT fallback
-            logger.warning(f"WorkflowFactory error: {e}, using RCT fallback")
+            logger.warning(f"create_workflow error: {e}, using RCT fallback")
             from app.services.analysis.workflows.rct import RCTExtractionWorkflow
 
             workflow = RCTExtractionWorkflow(model=settings.LLM_MODEL)
