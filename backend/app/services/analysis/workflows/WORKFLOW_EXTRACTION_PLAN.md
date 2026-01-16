@@ -1,8 +1,8 @@
-# Multi-Workflow Extraction System Design Document
+# Multi-Workflow Extraction System
 
 ## Overview
 
-Extend the current single RCT-optimized extraction workflow to support multiple evidence types through workflow routing based on `evidence_category`. Phase 1 implements RCT and Systematic Review (SR) workflows where in phase 1 all other categories (e.g. Modelling & Simulation, Policy Syntheses & Guidance Documents) should revert to RCT workflow, with Policy workflow planned for Phase 2.
+The extraction system supports multiple evidence types through workflow routing based on `evidence_category`. Phase 1 implements RCT and Systematic Review (SR) workflows. Phase 2 adds PolicyExtractionWorkflow for claim-level extraction from policy documents. Modelling & Simulation workflow is planned for Phase 3.
 
 ## Workflow Routing
 
@@ -10,375 +10,464 @@ Extend the current single RCT-optimized extraction workflow to support multiple 
 
 | Evidence Category | Workflow | Notes |
 |---|---|---|
-| Systematic Review and Meta-Analysis | SR | New workflow |
-| RCTs and Quasi-Experimental Studies | RCT | Existing (refactored) |
+| Systematic Review and Meta-Analysis | SR | Specialized for meta-analytic data |
+| RCTs and Quasi-Experimental Studies | RCT | Default workflow |
 | Observational Research Studies | RCT | Uses RCT workflow |
-| Modelling & Simulation | Policy (Phase 2) | Policy variant with `model_type` |
-| Policy Syntheses & Guidance Documents | Policy (Phase 2) | - |
-| Qualitative & Contextual Evidence | Policy (Phase 2) | - |
-| Expert Opinion and Commentary | Policy (Phase 2) | - |
+| Modelling & Simulation | RCT (Phase 3) | Own workflow planned |
+| Policy Syntheses & Guidance Documents | Policy | Claim-level extraction |
+| Qualitative & Contextual Evidence | Policy | Claim-level extraction |
+| Expert Opinion and Commentary | Policy | Claim-level extraction |
 | Unknown / Insufficient information | RCT | Fallback |
-| Other (Non-evidence) | Filtered | Already excluded before acquisition |
+| Other (Non-evidence) | Filtered | Excluded before extraction |
 
 ### Confidence-Based Fallback
-- If `evidence_confidence < 0.5` → Route to RCT workflow (fallback)
-- Rationale: RCT workflow is most general and produces usable output across evidence types
+
+- **RCT/SR:** If `evidence_confidence < 0.5` → Route to RCT workflow
+- **Policy:** No confidence fallback. Policy categories always use Policy workflow regardless of confidence (policy documents are structurally different enough that RCT extraction would produce poor results)
 
 ## Architecture
 
-### Factory Pattern Implementation
-
-```
-WorkflowFactory.create(evidence_category, confidence) → BaseExtractionWorkflow
-```
-
-**File:** `backend/app/services/analysis/workflows/factory.py` (new)
+### Function-Based Routing
 
 ```python
-class WorkflowFactory:
-    @staticmethod
-    def create(
-        evidence_category: str,
-        confidence: float,
-        model: str = "gpt-5-mini",
-        **kwargs
-    ) -> BaseExtractionWorkflow:
-        # Route based on category + confidence
-        pass
+from app.services.analysis.workflows import create_workflow
+
+workflow = create_workflow(
+    evidence_category="Policy Syntheses & Guidance Documents",
+    confidence=0.9,
+    model="gpt-4o-mini",
+    policy_project_id="project_123",
+    policy_user_id="user_456",
+)
+result = await workflow.run(paper_id, full_text, evidence_category, confidence)
+```
+
+**File:** `backend/app/services/analysis/workflows/routing.py`
+
+```python
+# Evidence categories that use Policy workflow
+POLICY_CATEGORIES = {
+    "Policy Syntheses & Guidance Documents",
+    "Qualitative & Contextual Evidence",
+    "Expert Opinion and Commentary",
+}
+
+def create_workflow(
+    evidence_category: str,
+    confidence: float = 1.0,
+    model: str = "gpt-4o-mini",
+    policy_project_id: Optional[str] = None,
+    policy_user_id: Optional[str] = None,
+) -> BaseExtractionWorkflow:
+    """Create the appropriate workflow based on evidence category and confidence."""
+    normalized = _normalize_category(evidence_category)
+
+    if normalized in FILTERED_CATEGORIES:
+        raise ValueError(f"Category '{evidence_category}' should be filtered")
+
+    # Policy workflow - no confidence fallback
+    if normalized in POLICY_CATEGORIES:
+        return PolicyExtractionWorkflow(...)
+
+    # SR workflow with confidence fallback
+    if normalized in SR_CATEGORIES and confidence >= CONFIDENCE_THRESHOLD:
+        return SRExtractionWorkflow(...)
+
+    # Default to RCT
+    return RCTExtractionWorkflow(...)
 ```
 
 ### Workflow Class Hierarchy
 
 ```
 BaseExtractionWorkflow (ABC)
-├── RCTExtractionWorkflow (refactored from current)
-├── SRExtractionWorkflow (new)
-└── PolicyExtractionWorkflow (Phase 2)
+├── RCTExtractionWorkflow
+├── SRExtractionWorkflow
+├── PolicyExtractionWorkflow (Phase 2)
+└── ModellingExtractionWorkflow (Phase 3)
 ```
 
 ### Directory Structure
 
 ```
 backend/app/services/analysis/workflows/
-├── __init__.py          # Exports: WorkflowFactory, BaseExtractionWorkflow, RCT/SR workflows
-├── base.py              # BaseExtractionWorkflow (ABC) with shared logic
-├── factory.py           # WorkflowFactory (separate, handles routing)
-├── rct.py               # RCTExtractionWorkflow
-└── sr.py                # SRExtractionWorkflow
+├── __init__.py     # Exports: create_workflow, all workflow classes
+├── base.py         # BaseExtractionWorkflow (ABC)
+├── routing.py      # create_workflow() function
+├── rct.py          # RCTExtractionWorkflow
+├── sr.py           # SRExtractionWorkflow
+└── policy.py       # PolicyExtractionWorkflow (Phase 2)
 ```
 
-**Backward Compatibility:**
-- `backend/app/services/analysis/workflow_langchain.py` - Keep existing, delegate to factory for backward compat
+---
 
-## Schema Design
+## Phase 2: Policy Workflow
 
-### Base + Extension Pattern
+### Design Principles
 
-#### Base Schemas (shared fields)
+1. **Claim-style only**: Policy workflow produces claim-level extractions, not empirical results
+2. **No mixed modes**: A single document produces EITHER empirical OR claim results, never both
+3. **Grounded extraction**: All claims must have supporting quotes
+4. **Atomic claims**: Compound claims are split into separate ResultItems
 
-**InterventionItem (extended):**
+### Schema Changes
+
+#### InterventionItem Extensions
+
+Add two nullable fields for Policy interventions:
+
 ```python
 class InterventionItem(BaseModel):
-    idx: int
-    name: str
-    type: str
-    description: str
-    study_type: str
-    country: Optional[str] = None
-    population_intervened: Optional[str] = None
-    population_demographics: Optional[str] = None
-    sample_size: Optional[str] = None
-    comparator: Optional[str] = None  # NEW: Add to base
-    intervention_semantic_type: Literal["trial_intervention", "intervention_category", "policy_measure"]  # NEW
-    supporting_quote: str
+    # ... existing fields ...
+
+    # Policy-specific fields (Phase 2)
+    responsible_actor: Optional[str] = None  # e.g., "national government", "local authorities"
+    implementation_level: Optional[
+        Literal["international", "national", "regional", "local", "organizational", "individual"]
+    ] = None
 ```
 
-**ResultItem (extended):**
+#### ResultItem Extensions
+
+Add claim-level fields for Policy workflow:
+
 ```python
 class ResultItem(BaseModel):
     intervention_idx: int
-    outcome_variable: str
-    direction: Literal["increase", "decrease", "null", "mixed_or_unclear"]  # RENAMED from effect_direction
-    estimate_level: Literal["study", "pooled", "claim"]  # NEW
+    outcome_variable: str  # For Policy: what the claim is about
 
-    # RCT/SR empirical fields (nullable)
+    # Direction fields (mutually exclusive usage)
+    direction: Literal["increase", "decrease", "null", "mixed_or_unclear"]  # RCT/SR
+    impact_direction: Optional[
+        Literal["positive", "negative", "mixed", "unclear"]
+    ] = None  # Policy
+
+    estimate_level: Optional[Literal["study", "pooled", "claim"]] = None
+
+    # RCT/SR empirical fields
     effect_size_type: Optional[str] = None
     effect_size: Optional[str] = None
     uncertainty: Optional[str] = None
     p_value: Optional[str] = None
-
-    # SR-specific fields (nullable, additions)
     heterogeneity_I2: Optional[str] = None
     tau2: Optional[str] = None
     summary_statistic: Optional[str] = None
+    n_studies: Optional[int] = None
 
-    # Policy-specific field (nullable, constrained qualitative scale)
-    impact_magnitude: Optional[Literal[
-        "substantial", "moderate", "modest", "marginal", "negligible", "unclear"
-    ]] = None
+    # SR stratum fields
+    stratum_type: Optional[str] = None
+    stratum_value: Optional[str] = None
+    is_primary_stratum: Optional[bool] = None
 
-    # Common fields
+    # Policy-specific fields (Phase 2)
+    claim_text: Optional[str] = None  # One-sentence LLM summary preserving meaning
+    claim_type: Optional[
+        Literal["recommendation", "assessment", "prediction", "warning"]
+    ] = None
+    evidence_basis: Optional[
+        Literal["empirical", "synthesis", "expert_judgement", "precedent", "unspecified"]
+    ] = None
+    uncertainty_language: Optional[
+        Literal["confident", "mixed", "cautious"]
+    ] = None
+    population_targeted: Optional[str] = None  # Only if explicitly stated
+
+    # Shared fields
+    impact_magnitude: Optional[
+        Literal["substantial", "moderate", "modest", "marginal", "negligible", "unclear"]
+    ] = None
     population_measured: Optional[str] = None
     subgroup_or_dose: Optional[str] = None
     result_text: str
     supporting_quote: str
 ```
 
-#### SR-Specific Extensions
+#### Schema Validation
 
-**SRInterventionItem** (extends InterventionItem conceptually):
-```python
-# Uses base InterventionItem with:
-# - intervention_semantic_type = "intervention_category"
-# - comparator populated from review's comparison description
-```
-
-#### Document-Level SR Fields
-
-**DocumentExtractionBundle (extended):**
-```python
-class DocumentExtractionBundle(BaseModel):
-    paper_id: str
-    workflow_used: str  # NEW: "rct", "sr", "policy"
-    routing_reason: str  # NEW: "evidence_category", "low_confidence_fallback", etc.
-
-    issues: List[IssueItem]
-    interventions: List[InterventionItem]
-    mappings: List[MappingItem]
-    results: List[ResultItem]
-    conclusion: Optional[ConclusionItem] = None
-
-    # SR document-level fields
-    n_studies_included: Optional[int] = None  # NEW: Aggregate only
-    sr_completeness_flag: Optional[str] = None  # NEW: "complete", "incomplete_heterogeneity", etc.
-```
-
-## Prompt Strategy
-
-### Conditional Additions Pattern
-
-Base prompts remain shared, with workflow-specific guidance appended:
+Add Pydantic validator enforcing mutual exclusivity:
 
 ```python
-def get_issues_prompt(workflow_type: str) -> ChatPromptTemplate:
-    base = ISSUES_PROMPT_BASE
-    if workflow_type == "sr":
-        return base + SR_ISSUES_ADDITIONS
-    elif workflow_type == "policy":
-        return base + POLICY_ISSUES_ADDITIONS
-    return base  # RCT default
+from pydantic import model_validator
+
+class ResultItem(BaseModel):
+    # ... fields ...
+
+    @model_validator(mode='after')
+    def validate_workflow_fields(self) -> 'ResultItem':
+        """Ensure empirical and claim fields are mutually exclusive."""
+        empirical_fields = [
+            self.effect_size, self.effect_size_type, self.p_value,
+            self.uncertainty, self.heterogeneity_I2, self.tau2,
+            self.summary_statistic, self.n_studies
+        ]
+        claim_fields = [
+            self.claim_text, self.claim_type, self.evidence_basis,
+            self.uncertainty_language
+        ]
+
+        has_empirical = any(f is not None for f in empirical_fields)
+        has_claim = any(f is not None for f in claim_fields)
+
+        if has_empirical and has_claim:
+            raise ValueError(
+                "ResultItem cannot have both empirical fields (effect_size, p_value, etc.) "
+                "and claim fields (claim_text, claim_type, etc.). Use one mode only."
+            )
+        return self
 ```
 
-### SR-Specific Prompt Additions
+### Policy Field Semantics
 
-**Issues (SR):**
+#### claim_text
+- One-sentence LLM summary preserving original meaning and modality
+- Do not paraphrase into stronger or weaker language
+- If multiple distinct claims exist, split into separate ResultItems
+
+#### claim_type
+| Value | Description |
+|-------|-------------|
+| `recommendation` | Proposes an action or policy |
+| `assessment` | Evaluates a situation or intervention |
+| `prediction` | States an expected future effect |
+| `warning` | Highlights risks or potential harms |
+
+Choose exactly one. If a statement contains both assessment AND recommendation, split into two ResultItems.
+
+#### evidence_basis
+| Value | Description |
+|-------|-------------|
+| `empirical` | Cites primary studies or data |
+| `synthesis` | Cites reviews or bodies of evidence |
+| `expert_judgement` | Based on professional opinion, panels, or author reasoning |
+| `precedent` | Justified by past policy or implementation |
+| `unspecified` | No explicit justification |
+
+This field classifies the TYPE of evidence, not specific citations. Not ordered by strength.
+
+#### uncertainty_language
+| Value | Description | Examples |
+|-------|-------------|----------|
+| `confident` | Assertive language, no caveats | "will reduce", "evidence clearly shows", "must implement" |
+| `mixed` | Both hedging and assertive language | "likely to improve, though...", "evidence suggests but..." |
+| `cautious` | Hedging, caveats, conditionality | "may help", "could potentially", "under certain conditions" |
+
+Based on document wording, not personal judgement.
+
+#### impact_direction
+| Value | Description |
+|-------|-------------|
+| `positive` | Beneficial/improving direction |
+| `negative` | Harmful/worsening direction |
+| `mixed` | Both positive and negative aspects |
+| `unclear` | Direction not stated or ambiguous |
+
+Do not infer direction if not explicit in the document.
+
+#### impact_magnitude
+Already defined. Populate only when magnitude language is present in the document. LLM may infer from context (e.g., "50% reduction" → "substantial").
+
+#### population_targeted
+Extract only if explicitly stated. Examples: "low-income households", "children under 5", "urban local authorities". Do not infer.
+
+#### supporting_quote
+Mandatory for all Policy ResultItems. Prefer the sentence that best grounds:
+1. The claim itself
+2. The evidence basis
+3. The uncertainty language
+
+### Policy Workflow Stages
+
+Same 5-stage structure as RCT/SR:
+
+| Stage | Name | Purpose |
+|-------|------|---------|
+| A | Issues Extraction | Extract 1-3 key problem statements that motivated the policy |
+| B | Interventions Extraction | Identify concrete policies, measures, or actions proposed |
+| C | Mapping Extraction | Link each issue to relevant interventions with rationale |
+| D | Results Extraction | Extract claims per intervention (per-intervention loop) |
+| E | Conclusions Extraction | Extract overall document stance and key takeaways |
+
+#### Stage A: Policy Issues
+
+Extract policy problems/challenges the document addresses. Focus on:
+- What problem or gap is being addressed?
+- What policy failure or need is identified?
+- What objective is the document trying to achieve?
+
+#### Stage B: Policy Interventions
+
+Extract concrete policy measures, recommendations, or actions. Key guidance:
+- Each target actor's recommendations = separate InterventionItem
+- Set `intervention_semantic_type = "policy_measure"`
+- Include `responsible_actor` and `implementation_level` when stated
+- Group thematically related measures under one intervention
+
+#### Stage D: Policy Results (Claims)
+
+Extract claims per intervention. Key guidance:
+- One claim per ResultItem (split compound claims)
+- Set `estimate_level = "claim"`
+- Use `impact_direction` instead of `direction`
+- Do not populate empirical fields (effect_size, p_value, etc.)
+- Deduplicate: if same claim appears in summary AND body, extract once (prefer body text)
+
+### Policy Prompts
+
+Located in `prompts.py`:
+- `POLICY_ISSUES_PROMPT` - Extract policy problems/challenges
+- `POLICY_INTERVENTIONS_PROMPT` - Extract policy measures with actor/level
+- `POLICY_RESULTS_PROMPT` - Extract claim-level results
+
+Policy workflow uses shared `MAPPING_PROMPT` and `CONCLUSIONS_PROMPT`.
+
+#### Prompt Design
+
+- Generic "policy document" framing (not subtype-specific)
+- Include examples from different document types (guidance, briefs, white papers)
+- Explicit examples for uncertainty_language calibration:
+
 ```
-Additional guidance for Systematic Reviews:
-- Interpret "issues" as REVIEW QUESTIONS or EVIDENCE GAPS
-- Capture language like "The aim of this review was..." or "We sought to determine..."
-- Focus on the questions the review addresses, not primary study problems
+uncertainty_language calibration:
+- "confident": "This policy will reduce emissions by 30%" / "Evidence clearly demonstrates..."
+- "cautious": "This approach may help..." / "Under certain conditions, this could..."
+- "mixed": "While evidence suggests benefits, implementation challenges remain..."
 ```
 
-**Interventions (SR):**
-```
-Additional guidance for Systematic Reviews:
-- Treat each row as an INTERVENTION CATEGORY (grouping of similar interventions)
-- Examples: "CBT-based interventions", "Parent training programs"
-- Capture meta-analytic grouping terms used in the review
-- n_studies is extracted at document level, not per-intervention
-- Use intervention_semantic_type = "intervention_category"
-```
-
-**Results (SR):**
-```
-Additional guidance for Systematic Reviews:
-- Focus on AGGREGATED REVIEW-LEVEL RESULTS, not per-study data
-- Extract pooled effect sizes with confidence intervals
-- Capture heterogeneity measures (I², τ²) when reported
-- Use estimate_level = "pooled"
-- If heterogeneity measures not reported, extraction still proceeds (flagged as incomplete)
-```
-
-### Policy Workflow Prompt Additions (Phase 2)
-
-**Results (Policy):**
-```
-Extract author-claimed impacts, not measured effects.
-
-direction: Claimed direction of impact vs baseline.
-Values: increase | decrease | null | mixed_or_unclear
-Use only explicit or clearly implied claims. If unclear, return null.
-
-impact_magnitude: Qualitative assessment of impact size.
-Values: substantial | moderate | modest | marginal | negligible | unclear
-Map author language to the closest value. If absent or unclear, return null.
-
-Do NOT populate effect_size, uncertainty, or p_value for policy documents.
-Use estimate_level = "claim"
-```
-
-## Workflow Implementation
-
-### WorkflowState (extended)
+### PolicyExtractionWorkflow Implementation
 
 ```python
-class WorkflowState(TypedDict):
-    paper_id: str
-    full_text: str
-    evidence_category: str  # NEW
-    evidence_confidence: float  # NEW
-    workflow_type: str  # NEW: "rct", "sr", "policy"
+class PolicyExtractionWorkflow(BaseExtractionWorkflow):
+    """Workflow for policy syntheses, qualitative evidence, and expert opinion."""
 
-    issues: List[IssueItem]
-    interventions: List[InterventionItem]
-    mappings: List[MappingItem]
-    results: List[ResultItem]
-    conclusion: Optional[ConclusionItem]
+    workflow_type = "policy"
 
-    # SR-specific state
-    n_studies_included: Optional[int]  # NEW
-    sr_completeness_flag: Optional[str]  # NEW
+    async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
+        """Extract policy problems/challenges."""
+        # Use POLICY_ISSUES_PROMPT
+        ...
 
-    error: Optional[str]
+    async def _extract_interventions(self, state: WorkflowState) -> Dict[str, Any]:
+        """Extract policy measures with responsible actors."""
+        # Use POLICY_INTERVENTIONS_PROMPT
+        # Set intervention_semantic_type = "policy_measure"
+        ...
+
+    async def _extract_results(self, state: WorkflowState) -> Dict[str, Any]:
+        """Extract claim-level results per intervention."""
+        # Use POLICY_RESULTS_PROMPT
+        # Set estimate_level = "claim"
+        # Populate claim_text, claim_type, evidence_basis, uncertainty_language
+        # Use impact_direction instead of direction
+        ...
 ```
 
-### Run Method Signature Change
-
-```python
-async def run(
-    self,
-    paper_id: str,
-    full_text: str,
-    evidence_category: str,  # NEW
-    evidence_confidence: float = 1.0,  # NEW
-) -> DocumentExtractionBundle:
-```
-
-### Error Handling: Retry Then Continue
-
-```python
-async def _extract_with_retry(self, stage_fn, state, max_retries=1):
-    for attempt in range(max_retries + 1):
-        try:
-            return await stage_fn(state)
-        except Exception as e:
-            if attempt < max_retries:
-                await asyncio.sleep(1)  # backoff
-                continue
-            logger.warning(f"Stage {stage_fn.__name__} failed after retry: {e}")
-            return self._empty_stage_result(stage_fn)
-```
-
-### SR Completeness Flag Logic
-
-```python
-def _check_sr_completeness(self, results: List[ResultItem]) -> str:
-    has_heterogeneity = any(
-        r.heterogeneity_I2 is not None or r.tau2 is not None
-        for r in results
-    )
-    if not has_heterogeneity:
-        return "incomplete_heterogeneity"
-    return "complete"
-```
-
-## Validation
-
-- **Same rules across all workflows** - fuzzy quote matching threshold unchanged
-- Quote grounding applies equally to RCT effect sizes and Policy narrative claims
-
-## Model Configuration
-
-- **All workflows use `gpt-5-mini`** for this phase
-- Configuration via existing `settings` pattern (no per-workflow model config yet)
+---
 
 ## Frontend Integration
 
-### Table Display (Common Denominator)
+### Table Display
 
 | Column | Description |
 |--------|-------------|
 | Intervention | Name/theme |
-| Outcome | outcome_variable |
-| Direction | Unified direction field |
+| Outcome | outcome_variable (for Policy: claim subject) |
+| Direction | `direction` (RCT/SR) or `impact_direction` (Policy) |
 | Workflow Type | "SR" / "RCT" / "Policy" |
-| Evidence Flags | "quantitative", "narrative", "incomplete" |
+| Evidence Category | From classification |
 
-### Expandable Details Panel
+### Expandable Details (Structured Field Grid)
 
 **RCT:** effect_size, CI, p_value, sample_size
-**SR:** pooled effect, I², τ², n_studies, summary_statistic
-**Policy:** impact_magnitude, supporting quotes
 
-## Migration
+**SR:** pooled effect, I², τ², n_studies, summary_statistic, stratum info
 
-- **Leave existing data as-is** - new fields only apply to future extractions
-- Existing extractions lack `workflow_used`, `estimate_level` fields (remain null/undefined)
+**Policy:** claim_text, claim_type, evidence_basis, uncertainty_language, impact_magnitude, population_targeted, supporting_quote
 
-## Files to Modify/Create
+### Synthesis Pipeline
 
-### New Directory Structure
-```
-backend/app/services/analysis/workflows/
-├── __init__.py          # Exports factory + workflow classes
-├── base.py              # BaseExtractionWorkflow (ABC)
-├── factory.py           # WorkflowFactory (separate from base)
-├── rct.py               # RCTExtractionWorkflow
-├── sr.py                # SRExtractionWorkflow
-└── prompts/             # Optional: workflow-specific prompt additions
-    ├── __init__.py
-    ├── rct_prompts.py
-    └── sr_prompts.py
-```
+Unified pipeline with `workflow_used` field gating which fields to consider:
+- RCT/SR: Aggregate by effect direction and magnitude
+- Policy: Aggregate by claim_type (group recommendations, assessments, etc.)
 
-### New Files
-- `backend/app/services/analysis/workflows/__init__.py` - Package exports
-- `backend/app/services/analysis/workflows/base.py` - Abstract base class
-- `backend/app/services/analysis/workflows/factory.py` - WorkflowFactory (routing logic)
-- `backend/app/services/analysis/workflows/rct.py` - RCT workflow (refactored)
-- `backend/app/services/analysis/workflows/sr.py` - SR workflow
+---
 
-### Modified Files
-- `backend/app/services/analysis/schemas_langchain.py` - Extended schemas
-- `backend/app/services/analysis/prompts.py` - Add SR prompt additions (or use prompts/ subdir)
-- `backend/app/services/analysis/workflow_langchain.py` - Delegate to factory (backward compat)
-- `backend/app/services/analysis/service.py` - Pass evidence_category to workflow
-- `frontend/lib/analysisProjectStore.ts` - Add new fields to types
-- `frontend/components/documents/PapersTable.tsx` - Update display
+## Phase 1 Status (Implemented)
 
-### Test Files
-- `backend/test/services/analysis/workflows/test_factory.py` - Router tests
-- `backend/test/services/analysis/workflows/test_rct.py` - RCT workflow tests
-- `backend/test/services/analysis/workflows/test_sr.py` - SR workflow tests
+- [x] `create_workflow()` routing function
+- [x] `BaseExtractionWorkflow` abstract base class
+- [x] `RCTExtractionWorkflow` implementation
+- [x] `SRExtractionWorkflow` implementation
+- [x] Extended schemas with SR and workflow fields
+- [x] SR-specific prompts
+- [x] Retry logic for stage failures
+- [x] Integration with `extractor_langchain.py`
+- [x] Integration with `test_extraction.py`
 
-## Phase 1 Scope
+## Phase 2 Implementation Checklist
 
-1. Implement `WorkflowFactory` with routing logic
-2. Refactor existing workflow into `RCTExtractionWorkflow`
-3. Implement `SRExtractionWorkflow` with SR-specific prompts
-4. Extend schemas with new fields
-5. Update `service.py` to pass evidence_category
-6. Add retry logic for stage failures
-7. Write tests using annotated sample documents
+### Schema Changes
+- [ ] Add `responsible_actor` field to InterventionItem
+- [ ] Add `implementation_level` field to InterventionItem
+- [ ] Add `claim_text` field to ResultItem
+- [ ] Add `claim_type` field to ResultItem
+- [ ] Add `evidence_basis` field to ResultItem
+- [ ] Add `uncertainty_language` field to ResultItem
+- [ ] Add `population_targeted` field to ResultItem
+- [ ] Add `impact_direction` field to ResultItem
+- [ ] Add Pydantic validator for empirical/claim mutual exclusivity
 
-## Phase 2 Scope (Future)
+### Routing Changes
+- [ ] Add `POLICY_CATEGORIES` set to routing.py
+- [ ] Update `create_workflow()` to route Policy categories (no confidence fallback)
+- [ ] Export `PolicyExtractionWorkflow` from `__init__.py`
 
-1. Implement `PolicyExtractionWorkflow`
-2. Add modelling mode variant (`model_type` field)
-3. Add Policy-specific prompt additions
-4. Frontend updates for Policy evidence flags
+### Workflow Implementation
+- [ ] Create `policy.py` with `PolicyExtractionWorkflow` class
+- [ ] Implement `_extract_issues()` using POLICY_ISSUES_PROMPT
+- [ ] Implement `_extract_interventions()` using POLICY_INTERVENTIONS_PROMPT
+- [ ] Implement `_extract_results()` using POLICY_RESULTS_PROMPT
+- [ ] Reuse `_extract_mappings()` and `_extract_conclusions()` from base
 
-## Open Questions Resolved
+### Prompts
+- [ ] Create `POLICY_ISSUES_PROMPT` with policy problem framing
+- [ ] Create `POLICY_INTERVENTIONS_PROMPT` with actor/level guidance
+- [ ] Create `POLICY_RESULTS_PROMPT` with claim extraction guidance and uncertainty examples
 
-| Question | Decision |
-|----------|----------|
-| Low confidence handling | RCT fallback workflow |
-| Schema design | Base + extension pattern |
-| Missing SR statistics | Flag as incomplete, continue extraction |
-| Intervention semantics | Add `intervention_semantic_type` field |
-| Effect vs impact fields | Unified `direction` field, additive specific fields |
-| Validation rules | Same across all workflows |
-| Partial failure | Retry once, then continue with empty |
-| estimate_level for Policy | "claim" |
-| Router location | Factory pattern |
-| Category source | Pass explicitly to run() |
+### Testing
+- [ ] Test with existing policy document corpus
+- [ ] Validate claim extraction quality
+- [ ] Verify mutual exclusivity validator works
+
+### Frontend (Optional for Phase 2)
+- [ ] Update detail panel to show Policy-specific fields
+- [ ] Add claim_type filtering/grouping option
+
+## Phase 3 Scope (Planned)
+
+1. Implement `ModellingExtractionWorkflow` for Modelling & Simulation documents
+2. Add modelling-specific fields (model_type, assumptions, scenarios)
+3. Route Modelling & Simulation category to dedicated workflow
+
+---
+
+## Files
+
+### Workflow Package
+
+| File | Purpose |
+|------|---------|
+| `workflows/__init__.py` | Package exports |
+| `workflows/base.py` | BaseExtractionWorkflow (ABC) |
+| `workflows/routing.py` | `create_workflow()` routing function |
+| `workflows/rct.py` | RCTExtractionWorkflow |
+| `workflows/sr.py` | SRExtractionWorkflow |
+| `workflows/policy.py` | PolicyExtractionWorkflow (Phase 2) |
+
+### Related Files
+
+| File | Purpose |
+|------|---------|
+| `schemas_langchain.py` | Extended Pydantic models |
+| `prompts.py` | All prompts (RCT + SR + Policy) |
+| `extractor_langchain.py` | Batch extraction service |
+| `api/test_extraction.py` | Test extraction API |
