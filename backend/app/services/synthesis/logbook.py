@@ -20,6 +20,7 @@ from app.services.synthesis.schemas import (
     KeyIssue,
     PolicyIntervention,
     OutcomeTheme,
+    RiskTheme,
     CitationInfo,
     EvidenceCoverageSnapshot,
     StructuredBriefing,
@@ -78,6 +79,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
     themes = themes_res.data or []
     issue_themes = [t for t in themes if t["theme_type"] == "issue"]
     intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
+    risk_theme_rows = [t for t in themes if t["theme_type"] == "risk"]
 
     # Map doc UUIDs to doc_ids
     docs_res = (
@@ -136,6 +138,21 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                     transferability_breakdown=t.get("transferability_breakdown"),
                     primary_causal_mechanism=t.get("primary_causal_mechanism"),
                     causal_mechanism_detail=t.get("causal_mechanism_detail"),
+                )
+            )
+
+    # Build risk themes
+    risk_themes: List[RiskTheme] = []
+    for t in risk_theme_rows:
+        if t.get("theme_name"):
+            risk_themes.append(
+                RiskTheme(
+                    theme_name=t["theme_name"],
+                    summary_description=t.get("summary_description") or "",
+                    frequency=t.get("frequency") or 0,
+                    source_doc_ids=t.get("source_doc_ids") or [],
+                    has_harm_warning=t.get("has_harm_warning") or False,
+                    linked_intervention_theme_id=t.get("linked_intervention_theme_id"),
                 )
             )
 
@@ -214,6 +231,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         key_issues=key_issues,
         interventions=interventions,
         outcome_themes=outcome_themes,
+        risk_themes=risk_themes,
         evidence_coverage=evidence_coverage,
         citation_map=citation_map,
     )

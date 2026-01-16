@@ -72,7 +72,7 @@ class SynthesisState(TypedDict, total=False):
     target_population: List[str]  # e.g., ["Children"]
     target_outcomes: List[str]  # e.g., ["body weight/size reduction"]
     target_geography: List[str]  # e.g., ["UK"]
-    target_inner_setting: Optional[str]  # e.g., "Schools"
+    target_inner_setting: List[str]  # e.g., ["Schools"]
 
     # Raw data
     raw_extractions: List[Dict]

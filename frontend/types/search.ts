@@ -67,7 +67,42 @@ export interface SearchParams {
   }
 
   // Synthesis summary types (Enhanced)
-  // Synthesis summary types (Enhanced)
+  export type VerdictType = 
+    | 'high_confidence_positive'
+    | 'high_confidence_negative'
+    | 'contested'
+    | 'ineffective'
+    | 'lean_positive'
+    | 'lean_negative'
+    | 'insufficient_evidence'
+    | 'probable_contribution';
+
+  export type SemanticMagnitudeType =
+    | 'transformational'
+    | 'substantial'
+    | 'moderate'
+    | 'marginal'
+    | 'unknown';
+
+  export type CausalityClaimType = 'attribution' | 'contribution' | 'correlation';
+
+  export interface TransferabilityBreakdown {
+    inner_setting: string;
+    population: string;
+    geography: string;
+    resource_intensity: string;
+    delivery_complexity: string;
+    notes?: Record<string, string>;
+  }
+
+  export interface RiskTheme {
+    theme_name: string;
+    summary_description: string;
+    frequency: number;
+    source_doc_ids: string[];
+    has_harm_warning: boolean;
+    linked_intervention_theme_id?: string;
+  }
   export interface KeyIssue {
     issue_theme: string
     summary_description: string
@@ -89,6 +124,11 @@ export interface SearchParams {
     countries?: string[]
     study_types?: Record<string, number>
     related_outcomes?: string[]
+    transferability_rating?: string
+    transferability_note?: string
+    transferability_breakdown?: TransferabilityBreakdown
+    primary_causal_mechanism?: CausalityClaimType
+    causal_mechanism_detail?: string
   }
 
   export interface CitationInfo {
@@ -126,6 +166,13 @@ export interface SearchParams {
     sample_effect_sizes: string[]
     frequency: number
     source_doc_ids: string[]
+    verdict_label?: VerdictType
+    verdict_description?: string
+    discord_flag?: boolean
+    discord_reason?: string
+    predicted_magnitude?: SemanticMagnitudeType
+    magnitude_confidence?: string
+    intervention_theme_id?: string
   }
 
   // Structured briefing types for frontend rendering
@@ -211,6 +258,7 @@ export interface SynthesisSection {
     outcome_themes?: OutcomeTheme[]
     evidence_coverage?: EvidenceCoverageSnapshot
     citation_map?: Record<string, CitationInfo>
+    risk_themes?: RiskTheme[]
   }
 
   // Drill-down finding interface (matches backend endpoint shape)

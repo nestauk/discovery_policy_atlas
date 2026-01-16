@@ -51,7 +51,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     target_population = search_query.get("population") or []
     target_outcomes = search_query.get("outcome") or []
     target_geography = search_query.get("geography") or ["UK"]
-    target_inner_setting = search_query.get("inner_setting")
+    target_inner_setting = search_query.get("inner_setting") or []
     # Normalise to list[str]
     if isinstance(target_population, str):
         target_population = [target_population]
@@ -59,6 +59,8 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         target_outcomes = [target_outcomes]
     if isinstance(target_geography, str):
         target_geography = [target_geography]
+    if isinstance(target_inner_setting, str):
+        target_inner_setting = [target_inner_setting]
 
     # Fetch document metadata including extraction_results for scores
     docs_res = (

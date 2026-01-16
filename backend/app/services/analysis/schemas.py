@@ -61,7 +61,7 @@ class SearchContext(BaseModel):
     screening_factors: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=list)
     geography: List[str] = Field(default_factory=list)
-    inner_setting: Optional[str] = None
+    inner_setting: List[str] = Field(default_factory=list)
     time_preset: Optional[str] = None
     time_from: Optional[str] = None
     time_to: Optional[str] = None

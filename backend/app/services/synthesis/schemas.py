@@ -521,6 +521,7 @@ class SynthesisSummary(BaseModel):
     key_issues: List[KeyIssue] = Field(default_factory=list)
     interventions: List[PolicyIntervention] = Field(default_factory=list)
     outcome_themes: List[OutcomeTheme] = Field(default_factory=list)
+    risk_themes: List[RiskTheme] = Field(default_factory=list)
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = Field(None)
     citation_map: Dict[str, CitationInfo] = Field(default_factory=dict)
 
