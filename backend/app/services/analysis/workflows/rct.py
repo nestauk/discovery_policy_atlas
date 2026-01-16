@@ -2,14 +2,11 @@
 RCT Extraction Workflow.
 
 Optimized for extracting data from individual RCTs and quasi-experimental studies.
-Extracts: Issues → Interventions → Mappings → Results (per intervention) → Conclusions → Validation
 """
 
 import json
 import logging
 from typing import Any, Dict
-
-from langgraph.graph import StateGraph, END
 
 from .base import BaseExtractionWorkflow, WorkflowState
 from ..prompts import (
@@ -31,41 +28,9 @@ logger = logging.getLogger(__name__)
 
 
 class RCTExtractionWorkflow(BaseExtractionWorkflow):
-    """Extraction workflow optimized for RCTs and quasi-experimental studies.
-
-    Implements a 4-stage extraction pipeline:
-    A. Issues: Extract 1-3 problem statements that motivated the research
-    B. Interventions: Extract 2-6 active interventions being evaluated
-    C. Mappings: Link issues to interventions with rationale
-    D. Results: Extract 1-5 results per intervention (looped)
-    E. Conclusions: Extract study conclusions with evidence strength assessment
-    F. Validation: Filter items without valid quotes
-    """
+    """Extraction workflow optimized for RCTs and quasi-experimental studies."""
 
     workflow_type = "rct"
-
-    def _build_workflow(self) -> StateGraph:
-        """Build the RCT extraction workflow graph."""
-        workflow = StateGraph(WorkflowState)
-
-        # Add nodes
-        workflow.add_node("extract_issues", self._extract_issues)
-        workflow.add_node("extract_interventions", self._extract_interventions)
-        workflow.add_node("extract_mappings", self._extract_mappings)
-        workflow.add_node("extract_results", self._extract_results)
-        workflow.add_node("extract_conclusions", self._extract_conclusions)
-        workflow.add_node("validate_and_filter", self._validate_and_filter)
-
-        # Define the flow
-        workflow.set_entry_point("extract_issues")
-        workflow.add_edge("extract_issues", "extract_interventions")
-        workflow.add_edge("extract_interventions", "extract_mappings")
-        workflow.add_edge("extract_mappings", "extract_results")
-        workflow.add_edge("extract_results", "extract_conclusions")
-        workflow.add_edge("extract_conclusions", "validate_and_filter")
-        workflow.add_edge("validate_and_filter", END)
-
-        return workflow.compile()
 
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage A: Extract issues."""

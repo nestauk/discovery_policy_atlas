@@ -5,11 +5,15 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tooltip } from '@/components/ui/tooltip'
-import { 
-  ChevronUp, 
-  ChevronDown, 
+import {
+  ChevronUp,
+  ChevronDown,
   Target
 } from 'lucide-react'
+import {
+  getEvidenceCategoryColors,
+  getEvidenceCategoryShortName,
+} from '@/lib/evidenceCategories'
 
 interface NavigatorInterventionData {
   name: string
@@ -227,48 +231,15 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                 </div>
 
                 <div className="col-span-2">
-                  {(() => {
-                    const category = intervention.evidence_category
-                    if (!category) {
-                      return <span className="text-gray-400 text-xs">—</span>
-                    }
-
-                    // Color coding by evidence strength (matching Documents tab)
-                    const categoryColors: Record<string, { bg: string; text: string }> = {
-                      'Systematic Review and Meta-Analysis': { bg: 'bg-[#0F294A]', text: 'text-white' },
-                      'RCTs and Quasi-Experimental Studies': { bg: 'bg-[#9A1BBE]', text: 'text-white' },
-                      'Observational Research Studies': { bg: 'bg-[#0000FF]', text: 'text-white' },
-                      'Modelling & Simulation': { bg: 'bg-[#18A48C]', text: 'text-white' },
-                      'Policy Syntheses & Guidance Documents': { bg: 'bg-[#97D9E3]', text: 'text-gray-900' },
-                      'Qualitative & Contextual Evidence': { bg: 'bg-[#A59BEE]', text: 'text-gray-900' },
-                      'Expert Opinion and Commentary': { bg: 'bg-[#F6A4B7]', text: 'text-gray-900' },
-                      'Unknown / Insufficient information': { bg: 'bg-[#f8f5f4]', text: 'text-gray-700' },
-                    }
-
-                    const colors = categoryColors[category] || { bg: 'bg-gray-100', text: 'text-gray-700' }
-
-                    // Short display names
-                    const shortNames: Record<string, string> = {
-                      'Systematic Review and Meta-Analysis': 'Systematic Review',
-                      'RCTs and Quasi-Experimental Studies': 'RCT/Quasi-Exp',
-                      'Observational Research Studies': 'Observational',
-                      'Modelling & Simulation': 'Modelling',
-                      'Policy Syntheses & Guidance Documents': 'Policy Guidance',
-                      'Qualitative & Contextual Evidence': 'Qualitative',
-                      'Expert Opinion and Commentary': 'Expert Opinion',
-                      'Unknown / Insufficient information': 'Unknown',
-                    }
-
-                    const displayName = shortNames[category] || category
-
-                    return (
-                      <Tooltip content={category}>
-                        <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} cursor-help whitespace-normal leading-tight`}>
-                          {displayName}
-                        </span>
-                      </Tooltip>
-                    )
-                  })()}
+                  {intervention.evidence_category ? (
+                    <Tooltip content={intervention.evidence_category}>
+                      <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${getEvidenceCategoryColors(intervention.evidence_category).bg} ${getEvidenceCategoryColors(intervention.evidence_category).text} cursor-help whitespace-normal leading-tight`}>
+                        {getEvidenceCategoryShortName(intervention.evidence_category)}
+                      </span>
+                    </Tooltip>
+                  ) : (
+                    <span className="text-gray-400 text-xs">—</span>
+                  )}
                 </div>
 
                 <div className="col-span-1">

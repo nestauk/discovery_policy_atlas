@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph
+from langgraph.graph import StateGraph, END
 
 from app.core.config import settings
 from app.utils.llm.llm_utils import (
@@ -72,10 +72,6 @@ class BaseExtractionWorkflow(ABC):
     # Subclasses must set this to identify the workflow type
     workflow_type: str = "base"
 
-    def _get_workflow_type(self) -> str:
-        """Return the workflow type identifier. Uses class attribute."""
-        return self.workflow_type
-
     def __init__(
         self,
         model: str = "gpt-5-mini",
@@ -103,9 +99,56 @@ class BaseExtractionWorkflow(ABC):
         # Build the workflow graph
         self.workflow = self._build_workflow()
 
-    @abstractmethod
     def _build_workflow(self) -> StateGraph:
-        """Build the LangGraph workflow. Implemented by subclasses."""
+        """Build the standard extraction workflow graph.
+
+        All workflows follow the same structure:
+        Issues -> Interventions -> Mappings -> Results -> Conclusions -> Validation
+
+        Subclasses implement the stage methods to customize prompts and processing.
+        """
+        workflow = StateGraph(WorkflowState)
+
+        workflow.add_node("extract_issues", self._extract_issues)
+        workflow.add_node("extract_interventions", self._extract_interventions)
+        workflow.add_node("extract_mappings", self._extract_mappings)
+        workflow.add_node("extract_results", self._extract_results)
+        workflow.add_node("extract_conclusions", self._extract_conclusions)
+        workflow.add_node("validate_and_filter", self._validate_and_filter)
+
+        workflow.set_entry_point("extract_issues")
+        workflow.add_edge("extract_issues", "extract_interventions")
+        workflow.add_edge("extract_interventions", "extract_mappings")
+        workflow.add_edge("extract_mappings", "extract_results")
+        workflow.add_edge("extract_results", "extract_conclusions")
+        workflow.add_edge("extract_conclusions", "validate_and_filter")
+        workflow.add_edge("validate_and_filter", END)
+
+        return workflow.compile()
+
+    @abstractmethod
+    async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
+        """Extract issues from the document. Implemented by subclasses."""
+        pass
+
+    @abstractmethod
+    async def _extract_interventions(self, state: WorkflowState) -> Dict[str, Any]:
+        """Extract interventions from the document. Implemented by subclasses."""
+        pass
+
+    @abstractmethod
+    async def _extract_mappings(self, state: WorkflowState) -> Dict[str, Any]:
+        """Extract mappings between issues and interventions. Implemented by subclasses."""
+        pass
+
+    @abstractmethod
+    async def _extract_results(self, state: WorkflowState) -> Dict[str, Any]:
+        """Extract results for each intervention. Implemented by subclasses."""
+        pass
+
+    @abstractmethod
+    async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
+        """Extract conclusions from the document. Implemented by subclasses."""
         pass
 
     async def run(
@@ -121,14 +164,12 @@ class BaseExtractionWorkflow(ABC):
         self._langfuse_session_id = session_id
         self._langfuse_handler = get_langfuse_handler(session_id=session_id)
 
-        workflow_type = self._get_workflow_type()
-
         initial_state = WorkflowState(
             paper_id=paper_id,
             full_text=full_text,
             evidence_category=evidence_category,
             evidence_confidence=evidence_confidence,
-            workflow_type=workflow_type,
+            workflow_type=self.workflow_type,
             issues=[],
             interventions=[],
             mappings=[],
@@ -144,11 +185,11 @@ class BaseExtractionWorkflow(ABC):
 
             if final_state.get("error"):
                 logger.error(f"Workflow error for {paper_id}: {final_state['error']}")
-                return self._empty_bundle(paper_id, workflow_type)
+                return self._empty_bundle(paper_id)
 
             return DocumentExtractionBundle(
                 paper_id=paper_id,
-                workflow_used=workflow_type,
+                workflow_used=self.workflow_type,
                 routing_reason="evidence_category",
                 issues=final_state["issues"],
                 interventions=final_state["interventions"],
@@ -161,15 +202,13 @@ class BaseExtractionWorkflow(ABC):
 
         except Exception as e:
             logger.error(f"Workflow failed for {paper_id}: {e}")
-            return self._empty_bundle(paper_id, workflow_type)
+            return self._empty_bundle(paper_id)
 
-    def _empty_bundle(
-        self, paper_id: str, workflow_type: str
-    ) -> DocumentExtractionBundle:
+    def _empty_bundle(self, paper_id: str) -> DocumentExtractionBundle:
         """Return an empty bundle on error."""
         return DocumentExtractionBundle(
             paper_id=paper_id,
-            workflow_used=workflow_type,
+            workflow_used=self.workflow_type,
             routing_reason="evidence_category",
             issues=[],
             interventions=[],
