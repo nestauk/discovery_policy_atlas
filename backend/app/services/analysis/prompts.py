@@ -178,7 +178,7 @@ INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
             """Task: Extract 2–6 ACTIVE INTERVENTIONS/PROGRAMS evaluated or proposed, that are the main focus of the study.
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","country":"...","population_intervened":["..."]|null,"population_demographics":"...","sample_size":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
@@ -191,7 +191,7 @@ Rules:
 
 
 Population Fields:
-- population_intervened: Who received the intervention (e.g., ["college students", "adults with depression"])
+- population_intervened: Who received the intervention (e.g., "college students", "adults with depression")
 - population_demographics: Secondary characteristics (e.g., "18-25 years old, 60% female, undergraduate students")
 - sample_size: Total number of participants in the intervention group (e.g., "153", "50 participants")
 - country: Where the intervention was carried out or recommended

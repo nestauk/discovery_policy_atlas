@@ -52,7 +52,7 @@ SR_INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
             """Extract 2–6 INTERVENTION CATEGORIES that are reviewed and form the main focus of this systematic review..
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","geographic_scope":"...","population_intervened":["..."]|null,"evidence_volume":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","geographic_scope":"...","population_intervened":"...|null","evidence_volume":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
@@ -65,7 +65,7 @@ Rules:
 - If required information for a field is not reported at the category level, return "null" for that field.
 
 Population Fields:
-- population_intervened: The population(s) targeted across included studies within the intervention category (e.g. ["adults with depression", "children and adolescents"]). Use abstracted labels; do not infer specifics.
+- population_intervened: The population targeted across included studies within the intervention category (e.g. "adults with depression", "children and adolescents"). Use abstracted labels; do not infer specifics.
 - evidence_volume: The volume of evidence supporting the intervention category (e.g. “5 RCTs”, “12 studies”), only if explicitly reported.
 
 Paper text:
@@ -88,6 +88,7 @@ Schema:
 {{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","n_studies":int|null,"sample_size":int|null,"stratum_type":"...|null","stratum_value":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"..."}}]}}
 
 Rules:
+- MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
 - Extract SEPARATE RESULT ROWS for each stratum (subgroup analysis, follow-up period, setting variant, etc.)
 - Focus on AGGREGATED REVIEW-LEVEL RESULTS for this intervention category, not per-study data
 - Each result row should correspond to a single pooled or aggregate effect estimate for ONE stratum

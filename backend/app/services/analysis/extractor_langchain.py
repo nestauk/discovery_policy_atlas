@@ -476,15 +476,6 @@ class LangChainExtractorService:
 
                 # Interventions
                 for item in data.get("interventions", []):
-                    population_intervened = item.get("population_intervened")
-                    if isinstance(population_intervened, list):
-                        population_intervened = "; ".join(
-                            [
-                                str(v).strip()
-                                for v in population_intervened
-                                if str(v).strip()
-                            ]
-                        )
                     row = {
                         "doc_id": doc_id,
                         "idx": item.get("idx"),
@@ -492,7 +483,7 @@ class LangChainExtractorService:
                         "type": item.get("type"),
                         "description": item.get("description"),
                         "country": item.get("country"),
-                        "population_intervened": population_intervened,
+                        "population_intervened": item.get("population_intervened"),
                         "population_demographics": item.get("population_demographics"),
                         "sample_size": item.get("sample_size"),
                         "comparator": item.get("comparator"),
