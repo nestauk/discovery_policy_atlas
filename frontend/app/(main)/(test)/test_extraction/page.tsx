@@ -88,6 +88,7 @@ interface ExtractionResult {
         outcome_variable?: string
         // Support both 'direction' (new schema) and 'effect_direction' (legacy)
         direction?: string
+        impact_direction?: string
         effect_direction?: string
         effect_size_type?: string
         effect_size?: string

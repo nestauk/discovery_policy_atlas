@@ -72,6 +72,7 @@ interface DocumentDetailResult {
         outcome_variable?: string
         // Support both 'direction' (new schema) and 'effect_direction' (legacy)
         direction?: string
+        impact_direction?: string
         effect_direction?: string
         effect_size_type?: string
         effect_size?: string
@@ -248,7 +249,9 @@ function DocumentDetailView({ extraction }: {
                                     </span>
                                     {/* Support both 'direction' (new) and 'effect_direction' (legacy) */}
                                     <Badge variant="outline" className="text-xs bg-green-100 text-green-700">
-                                      {result.direction || result.effect_direction}
+                                      {result.direction ||
+                                        result.impact_direction ||
+                                        result.effect_direction}
                                     </Badge>
                                   </div>
                                   

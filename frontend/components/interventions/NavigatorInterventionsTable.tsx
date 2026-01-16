@@ -13,6 +13,7 @@ import {
 import {
   getEvidenceCategoryColors,
   getEvidenceCategoryShortName,
+  isPolicyEvidenceCategory,
 } from '@/lib/evidenceCategories'
 
 interface NavigatorInterventionData {
@@ -20,6 +21,8 @@ interface NavigatorInterventionData {
   type: string
   country: string
   description: string
+  implementation_level?: string
+  responsible_actor?: string
   evidence_category?: string
   is_systematic_review?: boolean
   result_count: number
@@ -34,6 +37,13 @@ interface NavigatorInterventionData {
     supporting_quote?: string
     population_measured?: string
     subgroup_or_dose?: string
+    impact_direction?: string
+    impact_magnitude?: string
+    claim_text?: string
+    claim_type?: string
+    evidence_basis?: string
+    uncertainty_language?: string
+    population_targeted?: string
     // SR-specific fields for meta-analysis results
     heterogeneity_I2?: string
     tau2?: string
@@ -71,6 +81,16 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
   const [sortField, setSortField] = useState<SortField>('impact_score')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+
+  const directionBadgeClass = (direction: string) => {
+    if (direction === 'increase' || direction === 'positive') {
+      return 'bg-green-50 text-green-700 border-green-200'
+    }
+    if (direction === 'decrease' || direction === 'negative') {
+      return 'bg-red-50 text-red-700 border-red-200'
+    }
+    return 'bg-gray-50 text-gray-700 border-gray-200'
+  }
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -280,12 +300,30 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                       </div>
                     )}
 
+                    {(intervention.implementation_level || intervention.responsible_actor) && (
+                      <div className="text-xs text-gray-600">
+                        {intervention.implementation_level && (
+                          <div>
+                            <span className="font-medium text-gray-600">Implementation level: </span>
+                            {intervention.implementation_level}
+                          </div>
+                        )}
+                        {intervention.responsible_actor && (
+                          <div>
+                            <span className="font-medium text-gray-600">Responsible actor: </span>
+                            {intervention.responsible_actor}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Results Summary */}
                     {intervention.results_summary && intervention.results_summary.length > 0 && (
                       <div>
                         <div className="space-y-3">
                           {intervention.results_summary.map((result, idx) => {
                             const isSystematicReview = intervention.is_systematic_review === true
+                            const isPolicy = isPolicyEvidenceCategory(intervention.evidence_category)
                             // Build outcome title with stratum
                             const outcomeTitle = result.stratum_value
                               ? `${result.outcome} — ${result.stratum_value}`
@@ -313,13 +351,9 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                                   </div>
                                   <Badge
                                     variant="outline"
-                                    className={`text-xs ${
-                                      result.direction === 'increase' ? 'bg-green-50 text-green-700 border-green-200' :
-                                      result.direction === 'decrease' ? 'bg-red-50 text-red-700 border-red-200' :
-                                      'bg-gray-50 text-gray-700 border-gray-200'
-                                    }`}
+                                    className={`text-xs ${directionBadgeClass(result.impact_direction || result.direction)}`}
                                   >
-                                    {result.direction}
+                                    {result.impact_direction || result.direction}
                                   </Badge>
                                 </div>
 
@@ -336,64 +370,81 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                                 )}
 
                                 {/* Additional details - labels and fields based on evidence category */}
-                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                                  <div>
-                                    <span className="font-medium text-gray-600">
-                                      {isSystematicReview ? 'Aggregate Effect Size' : 'Effect Size'}
-                                      {result.effect_size_type && result.effect_size_type !== 'null' ? ` (${result.effect_size_type})` : ''}:{' '}
-                                    </span>
-                                    {result.effect_size && result.effect_size !== 'null' ? (
-                                      <span className="text-gray-600">{result.effect_size}</span>
-                                    ) : (
-                                      <span className="text-gray-400 italic">n/a</span>
+                                {isPolicy ? (
+                                  <div className="space-y-2 text-xs text-gray-700">
+                                    {result.claim_text && (
+                                      <p className="text-sm text-gray-800">{result.claim_text}</p>
                                     )}
+                                    <div className="space-y-1">
+                                      <div><span className="font-medium text-gray-600">Claim type: </span>{result.claim_type || 'n/a'}</div>
+                                      <div><span className="font-medium text-gray-600">Evidence basis: </span>{result.evidence_basis || 'n/a'}</div>
+                                      <div><span className="font-medium text-gray-600">Uncertainty: </span>{result.uncertainty_language || 'n/a'}</div>
+                                      <div><span className="font-medium text-gray-600">Impact magnitude: </span>{result.impact_magnitude || 'n/a'}</div>
+                                      <div><span className="font-medium text-gray-600">Population targeted: </span>{result.population_targeted || 'n/a'}</div>
+                                      <div><span className="font-medium text-gray-600">Implementation level: </span>{intervention.implementation_level || 'n/a'}</div>
+                                      <div><span className="font-medium text-gray-600">Responsible actor: </span>{intervention.responsible_actor || 'n/a'}</div>
+                                    </div>
                                   </div>
-                                  {/* Hide P-value for Systematic Reviews */}
-                                  {!isSystematicReview && (
+                                ) : (
+                                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
                                     <div>
-                                      <span className="font-medium text-gray-600">P-value: </span>
-                                      {result.p_value && result.p_value !== 'null' ? (
-                                        <span className="text-gray-600">{result.p_value}</span>
+                                      <span className="font-medium text-gray-600">
+                                        {isSystematicReview ? 'Aggregate Effect Size' : 'Effect Size'}
+                                        {result.effect_size_type && result.effect_size_type !== 'null' ? ` (${result.effect_size_type})` : ''}:{' '}
+                                      </span>
+                                      {result.effect_size && result.effect_size !== 'null' ? (
+                                        <span className="text-gray-600">{result.effect_size}</span>
                                       ) : (
                                         <span className="text-gray-400 italic">n/a</span>
                                       )}
                                     </div>
-                                  )}
-                                  <div>
-                                    <span className="font-medium text-gray-600">
-                                      {isSystematicReview ? 'Aggregate Uncertainty' : 'Uncertainty'}:{' '}
-                                    </span>
-                                    {result.uncertainty && result.uncertainty !== 'null' ? (
-                                      <span className="text-gray-600">±{result.uncertainty}</span>
-                                    ) : (
-                                      <span className="text-gray-400 italic">n/a</span>
+                                    {/* Hide P-value for Systematic Reviews */}
+                                    {!isSystematicReview && (
+                                      <div>
+                                        <span className="font-medium text-gray-600">P-value: </span>
+                                        {result.p_value && result.p_value !== 'null' ? (
+                                          <span className="text-gray-600">{result.p_value}</span>
+                                        ) : (
+                                          <span className="text-gray-400 italic">n/a</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    <div>
+                                      <span className="font-medium text-gray-600">
+                                        {isSystematicReview ? 'Aggregate Uncertainty' : 'Uncertainty'}:{' '}
+                                      </span>
+                                      {result.uncertainty && result.uncertainty !== 'null' ? (
+                                        <span className="text-gray-600">±{result.uncertainty}</span>
+                                      ) : (
+                                        <span className="text-gray-400 italic">n/a</span>
+                                      )}
+                                    </div>
+                                    {/* SR-specific: heterogeneity measures for Systematic Reviews */}
+                                    {isSystematicReview && (
+                                      <>
+                                        <div>
+                                          <span className="font-medium text-gray-600">I²: </span>
+                                          {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? (
+                                            <span className="text-gray-600">{result.heterogeneity_I2}</span>
+                                          ) : (
+                                            <span className="text-gray-400 italic">n/a</span>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <span className="font-medium text-gray-600">τ²: </span>
+                                          {result.tau2 && result.tau2 !== 'null' ? (
+                                            <span className="text-gray-600">{result.tau2}</span>
+                                          ) : (
+                                            <span className="text-gray-400 italic">n/a</span>
+                                          )}
+                                        </div>
+                                      </>
                                     )}
                                   </div>
-                                  {/* SR-specific: heterogeneity measures for Systematic Reviews */}
-                                  {isSystematicReview && (
-                                    <>
-                                      <div>
-                                        <span className="font-medium text-gray-600">I²: </span>
-                                        {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? (
-                                          <span className="text-gray-600">{result.heterogeneity_I2}</span>
-                                        ) : (
-                                          <span className="text-gray-400 italic">n/a</span>
-                                        )}
-                                      </div>
-                                      <div>
-                                        <span className="font-medium text-gray-600">τ²: </span>
-                                        {result.tau2 && result.tau2 !== 'null' ? (
-                                          <span className="text-gray-600">{result.tau2}</span>
-                                        ) : (
-                                          <span className="text-gray-400 italic">n/a</span>
-                                        )}
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
+                                )}
 
                                 {/* Population info */}
-                                {result.population_measured && (
+                                {result.population_measured && !isPolicy && (
                                   <div className="mt-2 text-xs text-gray-600">
                                     <div><span className="font-medium">Population:</span> {result.population_measured}</div>
                                   </div>

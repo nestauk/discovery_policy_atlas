@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { isPolicyEvidenceCategory } from '@/lib/evidenceCategories'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { 
   AlertCircle,
@@ -37,13 +38,22 @@ interface DocumentDetailResult {
       type?: string
       country?: string
       sample_size?: string
+      implementation_level?: string
+      responsible_actor?: string
       supporting_quote?: string
       addresses_issues?: number[]
       results?: Array<{
         outcome_variable?: string
         // Support both 'direction' (new schema) and 'effect_direction' (legacy)
         direction?: string
+        impact_direction?: string
         effect_direction?: string
+        impact_magnitude?: string
+        claim_text?: string
+        claim_type?: string
+        evidence_basis?: string
+        uncertainty_language?: string
+        population_targeted?: string
         effect_size_type?: string
         effect_size?: string
         uncertainty?: string
@@ -106,6 +116,11 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
   const issues = extraction.issues || []
   const interventions = extraction.interventions || []
   const conclusion = extraction.conclusion
+  const evidenceCategory =
+    typeof extraction.metadata?.evidence_category === 'string'
+      ? extraction.metadata?.evidence_category
+      : undefined
+  const isPolicyEvidence = isPolicyEvidenceCategory(evidenceCategory)
 
   return (
     <div className="space-y-4">
@@ -202,6 +217,16 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
                           Sample: {intervention.sample_size}
                         </Badge>
                       )}
+                      {intervention.implementation_level && (
+                        <Badge variant="outline" className="text-xs bg-slate-50 text-slate-700">
+                          Level: {intervention.implementation_level}
+                        </Badge>
+                      )}
+                      {intervention.responsible_actor && (
+                        <Badge variant="outline" className="text-xs bg-slate-50 text-slate-700">
+                          Actor: {intervention.responsible_actor}
+                        </Badge>
+                      )}
                         </div>
                       </div>
                     </div>
@@ -231,6 +256,10 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
                               key={resultIndex}
                               className="bg-green-50 border-l-4 border-green-200 p-2 rounded"
                             >
+                              {(() => {
+                                const isPolicy = isPolicyEvidence
+                                return (
+                              <>
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
                                 <span className="font-medium text-green-900 text-sm">
                                   {result.outcome_variable}
@@ -243,12 +272,14 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
                                 )}
                                 {/* Support both 'direction' (new schema) and 'effect_direction' (legacy) */}
                                 <Badge variant="outline" className="text-xs bg-green-100 text-green-700">
-                                  {result.direction || result.effect_direction}
+                                  {result.direction ||
+                                    result.impact_direction ||
+                                    result.effect_direction}
                                 </Badge>
                               </div>
 
                               {/* Sample size info for SR */}
-                              {isSystematicReview && (result.n_studies || result.sample_size) && (
+                              {isSystematicReview && !isPolicy && (result.n_studies || result.sample_size) && (
                                 <div className="flex gap-3 text-xs text-green-700 mb-1">
                                   {result.n_studies && (
                                     <span>k = {result.n_studies} studies</span>
@@ -260,7 +291,7 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
                               )}
 
                               {/* Quantitative measures */}
-                              {((result.effect_size && result.effect_size !== 'null') || (result.p_value && result.p_value !== 'null') || (result.uncertainty && result.uncertainty !== 'null') || (result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null')) && (
+                              {!isPolicy && ((result.effect_size && result.effect_size !== 'null') || (result.p_value && result.p_value !== 'null') || (result.uncertainty && result.uncertainty !== 'null') || (result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null')) && (
                                 <div className="flex flex-wrap gap-3 text-xs text-green-800 mb-1">
                                   {result.effect_size && result.effect_size !== 'null' && (
                                     <span>
@@ -289,21 +320,43 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
                               )}
 
                               {/* Population measured */}
-                              {result.population_measured && result.population_measured !== 'null' && (
+                              {!isPolicy && result.population_measured && result.population_measured !== 'null' && (
                                 <p className="text-xs text-green-700 mb-1">
                                   Population: {result.population_measured}
                                 </p>
                               )}
 
-                              {result.result_text && (
+                              {isPolicy && (
+                                <div className="text-xs text-green-900 mb-1 space-y-2">
+                                  {result.claim_text && (
+                                    <p className="text-sm text-green-900">
+                                      {result.claim_text}
+                                    </p>
+                                  )}
+                                  <div className="space-y-1">
+                                    <div><span className="font-medium">Claim type: </span>{result.claim_type || 'n/a'}</div>
+                                    <div><span className="font-medium">Evidence basis: </span>{result.evidence_basis || 'n/a'}</div>
+                                    <div><span className="font-medium">Uncertainty: </span>{result.uncertainty_language || 'n/a'}</div>
+                                    <div><span className="font-medium">Impact magnitude: </span>{result.impact_magnitude || 'n/a'}</div>
+                                    <div><span className="font-medium">Population targeted: </span>{result.population_targeted || 'n/a'}</div>
+                                    <div><span className="font-medium">Implementation level: </span>{intervention.implementation_level || 'n/a'}</div>
+                                    <div><span className="font-medium">Responsible actor: </span>{intervention.responsible_actor || 'n/a'}</div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {!isPolicy && result.result_text && (
                                 <p className="text-sm text-green-900 mb-1">{result.result_text}</p>
                               )}
 
                               {result.supporting_quote && (
-                                <blockquote className="border-l-2 border-green-300 pl-2 text-xs text-green-700 italic">
+                                <blockquote className="border-l-2 border-green-300 pl-2 text-green-700 italic">
                                   &ldquo;{result.supporting_quote}&rdquo;
                                 </blockquote>
                               )}
+                            </>
+                            )
+                          })()}
                             </div>
                           ))}
                         </div>
