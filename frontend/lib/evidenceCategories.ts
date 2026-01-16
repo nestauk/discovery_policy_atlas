@@ -38,6 +38,12 @@ export const EVIDENCE_CATEGORY_SHORT_NAMES: Record<string, string> = {
   'Unknown / Insufficient information': 'Unknown',
 }
 
+export const POLICY_EVIDENCE_CATEGORIES = new Set([
+  'Policy Syntheses & Guidance Documents',
+  'Qualitative & Contextual Evidence',
+  'Expert Opinion and Commentary',
+])
+
 /**
  * Get colors for an evidence category, with fallback for unknown categories.
  */
@@ -50,4 +56,8 @@ export function getEvidenceCategoryColors(category: string): EvidenceCategoryCol
  */
 export function getEvidenceCategoryShortName(category: string): string {
   return EVIDENCE_CATEGORY_SHORT_NAMES[category] || category
+}
+
+export function isPolicyEvidenceCategory(category?: string): boolean {
+  return !!category && POLICY_EVIDENCE_CATEGORIES.has(category)
 }

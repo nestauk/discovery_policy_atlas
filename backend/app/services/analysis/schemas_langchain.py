@@ -7,7 +7,7 @@ and workflow-specific nullable fields.
 """
 
 from typing import List, Optional, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class IssueItem(BaseModel):
@@ -46,6 +46,18 @@ class InterventionItem(BaseModel):
     intervention_semantic_type: Optional[
         Literal["trial_intervention", "intervention_category", "policy_measure"]
     ] = None
+    # Policy-specific fields
+    responsible_actor: Optional[str] = None
+    implementation_level: Optional[
+        Literal[
+            "international",
+            "national",
+            "regional",
+            "local",
+            "organizational",
+            "individual",
+        ]
+    ] = None
     supporting_quote: str
 
 
@@ -68,7 +80,9 @@ class ResultItem(BaseModel):
     intervention_idx: int
     outcome_variable: str
     # RENAMED: direction (was effect_direction), added mixed_or_unclear
-    direction: Literal["increase", "decrease", "null", "mixed_or_unclear"]
+    direction: Optional[
+        Literal["increase", "decrease", "null", "mixed_or_unclear"]
+    ] = None
     # NEW: Distinguishes study-level (RCT), pooled (SR), or claim (Policy) estimates
     estimate_level: Optional[Literal["study", "pooled", "claim"]] = None
 
@@ -98,6 +112,20 @@ class ResultItem(BaseModel):
             "substantial", "moderate", "modest", "marginal", "negligible", "unclear"
         ]
     ] = None
+    impact_direction: Optional[
+        Literal["positive", "negative", "mixed", "unclear"]
+    ] = None
+    claim_text: Optional[str] = None
+    claim_type: Optional[
+        Literal["recommendation", "assessment", "prediction", "warning"]
+    ] = None
+    evidence_basis: Optional[
+        Literal[
+            "empirical", "synthesis", "expert_judgement", "precedent", "unspecified"
+        ]
+    ] = None
+    uncertainty_language: Optional[Literal["confident", "mixed", "cautious"]] = None
+    population_targeted: Optional[str] = None
 
     # Common fields
     population_measured: Optional[
@@ -106,6 +134,44 @@ class ResultItem(BaseModel):
     subgroup_or_dose: Optional[str] = None
     result_text: str
     supporting_quote: str
+
+    @model_validator(mode="after")
+    def validate_workflow_fields(self) -> "ResultItem":
+        """Ensure empirical and claim fields are mutually exclusive."""
+        empirical_fields = [
+            self.effect_size,
+            self.effect_size_type,
+            self.p_value,
+            self.uncertainty,
+            self.heterogeneity_I2,
+            self.tau2,
+            self.summary_statistic,
+            self.n_studies,
+            self.sample_size,
+            self.stratum_type,
+            self.stratum_value,
+            self.is_primary_stratum,
+            self.direction,
+        ]
+        claim_fields = [
+            self.claim_text,
+            self.claim_type,
+            self.evidence_basis,
+            self.uncertainty_language,
+            self.impact_direction,
+            self.impact_magnitude,
+            self.population_targeted,
+        ]
+
+        has_empirical = any(f is not None for f in empirical_fields)
+        has_claim = any(f is not None for f in claim_fields)
+
+        if has_empirical and has_claim:
+            raise ValueError(
+                "ResultItem cannot have both empirical fields (effect_size, p_value, etc.) "
+                "and claim fields (claim_text, claim_type, etc.). Use one mode only."
+            )
+        return self
 
 
 # Intermediate extraction models for each stage

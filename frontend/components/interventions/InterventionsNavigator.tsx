@@ -37,6 +37,8 @@ interface DetailedIntervention {
   country?: string
   evidence_category?: string
   is_systematic_review?: boolean
+  implementation_level?: string
+  responsible_actor?: string
   sample_size?: number | null
   impact_score?: number
   evidence_score?: number
@@ -47,7 +49,14 @@ interface DetailedIntervention {
     outcome_variable?: string
     // Support both 'direction' (new schema) and 'effect_direction' (legacy)
     direction?: string
+    impact_direction?: string
     effect_direction?: string
+    impact_magnitude?: string
+    claim_text?: string
+    claim_type?: string
+    evidence_basis?: string
+    uncertainty_language?: string
+    population_targeted?: string
     effect_size?: string
     p_value?: string
     uncertainty?: string
@@ -343,11 +352,24 @@ export function InterventionsNavigator({
       description: detail.description,
       evidence_category: detail.evidence_category,
       is_systematic_review: detail.is_systematic_review,
+      implementation_level: detail.implementation_level,
+      responsible_actor: detail.responsible_actor,
       result_count: detail.results?.length || 0,
       results_summary: (detail.results || []).map(result => ({
         outcome: result.outcome_variable || 'Outcome',
         // Support both 'direction' (new schema) and 'effect_direction' (legacy)
-        direction: result.direction || result.effect_direction || 'unknown',
+        direction:
+          result.direction ||
+          result.impact_direction ||
+          result.effect_direction ||
+          'unknown',
+        impact_direction: result.impact_direction,
+        impact_magnitude: result.impact_magnitude,
+        claim_text: result.claim_text,
+        claim_type: result.claim_type,
+        evidence_basis: result.evidence_basis,
+        uncertainty_language: result.uncertainty_language,
+        population_targeted: result.population_targeted,
         effect_size: result.effect_size,
         effect_size_type: result.effect_size_type,
         p_value: result.p_value,

@@ -13,6 +13,7 @@ import {
 import {
   getEvidenceCategoryColors,
   getEvidenceCategoryShortName,
+  isPolicyEvidenceCategory,
 } from '@/lib/evidenceCategories'
 
 export interface InterventionData {
@@ -20,6 +21,8 @@ export interface InterventionData {
   type: string
   country: string
   description: string
+  implementation_level?: string
+  responsible_actor?: string
   evidence_category?: string
   is_systematic_review?: boolean
   result_count: number
@@ -34,6 +37,13 @@ export interface InterventionData {
     supporting_quote?: string
     population_measured?: string
     subgroup_or_dose?: string
+    impact_direction?: string
+    impact_magnitude?: string
+    claim_text?: string
+    claim_type?: string
+    evidence_basis?: string
+    uncertainty_language?: string
+    population_targeted?: string
     // SR-specific fields for meta-analysis results
     heterogeneity_I2?: string
     tau2?: string
@@ -63,6 +73,16 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
   const [sortField, setSortField] = useState<SortField>('evidence_category_rank')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+
+  const directionBadgeClass = (direction: string) => {
+    if (direction === 'increase' || direction === 'positive') {
+      return 'bg-green-50 text-green-700 border-green-200'
+    }
+    if (direction === 'decrease' || direction === 'negative') {
+      return 'bg-red-50 text-red-700 border-red-200'
+    }
+    return 'bg-gray-50 text-gray-700 border-gray-200'
+  }
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -233,6 +253,22 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
                         <p className="text-sm text-gray-700">{intervention.description}</p>
                       </div>
                     )}
+                    {(intervention.implementation_level || intervention.responsible_actor) && (
+                      <div className="text-xs text-gray-600">
+                        {intervention.implementation_level && (
+                          <div>
+                            <span className="font-medium text-gray-600">Implementation level: </span>
+                            {intervention.implementation_level}
+                          </div>
+                        )}
+                        {intervention.responsible_actor && (
+                          <div>
+                            <span className="font-medium text-gray-600">Responsible actor: </span>
+                            {intervention.responsible_actor}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Results Summary */}
                     {intervention.results_summary && intervention.results_summary.length > 0 && (
@@ -252,19 +288,34 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
                                 )}
                                 <Badge 
                                   variant="outline" 
-                                  className={`text-xs ${
-                                    result.direction === 'increase' ? 'bg-green-50 text-green-700 border-green-200' :
-                                    result.direction === 'decrease' ? 'bg-red-50 text-red-700 border-red-200' :
-                                    'bg-gray-50 text-gray-700 border-gray-200'
-                                  }`}
+                                  className={`text-xs ${directionBadgeClass(result.impact_direction || result.direction)}`}
                                 >
-                                  {result.direction}
+                                  {result.impact_direction || result.direction}
                                 </Badge>
                               </div>
                               
                               {/* Additional details - labels and fields based on evidence category */}
                               {(() => {
                                 const isSystematicReview = intervention.is_systematic_review === true
+                                const isPolicy = isPolicyEvidenceCategory(intervention.evidence_category)
+                                if (isPolicy) {
+                                  return (
+                                    <div className="space-y-2 text-xs text-gray-700">
+                                      {result.claim_text && (
+                                        <p className="text-sm text-gray-800">{result.claim_text}</p>
+                                      )}
+                                      <div className="space-y-1">
+                                        <div><span className="font-medium text-gray-600">Claim type: </span>{result.claim_type || 'n/a'}</div>
+                                        <div><span className="font-medium text-gray-600">Evidence basis: </span>{result.evidence_basis || 'n/a'}</div>
+                                        <div><span className="font-medium text-gray-600">Uncertainty: </span>{result.uncertainty_language || 'n/a'}</div>
+                                        <div><span className="font-medium text-gray-600">Impact magnitude: </span>{result.impact_magnitude || 'n/a'}</div>
+                                        <div><span className="font-medium text-gray-600">Population targeted: </span>{result.population_targeted || 'n/a'}</div>
+                                        <div><span className="font-medium text-gray-600">Implementation level: </span>{intervention.implementation_level || 'n/a'}</div>
+                                        <div><span className="font-medium text-gray-600">Responsible actor: </span>{intervention.responsible_actor || 'n/a'}</div>
+                                      </div>
+                                    </div>
+                                  )
+                                }
                                 return (
                                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
                                     <div>

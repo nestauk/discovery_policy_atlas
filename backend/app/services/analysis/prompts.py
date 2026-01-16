@@ -413,6 +413,105 @@ Paper text:
 
 
 # =============================================================================
+# POLICY EXTRACTION PROMPTS
+# =============================================================================
+
+POLICY_ISSUES_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACTION_SYSTEM_PROMPT),
+        (
+            "human",
+            """Extract 1-3 KEY POLICY PROBLEMS/CHALLENGES or OBJECTIVES addressed by this document.
+
+Schema:
+{{"issues":[{{"idx":0,"label":"...","explanation":"...","supporting_quote":"..."}}], "coverage_note":"string|null"}}
+
+Rules:
+- MECE: Merge overlaps; avoid duplicates; prefer concise policy-relevant labels.
+- Focus on policy failures, unmet needs, or objectives (e.g., "low uptake of preventive services", "carbon emissions targets not met").
+- Do NOT include recommendations or impacts here (those belong in interventions/results).
+- explanation: 1-2 sentences contextualizing the issue based on the document.
+- Only include issues explicitly supported by the text.
+
+Paper text:
+{full_text}""",
+        ),
+    ]
+)
+
+
+POLICY_INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACTION_SYSTEM_PROMPT),
+        (
+            "human",
+            """Extract 2-6 CONCRETE POLICY MEASURES, RECOMMENDATIONS, or ACTIONS proposed in the document.
+
+Schema:
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","country":"...","population_intervened":"...|null","population_demographics":"...|null","sample_size":"...|null","comparator":"...|null","responsible_actor":"...|null","implementation_level":"international|national|regional|local|organizational|individual|null","supporting_quote":"..."}}], "coverage_note":"string"}}
+
+Rules:
+- MECE: mutually exclusive and collectively exhaustive; merge overlaps.
+- Focus on policy measures/actions, not general background statements.
+- Each target actor's recommendations should be separate interventions when clearly distinct.
+- description must paraphrase only what is in the quote; do not infer details.
+- responsible_actor: Who is expected to implement the measure (e.g., "national government", "local authorities", "school leaders").
+- implementation_level: international|national|regional|local|organizational|individual if explicitly stated.
+- If a field is not stated, return null (JSON null, not the string "null").
+
+Paper text:
+{full_text}""",
+        ),
+    ]
+)
+
+
+POLICY_RESULTS_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACTION_SYSTEM_PROMPT),
+        (
+            "human",
+            """For ONLY the intervention below, extract 1-5 MECE CLAIMS about expected impacts or outcomes.
+
+Intervention:
+{one_intervention_json}
+
+Schema:
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","impact_direction":"positive|negative|mixed|unclear|null","impact_magnitude":"substantial|moderate|modest|marginal|negligible|unclear|null","claim_text":"...","claim_type":"recommendation|assessment|prediction|warning|null","evidence_basis":"empirical|synthesis|expert_judgement|precedent|unspecified|null","uncertainty_language":"confident|mixed|cautious|null","population_targeted":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"..."}}]}}
+
+Rules:
+- One claim per result row; split compound statements.
+- Extract AUTHOR-CLAIMED impacts, not measured effects.
+- claim_text: One sentence that states the CURRENT baseline/problem and the RECOMMENDED or EXPECTED change (e.g., "Low consumer awareness currently limits uptake, so education and support are recommended.").
+- Make modality explicit in the wording: normative (should/must), diagnostic (is insufficient/lacks), or predictive (likely/expected).
+- result_text: Short sentence describing the claimed impact; if unsure, copy claim_text.
+- claim_type:
+  - recommendation: proposes an action or policy
+  - assessment: evaluates a situation or intervention
+  - prediction: states an expected future effect
+  - warning: highlights risks or potential harms
+- evidence_basis:
+  - empirical: cites primary studies/data
+  - synthesis: cites reviews or bodies of evidence
+  - expert_judgement: based on professional opinion/panels/author reasoning
+  - precedent: justified by past policy/implementation
+  - unspecified: no explicit justification
+- uncertainty_language:
+  - confident: assertive language, no caveats
+  - mixed: both hedging and assertive language
+  - cautious: hedging, caveats, conditionality
+- impact_direction: positive|negative|mixed|unclear based on explicit wording only.
+- Do NOT populate effect_size, uncertainty, or p_value.
+- population_targeted: only if explicitly stated.
+
+Paper text:
+{full_text}""",
+        ),
+    ]
+)
+
+
+# =============================================================================
 # SEARCH WIZARD: POPULATION AND OUTCOME OPTIONS GENERATION
 # =============================================================================
 

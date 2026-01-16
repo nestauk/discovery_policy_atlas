@@ -295,7 +295,10 @@ async def get_findings(
                 Outcome=str(res.get("outcome_variable") or "") or None,
                 # Support both 'direction' (new schema) and 'effect_direction' (legacy)
                 EffectDirection=str(
-                    res.get("direction") or res.get("effect_direction") or ""
+                    res.get("direction")
+                    or res.get("impact_direction")
+                    or res.get("effect_direction")
+                    or ""
                 )
                 or None,
                 EffectSizeType=str(res.get("effect_size_type") or "") or None,
