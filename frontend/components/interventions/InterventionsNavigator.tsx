@@ -56,6 +56,7 @@ interface DetailedIntervention {
     direction?: string
     effect_direction?: string
     effect_size?: string
+    effect_size_type?: string
     p_value?: string
     uncertainty?: string
     result_text?: string
@@ -419,6 +420,19 @@ export function InterventionsNavigator({
     }))
   }, [])
 
+  // Render evidence mix summary from detailed interventions
+  const renderEvidenceMix = useCallback((detailedInterventions: DetailedIntervention[] | undefined) => {
+    const computedMix = computeEvidenceMixFromInterventions(detailedInterventions)
+    const mixText = formatEvidenceMixCompact(computedMix)
+    if (!mixText) return null
+    return (
+      <p className="text-sm text-slate-600">
+        <span className="font-semibold">Evidence Mix: </span>
+        {mixText}
+      </p>
+    )
+  }, [])
+
   if (!activeProject) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -615,16 +629,7 @@ export function InterventionsNavigator({
                       <CardContent className="pt-0">
                         <div className="space-y-3">
                           {/* Evidence Mix - computed from unique documents in detailed interventions */}
-                          {(() => {
-                            const computedMix = computeEvidenceMixFromInterventions(intervention.detailed_interventions)
-                            const mixText = formatEvidenceMixCompact(computedMix)
-                            return mixText ? (
-                              <p className="text-sm text-slate-600">
-                                <span className="font-semibold">Evidence Mix: </span>
-                                {mixText}
-                              </p>
-                            ) : null
-                          })()}
+                          {renderEvidenceMix(intervention.detailed_interventions)}
 
                           {/* Detailed Interventions */}
                           {intervention.detailed_interventions?.length ? (
@@ -741,16 +746,7 @@ export function InterventionsNavigator({
                               <CardContent className="pt-0">
                                 <div className="space-y-3">
                                   {/* Evidence Mix - computed from unique documents in detailed interventions */}
-                                  {(() => {
-                                    const computedMix = computeEvidenceMixFromInterventions(intervention.detailed_interventions)
-                                    const mixText = formatEvidenceMixCompact(computedMix)
-                                    return mixText ? (
-                                      <p className="text-sm text-slate-600">
-                                        <span className="font-semibold">Evidence Mix: </span>
-                                        {mixText}
-                                      </p>
-                                    ) : null
-                                  })()}
+                                  {renderEvidenceMix(intervention.detailed_interventions)}
 
                                   {/* Detailed Interventions */}
                                   {intervention.detailed_interventions?.length ? (

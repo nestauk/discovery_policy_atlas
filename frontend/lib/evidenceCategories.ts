@@ -39,10 +39,10 @@ export const EVIDENCE_CATEGORY_SHORT_NAMES: Record<string, string> = {
 }
 
 /**
- * Very short names for evidence mix display (used in intervention star ratings).
+ * Short names for evidence types (used in evidence mix display and explanations).
  * These match the keys returned from the backend evidence_mix field.
  */
-export const EVIDENCE_MIX_DISPLAY_NAMES: Record<string, string> = {
+export const EVIDENCE_TYPE_SHORT_NAMES: Record<string, string> = {
   'systematic_review': 'SR/MA',
   'rct': 'RCT',
   'observational': 'Observational',
@@ -52,6 +52,9 @@ export const EVIDENCE_MIX_DISPLAY_NAMES: Record<string, string> = {
   'opinion': 'Opinion',
   'unknown': 'Unknown',
 }
+
+/** @deprecated Use EVIDENCE_TYPE_SHORT_NAMES instead */
+export const EVIDENCE_MIX_DISPLAY_NAMES = EVIDENCE_TYPE_SHORT_NAMES
 
 /**
  * Colors for evidence mix display (matching the evidence category colors by type).
@@ -109,19 +112,11 @@ const EVIDENCE_TYPE_FULL_NAMES: Record<string, string> = {
   'unknown': 'unclassified evidence',
 }
 
-/**
- * Short names for evidence mix compact display.
- */
-const EVIDENCE_TYPE_SHORT_NAMES: Record<string, string> = {
-  'systematic_review': 'SR/MA',
-  'rct': 'RCT',
-  'observational': 'Observational',
-  'modelling': 'Modelling',
-  'policy': 'Policy',
-  'qualitative': 'Qualitative',
-  'opinion': 'Opinion',
-  'unknown': 'Unknown',
-}
+/** Evidence types in order of strength (strongest first) */
+const EVIDENCE_TYPE_ORDER = [
+  'systematic_review', 'rct', 'observational', 'modelling',
+  'policy', 'qualitative', 'opinion'
+] as const
 
 /**
  * Generate an explanation for an intervention theme's evidence score.
@@ -136,30 +131,9 @@ export function getEvidenceScoreExplanation(
 
   // Build explanation based on ACTUAL evidence present, not star level
   if (evidenceMix && Object.keys(evidenceMix).length > 0) {
-    const presentTypes: string[] = []
-
-    // Check what's actually present (in order of strength)
-    if (evidenceMix['systematic_review'] && evidenceMix['systematic_review'] > 0) {
-      presentTypes.push(EVIDENCE_TYPE_FULL_NAMES['systematic_review'])
-    }
-    if (evidenceMix['rct'] && evidenceMix['rct'] > 0) {
-      presentTypes.push(EVIDENCE_TYPE_FULL_NAMES['rct'])
-    }
-    if (evidenceMix['observational'] && evidenceMix['observational'] > 0) {
-      presentTypes.push(EVIDENCE_TYPE_FULL_NAMES['observational'])
-    }
-    if (evidenceMix['modelling'] && evidenceMix['modelling'] > 0) {
-      presentTypes.push(EVIDENCE_TYPE_FULL_NAMES['modelling'])
-    }
-    if (evidenceMix['policy'] && evidenceMix['policy'] > 0) {
-      presentTypes.push(EVIDENCE_TYPE_FULL_NAMES['policy'])
-    }
-    if (evidenceMix['qualitative'] && evidenceMix['qualitative'] > 0) {
-      presentTypes.push(EVIDENCE_TYPE_FULL_NAMES['qualitative'])
-    }
-    if (evidenceMix['opinion'] && evidenceMix['opinion'] > 0) {
-      presentTypes.push(EVIDENCE_TYPE_FULL_NAMES['opinion'])
-    }
+    const presentTypes = EVIDENCE_TYPE_ORDER
+      .filter(key => evidenceMix[key] && evidenceMix[key] > 0)
+      .map(key => EVIDENCE_TYPE_FULL_NAMES[key])
 
     if (presentTypes.length > 0) {
       parts.push(`Evidence includes ${presentTypes.join(', ')}`)
@@ -187,10 +161,10 @@ export function formatEvidenceMixCompact(evidenceMix?: Record<string, number>): 
     return ''
   }
 
-  // Order by evidence strength (highest first)
-  const order = ['systematic_review', 'rct', 'observational', 'modelling', 'policy', 'qualitative', 'opinion', 'unknown']
+  // Order by evidence strength (highest first), including 'unknown' at the end
+  const orderWithUnknown = [...EVIDENCE_TYPE_ORDER, 'unknown'] as const
 
-  return order
+  return orderWithUnknown
     .filter(key => evidenceMix[key] && evidenceMix[key] > 0)
     .map(key => `${evidenceMix[key]} ${EVIDENCE_TYPE_SHORT_NAMES[key]}`)
     .join(', ')
