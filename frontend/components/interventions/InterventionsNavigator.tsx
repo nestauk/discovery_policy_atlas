@@ -12,6 +12,8 @@ import { Switch } from '@/components/ui/switch'
 import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
 import { NavigatorInterventionsTable } from '@/components/interventions/NavigatorInterventionsTable'
 import { type InterventionData } from '@/components/interventions/InterventionsTable'
+import { getEvidenceScoreExplanation, formatEvidenceMixCompact, computeEvidenceMixFromInterventions } from '@/lib/evidenceCategories'
+import { Tooltip } from '@/components/ui/tooltip'
 
 interface IssueTheme {
   theme_name: string
@@ -26,7 +28,12 @@ interface InterventionTheme {
   impact_summary?: string
   frequency: number
   avg_impact_score?: number
-  avg_evidence_score?: number
+  // New evidence strength methodology
+  stars?: number
+  base_rating?: number
+  cap_applied?: string | null
+  cap_message?: string | null
+  evidence_mix?: Record<string, number>
   detailed_interventions?: DetailedIntervention[]
 }
 
@@ -249,8 +256,8 @@ export function InterventionsNavigator({
     }
   }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken, onDownload])
 
-  const renderStars = useCallback((score?: number) => {
-    if (!score) return null
+  const renderStars = useCallback((score?: number, showDecimal: boolean = true) => {
+    if (score === undefined || score === null) return null
     return (
       <div className="flex items-center gap-1">
         <div className="flex">
@@ -263,7 +270,7 @@ export function InterventionsNavigator({
             />
           ))}
         </div>
-        <span className="text-xs text-slate-600">{score.toFixed(1)}</span>
+        {showDecimal && <span className="text-xs text-slate-600">{score.toFixed(1)}</span>}
       </div>
     )
   }, [])
@@ -274,7 +281,8 @@ export function InterventionsNavigator({
         case 'impact':
           return (b.avg_impact_score || 0) - (a.avg_impact_score || 0)
         case 'evidence':
-          return (b.avg_evidence_score || 0) - (a.avg_evidence_score || 0)
+          // Use new stars field instead of avg_evidence_score
+          return (b.stars ?? 0) - (a.stars ?? 0)
         case 'frequency':
         default:
           return (b.detailed_interventions?.length || 0) - (a.detailed_interventions?.length || 0)
@@ -284,9 +292,9 @@ export function InterventionsNavigator({
 
   const getAllInterventions = useMemo(() => {
     if (!data) return []
-    
+
     const interventionsMap = new Map()
-    
+
     data.issue_themes.forEach(issue => {
       issue.related_interventions.forEach(intervention => {
         const key = intervention.theme_name
@@ -296,8 +304,19 @@ export function InterventionsNavigator({
           if (intervention.avg_impact_score) {
             existing.impact_scores.push(intervention.avg_impact_score)
           }
-          if (intervention.avg_evidence_score) {
-            existing.evidence_scores.push(intervention.avg_evidence_score)
+          // Keep the highest stars rating when combining themes
+          if (intervention.stars !== undefined && (existing.stars === undefined || intervention.stars > existing.stars)) {
+            existing.stars = intervention.stars
+            existing.base_rating = intervention.base_rating
+            existing.cap_applied = intervention.cap_applied
+            existing.cap_message = intervention.cap_message
+          }
+          // Merge evidence_mix counts
+          if (intervention.evidence_mix) {
+            existing.evidence_mix = existing.evidence_mix || {}
+            Object.entries(intervention.evidence_mix).forEach(([key, count]) => {
+              existing.evidence_mix[key] = (existing.evidence_mix[key] || 0) + count
+            })
           }
           // Keep the first impact_summary we encounter (if current doesn't have one)
           if (!existing.impact_summary && intervention.impact_summary) {
@@ -315,23 +334,20 @@ export function InterventionsNavigator({
           interventionsMap.set(key, {
             ...intervention,
             impact_scores: intervention.avg_impact_score ? [intervention.avg_impact_score] : [],
-            evidence_scores: intervention.avg_evidence_score ? [intervention.avg_evidence_score] : [],
+            evidence_mix: intervention.evidence_mix ? { ...intervention.evidence_mix } : {},
             detailed_interventions: [...(intervention.detailed_interventions || [])]
           })
         }
       })
     })
-    
+
     const interventions = Array.from(interventionsMap.values()).map(intervention => ({
       ...intervention,
-      avg_impact_score: intervention.impact_scores.length > 0 
-        ? intervention.impact_scores.reduce((a: number, b: number) => a + b, 0) / intervention.impact_scores.length 
+      avg_impact_score: intervention.impact_scores.length > 0
+        ? intervention.impact_scores.reduce((a: number, b: number) => a + b, 0) / intervention.impact_scores.length
         : undefined,
-      avg_evidence_score: intervention.evidence_scores.length > 0
-        ? intervention.evidence_scores.reduce((a: number, b: number) => a + b, 0) / intervention.evidence_scores.length
-        : undefined
     }))
-    
+
     return sortInterventions(interventions)
   }, [data, sortInterventions])
 
@@ -562,16 +578,20 @@ export function InterventionsNavigator({
                         </div>
                         
                         <div className="flex items-start gap-4 ml-4">
+                          {intervention.stars !== undefined && (
+                            <div className="text-right">
+                              <div className="text-xs text-slate-500">Evidence:</div>
+                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.evidence_mix, intervention.cap_message)}>
+                                <div className="flex items-center cursor-help">
+                                  {renderStars(intervention.stars, false)}
+                                </div>
+                              </Tooltip>
+                            </div>
+                          )}
                           {intervention.avg_impact_score && (
                             <div className="text-right">
                               <div className="text-xs text-slate-500">Impact:</div>
-                              {renderStars(intervention.avg_impact_score)}
-                            </div>
-                          )}
-                          {intervention.avg_evidence_score && (
-                            <div className="text-right">
-                              <div className="text-xs text-slate-500">Evidence:</div>
-                              {renderStars(intervention.avg_evidence_score)}
+                              {renderStars(intervention.avg_impact_score, true)}
                             </div>
                           )}
                           <div className="text-right">
@@ -593,18 +613,33 @@ export function InterventionsNavigator({
 
                     {expandedInterventions.has(`all-${intervention.theme_name}`) && (
                       <CardContent className="pt-0">
-                        {intervention.detailed_interventions?.length ? (
-                          <div className="space-y-3">
-                            <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                            <NavigatorInterventionsTable 
-                              interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                            />
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-600">
-                            <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
-                          </div>
-                        )}
+                        <div className="space-y-3">
+                          {/* Evidence Mix - computed from unique documents in detailed interventions */}
+                          {(() => {
+                            const computedMix = computeEvidenceMixFromInterventions(intervention.detailed_interventions)
+                            const mixText = formatEvidenceMixCompact(computedMix)
+                            return mixText ? (
+                              <p className="text-sm text-slate-600">
+                                <span className="font-semibold">Evidence Mix: </span>
+                                {mixText}
+                              </p>
+                            ) : null
+                          })()}
+
+                          {/* Detailed Interventions */}
+                          {intervention.detailed_interventions?.length ? (
+                            <div>
+                              <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
+                              <NavigatorInterventionsTable
+                                interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
+                              />
+                            </div>
+                          ) : (
+                            <div className="text-sm text-slate-600">
+                              <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
+                            </div>
+                          )}
+                        </div>
                       </CardContent>
                     )}
                   </Card>
@@ -669,16 +704,20 @@ export function InterventionsNavigator({
                                 </div>
                                 
                                 <div className="flex items-start gap-4 ml-4">
+                                  {intervention.stars !== undefined && (
+                                    <div className="text-right">
+                                      <div className="text-xs text-slate-500">Evidence:</div>
+                                      <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.evidence_mix, intervention.cap_message)}>
+                                        <div className="flex items-center cursor-help">
+                                          {renderStars(intervention.stars, false)}
+                                        </div>
+                                      </Tooltip>
+                                    </div>
+                                  )}
                                   {intervention.avg_impact_score && (
                                     <div className="text-right">
                                       <div className="text-xs text-slate-500">Impact:</div>
-                                      {renderStars(intervention.avg_impact_score)}
-                                    </div>
-                                  )}
-                                  {intervention.avg_evidence_score && (
-                                    <div className="text-right">
-                                      <div className="text-xs text-slate-500">Evidence:</div>
-                                      {renderStars(intervention.avg_evidence_score)}
+                                      {renderStars(intervention.avg_impact_score, true)}
                                     </div>
                                   )}
                                   <div className="text-right">
@@ -700,18 +739,33 @@ export function InterventionsNavigator({
 
                             {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
                               <CardContent className="pt-0">
-                                {intervention.detailed_interventions?.length ? (
-                                  <div className="space-y-3">
-                                    <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                                    <NavigatorInterventionsTable 
-                                      interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                                    />
-                                  </div>
-                                ) : (
-                                  <div className="text-sm text-slate-600">
-                                    <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents.</p>
-                                  </div>
-                                )}
+                                <div className="space-y-3">
+                                  {/* Evidence Mix - computed from unique documents in detailed interventions */}
+                                  {(() => {
+                                    const computedMix = computeEvidenceMixFromInterventions(intervention.detailed_interventions)
+                                    const mixText = formatEvidenceMixCompact(computedMix)
+                                    return mixText ? (
+                                      <p className="text-sm text-slate-600">
+                                        <span className="font-semibold">Evidence Mix: </span>
+                                        {mixText}
+                                      </p>
+                                    ) : null
+                                  })()}
+
+                                  {/* Detailed Interventions */}
+                                  {intervention.detailed_interventions?.length ? (
+                                    <div>
+                                      <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
+                                      <NavigatorInterventionsTable
+                                        interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm text-slate-600">
+                                      <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents.</p>
+                                    </div>
+                                  )}
+                                </div>
                               </CardContent>
                             )}
                           </Card>

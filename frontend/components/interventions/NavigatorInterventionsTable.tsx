@@ -13,6 +13,7 @@ import {
 import {
   getEvidenceCategoryColors,
   getEvidenceCategoryShortName,
+  getEvidenceCategoryScore,
 } from '@/lib/evidenceCategories'
 
 interface NavigatorInterventionData {
@@ -83,8 +84,20 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
 
   const sortedInterventions = useMemo(() => {
     return [...interventions].sort((a, b) => {
-      let aValue: string | number | null = a[sortField === 'sample_size' ? 'total_sample_size' : sortField] ?? null
-      let bValue: string | number | null = b[sortField === 'sample_size' ? 'total_sample_size' : sortField] ?? null
+      let aValue: string | number | null
+      let bValue: string | number | null
+
+      // For evidence_score, derive from evidence_category
+      if (sortField === 'evidence_score') {
+        aValue = getEvidenceCategoryScore(a.evidence_category) ?? null
+        bValue = getEvidenceCategoryScore(b.evidence_category) ?? null
+      } else if (sortField === 'sample_size') {
+        aValue = a.total_sample_size ?? null
+        bValue = b.total_sample_size ?? null
+      } else {
+        aValue = a[sortField] ?? null
+        bValue = b[sortField] ?? null
+      }
 
       // Handle null values
       if (aValue === null || aValue === undefined) aValue = sortDirection === 'asc' ? Infinity : -Infinity
@@ -188,11 +201,11 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
         <div className="col-span-2">
           Evidence Category
         </div>
-        <div className="col-span-1">
-          <SortButton field="impact_score">Impact</SortButton>
-        </div>
         <div className="col-span-2">
           <SortButton field="evidence_score">Evidence</SortButton>
+        </div>
+        <div className="col-span-1">
+          <SortButton field="impact_score">Impact</SortButton>
         </div>
         <div className="col-span-2 text-center">
           <SortButton field="sample_size">Sample Size</SortButton>
@@ -242,19 +255,20 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                   )}
                 </div>
 
+                <div className="col-span-2">
+                  {/* Evidence strength derived from evidence_category */}
+                  {renderRating(
+                    getEvidenceCategoryScore(intervention.evidence_category) ?? undefined,
+                    undefined,
+                    intervention.evidence_category ? `Based on: ${intervention.evidence_category}` : undefined
+                  )}
+                </div>
+
                 <div className="col-span-1">
                   {renderRating(
                     intervention.impact_score,
                     intervention.impact_justification,
                     'Predicted impact of this intervention based on reported outcomes'
-                  )}
-                </div>
-
-                <div className="col-span-2">
-                  {renderRating(
-                    intervention.evidence_score,
-                    intervention.evidence_justification,
-                    'Quality of evidence supporting this intervention based on study design and methodology'
                   )}
                 </div>
 
