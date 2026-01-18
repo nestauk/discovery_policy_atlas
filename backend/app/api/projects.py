@@ -36,6 +36,160 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 
 
+# Evidence strength calculation constants
+EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
+DENSITY_THRESHOLD = 0.025  # 2.5%
+
+# Map evidence categories to scores (for individual document display)
+EVIDENCE_CATEGORY_SCORES = {
+    "Systematic Review and Meta-Analysis": 5,
+    "RCTs and Quasi-Experimental Studies": 4,
+    "Observational Research Studies": 3,
+    "Modelling & Simulation": 2,
+    "Policy Syntheses & Guidance Documents": 2,
+    "Qualitative & Contextual Evidence": 2,
+    "Expert Opinion and Commentary": 1,
+    "Other (Non-evidence documents)": 0,
+    "Unknown / Insufficient information": 0,
+}
+
+# Short names for evidence mix display
+EVIDENCE_MIX_SHORT_NAMES = {
+    "Systematic Review and Meta-Analysis": "SR/MA",
+    "RCTs and Quasi-Experimental Studies": "RCT",
+    "Observational Research Studies": "Observational",
+    "Modelling & Simulation": "Modelling",
+    "Policy Syntheses & Guidance Documents": "Policy",
+    "Qualitative & Contextual Evidence": "Qualitative",
+    "Expert Opinion and Commentary": "Opinion",
+    "Unknown / Insufficient information": "Unknown",
+}
+
+# Cap reason messages (user-friendly)
+CAP_MESSAGES = {
+    "single_srma": "Limited by single systematic review",
+    "single_rct": "Limited by single experimental study",
+    "single_obs": "Limited by single observational study",
+    "density": "Limited by small evidence base",
+}
+
+
+def calculate_evidence_strength(
+    documents_with_evidence: list[dict],
+    project_total_docs: int,
+) -> dict:
+    """Calculate evidence strength rating for an intervention based on its documents.
+
+    Args:
+        documents_with_evidence: List of dicts with 'evidence_category' and 'evidence_confidence'
+        project_total_docs: Total number of documents in the project (for density calculation)
+
+    Returns:
+        Dict with stars, base_rating, cap_applied, cap_message, evidence_mix
+    """
+    # Filter to documents meeting confidence threshold
+    qualifying_docs = [
+        d
+        for d in documents_with_evidence
+        if (d.get("evidence_confidence") or 0) >= EVIDENCE_CONFIDENCE_THRESHOLD
+    ]
+
+    if not qualifying_docs:
+        return {
+            "stars": 0,
+            "base_rating": 0,
+            "cap_applied": None,
+            "cap_message": "No qualifying evidence",
+            "evidence_mix": {},
+        }
+
+    # Count by evidence category
+    counts = {
+        "systematic_review": 0,
+        "rct": 0,
+        "observational": 0,
+        "modelling": 0,
+        "policy": 0,
+        "qualitative": 0,
+        "opinion": 0,
+        "unknown": 0,
+    }
+
+    category_mapping = {
+        "Systematic Review and Meta-Analysis": "systematic_review",
+        "RCTs and Quasi-Experimental Studies": "rct",
+        "Observational Research Studies": "observational",
+        "Modelling & Simulation": "modelling",
+        "Policy Syntheses & Guidance Documents": "policy",
+        "Qualitative & Contextual Evidence": "qualitative",
+        "Expert Opinion and Commentary": "opinion",
+        "Unknown / Insufficient information": "unknown",
+    }
+
+    for doc in qualifying_docs:
+        cat = doc.get("evidence_category")
+        if cat and cat in category_mapping:
+            counts[category_mapping[cat]] += 1
+
+    # Determine base rating (strongest evidence present)
+    if counts["systematic_review"] >= 1:
+        base_rating = 5
+    elif counts["rct"] >= 1:
+        base_rating = 4
+    elif counts["observational"] >= 1:
+        base_rating = 3
+    elif counts["modelling"] + counts["policy"] + counts["qualitative"] >= 1:
+        base_rating = 2
+    elif counts["opinion"] >= 1:
+        base_rating = 1
+    else:
+        base_rating = 0
+
+    # Calculate potential caps
+    caps = []
+
+    # Single-study caps
+    if base_rating == 5 and counts["systematic_review"] == 1:
+        caps.append(("single_srma", 4))
+    if base_rating == 4 and counts["rct"] == 1:
+        caps.append(("single_rct", 3))
+    if base_rating == 3 and counts["observational"] == 1:
+        caps.append(("single_obs", 2))
+
+    # Density cap
+    if project_total_docs > 0:
+        density = len(qualifying_docs) / project_total_docs
+        if density < DENSITY_THRESHOLD:
+            caps.append(("density", 3))
+
+    # Apply strictest cap
+    final_rating = base_rating
+    applied_cap = None
+
+    for cap_type, cap_value in caps:
+        if cap_value < final_rating:
+            final_rating = cap_value
+            applied_cap = cap_type
+
+    # Build evidence mix for display (only non-zero counts)
+    evidence_mix = {k: v for k, v in counts.items() if v > 0}
+
+    # Log if cap was applied
+    if applied_cap:
+        logger.info(
+            f"Evidence cap applied: base={base_rating}, final={final_rating}, "
+            f"cap={applied_cap}, docs={len(qualifying_docs)}"
+        )
+
+    return {
+        "stars": final_rating,
+        "base_rating": base_rating,
+        "cap_applied": applied_cap,
+        "cap_message": CAP_MESSAGES.get(applied_cap) if applied_cap else None,
+        "evidence_mix": evidence_mix,
+    }
+
+
 # END-I - INFO REGION END
 
 
@@ -1035,6 +1189,9 @@ async def get_project_interventions(
         if not docs_result.data:
             return {"interventions": [], "total": 0}
 
+        # Total documents for density calculation
+        project_total_docs = len(docs_result.data)
+
         # Process interventions from all documents
         aggregated_interventions = {}
 
@@ -1097,6 +1254,8 @@ async def get_project_interventions(
                         "result_count": 0,
                         "results_summary": [],
                         "documents": [],
+                        # Track evidence info for all documents (for strength calculation)
+                        "documents_with_evidence": [],
                     }
 
                 # Add document info
@@ -1106,6 +1265,16 @@ async def get_project_interventions(
                         "title": document.get("title"),
                         "source": document.get("source"),
                         "landing_page_url": document.get("landing_page_url"),
+                    }
+                )
+
+                # Track evidence info for strength calculation
+                aggregated_interventions[intervention_key][
+                    "documents_with_evidence"
+                ].append(
+                    {
+                        "evidence_category": document.get("evidence_category"),
+                        "evidence_confidence": document.get("evidence_confidence"),
                     }
                 )
 
@@ -1212,14 +1381,26 @@ async def get_project_interventions(
 
             intervention_data["results_summary"] = unique_results
 
+            # Calculate evidence strength using new methodology
+            evidence_strength = calculate_evidence_strength(
+                intervention_data["documents_with_evidence"],
+                project_total_docs,
+            )
+            intervention_data["stars"] = evidence_strength["stars"]
+            intervention_data["base_rating"] = evidence_strength["base_rating"]
+            intervention_data["cap_applied"] = evidence_strength["cap_applied"]
+            intervention_data["cap_message"] = evidence_strength["cap_message"]
+            intervention_data["evidence_mix"] = evidence_strength["evidence_mix"]
+
             # Clean up temporary fields
             del intervention_data["sample_sizes"]
+            del intervention_data["documents_with_evidence"]
 
             interventions_list.append(intervention_data)
 
-        # Sort by evidence category rank (best first), then by result count
+        # Sort by stars (highest first), then by evidence category rank, then by result count
         interventions_list.sort(
-            key=lambda x: (x["evidence_category_rank"], -x["result_count"])
+            key=lambda x: (-x["stars"], x["evidence_category_rank"], -x["result_count"])
         )
 
         return {"interventions": interventions_list, "total": len(interventions_list)}
@@ -1597,16 +1778,36 @@ async def get_issue_intervention_navigator(
 
                 # Only include intervention themes that have actual connections
                 if shared_docs:
-                    # Calculate average scores
+                    # Calculate average impact score (still use averaging for impact)
                     avg_impact_score = (
                         sum(impact_scores) / len(impact_scores)
                         if impact_scores
                         else None
                     )
-                    avg_evidence_score = (
-                        sum(evidence_scores) / len(evidence_scores)
-                        if evidence_scores
-                        else None
+
+                    # Collect evidence info for the new evidence strength calculation
+                    documents_with_evidence = []
+                    for doc_id in shared_docs:
+                        # Find the document by doc_id
+                        doc = None
+                        for d in documents:
+                            if d and d.get("doc_id") == doc_id:
+                                doc = d
+                                break
+                        if doc:
+                            documents_with_evidence.append(
+                                {
+                                    "evidence_category": doc.get("evidence_category"),
+                                    "evidence_confidence": doc.get(
+                                        "evidence_confidence"
+                                    ),
+                                }
+                            )
+
+                    # Calculate evidence strength using new methodology
+                    evidence_strength = calculate_evidence_strength(
+                        documents_with_evidence,
+                        len(documents),  # project total docs for density calculation
                     )
 
                     # Build detailed interventions from the extractions
@@ -1764,9 +1965,12 @@ async def get_issue_intervention_navigator(
                             "avg_impact_score": round(avg_impact_score, 1)
                             if avg_impact_score
                             else None,
-                            "avg_evidence_score": round(avg_evidence_score, 1)
-                            if avg_evidence_score
-                            else None,
+                            # New evidence strength methodology (replaces avg_evidence_score)
+                            "stars": evidence_strength["stars"],
+                            "base_rating": evidence_strength["base_rating"],
+                            "cap_applied": evidence_strength["cap_applied"],
+                            "cap_message": evidence_strength["cap_message"],
+                            "evidence_mix": evidence_strength["evidence_mix"],
                             "detailed_interventions": list(
                                 unique_interventions.values()
                             ),
