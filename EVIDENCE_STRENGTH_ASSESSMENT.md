@@ -218,7 +218,7 @@ In terms of classification_confidence, we actually already have an evidence_cate
   "evidence_type": string,  // One of the 8 types from typology
   "evidence_score": int,    // 0-5
   "classification_confidence": float,  // 0.0-1.0
-  "meets_threshold": boolean  // true if confidence >= 0.6
+  "meets_threshold": boolean  // true if confidence >= 0.5
 }
 ```
 
@@ -255,7 +255,7 @@ Use evidence_category for counting.
 ```python
 def calculate_theme_rating(theme_documents, project_total):
     # Filter to documents meeting confidence threshold
-    qualifying_docs = [d for d in theme_documents if d.confidence >= 0.6]
+    qualifying_docs = [d for d in theme_documents if d.confidence >= 0.5]
 
     if not qualifying_docs:
         return Rating(stars=0, cap=None, message="No qualifying evidence")
