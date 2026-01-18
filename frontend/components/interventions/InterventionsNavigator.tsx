@@ -587,6 +587,7 @@ export function InterventionsNavigator({
                                   {intervention.impact_summary}
                                 </p>
                               )}
+                              {renderEvidenceMix(intervention.detailed_interventions)}
                             </div>
                           )}
                         </div>
@@ -628,9 +629,6 @@ export function InterventionsNavigator({
                     {expandedInterventions.has(`all-${intervention.theme_name}`) && (
                       <CardContent className="pt-0">
                         <div className="space-y-3">
-                          {/* Evidence Mix - computed from unique documents in detailed interventions */}
-                          {renderEvidenceMix(intervention.detailed_interventions)}
-
                           {/* Detailed Interventions */}
                           {intervention.detailed_interventions?.length ? (
                             <div>
@@ -704,6 +702,7 @@ export function InterventionsNavigator({
                                           {intervention.impact_summary}
                                         </p>
                                       )}
+                                      {renderEvidenceMix(intervention.detailed_interventions)}
                                     </div>
                                   )}
                                 </div>
@@ -745,9 +744,6 @@ export function InterventionsNavigator({
                             {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
                               <CardContent className="pt-0">
                                 <div className="space-y-3">
-                                  {/* Evidence Mix - computed from unique documents in detailed interventions */}
-                                  {renderEvidenceMix(intervention.detailed_interventions)}
-
                                   {/* Detailed Interventions */}
                                   {intervention.detailed_interventions?.length ? (
                                     <div>

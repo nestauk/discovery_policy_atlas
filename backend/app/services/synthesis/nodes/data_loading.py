@@ -11,6 +11,7 @@ from typing import Dict, List
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState, Concept
 from app.services.synthesis.utils import normalize_study_type
+from app.services.analysis.evidence_category import EVIDENCE_CATEGORY_SCORES
 
 
 async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
@@ -46,11 +47,11 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         else "Not specified"
     )
 
-    # Fetch document metadata including extraction_results for scores
+    # Fetch document metadata including evidence_category and extraction_results
     docs_res = (
         supabase.table("analysis_documents")
         .select(
-            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results"
+            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, evidence_category, extraction_results"
         )
         .eq("analysis_project_id", project_id)
         .execute()
@@ -76,16 +77,22 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             "document_type": doc.get("document_type"),
         }
 
-        # Extract evidence strength and impact scores from conclusion
+        # Get evidence score from evidence_category and impact score from conclusion
+        evidence_category = doc.get("evidence_category")
+        evidence_score = (
+            EVIDENCE_CATEGORY_SCORES.get(evidence_category)
+            if evidence_category
+            else None
+        )
+
         extraction_results = doc.get("extraction_results") or {}
         conclusion = extraction_results.get("conclusion") or {}
-        evidence_strength = conclusion.get("evidence_strength") or {}
         predicted_impact = conclusion.get("predicted_impact") or {}
 
         doc_scores[doc_uuid] = {
-            "evidence_score": evidence_strength.get("stars"),  # 1-5 or None
+            "evidence_score": evidence_score,  # 0-5 based on evidence category
             "impact_score": predicted_impact.get("stars"),  # 1-5 or None
-            "evidence_justification": evidence_strength.get("justification", ""),
+            "evidence_category": evidence_category,
             "impact_justification": predicted_impact.get("justification", ""),
         }
 

@@ -2193,14 +2193,18 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 raw_data = extraction.get("raw_data", {})
 
-                # Get scores from document conclusion
+                # Get evidence score from category and impact score from conclusion
+                evidence_category = doc.get("evidence_category")
+                evidence_score = (
+                    EVIDENCE_CATEGORY_SCORES.get(evidence_category)
+                    if evidence_category
+                    else None
+                )
+
                 extraction_results = doc.get("extraction_results", {})
                 conclusion = extraction_results.get("conclusion", {}) or {}
-                evidence_strength = conclusion.get("evidence_strength", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
-
-                impact_score = evidence_strength.get("stars")
-                evidence_score = predicted_impact.get("stars")
+                impact_score = predicted_impact.get("stars")
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
@@ -2296,10 +2300,16 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     logger.warning(f"Skipping None document at index {i}")
                     continue
 
-                # Extract evidence assessment from conclusion if available
+                # Get evidence score from category and impact score from conclusion
+                evidence_category = doc.get("evidence_category", "")
+                evidence_score = (
+                    EVIDENCE_CATEGORY_SCORES.get(evidence_category, "")
+                    if evidence_category
+                    else ""
+                )
+
                 extraction_results = doc.get("extraction_results", {}) or {}
                 conclusion = extraction_results.get("conclusion", {}) or {}
-                evidence_strength = conclusion.get("evidence_strength", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
 
                 # Handle authors field safely
@@ -2320,10 +2330,8 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                         "Relevance": "Yes" if doc.get("is_relevant", False) else "No",
                         "Relevance Reason": doc.get("relevance_reason", ""),
                         "Confidence": doc.get("relevance_confidence", ""),
-                        "Evidence Score": evidence_strength.get("stars", ""),
-                        "Evidence Justification": evidence_strength.get(
-                            "justification", ""
-                        ),
+                        "Evidence Category": evidence_category,
+                        "Evidence Score": evidence_score,
                         "Impact Score": predicted_impact.get("stars", ""),
                         "Impact Justification": predicted_impact.get(
                             "justification", ""
