@@ -30,48 +30,17 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
+from app.services.analysis.evidence_category import (
+    EVIDENCE_CONFIDENCE_THRESHOLD,
+    DENSITY_THRESHOLD,
+    EVIDENCE_CATEGORY_SCORES,
+    EVIDENCE_CATEGORY_RANKS,
+    CAP_MESSAGES,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
-
-
-# Evidence strength calculation constants
-EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
-DENSITY_THRESHOLD = 0.025  # 2.5%
-
-# Map evidence categories to scores (for individual document display)
-EVIDENCE_CATEGORY_SCORES = {
-    "Systematic Review and Meta-Analysis": 5,
-    "RCTs and Quasi-Experimental Studies": 4,
-    "Observational Research Studies": 3,
-    "Modelling & Simulation": 2,
-    "Policy Syntheses & Guidance Documents": 2,
-    "Qualitative & Contextual Evidence": 2,
-    "Expert Opinion and Commentary": 1,
-    "Other (Non-evidence documents)": 0,
-    "Unknown / Insufficient information": 0,
-}
-
-# Short names for evidence mix display
-EVIDENCE_MIX_SHORT_NAMES = {
-    "Systematic Review and Meta-Analysis": "SR/MA",
-    "RCTs and Quasi-Experimental Studies": "RCT",
-    "Observational Research Studies": "Observational",
-    "Modelling & Simulation": "Modelling",
-    "Policy Syntheses & Guidance Documents": "Policy",
-    "Qualitative & Contextual Evidence": "Qualitative",
-    "Expert Opinion and Commentary": "Opinion",
-    "Unknown / Insufficient information": "Unknown",
-}
-
-# Cap reason messages (user-friendly)
-CAP_MESSAGES = {
-    "single_srma": "Limited by single systematic review",
-    "single_rct": "Limited by single experimental study",
-    "single_obs": "Limited by single observational study",
-    "density": "Limited by small evidence base",
-}
 
 
 def calculate_evidence_strength(
@@ -897,36 +866,17 @@ async def get_project_documents(
                 filtered_other_count += 1
                 continue
 
-            category_scores = {
-                "Systematic Review and Meta-Analysis": 5,
-                "RCTs and Quasi-Experimental Studies": 4,
-                "Observational Research Studies": 3,
-                "Modelling & Simulation": 2,
-                "Policy Syntheses & Guidance Documents": 2,
-                "Qualitative & Contextual Evidence": 2,
-                "Expert Opinion and Commentary": 1,
-                "Unknown / Insufficient information": 0,
-            }
-            category_ranks = {
-                "Systematic Review and Meta-Analysis": 1,
-                "RCTs and Quasi-Experimental Studies": 2,
-                "Observational Research Studies": 3,
-                "Modelling & Simulation": 4,
-                "Policy Syntheses & Guidance Documents": 5,
-                "Qualitative & Contextual Evidence": 6,
-                "Expert Opinion and Commentary": 7,
-                "Unknown / Insufficient information": 8,
-            }
-
             doc_copy = doc.copy()
             # Map citation_count (database) to cited_by_count (frontend)
             if "citation_count" in doc_copy:
                 doc_copy["cited_by_count"] = doc_copy["citation_count"]
             evidence_category = doc_copy.get("evidence_category")
-            doc_copy["evidence_category_rank"] = category_ranks.get(
+            doc_copy["evidence_category_rank"] = EVIDENCE_CATEGORY_RANKS.get(
                 evidence_category, 999
             )
-            doc_copy["evidence_strength"] = category_scores.get(evidence_category, 0)
+            doc_copy["evidence_strength"] = EVIDENCE_CATEGORY_SCORES.get(
+                evidence_category, 0
+            )
             if evidence_category:
                 doc_copy[
                     "evidence_strength_justification"
@@ -1231,18 +1181,7 @@ async def get_project_interventions(
             if not evidence_category:
                 return 999  # Unknown/missing goes to the end
 
-            category_ranks = {
-                "Systematic Review and Meta-Analysis": 1,
-                "RCTs and Quasi-Experimental Studies": 2,
-                "Observational Research Studies": 3,
-                "Modelling & Simulation": 4,
-                "Policy Syntheses & Guidance Documents": 5,
-                "Qualitative & Contextual Evidence": 6,
-                "Expert Opinion and Commentary": 7,
-                "Other (Non-evidence documents)": 8,
-                "Unknown / Insufficient information": 9,
-            }
-            return category_ranks.get(evidence_category, 999)
+            return EVIDENCE_CATEGORY_RANKS.get(evidence_category, 999)
 
         for document in docs_result.data:
             extraction_results = document.get("extraction_results", {})
@@ -1700,17 +1639,6 @@ async def get_issue_intervention_navigator(
         # Build document-level issue-intervention mappings from extraction results
         doc_mappings = {}  # doc_id -> [(issue_extraction_id, intervention_extraction_id)]
         doc_scores = {}  # doc_id -> {impact_score, evidence_score}
-        category_scores = {
-            "Systematic Review and Meta-Analysis": 5,
-            "RCTs and Quasi-Experimental Studies": 4,
-            "Observational Research Studies": 3,
-            "Modelling & Simulation": 2,
-            "Policy Syntheses & Guidance Documents": 2,
-            "Qualitative & Contextual Evidence": 2,
-            "Expert Opinion and Commentary": 1,
-            "Unknown / Insufficient information": 0,
-        }
-
         for document in documents:
             if not document:
                 continue
@@ -1730,7 +1658,7 @@ async def get_issue_intervention_navigator(
 
             doc_scores[doc_id] = {
                 "impact_score": predicted_impact.get("stars"),
-                "evidence_score": category_scores.get(
+                "evidence_score": EVIDENCE_CATEGORY_SCORES.get(
                     document.get("evidence_category"), 0
                 ),
                 "impact_justification": predicted_impact.get("justification", ""),

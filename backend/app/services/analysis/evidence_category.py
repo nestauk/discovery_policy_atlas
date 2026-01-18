@@ -46,6 +46,50 @@ EVIDENCE_CATEGORIES = [
     "Unknown / Insufficient information",
 ]
 
+EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
+DENSITY_THRESHOLD = 0.025  # 2.5%
+
+EVIDENCE_CATEGORY_SCORES = {
+    "Systematic Review and Meta-Analysis": 5,
+    "RCTs and Quasi-Experimental Studies": 4,
+    "Observational Research Studies": 3,
+    "Modelling & Simulation": 2,
+    "Policy Syntheses & Guidance Documents": 2,
+    "Qualitative & Contextual Evidence": 2,
+    "Expert Opinion and Commentary": 1,
+    "Other (Non-evidence documents)": 0,
+    "Unknown / Insufficient information": 0,
+}
+
+EVIDENCE_CATEGORY_RANKS = {
+    "Systematic Review and Meta-Analysis": 1,
+    "RCTs and Quasi-Experimental Studies": 2,
+    "Observational Research Studies": 3,
+    "Modelling & Simulation": 4,
+    "Policy Syntheses & Guidance Documents": 5,
+    "Qualitative & Contextual Evidence": 6,
+    "Expert Opinion and Commentary": 7,
+    "Unknown / Insufficient information": 8,
+}
+
+EVIDENCE_MIX_SHORT_NAMES = {
+    "Systematic Review and Meta-Analysis": "SR/MA",
+    "RCTs and Quasi-Experimental Studies": "RCT",
+    "Observational Research Studies": "Observational",
+    "Modelling & Simulation": "Modelling",
+    "Policy Syntheses & Guidance Documents": "Policy",
+    "Qualitative & Contextual Evidence": "Qualitative",
+    "Expert Opinion and Commentary": "Opinion",
+    "Unknown / Insufficient information": "Unknown",
+}
+
+CAP_MESSAGES = {
+    "single_srma": "Limited by single systematic review",
+    "single_rct": "Limited by single experimental study",
+    "single_obs": "Limited by single observational study",
+    "density": "Limited by small evidence base",
+}
+
 
 # TODO: Consider extracting common batch processing logic (shared with RelevanceService)
 # if we add a third LLM-based service. See _screen_batch and _run_batch_processor.
