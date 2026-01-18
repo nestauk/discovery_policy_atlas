@@ -13,7 +13,6 @@ import {
 import {
   getEvidenceCategoryColors,
   getEvidenceCategoryShortName,
-  getEvidenceCategoryScore,
 } from '@/lib/evidenceCategories'
 
 interface NavigatorInterventionData {
@@ -87,10 +86,9 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
       let aValue: string | number | null
       let bValue: string | number | null
 
-      // For evidence_score, derive from evidence_category
       if (sortField === 'evidence_score') {
-        aValue = getEvidenceCategoryScore(a.evidence_category) ?? null
-        bValue = getEvidenceCategoryScore(b.evidence_category) ?? null
+        aValue = a.evidence_score ?? null
+        bValue = b.evidence_score ?? null
       } else if (sortField === 'sample_size') {
         aValue = a.total_sample_size ?? null
         bValue = b.total_sample_size ?? null
@@ -256,11 +254,9 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                 </div>
 
                 <div className="col-span-2">
-                  {/* Evidence strength derived from evidence_category */}
                   {renderRating(
-                    getEvidenceCategoryScore(intervention.evidence_category) ?? undefined,
-                    undefined,
-                    intervention.evidence_category ? `Based on: ${intervention.evidence_category}` : undefined
+                    intervention.evidence_score,
+                    intervention.evidence_justification
                   )}
                 </div>
 

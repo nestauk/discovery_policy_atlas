@@ -25,30 +25,6 @@ export const EVIDENCE_CATEGORY_COLORS: Record<string, EvidenceCategoryColors> = 
 }
 
 /**
- * Evidence category scores (0-5) based on evidence strength methodology.
- * Individual documents get their star rating from their evidence category.
- */
-export const EVIDENCE_CATEGORY_SCORES: Record<string, number> = {
-  'Systematic Review and Meta-Analysis': 5,
-  'RCTs and Quasi-Experimental Studies': 4,
-  'Observational Research Studies': 3,
-  'Modelling & Simulation': 2,
-  'Policy Syntheses & Guidance Documents': 2,
-  'Qualitative & Contextual Evidence': 2,
-  'Expert Opinion and Commentary': 1,
-  'Other (Non-evidence documents)': 0,
-  'Unknown / Insufficient information': 0,
-}
-
-/**
- * Get the star rating (0-5) for an evidence category.
- */
-export function getEvidenceCategoryScore(category: string | null | undefined): number | null {
-  if (!category) return null
-  return EVIDENCE_CATEGORY_SCORES[category] ?? null
-}
-
-/**
  * Short display names for evidence categories (used in compact table views).
  */
 export const EVIDENCE_CATEGORY_SHORT_NAMES: Record<string, string> = {

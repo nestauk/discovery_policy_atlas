@@ -41,6 +41,7 @@ export interface SearchParams {
     evidence_category?: string
     evidence_confidence?: number
     evidence_category_reasoning?: string
+    evidence_category_rank?: number
     // Processing status fields
     full_text_available?: boolean
     extraction_status?: string

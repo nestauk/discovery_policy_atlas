@@ -747,9 +747,8 @@ export default function AnalysisResultsPage() {
   // Transform documents for table display and apply filtering
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
-      // Extract evidence assessment from conclusion if available
+      // Extract impact assessment from conclusion (LLM judge)
       const conclusion = doc.extraction_results?.conclusion
-      const evidenceStrength = conclusion?.evidence_strength
       const predictedImpact = conclusion?.predicted_impact
       
       return {
@@ -778,9 +777,10 @@ export default function AnalysisResultsPage() {
         evidence_category: doc.evidence_category,
         evidence_confidence: doc.evidence_confidence,
         evidence_category_reasoning: doc.evidence_category_reasoning,
+        evidence_category_rank: doc.evidence_category_rank,
         // Add evidence assessment fields
-        evidence_strength: evidenceStrength?.stars || undefined,
-        evidence_strength_justification: evidenceStrength?.justification,
+        evidence_strength: doc.evidence_strength ?? undefined,
+        evidence_strength_justification: doc.evidence_strength_justification,
         predicted_impact: predictedImpact?.stars || undefined,
         predicted_impact_justification: predictedImpact?.justification
       }

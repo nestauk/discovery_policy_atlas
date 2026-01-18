@@ -7,7 +7,7 @@ import type { Paper } from '@/types/search'
 import { Check, X } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { StarRating } from '@/components/ui/star-rating'
-import { getEvidenceCategoryScore, getEvidenceCategoryColors, getEvidenceCategoryShortName } from '@/lib/evidenceCategories'
+import { getEvidenceCategoryColors, getEvidenceCategoryShortName } from '@/lib/evidenceCategories'
 
 interface PapersTableProps {
   papers: Paper[]
@@ -165,18 +165,8 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       key: 'evidence_category_base',
       width: '10%',
       sorter: (a, b) => {
-        const evidenceRank: Record<string, number> = {
-          'Systematic Review and Meta-Analysis': 1,
-          'RCTs and Quasi-Experimental Studies': 2,
-          'Observational Research Studies': 3,
-          'Modelling & Simulation': 4,
-          'Policy Syntheses & Guidance Documents': 5,
-          'Qualitative & Contextual Evidence': 6,
-          'Expert Opinion and Commentary': 7,
-          'Unknown / Insufficient information': 8,
-        }
-        const aRank = evidenceRank[a.evidence_category || ''] || 999
-        const bRank = evidenceRank[b.evidence_category || ''] || 999
+        const aRank = a.evidence_category_rank ?? 999
+        const bRank = b.evidence_category_rank ?? 999
         return aRank - bRank
       },
       render: (_text, record) => {
@@ -204,17 +194,10 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       dataIndex: 'evidence_category',
       key: 'evidence_strength',
       width: '10%',
-      sorter: (a, b) => (getEvidenceCategoryScore(a.evidence_category) ?? 0) - (getEvidenceCategoryScore(b.evidence_category) ?? 0),
+      sorter: (a, b) => (a.evidence_strength ?? 0) - (b.evidence_strength ?? 0),
       render: (_text, record) => {
-        const score = getEvidenceCategoryScore(record.evidence_category)
-        const category = record.evidence_category
-        // Build a meaningful tooltip explaining the rating
-        let tooltip: string | undefined
-        if (score !== null && category) {
-          tooltip = `${score}/5 - Based on evidence type: ${category}`
-        } else if (score !== null) {
-          tooltip = `${score}/5`
-        }
+        const score = record.evidence_strength ?? null
+        const tooltip = record.evidence_strength_justification
         return (
           <StarRating
             stars={score}

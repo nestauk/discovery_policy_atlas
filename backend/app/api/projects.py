@@ -897,10 +897,40 @@ async def get_project_documents(
                 filtered_other_count += 1
                 continue
 
+            category_scores = {
+                "Systematic Review and Meta-Analysis": 5,
+                "RCTs and Quasi-Experimental Studies": 4,
+                "Observational Research Studies": 3,
+                "Modelling & Simulation": 2,
+                "Policy Syntheses & Guidance Documents": 2,
+                "Qualitative & Contextual Evidence": 2,
+                "Expert Opinion and Commentary": 1,
+                "Unknown / Insufficient information": 0,
+            }
+            category_ranks = {
+                "Systematic Review and Meta-Analysis": 1,
+                "RCTs and Quasi-Experimental Studies": 2,
+                "Observational Research Studies": 3,
+                "Modelling & Simulation": 4,
+                "Policy Syntheses & Guidance Documents": 5,
+                "Qualitative & Contextual Evidence": 6,
+                "Expert Opinion and Commentary": 7,
+                "Unknown / Insufficient information": 8,
+            }
+
             doc_copy = doc.copy()
             # Map citation_count (database) to cited_by_count (frontend)
             if "citation_count" in doc_copy:
                 doc_copy["cited_by_count"] = doc_copy["citation_count"]
+            evidence_category = doc_copy.get("evidence_category")
+            doc_copy["evidence_category_rank"] = category_ranks.get(
+                evidence_category, 999
+            )
+            doc_copy["evidence_strength"] = category_scores.get(evidence_category, 0)
+            if evidence_category:
+                doc_copy[
+                    "evidence_strength_justification"
+                ] = f"Based on evidence category: {evidence_category}"
             documents.append(doc_copy)
 
         if filtered_other_count > 0:
@@ -1670,6 +1700,16 @@ async def get_issue_intervention_navigator(
         # Build document-level issue-intervention mappings from extraction results
         doc_mappings = {}  # doc_id -> [(issue_extraction_id, intervention_extraction_id)]
         doc_scores = {}  # doc_id -> {impact_score, evidence_score}
+        category_scores = {
+            "Systematic Review and Meta-Analysis": 5,
+            "RCTs and Quasi-Experimental Studies": 4,
+            "Observational Research Studies": 3,
+            "Modelling & Simulation": 2,
+            "Policy Syntheses & Guidance Documents": 2,
+            "Qualitative & Contextual Evidence": 2,
+            "Expert Opinion and Commentary": 1,
+            "Unknown / Insufficient information": 0,
+        }
 
         for document in documents:
             if not document:
@@ -1684,16 +1724,21 @@ async def get_issue_intervention_navigator(
             if not extraction_results or not doc_id:
                 continue
 
-            # Get conclusion scores
+            # Get conclusion scores (impact only)
             conclusion = extraction_results.get("conclusion", {}) or {}
-            evidence_strength = conclusion.get("evidence_strength", {}) or {}
             predicted_impact = conclusion.get("predicted_impact", {}) or {}
 
             doc_scores[doc_id] = {
                 "impact_score": predicted_impact.get("stars"),
-                "evidence_score": evidence_strength.get("stars"),
+                "evidence_score": category_scores.get(
+                    document.get("evidence_category"), 0
+                ),
                 "impact_justification": predicted_impact.get("justification", ""),
-                "evidence_justification": evidence_strength.get("justification", ""),
+                "evidence_justification": (
+                    f"Based on evidence category: {document.get('evidence_category')}"
+                    if document.get("evidence_category")
+                    else ""
+                ),
             }
 
             # Get mappings from extraction results
