@@ -7,6 +7,7 @@ import type { Paper } from '@/types/search'
 import { Check, X } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { StarRating } from '@/components/ui/star-rating'
+import { getEvidenceCategoryScore, getEvidenceCategoryColors, getEvidenceCategoryShortName } from '@/lib/evidenceCategories'
 
 interface PapersTableProps {
   papers: Paper[]
@@ -159,17 +160,66 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       ),
     },
     {
+      title: 'Evidence Category',
+      dataIndex: 'evidence_category',
+      key: 'evidence_category_base',
+      width: '10%',
+      sorter: (a, b) => {
+        const evidenceRank: Record<string, number> = {
+          'Systematic Review and Meta-Analysis': 1,
+          'RCTs and Quasi-Experimental Studies': 2,
+          'Observational Research Studies': 3,
+          'Modelling & Simulation': 4,
+          'Policy Syntheses & Guidance Documents': 5,
+          'Qualitative & Contextual Evidence': 6,
+          'Expert Opinion and Commentary': 7,
+          'Unknown / Insufficient information': 8,
+        }
+        const aRank = evidenceRank[a.evidence_category || ''] || 999
+        const bRank = evidenceRank[b.evidence_category || ''] || 999
+        return aRank - bRank
+      },
+      render: (_text, record) => {
+        const category = record.evidence_category
+        if (!category) {
+          return <span className="text-gray-400 text-xs">-</span>
+        }
+        const colors = getEvidenceCategoryColors(category)
+        const displayName = getEvidenceCategoryShortName(category)
+        // Build tooltip: category name + reasoning (if available)
+        const tooltipContent = record.evidence_category_reasoning
+          ? `${category}\n\n${record.evidence_category_reasoning}`
+          : category
+        return (
+          <Tooltip content={tooltipContent}>
+            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} cursor-help whitespace-normal leading-tight`}>
+              {displayName}
+            </span>
+          </Tooltip>
+        )
+      },
+    },
+    {
       title: 'Evidence Strength',
-      dataIndex: 'evidence_strength',
+      dataIndex: 'evidence_category',
       key: 'evidence_strength',
       width: '10%',
-      sorter: (a, b) => (a.evidence_strength ?? 0) - (b.evidence_strength ?? 0),
-      render: (text, record) => {
+      sorter: (a, b) => (getEvidenceCategoryScore(a.evidence_category) ?? 0) - (getEvidenceCategoryScore(b.evidence_category) ?? 0),
+      render: (_text, record) => {
+        const score = getEvidenceCategoryScore(record.evidence_category)
+        const category = record.evidence_category
+        // Build a meaningful tooltip explaining the rating
+        let tooltip: string | undefined
+        if (score !== null && category) {
+          tooltip = `${score}/5 - Based on evidence type: ${category}`
+        } else if (score !== null) {
+          tooltip = `${score}/5`
+        }
         return (
           <StarRating
-            stars={record.evidence_strength}
+            stars={score}
             size="sm"
-            tooltip={record.evidence_strength_justification}
+            tooltip={tooltip}
           />
         )
       },
@@ -225,77 +275,8 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
     },
   ];
 
-  // Conditional columns (Evidence Category, Sample Size, Source, and Status)
+  // Conditional columns (Sample Size, Source, and Status)
   const conditionalColumns: ColumnsType<DataType> = showAdditionalColumns ? [
-    {
-      title: 'Evidence Category',
-      dataIndex: 'evidence_category',
-      key: 'evidence_category',
-      width: '12%',
-      sorter: (a, b) => {
-        // Sort by evidence strength (Systematic Review = 1, Unknown = 8)
-        const evidenceRank: Record<string, number> = {
-          'Systematic Review and Meta-Analysis': 1,
-          'RCTs and Quasi-Experimental Studies': 2,
-          'Observational Research Studies': 3,
-          'Modelling & Simulation': 4,
-          'Policy Syntheses & Guidance Documents': 5,
-          'Qualitative & Contextual Evidence': 6,
-          'Expert Opinion and Commentary': 7,
-          'Unknown / Insufficient information': 8,
-        }
-        const aRank = evidenceRank[a.evidence_category || ''] || 999
-        const bRank = evidenceRank[b.evidence_category || ''] || 999
-        return aRank - bRank
-      },
-      render: (_text, record) => {
-        const category = record.evidence_category
-        if (!category) {
-          return <span className="text-gray-400 text-xs">-</span>
-        }
-
-        // Color coding by evidence strength (removed "Other" - it's filtered out)
-        const categoryColors: Record<string, { bg: string; text: string }> = {
-          'Systematic Review and Meta-Analysis': { bg: 'bg-[#0F294A]', text: 'text-white' },
-          'RCTs and Quasi-Experimental Studies': { bg: 'bg-[#9A1BBE]', text: 'text-white' },
-          'Observational Research Studies': { bg: 'bg-[#0000FF]', text: 'text-white' },
-          'Modelling & Simulation': { bg: 'bg-[#18A48C]', text: 'text-white' },
-          'Policy Syntheses & Guidance Documents': { bg: 'bg-[#97D9E3]', text: 'text-gray-900' },
-          'Qualitative & Contextual Evidence': { bg: 'bg-[#A59BEE]', text: 'text-gray-900' },
-          'Expert Opinion and Commentary': { bg: 'bg-[#F6A4B7]', text: 'text-gray-900' },
-          'Unknown / Insufficient information': { bg: 'bg-[#f8f5f4]', text: 'text-gray-700' },
-        }
-
-        const colors = categoryColors[category] || { bg: 'bg-gray-100', text: 'text-gray-700' }
-
-        // Shortened display names (removed "Other")
-        const shortNames: Record<string, string> = {
-          'Systematic Review and Meta-Analysis': 'Systematic Review',
-          'RCTs and Quasi-Experimental Studies': 'RCT/Quasi-Exp',
-          'Observational Research Studies': 'Observational',
-          'Modelling & Simulation': 'Modelling',
-          'Policy Syntheses & Guidance Documents': 'Policy Guidance',
-          'Qualitative & Contextual Evidence': 'Qualitative',
-          'Expert Opinion and Commentary': 'Expert Opinion',
-          'Unknown / Insufficient information': 'Unknown',
-        }
-
-        const displayName = shortNames[category] || category
-
-        // Build tooltip: category name + reasoning (if available)
-        const tooltipContent = record.evidence_category_reasoning
-          ? `${category}\n\n${record.evidence_category_reasoning}`
-          : category
-
-        return (
-          <Tooltip content={tooltipContent}>
-            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} cursor-help whitespace-normal leading-tight`}>
-              {displayName}
-            </span>
-          </Tooltip>
-        )
-      },
-    },
     {
       title: 'Sample Size',
       dataIndex: 'sample_size',
