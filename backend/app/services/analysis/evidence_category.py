@@ -48,6 +48,7 @@ EVIDENCE_CATEGORIES = [
 
 EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
 DENSITY_THRESHOLD = 0.025  # 2.5%
+SMALL_SAMPLE_THRESHOLD = 100  # N < 100 triggers penalty for causal evidence
 
 EVIDENCE_CATEGORY_SCORES = {
     "Systematic Review and Meta-Analysis": 5,
@@ -88,6 +89,7 @@ CAP_MESSAGES = {
     "single_rct": "Limited by single experimental study",
     "single_obs": "Limited by single observational study",
     "density": "Limited by small evidence base",
+    "small_sample": "All studies have sample sizes under 100, limiting statistical power",
 }
 
 

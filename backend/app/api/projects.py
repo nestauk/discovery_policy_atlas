@@ -33,6 +33,7 @@ from app.services.analysis.schemas import (
 from app.services.analysis.evidence_category import (
     EVIDENCE_CONFIDENCE_THRESHOLD,
     DENSITY_THRESHOLD,
+    SMALL_SAMPLE_THRESHOLD,
     EVIDENCE_CATEGORY_SCORES,
     EVIDENCE_CATEGORY_RANKS,
     CAP_MESSAGES,
@@ -50,7 +51,8 @@ def calculate_evidence_strength(
     """Calculate evidence strength rating for an intervention based on its documents.
 
     Args:
-        documents_with_evidence: List of dicts with 'evidence_category' and 'evidence_confidence'
+        documents_with_evidence: List of dicts with 'evidence_category', 'evidence_confidence',
+            and optionally 'sample_size' and 'doc_id'
         project_total_docs: Total number of documents in the project (for density calculation)
 
     Returns:
@@ -114,7 +116,56 @@ def calculate_evidence_strength(
     else:
         base_rating = 0
 
-    # Calculate potential caps
+    # Start with base rating before applying penalties and caps
+    final_rating = base_rating
+    applied_cap = None
+
+    # Apply sample size penalty for causal evidence (before caps)
+    # Penalty applies only to RCT (base=4) and Observational (base=3) tiers
+    if base_rating in (3, 4):
+        # Determine which category to check based on base rating
+        if base_rating == 4:
+            target_category = "RCTs and Quasi-Experimental Studies"
+        else:
+            target_category = "Observational Research Studies"
+
+        # Get unique documents by doc_id with their max sample size
+        # (a document may appear multiple times for different interventions)
+        docs_by_id = {}
+        for doc in qualifying_docs:
+            if doc.get("evidence_category") == target_category:
+                doc_id = doc.get("doc_id")
+                sample_size = doc.get("sample_size")
+
+                if doc_id:
+                    if doc_id not in docs_by_id:
+                        docs_by_id[doc_id] = sample_size
+                    elif sample_size is not None:
+                        # Take max sample size if document appears multiple times
+                        existing = docs_by_id[doc_id]
+                        if existing is None or sample_size > existing:
+                            docs_by_id[doc_id] = sample_size
+                elif sample_size is not None:
+                    # No doc_id, use sample_size directly (treat as unique entry)
+                    # Use a unique key to avoid overwriting
+                    unique_key = f"_anon_{len(docs_by_id)}"
+                    docs_by_id[unique_key] = sample_size
+
+        # Filter to documents with known sample sizes
+        known_sample_sizes = [n for n in docs_by_id.values() if n is not None]
+
+        # Apply penalty if ALL known sample sizes are small
+        if known_sample_sizes and all(
+            n < SMALL_SAMPLE_THRESHOLD for n in known_sample_sizes
+        ):
+            final_rating -= 1
+            applied_cap = "small_sample"
+            logger.info(
+                f"Sample size penalty applied: base={base_rating}, "
+                f"sample_sizes={known_sample_sizes}"
+            )
+
+    # Calculate potential caps (applied after sample size penalty)
     caps = []
 
     # Single-study caps
@@ -126,15 +177,12 @@ def calculate_evidence_strength(
         caps.append(("single_obs", 2))
 
     # Density cap
-    if project_total_docs > 0:
+    if project_total_docs > 0 and counts["systematic_review"] == 0:
         density = len(qualifying_docs) / project_total_docs
         if density < DENSITY_THRESHOLD:
             caps.append(("density", 3))
 
     # Apply strictest cap
-    final_rating = base_rating
-    applied_cap = None
-
     for cap_type, cap_value in caps:
         if cap_value < final_rating:
             final_rating = cap_value
@@ -143,8 +191,8 @@ def calculate_evidence_strength(
     # Build evidence mix for display (only non-zero counts)
     evidence_mix = {k: v for k, v in counts.items() if v > 0}
 
-    # Log if cap was applied
-    if applied_cap:
+    # Log if cap was applied (and not already logged for sample size)
+    if applied_cap and applied_cap != "small_sample":
         logger.info(
             f"Evidence cap applied: base={base_rating}, final={final_rating}, "
             f"cap={applied_cap}, docs={len(qualifying_docs)}"
@@ -1237,25 +1285,32 @@ async def get_project_interventions(
                     }
                 )
 
-                # Track evidence info for strength calculation
+                # Get sample size for this intervention (used for both tracking and penalty)
+                sample_size = intervention.get("sample_size")
+                sample_size_int = None
+                if sample_size:
+                    try:
+                        sample_size_int = int(sample_size)
+                    except (ValueError, TypeError):
+                        pass
+
+                # Track evidence info for strength calculation (including sample size for penalty)
                 aggregated_interventions[intervention_key][
                     "documents_with_evidence"
                 ].append(
                     {
+                        "doc_id": document.get("doc_id"),
                         "evidence_category": document.get("evidence_category"),
                         "evidence_confidence": document.get("evidence_confidence"),
+                        "sample_size": sample_size_int,
                     }
                 )
 
-                # Add sample size if available
-                sample_size = intervention.get("sample_size")
-                if sample_size:
-                    try:
-                        aggregated_interventions[intervention_key][
-                            "sample_sizes"
-                        ].append(int(sample_size))
-                    except (ValueError, TypeError):
-                        pass  # Skip non-numeric sample sizes
+                # Add sample size to list if available (for aggregate stats)
+                if sample_size_int is not None:
+                    aggregated_interventions[intervention_key]["sample_sizes"].append(
+                        sample_size_int
+                    )
 
                 # Add result count and summaries for this intervention
                 intervention_results = results_by_intervention.get(intervention_idx, [])
@@ -1760,20 +1815,37 @@ async def get_issue_intervention_navigator(
 
                     # Collect evidence info for the new evidence strength calculation
                     documents_with_evidence = []
-                    for doc_id in shared_docs:
+                    for shared_doc_id in shared_docs:
                         # Find the document by doc_id
                         doc = None
                         for d in documents:
-                            if d and d.get("doc_id") == doc_id:
+                            if d and d.get("doc_id") == shared_doc_id:
                                 doc = d
                                 break
                         if doc:
+                            # Extract max sample size from document's interventions
+                            extraction_results = doc.get("extraction_results", {}) or {}
+                            interventions = extraction_results.get("interventions", [])
+                            doc_sample_sizes = []
+                            for intervention in interventions:
+                                sample_size = intervention.get("sample_size")
+                                if sample_size:
+                                    try:
+                                        doc_sample_sizes.append(int(sample_size))
+                                    except (ValueError, TypeError):
+                                        pass
+                            max_sample_size = (
+                                max(doc_sample_sizes) if doc_sample_sizes else None
+                            )
+
                             documents_with_evidence.append(
                                 {
+                                    "doc_id": shared_doc_id,
                                     "evidence_category": doc.get("evidence_category"),
                                     "evidence_confidence": doc.get(
                                         "evidence_confidence"
                                     ),
+                                    "sample_size": max_sample_size,
                                 }
                             )
 
