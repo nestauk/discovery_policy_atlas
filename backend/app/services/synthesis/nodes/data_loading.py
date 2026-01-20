@@ -33,10 +33,10 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
 
     supabase = vectorization_service.supabase
 
-    # Fetch research question
+    # Fetch research question + user search intent (population/outcome)
     proj_res = (
         supabase.table("analysis_projects")
-        .select("title, query")
+        .select("title, query, search_query")
         .eq("id", project_id)
         .execute()
     )
@@ -46,11 +46,20 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         else "Not specified"
     )
 
+    search_query = (proj_res.data[0].get("search_query") or {}) if proj_res.data else {}
+    target_population = search_query.get("population") or []
+    target_outcomes = search_query.get("outcome") or []
+    # Normalise to list[str]
+    if isinstance(target_population, str):
+        target_population = [target_population]
+    if isinstance(target_outcomes, str):
+        target_outcomes = [target_outcomes]
+
     # Fetch document metadata including extraction_results for scores
     docs_res = (
         supabase.table("analysis_documents")
         .select(
-            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results"
+            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, top_line, is_relevant"
         )
         .eq("analysis_project_id", project_id)
         .execute()
@@ -69,11 +78,15 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         doc_metadata[doc_uuid] = {
             "doc_id": doc.get("doc_id"),
             "title": doc.get("title") or "",
+            "top_line": doc.get("top_line") or "",
             "year": doc.get("year"),
             "author_short": author_short,
             "url": doc.get("landing_page_url") or doc.get("pdf_url"),
             "source": doc.get("source"),
             "document_type": doc.get("document_type"),
+            "is_relevant": bool(doc.get("is_relevant"))
+            if doc.get("is_relevant") is not None
+            else None,
         }
 
         # Extract evidence strength and impact scores from conclusion
@@ -121,11 +134,18 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 **base,
                 "type": "intervention",
                 "intervention_name": str(row.get("label") or raw.get("name") or ""),
+                "intervention_idx": raw.get("idx"),
                 "study_type": normalize_study_type(str(raw_st)),
                 "country": str(raw.get("country") or ""),
                 "description": str(
                     row.get("description") or raw.get("description") or ""
                 ),
+                "supporting_quote": str(raw.get("supporting_quote") or ""),
+                "population_intervened": str(raw.get("population_intervened") or ""),
+                "population_demographics": str(
+                    raw.get("population_demographics") or ""
+                ),
+                "sample_size": str(raw.get("sample_size") or ""),
             }
         elif et == "issue":
             return {
@@ -145,6 +165,14 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 ),
                 "effect_direction": str(raw.get("effect_direction") or ""),
                 "effect_size": str(raw.get("effect_size") or ""),
+                "effect_size_type": str(raw.get("effect_size_type") or ""),
+                "p_value": raw.get("p_value"),
+                "uncertainty": raw.get("uncertainty"),
+                "intervention_idx": raw.get("intervention_idx"),
+                "subgroup_or_dose": str(raw.get("subgroup_or_dose") or ""),
+                "population_measured": str(raw.get("population_measured") or ""),
+                "result_text": str(raw.get("result_text") or ""),
+                "supporting_quote": str(raw.get("supporting_quote") or ""),
             }
         return {**base, "type": et}
 
@@ -159,6 +187,8 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     return {
         "raw_extractions": uniform,
         "research_question": research_question,
+        "target_population": target_population,
+        "target_outcomes": target_outcomes,
         "doc_metadata": doc_metadata,
         "doc_scores": doc_scores,
         "extraction_to_doc": extraction_to_doc,

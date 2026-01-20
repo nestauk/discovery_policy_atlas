@@ -85,6 +85,7 @@ export default function ProjectResultsPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
+  const showRerunButton = process.env.NEXT_PUBLIC_SHOW_SYNTHESIS_RERUN === 'true'
   
   // Get projectId from URL params
   const projectId = params.projectId as string
@@ -99,7 +100,6 @@ export default function ProjectResultsPage() {
   const urlSubTab: EvidenceSubTabType = validSubTabs.includes(subtabParam as EvidenceSubTabType) 
     ? (subtabParam as EvidenceSubTabType) 
     : 'interventions'
-  
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hasLoadedData, setHasLoadedData] = useState(false)
@@ -129,10 +129,13 @@ export default function ProjectResultsPage() {
   const [interventions, setInterventions] = useState<InterventionData[]>([])
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState<string | null>(null)
+  const [isRerunningSynthesis, setIsRerunningSynthesis] = useState(false)
+  const [rerunError, setRerunError] = useState<string | null>(null)
+
   const [projectLoading, setProjectLoading] = useState(false)
 
-  const { activeProject, setActiveProject } = useAnalysisProjectStore()
-  const { fetchWithAuth, getAnalysisProject, getProjectInterventions } = useAPI()
+  const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
+  const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
   const { getToken } = useAuth()
 
   // Update URL when tab changes (without full navigation)
@@ -271,6 +274,37 @@ export default function ProjectResultsPage() {
       setLoadingData(false)
     }
   }, [projectId, fetchWithAuth, getProjectInterventions, hasLoadedData])
+
+  const handleRerunSynthesis = useCallback(async () => {
+    if (!activeProject?.id || isRerunningSynthesis) return
+
+    const forceFlag = true
+    if (activeProject.status === 'running') {
+      const confirmed = window.confirm(
+        'Synthesis is currently running. Force rerun anyway? This will start a new synthesis run.'
+      )
+      if (!confirmed) return
+    }
+
+    setIsRerunningSynthesis(true)
+    setRerunError(null)
+
+    try {
+      await rerunSynthesisForProject(activeProject.id, {
+        force: forceFlag,
+        invalidate_previous: true,
+      })
+
+      const updated = { ...activeProject, status: 'running' as const }
+      setActiveProject(updated)
+      setProjects(projects.map((p) => (p.id === updated.id ? { ...p, status: updated.status } : p)))
+    } catch (error) {
+      console.error('Failed to rerun synthesis', error)
+      setRerunError('Failed to start synthesis rerun')
+    } finally {
+      setIsRerunningSynthesis(false)
+    }
+  }, [activeProject, isRerunningSynthesis, rerunSynthesisForProject, setActiveProject, setProjects, projects])
 
   const handleDownloadDocumentsCSV = useCallback(async () => {
     if (!projectId) return
@@ -967,6 +1001,13 @@ export default function ProjectResultsPage() {
                         structuredBriefing={summaryData.structured_briefing}
                         citationMap={summaryData.citation_map}
                         evidenceCoverage={summaryData.evidence_coverage}
+                        {...(showRerunButton
+                          ? {
+                              onRerunSynthesis: handleRerunSynthesis,
+                              isRerunningSynthesis,
+                              rerunError,
+                            }
+                          : {})}
                         onCitationClick={() => {
                           updateUrl('evidence', 'documents')
                         }}

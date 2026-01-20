@@ -174,6 +174,19 @@ export function useAPI() {
     });
   };
 
+  const rerunSynthesisForProject = async (
+    projectId: string,
+    options: { force?: boolean; invalidate_previous?: boolean } = {}
+  ) => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}/rerun-synthesis`, {
+      method: 'POST',
+      body: JSON.stringify({
+        force: options.force ?? true,
+        invalidate_previous: options.invalidate_previous ?? true,
+      }),
+    });
+  };
+
   const getDocumentExtraction = async (projectId: string, documentId: string) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}/documents/${documentId}/extraction`);
   };
@@ -207,6 +220,7 @@ export function useAPI() {
     updateAnalysisProject,
     deleteAnalysisProject,
     runAnalysisForProject,
+    rerunSynthesisForProject,
     getDocumentExtraction,
     getProjectInterventions,
   };
