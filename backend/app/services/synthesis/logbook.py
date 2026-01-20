@@ -136,8 +136,6 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                     transferability_rating=t.get("transferability_rating"),
                     transferability_note=t.get("transferability_note"),
                     transferability_breakdown=t.get("transferability_breakdown"),
-                    primary_causal_mechanism=t.get("primary_causal_mechanism"),
-                    causal_mechanism_detail=t.get("causal_mechanism_detail"),
                 )
             )
 
@@ -178,6 +176,8 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                     predicted_magnitude=ot.get("predicted_magnitude"),
                     magnitude_confidence=ot.get("magnitude_confidence"),
                     intervention_theme_id=ot.get("intervention_theme_id"),
+                    primary_causal_mechanism=ot.get("primary_causal_mechanism"),
+                    causal_mechanism_detail=ot.get("causal_mechanism_detail"),
                 )
             )
 
@@ -387,8 +387,6 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "transferability_rating": intv_dict.get("transferability_rating"),
                 "transferability_note": intv_dict.get("transferability_note"),
                 "transferability_breakdown": intv_dict.get("transferability_breakdown"),
-                "primary_causal_mechanism": intv_dict.get("primary_causal_mechanism"),
-                "causal_mechanism_detail": intv_dict.get("causal_mechanism_detail"),
                 "created_at": datetime.utcnow().isoformat(),
             }
         ).execute()
@@ -434,6 +432,8 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "discord_reason": out_dict.get("discord_reason"),
                 "predicted_magnitude": out_dict.get("predicted_magnitude"),
                 "magnitude_confidence": out_dict.get("magnitude_confidence"),
+                "primary_causal_mechanism": out_dict.get("primary_causal_mechanism"),
+                "causal_mechanism_detail": out_dict.get("causal_mechanism_detail"),
                 "intervention_theme_id": intervention_link,
                 "created_at": datetime.utcnow().isoformat(),
             }

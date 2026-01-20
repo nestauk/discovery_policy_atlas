@@ -450,6 +450,8 @@ class OutcomeTheme(BaseModel):
     predicted_magnitude: Optional[SemanticMagnitudeType] = Field(None)
     magnitude_confidence: Optional[str] = Field(None)
     intervention_theme_id: Optional[str] = Field(None)
+    primary_causal_mechanism: Optional[CausalityClaimType] = Field(None)
+    causal_mechanism_detail: Optional[str] = Field(None)
 
 
 class InterventionDetails(BaseModel):
@@ -509,8 +511,6 @@ class PolicyIntervention(BaseModel):
     transferability_rating: Optional[str] = Field(None)
     transferability_note: Optional[str] = Field(None)
     transferability_breakdown: Optional[TransferabilityBreakdown] = Field(None)
-    primary_causal_mechanism: Optional[CausalityClaimType] = Field(None)
-    causal_mechanism_detail: Optional[str] = Field(None)
 
 
 class SynthesisSummary(BaseModel):

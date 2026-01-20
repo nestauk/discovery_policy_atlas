@@ -174,8 +174,8 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             str(d["id"]): str(d.get("doc_id") or "") for d in (docs_res.data or [])
         }
 
-        for i in range(0, len(all_ex_ids), 500):
-            chunk = all_ex_ids[i : i + 500]
+        for i in range(0, len(all_ex_ids), 100):
+            chunk = all_ex_ids[i : i + 100]
             exts_res = (
                 supabase.table("analysis_extractions")
                 .select("id, analysis_document_id, raw_data")

@@ -11,7 +11,11 @@ import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
 import { NavigatorInterventionsTable } from '@/components/interventions/NavigatorInterventionsTable'
+import { ImpactProfileCard } from '@/components/synthesis/ImpactProfileCard'
+import { RiskWarnings } from '@/components/synthesis/RiskWarnings'
+import { TransferabilityScore } from '@/components/synthesis/TransferabilityScore'
 import { type InterventionData } from '@/components/interventions/InterventionsTable'
+import type { OutcomeTheme, RiskTheme, TransferabilityBreakdown } from '@/types/search'
 import { getEvidenceScoreExplanation, formatEvidenceMixCompact, getEvidenceCategories } from '@/lib/evidenceCategories'
 import { Tooltip } from '@/components/ui/tooltip'
 
@@ -28,7 +32,13 @@ interface BaseInterventionTheme {
   impact_summary?: string
   frequency: number
   avg_impact_score?: number
+  avg_evidence_score?: number
   detailed_interventions?: DetailedIntervention[]
+  transferability_rating?: string | null
+  transferability_note?: string | null
+  transferability_breakdown?: TransferabilityBreakdown | null
+  outcome_themes?: OutcomeTheme[]
+  risk_themes?: RiskTheme[]
 }
 
 interface IssueInterventionTheme extends BaseInterventionTheme {
@@ -863,6 +873,34 @@ export function InterventionsNavigator({
                     {expandedInterventions.has(`all-${intervention.theme_name}`) && (
                       <CardContent className="pt-0">
                         <div className="space-y-3">
+                          {(intervention.transferability_rating || intervention.transferability_breakdown) && (
+                            <TransferabilityScore
+                              rating={intervention.transferability_rating}
+                              note={intervention.transferability_note}
+                              breakdown={intervention.transferability_breakdown}
+                            />
+                          )}
+
+                          {intervention.outcome_themes?.length ? (
+                            <div className="space-y-2">
+                              <div className="text-sm font-medium text-slate-700">Impact Profile</div>
+                              <div className="grid gap-2">
+                                {intervention.outcome_themes.map((outcome) => (
+                                  <ImpactProfileCard
+                                    key={`${intervention.theme_name}-${outcome.outcome_name}`}
+                                    outcome={outcome}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {intervention.risk_themes?.length ? (
+                            <RiskWarnings risks={intervention.risk_themes} />
+                          ) : null}
+                        </div>
+
+                        <div className="space-y-3">
                           {/* Detailed Interventions */}
                           {intervention.detailed_interventions?.length ? (
                             <div>
@@ -977,6 +1015,34 @@ export function InterventionsNavigator({
 
                             {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
                               <CardContent className="pt-0">
+                                <div className="space-y-3">
+                                  {(intervention.transferability_rating || intervention.transferability_breakdown) && (
+                                    <TransferabilityScore
+                                      rating={intervention.transferability_rating}
+                                      note={intervention.transferability_note}
+                                      breakdown={intervention.transferability_breakdown}
+                                    />
+                                  )}
+
+                                  {intervention.outcome_themes?.length ? (
+                                    <div className="space-y-2">
+                                      <div className="text-sm font-medium text-slate-700">Impact Profile</div>
+                                      <div className="grid gap-2">
+                                        {intervention.outcome_themes.map((outcome) => (
+                                          <ImpactProfileCard
+                                            key={`${intervention.theme_name}-${outcome.outcome_name}`}
+                                            outcome={outcome}
+                                          />
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+
+                                  {intervention.risk_themes?.length ? (
+                                    <RiskWarnings risks={intervention.risk_themes} />
+                                  ) : null}
+                                </div>
+
                                 <div className="space-y-3">
                                   {/* Detailed Interventions */}
                                   {intervention.detailed_interventions?.length ? (

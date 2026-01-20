@@ -181,6 +181,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 ),
                 "effect_size": str(raw.get("effect_size") or ""),
                 "effect_size_type": str(raw.get("effect_size_type") or ""),
+                "causality_claim": raw.get("causality_claim"),
                 "p_value": raw.get("p_value"),
                 "uncertainty": raw.get("uncertainty"),
                 "intervention_idx": raw.get("intervention_idx"),

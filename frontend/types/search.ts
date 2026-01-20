@@ -127,8 +127,6 @@ export interface SearchParams {
     transferability_rating?: string
     transferability_note?: string
     transferability_breakdown?: TransferabilityBreakdown
-    primary_causal_mechanism?: CausalityClaimType
-    causal_mechanism_detail?: string
   }
 
   export interface CitationInfo {
@@ -173,6 +171,8 @@ export interface SearchParams {
     predicted_magnitude?: SemanticMagnitudeType
     magnitude_confidence?: string
     intervention_theme_id?: string
+  primary_causal_mechanism?: CausalityClaimType
+  causal_mechanism_detail?: string
   }
 
   // Structured briefing types for frontend rendering
