@@ -323,10 +323,13 @@ export function InterventionsNavigator({
           if (!existing.impact_summary && intervention.impact_summary) {
             existing.impact_summary = intervention.impact_summary
           }
-          // Deduplicate detailed interventions by name
+          // Deduplicate detailed interventions by name + evidence_category
+          // This preserves different evidence types for the same intervention
           const newDetails = intervention.detailed_interventions || []
           newDetails.forEach(detail => {
-            const exists = existing.detailed_interventions.some((d: DetailedIntervention) => d.name === detail.name)
+            const exists = existing.detailed_interventions.some(
+              (d: DetailedIntervention) => d.name === detail.name && d.evidence_category === detail.evidence_category
+            )
             if (!exists) {
               existing.detailed_interventions.push(detail)
             }

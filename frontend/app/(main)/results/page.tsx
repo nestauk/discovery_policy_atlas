@@ -56,7 +56,7 @@ interface AnalysisDocument {
   extraction_status?: string
   text_source?: string  // "full_text" or "abstract" - what was used for extraction
   study_strength?: string  // strongest study type letter from interventions
-  sample_size?: number  // largest sample size from interventions
+  sample_size?: number  // primary intervention sample size for this document
   cited_by_count?: number  // Citation count from API
   extraction_results?: {
     conclusion?: {
@@ -79,6 +79,36 @@ interface AnalysisDocument {
     mappings?: unknown[]
     results?: unknown[]
   }
+}
+
+const parseSampleSize = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 0 ? Math.trunc(value) : undefined
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/,/g, '').trim()
+    const match = cleaned.match(/\d+/)
+    if (match) {
+      const parsed = Number.parseInt(match[0], 10)
+      return parsed > 0 ? parsed : undefined
+    }
+  }
+  return undefined
+}
+
+const getDocumentSampleSize = (doc: AnalysisDocument): number | undefined => {
+  if (typeof doc.sample_size === 'number') {
+    return doc.sample_size > 0 ? doc.sample_size : undefined
+  }
+  const interventions = doc.extraction_results?.interventions
+  if (Array.isArray(interventions) && interventions.length > 0) {
+    const primary = interventions[0]
+    if (primary && typeof primary === 'object') {
+      const sampleSize = (primary as { sample_size?: unknown }).sample_size
+      return parseSampleSize(sampleSize)
+    }
+  }
+  return undefined
 }
 
 
@@ -627,9 +657,8 @@ export default function AnalysisResultsPage() {
   }
 
   // Create study strength and sample size mappings from interventions data
-  const { studyStrengthMapping, sampleSizeMapping } = useMemo(() => {
+  const { studyStrengthMapping } = useMemo(() => {
     const strengthMapping: Record<string, string> = {}
-    const sizeMapping: Record<string, number> = {}
     
     // Study type ranking function (same as backend)
     const getStudyTypeRank = (studyType: string): number => {
@@ -667,22 +696,11 @@ export default function AnalysisResultsPage() {
             strengthMapping[docId] = studyType
           }
         }
-        
-        // Get sample size from intervention
-        const sampleSize = intervention.total_sample_size
-        if (sampleSize && sampleSize > 0) {
-          const existingSize = sizeMapping[docId] || 0
-          // Keep the largest sample size
-          if (sampleSize > existingSize) {
-            sizeMapping[docId] = sampleSize
-          }
-        }
       })
     })
     
     return {
-      studyStrengthMapping: strengthMapping,
-      sampleSizeMapping: sizeMapping
+      studyStrengthMapping: strengthMapping
     }
   }, [interventions])
 
@@ -772,7 +790,7 @@ export default function AnalysisResultsPage() {
         text_source: doc.text_source,
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
-        sample_size: sampleSizeMapping[doc.doc_id] || undefined,
+        sample_size: getDocumentSampleSize(doc),
         // Add evidence categorisation fields
         evidence_category: doc.evidence_category,
         evidence_confidence: doc.evidence_confidence,
@@ -793,7 +811,7 @@ export default function AnalysisResultsPage() {
       transformedPapers: relevant,
       relevantCount: relevant.length
     };
-  }, [documents, studyStrengthMapping, sampleSizeMapping]);
+  }, [documents, studyStrengthMapping]);
 
   return (
     <div className="flex-1 flex flex-col">

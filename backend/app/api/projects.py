@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
+import re
 import uuid
 from typing import Optional, List
 import pandas as pd
@@ -42,6 +43,11 @@ from app.services.analysis.evidence_category import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
+
+CAUSAL_EVIDENCE_CATEGORIES = {
+    "RCTs and Quasi-Experimental Studies",
+    "Observational Research Studies",
+}
 
 
 def calculate_evidence_strength(
@@ -205,6 +211,48 @@ def calculate_evidence_strength(
         "cap_message": CAP_MESSAGES.get(applied_cap) if applied_cap else None,
         "evidence_mix": evidence_mix,
     }
+
+
+def _parse_sample_size(value: object) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        if value <= 0 or value != value:
+            return None
+        return int(value)
+    if isinstance(value, str):
+        cleaned = value.replace(",", "").strip()
+        if cleaned.isdigit():
+            parsed = int(cleaned)
+            return parsed if parsed > 0 else None
+        match = re.search(r"\d+", cleaned)
+        if match:
+            parsed = int(match.group(0))
+            return parsed if parsed > 0 else None
+    return None
+
+
+def get_document_sample_size(doc: dict) -> Optional[int]:
+    extraction_results = doc.get("extraction_results") or {}
+    interventions = extraction_results.get("interventions") or []
+    if not isinstance(interventions, list) or not interventions:
+        return None
+    primary = interventions[0]
+    if not isinstance(primary, dict):
+        return None
+    return _parse_sample_size(primary.get("sample_size"))
+
+
+def should_apply_document_sample_penalty(
+    evidence_category: str | None, sample_size: Optional[int]
+) -> bool:
+    if evidence_category not in CAUSAL_EVIDENCE_CATEGORIES:
+        return False
+    if sample_size is None or sample_size == 0:
+        return False
+    return sample_size < SMALL_SAMPLE_THRESHOLD
 
 
 # END-I - INFO REGION END
@@ -922,13 +970,23 @@ async def get_project_documents(
             doc_copy["evidence_category_rank"] = EVIDENCE_CATEGORY_RANKS.get(
                 evidence_category, 999
             )
-            doc_copy["evidence_strength"] = EVIDENCE_CATEGORY_SCORES.get(
-                evidence_category, 0
+            base_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
+            sample_size = get_document_sample_size(doc)
+            if sample_size is not None or "sample_size" not in doc_copy:
+                doc_copy["sample_size"] = sample_size
+            penalty_applied = should_apply_document_sample_penalty(
+                evidence_category, sample_size
+            )
+            doc_copy["evidence_strength"] = (
+                base_score - 1 if penalty_applied else base_score
             )
             if evidence_category:
-                doc_copy[
-                    "evidence_strength_justification"
-                ] = f"Based on evidence category: {evidence_category}"
+                justification = f"Based on evidence category: {evidence_category}"
+                if penalty_applied:
+                    justification = (
+                        f"{justification}. Score reduced due to sample size < 100"
+                    )
+                doc_copy["evidence_strength_justification"] = justification
             documents.append(doc_copy)
 
         if filtered_other_count > 0:
