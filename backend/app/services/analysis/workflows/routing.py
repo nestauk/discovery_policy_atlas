@@ -71,19 +71,11 @@ def create_workflow(
     # Use SR workflow for systematic reviews with sufficient confidence
     use_sr = normalized_category in SR_CATEGORIES and confidence >= CONFIDENCE_THRESHOLD
 
-    if use_sr:
-        logger.info(
-            f"Creating SR workflow for '{evidence_category}' (confidence: {confidence:.2f})"
-        )
-        return SRExtractionWorkflow(**kwargs)
+    workflow_type = "SR" if use_sr else "RCT"
+    reason = "low confidence fallback" if confidence < CONFIDENCE_THRESHOLD else ""
+    logger.info(
+        f"Creating {workflow_type} workflow for '{evidence_category}' "
+        f"(confidence: {confidence:.2f}){f' - {reason}' if reason else ''}"
+    )
 
-    # Default to RCT workflow (handles all other categories and low confidence)
-    if confidence < CONFIDENCE_THRESHOLD:
-        logger.info(
-            f"Low confidence ({confidence:.2f}) for '{evidence_category}', using RCT fallback"
-        )
-    else:
-        logger.info(
-            f"Creating RCT workflow for '{evidence_category}' (confidence: {confidence:.2f})"
-        )
-    return RCTExtractionWorkflow(**kwargs)
+    return SRExtractionWorkflow(**kwargs) if use_sr else RCTExtractionWorkflow(**kwargs)

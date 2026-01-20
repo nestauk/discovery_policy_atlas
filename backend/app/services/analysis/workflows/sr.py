@@ -30,11 +30,10 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
 
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         try:
-            tags = ["component:extraction", "workflow:sr", f"paper:{state['paper_id']}"]
             result = await self._run_prompt_stage(
                 SR_ISSUES_PROMPT,
                 {"full_text": state["full_text"]},
-                tags,
+                self._build_tags("issues", state["paper_id"]),
                 "sr.issues",
             )
             extraction = IssuesExtraction(**result)
@@ -46,11 +45,10 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
 
     async def _extract_interventions(self, state: WorkflowState) -> Dict[str, Any]:
         try:
-            tags = ["component:extraction", "workflow:sr", f"paper:{state['paper_id']}"]
             result = await self._run_prompt_stage(
                 SR_INTERVENTIONS_PROMPT,
                 {"full_text": state["full_text"]},
-                tags,
+                self._build_tags("interventions", state["paper_id"]),
                 "sr.interventions",
             )
             extraction = InterventionsExtraction(**result)
@@ -68,7 +66,6 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
         try:
             if not state["issues"] or not state["interventions"]:
                 return {"mappings": []}
-            tags = ["component:extraction", "workflow:sr", f"paper:{state['paper_id']}"]
             result = await self._run_prompt_stage(
                 MAPPING_PROMPT,
                 {
@@ -80,7 +77,7 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                         state["interventions"], "interventions"
                     ),
                 },
-                tags,
+                self._build_tags("mappings", state["paper_id"]),
                 "sr.mappings",
             )
             extraction = MappingsExtraction(**result)
@@ -98,11 +95,6 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
 
             for intervention in state["interventions"]:
                 try:
-                    tags = [
-                        "component:extraction",
-                        "workflow:sr",
-                        f"paper:{state['paper_id']}",
-                    ]
                     result = await self._run_prompt_stage(
                         SR_RESULTS_PROMPT,
                         {
@@ -111,7 +103,7 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                                 intervention.model_dump()
                             ),
                         },
-                        tags,
+                        self._build_tags("results", state["paper_id"]),
                         "sr.results",
                     )
                     extraction = ResultsExtraction(**result)
@@ -132,7 +124,6 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
 
     async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
         try:
-            tags = ["component:extraction", "workflow:sr", f"paper:{state['paper_id']}"]
             interventions_json = (
                 json.dumps([i.model_dump() for i in state["interventions"]], indent=2)
                 if state["interventions"]
@@ -144,7 +135,7 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                     "full_text": state["full_text"],
                     "interventions_json": interventions_json,
                 },
-                tags,
+                self._build_tags("conclusions", state["paper_id"]),
                 "sr.conclusions",
             )
             extraction = ConclusionsExtraction(**result)

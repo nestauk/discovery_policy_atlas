@@ -35,25 +35,16 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage A: Extract issues."""
         try:
-            tags = [
-                "component:extraction",
-                "component:extraction.issues",
-                "workflow:rct",
-                f"paper:{state['paper_id']}",
-                f"model:{self.model_name}",
-            ]
-
             result = await self._run_prompt_stage(
                 ISSUES_PROMPT,
                 {"full_text": state["full_text"]},
-                tags,
+                self._build_tags("issues", state["paper_id"]),
                 "rct.extraction.issues",
                 extra={"paper_id": state["paper_id"]},
             )
 
             extraction = IssuesExtraction(**result)
             logger.info(f"[RCT] Extracted {len(extraction.issues)} issues")
-
             return {"issues": extraction.issues}
 
         except Exception as e:
@@ -63,32 +54,21 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
     async def _extract_interventions(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage B: Extract interventions."""
         try:
-            tags = [
-                "component:extraction",
-                "component:extraction.interventions",
-                "workflow:rct",
-                f"paper:{state['paper_id']}",
-                f"model:{self.model_name}",
-            ]
-
             result = await self._run_prompt_stage(
                 INTERVENTIONS_PROMPT,
                 {"full_text": state["full_text"]},
-                tags,
+                self._build_tags("interventions", state["paper_id"]),
                 "rct.extraction.interventions",
                 extra={"paper_id": state["paper_id"]},
             )
 
             extraction = InterventionsExtraction(**result)
-
-            # Set intervention_semantic_type for RCT workflow
             for intervention in extraction.interventions:
                 intervention.intervention_semantic_type = "trial_intervention"
 
             logger.info(
                 f"[RCT] Extracted {len(extraction.interventions)} interventions"
             )
-
             return {"interventions": extraction.interventions}
 
         except Exception as e:
@@ -104,34 +84,24 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
             if not state["issues"] or not state["interventions"]:
                 return {"mappings": []}
 
-            issues_json = self._serialize_for_prompt(state["issues"], "issues")
-            interventions_json = self._serialize_for_prompt(
-                state["interventions"], "interventions"
-            )
-
-            tags = [
-                "component:extraction",
-                "component:extraction.mappings",
-                "workflow:rct",
-                f"paper:{state['paper_id']}",
-                f"model:{self.model_name}",
-            ]
-
             result = await self._run_prompt_stage(
                 MAPPING_PROMPT,
                 {
                     "full_text": state["full_text"],
-                    "issues_json": issues_json,
-                    "interventions_json": interventions_json,
+                    "issues_json": self._serialize_for_prompt(
+                        state["issues"], "issues"
+                    ),
+                    "interventions_json": self._serialize_for_prompt(
+                        state["interventions"], "interventions"
+                    ),
                 },
-                tags,
+                self._build_tags("mappings", state["paper_id"]),
                 "rct.extraction.mappings",
                 extra={"paper_id": state["paper_id"]},
             )
 
             extraction = MappingsExtraction(**result)
             logger.info(f"[RCT] Extracted {len(extraction.mappings)} mappings")
-
             return {"mappings": extraction.mappings}
 
         except Exception as e:
@@ -145,26 +115,17 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 return {"results": []}
 
             all_results = []
-
-            # Process each intervention
             for intervention in state["interventions"]:
                 try:
-                    one_intervention_json = json.dumps(intervention.model_dump())
-                    tags = [
-                        "component:extraction",
-                        "component:extraction.results",
-                        "workflow:rct",
-                        f"paper:{state['paper_id']}",
-                        f"model:{self.model_name}",
-                    ]
-
                     result = await self._run_prompt_stage(
                         RESULTS_PROMPT,
                         {
                             "full_text": state["full_text"],
-                            "one_intervention_json": one_intervention_json,
+                            "one_intervention_json": json.dumps(
+                                intervention.model_dump()
+                            ),
                         },
-                        tags,
+                        self._build_tags("results", state["paper_id"]),
                         "rct.extraction.results",
                         extra={
                             "paper_id": state["paper_id"],
@@ -173,23 +134,18 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                     )
 
                     extraction = ResultsExtraction(**result)
-
-                    # Set fields for RCT workflow
                     for res in extraction.results:
                         res.intervention_idx = intervention.idx
                         res.estimate_level = "study"
-
                     all_results.extend(extraction.results)
 
                 except Exception as e:
                     logger.warning(
-                        f"[RCT] Results extraction failed for intervention {intervention.idx}: {e}"
+                        f"[RCT] Results failed for intervention {intervention.idx}: {e}"
                     )
-                    continue
 
             logger.info(
-                f"[RCT] Extracted {len(all_results)} results across "
-                f"{len(state['interventions'])} interventions"
+                f"[RCT] Extracted {len(all_results)} results across {len(state['interventions'])} interventions"
             )
             return {"results": all_results}
 
@@ -201,24 +157,10 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
         """Stage E: Extract study conclusions with evidence strength assessment."""
         try:
             interventions_json = (
-                json.dumps(
-                    [
-                        intervention.model_dump()
-                        for intervention in state["interventions"]
-                    ],
-                    indent=2,
-                )
+                json.dumps([i.model_dump() for i in state["interventions"]], indent=2)
                 if state["interventions"]
                 else "No interventions extracted"
             )
-
-            tags = [
-                "component:extraction",
-                "component:extraction.conclusions",
-                "workflow:rct",
-                f"paper:{state['paper_id']}",
-                f"model:{self.model_name}",
-            ]
 
             result = await self._run_prompt_stage(
                 CONCLUSIONS_PROMPT,
@@ -226,18 +168,15 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                     "full_text": state["full_text"],
                     "interventions_json": interventions_json,
                 },
-                tags,
+                self._build_tags("conclusions", state["paper_id"]),
                 "rct.extraction.conclusions",
                 extra={"paper_id": state["paper_id"]},
             )
 
             extraction = ConclusionsExtraction(**result)
-            logger.info("[RCT] Extracted study conclusion with evidence assessment")
-
+            logger.info("[RCT] Extracted study conclusion")
             return {"conclusion": extraction.conclusion}
 
         except Exception as e:
             logger.error(f"[RCT] Conclusions extraction failed: {e}")
             return {"conclusion": None, "error": f"Conclusions extraction failed: {e}"}
-
-    # Uses base class _validate_and_filter - no RCT-specific validation needed

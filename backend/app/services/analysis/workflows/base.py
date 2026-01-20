@@ -235,6 +235,16 @@ class BaseExtractionWorkflow(ABC):
             return [self._langfuse_handler]
         return []
 
+    def _build_tags(self, stage: str, paper_id: str) -> List[str]:
+        """Build standard tags for a workflow stage."""
+        return [
+            "component:extraction",
+            f"component:extraction.{stage}",
+            f"workflow:{self.workflow_type}",
+            f"paper:{paper_id}",
+            f"model:{self.model_name}",
+        ]
+
     async def _run_prompt_stage(
         self,
         prompt,
