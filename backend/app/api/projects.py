@@ -80,6 +80,15 @@ def calculate_evidence_strength(
             "evidence_mix": {},
         }
 
+    def get_effective_evidence_score(doc: dict) -> int:
+        """Compute effective score after per-document adjustments (e.g., sample size)."""
+        evidence_category = doc.get("evidence_category")
+        base_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
+        sample_size = doc.get("sample_size")
+        if should_apply_document_sample_penalty(evidence_category, sample_size):
+            return max(0, base_score - 1)
+        return base_score
+
     # Count by evidence category
     counts = {
         "systematic_review": 0,
@@ -103,21 +112,26 @@ def calculate_evidence_strength(
         "Unknown / Insufficient information": "unknown",
     }
 
+    effective_score_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+
     for doc in qualifying_docs:
         cat = doc.get("evidence_category")
         if cat and cat in category_mapping:
             counts[category_mapping[cat]] += 1
+        effective_score = get_effective_evidence_score(doc)
+        if effective_score in effective_score_counts:
+            effective_score_counts[effective_score] += 1
 
     # Determine base rating (strongest evidence present)
-    if counts["systematic_review"] >= 1:
+    if effective_score_counts[5] >= 1:
         base_rating = 5
-    elif counts["rct"] >= 1:
+    elif effective_score_counts[4] >= 1:
         base_rating = 4
-    elif counts["observational"] >= 1:
+    elif effective_score_counts[3] >= 1:
         base_rating = 3
-    elif counts["modelling"] + counts["policy"] + counts["qualitative"] >= 1:
+    elif effective_score_counts[2] >= 1:
         base_rating = 2
-    elif counts["opinion"] >= 1:
+    elif effective_score_counts[1] >= 1:
         base_rating = 1
     else:
         base_rating = 0
@@ -125,51 +139,6 @@ def calculate_evidence_strength(
     # Start with base rating before applying penalties and caps
     final_rating = base_rating
     applied_cap = None
-
-    # Apply sample size penalty for causal evidence (before caps)
-    # Penalty applies only to RCT (base=4) and Observational (base=3) tiers
-    if base_rating in (3, 4):
-        # Determine which category to check based on base rating
-        if base_rating == 4:
-            target_category = "RCTs and Quasi-Experimental Studies"
-        else:
-            target_category = "Observational Research Studies"
-
-        # Get unique documents by doc_id with their max sample size
-        # (a document may appear multiple times for different interventions)
-        docs_by_id = {}
-        for doc in qualifying_docs:
-            if doc.get("evidence_category") == target_category:
-                doc_id = doc.get("doc_id")
-                sample_size = doc.get("sample_size")
-
-                if doc_id:
-                    if doc_id not in docs_by_id:
-                        docs_by_id[doc_id] = sample_size
-                    elif sample_size is not None:
-                        # Take max sample size if document appears multiple times
-                        existing = docs_by_id[doc_id]
-                        if existing is None or sample_size > existing:
-                            docs_by_id[doc_id] = sample_size
-                elif sample_size is not None:
-                    # No doc_id, use sample_size directly (treat as unique entry)
-                    # Use a unique key to avoid overwriting
-                    unique_key = f"_anon_{len(docs_by_id)}"
-                    docs_by_id[unique_key] = sample_size
-
-        # Filter to documents with known sample sizes
-        known_sample_sizes = [n for n in docs_by_id.values() if n is not None]
-
-        # Apply penalty if ALL known sample sizes are small
-        if known_sample_sizes and all(
-            n < SMALL_SAMPLE_THRESHOLD for n in known_sample_sizes
-        ):
-            final_rating -= 1
-            applied_cap = "small_sample"
-            logger.info(
-                f"Sample size penalty applied: base={base_rating}, "
-                f"sample_sizes={known_sample_sizes}"
-            )
 
     # Calculate potential caps (applied after sample size penalty)
     caps = []
@@ -2050,12 +2019,30 @@ async def get_issue_intervention_navigator(
                                     }
                                 )
 
-                    # Deduplicate by name
+                    # Deduplicate by name, keeping the highest evidence score
                     unique_interventions = {}
                     for detail in detailed_interventions:
                         name = detail.get("name", "")
-                        if name and name not in unique_interventions:
+                        if not name:
+                            continue
+                        existing = unique_interventions.get(name)
+                        if not existing:
                             unique_interventions[name] = detail
+                            continue
+                        existing_score = existing.get("evidence_score") or 0
+                        new_score = detail.get("evidence_score") or 0
+                        if new_score > existing_score:
+                            unique_interventions[name] = detail
+                            continue
+                        if new_score == existing_score:
+                            existing_rank = EVIDENCE_CATEGORY_RANKS.get(
+                                existing.get("evidence_category"), 999
+                            )
+                            new_rank = EVIDENCE_CATEGORY_RANKS.get(
+                                detail.get("evidence_category"), 999
+                            )
+                            if new_rank < existing_rank:
+                                unique_interventions[name] = detail
 
                     related_interventions.append(
                         {
