@@ -37,6 +37,7 @@ from app.services.analysis.evidence_category import (
     SMALL_SAMPLE_THRESHOLD,
     EVIDENCE_CATEGORY_SCORES,
     EVIDENCE_CATEGORY_RANKS,
+    EVIDENCE_CATEGORY_TO_KEY,
     CAP_MESSAGES,
 )
 
@@ -89,52 +90,25 @@ def calculate_evidence_strength(
             return max(0, base_score - 1)
         return base_score
 
-    # Count by evidence category
-    counts = {
-        "systematic_review": 0,
-        "rct": 0,
-        "observational": 0,
-        "modelling": 0,
-        "policy": 0,
-        "qualitative": 0,
-        "opinion": 0,
-        "unknown": 0,
-    }
-
-    category_mapping = {
-        "Systematic Review and Meta-Analysis": "systematic_review",
-        "RCTs and Quasi-Experimental Studies": "rct",
-        "Observational Research Studies": "observational",
-        "Modelling & Simulation": "modelling",
-        "Policy Syntheses & Guidance Documents": "policy",
-        "Qualitative & Contextual Evidence": "qualitative",
-        "Expert Opinion and Commentary": "opinion",
-        "Unknown / Insufficient information": "unknown",
-    }
-
-    effective_score_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    # Count by evidence category and effective scores
+    counts = {key: 0 for key in EVIDENCE_CATEGORY_TO_KEY.values()}
+    effective_score_counts = [0] * 6
 
     for doc in qualifying_docs:
         cat = doc.get("evidence_category")
-        if cat and cat in category_mapping:
-            counts[category_mapping[cat]] += 1
+        if cat:
+            key = EVIDENCE_CATEGORY_TO_KEY.get(cat)
+            if key:
+                counts[key] += 1
         effective_score = get_effective_evidence_score(doc)
-        if effective_score in effective_score_counts:
+        if 0 <= effective_score <= 5:
             effective_score_counts[effective_score] += 1
 
-    # Determine base rating (strongest evidence present)
-    if effective_score_counts[5] >= 1:
-        base_rating = 5
-    elif effective_score_counts[4] >= 1:
-        base_rating = 4
-    elif effective_score_counts[3] >= 1:
-        base_rating = 3
-    elif effective_score_counts[2] >= 1:
-        base_rating = 2
-    elif effective_score_counts[1] >= 1:
-        base_rating = 1
-    else:
-        base_rating = 0
+    # Determine base rating from highest effective score present
+    base_rating = max(
+        (score for score, count in enumerate(effective_score_counts) if count),
+        default=0,
+    )
 
     # Start with base rating before applying penalties and caps
     final_rating = base_rating

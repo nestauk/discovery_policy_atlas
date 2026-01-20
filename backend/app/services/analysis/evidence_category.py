@@ -84,6 +84,18 @@ EVIDENCE_MIX_SHORT_NAMES = {
     "Unknown / Insufficient information": "Unknown",
 }
 
+# Maps full category names to short keys for evidence mix counting.
+EVIDENCE_CATEGORY_TO_KEY = {
+    "Systematic Review and Meta-Analysis": "systematic_review",
+    "RCTs and Quasi-Experimental Studies": "rct",
+    "Observational Research Studies": "observational",
+    "Modelling & Simulation": "modelling",
+    "Policy Syntheses & Guidance Documents": "policy",
+    "Qualitative & Contextual Evidence": "qualitative",
+    "Expert Opinion and Commentary": "opinion",
+    "Unknown / Insufficient information": "unknown",
+}
+
 CAP_MESSAGES = {
     "single_srma": "Limited by single systematic review",
     "single_rct": "Limited by single experimental study",

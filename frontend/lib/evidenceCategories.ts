@@ -39,6 +39,27 @@ export const EVIDENCE_CATEGORY_SHORT_NAMES: Record<string, string> = {
 }
 
 /**
+ * Map full evidence category names to short keys for counting.
+ */
+const EVIDENCE_CATEGORY_TO_KEY: Record<string, string> = {
+  'Systematic Review and Meta-Analysis': 'systematic_review',
+  'RCTs and Quasi-Experimental Studies': 'rct',
+  'Observational Research Studies': 'observational',
+  'Modelling & Simulation': 'modelling',
+  'Policy Syntheses & Guidance Documents': 'policy',
+  'Qualitative & Contextual Evidence': 'qualitative',
+  'Expert Opinion and Commentary': 'opinion',
+  'Unknown / Insufficient information': 'unknown',
+}
+
+/**
+ * Maps short keys to full category names (inverse of EVIDENCE_CATEGORY_TO_KEY).
+ */
+const KEY_TO_EVIDENCE_CATEGORY = Object.fromEntries(
+  Object.entries(EVIDENCE_CATEGORY_TO_KEY).map(([category, key]) => [key, category])
+) as Record<string, string>
+
+/**
  * Short names for evidence types (used in evidence mix display and explanations).
  * These match the keys returned from the backend evidence_mix field.
  */
@@ -53,35 +74,21 @@ export const EVIDENCE_TYPE_SHORT_NAMES: Record<string, string> = {
   'unknown': 'Unknown',
 }
 
-/** @deprecated Use EVIDENCE_TYPE_SHORT_NAMES instead */
-export const EVIDENCE_MIX_DISPLAY_NAMES = EVIDENCE_TYPE_SHORT_NAMES
-
-/**
- * Colors for evidence mix display (matching the evidence category colors by type).
- */
-export const EVIDENCE_MIX_COLORS: Record<string, EvidenceCategoryColors> = {
-  'systematic_review': { bg: 'bg-[#0F294A]', text: 'text-white' },
-  'rct': { bg: 'bg-[#9A1BBE]', text: 'text-white' },
-  'observational': { bg: 'bg-[#0000FF]', text: 'text-white' },
-  'modelling': { bg: 'bg-[#18A48C]', text: 'text-white' },
-  'policy': { bg: 'bg-[#97D9E3]', text: 'text-gray-900' },
-  'qualitative': { bg: 'bg-[#A59BEE]', text: 'text-gray-900' },
-  'opinion': { bg: 'bg-[#F6A4B7]', text: 'text-gray-900' },
-  'unknown': { bg: 'bg-[#f8f5f4]', text: 'text-gray-700' },
-}
-
 /**
  * Get display name for an evidence mix key.
  */
 export function getEvidenceMixDisplayName(key: string): string {
-  return EVIDENCE_MIX_DISPLAY_NAMES[key] || key
+  return EVIDENCE_TYPE_SHORT_NAMES[key] || key
 }
 
 /**
- * Get colors for an evidence mix key.
+ * Get colors for an evidence mix key (derived from category colors).
  */
 export function getEvidenceMixColors(key: string): EvidenceCategoryColors {
-  return EVIDENCE_MIX_COLORS[key] || { bg: 'bg-gray-100', text: 'text-gray-700' }
+  const fullCategory = KEY_TO_EVIDENCE_CATEGORY[key]
+  return fullCategory
+    ? getEvidenceCategoryColors(fullCategory)
+    : { bg: 'bg-gray-100', text: 'text-gray-700' }
 }
 
 /**
@@ -168,20 +175,6 @@ export function formatEvidenceMixCompact(evidenceMix?: Record<string, number>): 
     .filter(key => evidenceMix[key] && evidenceMix[key] > 0)
     .map(key => `${evidenceMix[key]} ${EVIDENCE_TYPE_SHORT_NAMES[key]}`)
     .join(', ')
-}
-
-/**
- * Map full evidence category names to short keys for counting.
- */
-const EVIDENCE_CATEGORY_TO_KEY: Record<string, string> = {
-  'Systematic Review and Meta-Analysis': 'systematic_review',
-  'RCTs and Quasi-Experimental Studies': 'rct',
-  'Observational Research Studies': 'observational',
-  'Modelling & Simulation': 'modelling',
-  'Policy Syntheses & Guidance Documents': 'policy',
-  'Qualitative & Contextual Evidence': 'qualitative',
-  'Expert Opinion and Commentary': 'opinion',
-  'Unknown / Insufficient information': 'unknown',
 }
 
 /**
