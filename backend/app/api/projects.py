@@ -36,6 +36,8 @@ from app.services.analysis.evidence_category import (
 from app.services.analysis.evidence_strength import (
     calculate_evidence_strength,
     calculate_document_evidence_score,
+    get_document_max_sample_size,
+    build_document_evidence_info,
 )
 
 logger = logging.getLogger(__name__)
@@ -1154,28 +1156,11 @@ async def get_project_interventions(
                         doc_id
                     )
 
-                    # Calculate max sample size from ALL interventions in this document
-                    doc_sample_sizes = []
-                    for intv in interventions:
-                        intv_sample_size = intv.get("sample_size")
-                        if intv_sample_size:
-                            try:
-                                doc_sample_sizes.append(int(intv_sample_size))
-                            except (ValueError, TypeError):
-                                pass
-                    max_sample_size = (
-                        max(doc_sample_sizes) if doc_sample_sizes else None
-                    )
-
+                    max_sample_size = get_document_max_sample_size(interventions)
                     aggregated_interventions[intervention_key][
                         "documents_with_evidence"
                     ].append(
-                        {
-                            "doc_id": doc_id,
-                            "evidence_category": document.get("evidence_category"),
-                            "evidence_confidence": document.get("evidence_confidence"),
-                            "sample_size": max_sample_size,
-                        }
+                        build_document_evidence_info(document, max_sample_size, doc_id)
                     )
 
                 # Add result count and summaries for this intervention
@@ -1557,6 +1542,9 @@ async def get_issue_intervention_navigator(
 
         documents = docs_result.data or []
         docs_by_id = {str(d["id"]): d for d in documents if d and d.get("id")}
+        docs_by_doc_id = {
+            d.get("doc_id"): d for d in documents if d and d.get("doc_id")
+        }
 
         # Build document-level issue-intervention mappings from extraction results
         doc_mappings = {}  # doc_id -> [(issue_extraction_id, intervention_extraction_id)]
@@ -1680,38 +1668,17 @@ async def get_issue_intervention_navigator(
                     # Collect evidence info for the new evidence strength calculation
                     documents_with_evidence = []
                     for shared_doc_id in shared_docs:
-                        # Find the document by doc_id
-                        doc = None
-                        for d in documents:
-                            if d and d.get("doc_id") == shared_doc_id:
-                                doc = d
-                                break
-                        if doc:
-                            # Extract max sample size from document's interventions
-                            extraction_results = doc.get("extraction_results", {}) or {}
-                            interventions = extraction_results.get("interventions", [])
-                            doc_sample_sizes = []
-                            for intervention in interventions:
-                                sample_size = intervention.get("sample_size")
-                                if sample_size:
-                                    try:
-                                        doc_sample_sizes.append(int(sample_size))
-                                    except (ValueError, TypeError):
-                                        pass
-                            max_sample_size = (
-                                max(doc_sample_sizes) if doc_sample_sizes else None
+                        doc = docs_by_doc_id.get(shared_doc_id)
+                        if not doc:
+                            continue
+                        extraction_results = doc.get("extraction_results", {}) or {}
+                        interventions = extraction_results.get("interventions", [])
+                        max_sample_size = get_document_max_sample_size(interventions)
+                        documents_with_evidence.append(
+                            build_document_evidence_info(
+                                doc, max_sample_size, shared_doc_id
                             )
-
-                            documents_with_evidence.append(
-                                {
-                                    "doc_id": shared_doc_id,
-                                    "evidence_category": doc.get("evidence_category"),
-                                    "evidence_confidence": doc.get(
-                                        "evidence_confidence"
-                                    ),
-                                    "sample_size": max_sample_size,
-                                }
-                            )
+                        )
 
                     # Calculate evidence strength using new methodology
                     evidence_strength = calculate_evidence_strength(

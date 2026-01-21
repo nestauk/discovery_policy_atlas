@@ -89,6 +89,31 @@ def get_document_sample_size(doc: dict) -> Optional[int]:
     return _parse_sample_size(primary.get("sample_size"))
 
 
+def get_document_max_sample_size(interventions: list[dict]) -> Optional[int]:
+    if not interventions:
+        return None
+    sample_sizes = []
+    for intervention in interventions:
+        sample_size = intervention.get("sample_size")
+        if sample_size:
+            try:
+                sample_sizes.append(int(sample_size))
+            except (ValueError, TypeError):
+                pass
+    return max(sample_sizes) if sample_sizes else None
+
+
+def build_document_evidence_info(
+    doc: dict, sample_size: Optional[int], doc_id: Optional[str] = None
+) -> dict:
+    return {
+        "doc_id": doc_id or doc.get("doc_id"),
+        "evidence_category": doc.get("evidence_category"),
+        "evidence_confidence": doc.get("evidence_confidence"),
+        "sample_size": sample_size,
+    }
+
+
 def should_apply_sample_penalty(
     evidence_category: str | None,
     sample_size: Optional[int],
