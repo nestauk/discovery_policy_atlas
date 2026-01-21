@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
-import re
 import uuid
 from typing import Optional, List
 import pandas as pd
@@ -32,170 +31,18 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsResponse,
 )
 from app.services.analysis.evidence_category import (
-    EVIDENCE_CONFIDENCE_THRESHOLD,
-    DENSITY_THRESHOLD,
-    SMALL_SAMPLE_THRESHOLD,
     EVIDENCE_CATEGORY_SCORES,
     EVIDENCE_CATEGORY_RANKS,
-    EVIDENCE_CATEGORY_TO_KEY,
-    CAP_MESSAGES,
+)
+from app.services.analysis.evidence_strength import (
+    calculate_evidence_strength,
+    get_document_sample_size,
+    should_apply_sample_penalty,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
-
-CAUSAL_EVIDENCE_CATEGORIES = {
-    "RCTs and Quasi-Experimental Studies",
-    "Observational Research Studies",
-}
-
-
-def calculate_evidence_strength(
-    documents_with_evidence: list[dict],
-    project_total_docs: int,
-) -> dict:
-    """Calculate evidence strength rating for an intervention based on its documents.
-
-    Args:
-        documents_with_evidence: List of dicts with 'evidence_category', 'evidence_confidence',
-            and optionally 'sample_size' and 'doc_id'
-        project_total_docs: Total number of documents in the project (for density calculation)
-
-    Returns:
-        Dict with stars, base_rating, cap_applied, cap_message, evidence_mix
-    """
-    # Filter to documents meeting confidence threshold
-    qualifying_docs = [
-        d
-        for d in documents_with_evidence
-        if (d.get("evidence_confidence") or 0) >= EVIDENCE_CONFIDENCE_THRESHOLD
-    ]
-
-    if not qualifying_docs:
-        return {
-            "stars": 0,
-            "base_rating": 0,
-            "cap_applied": None,
-            "cap_message": "No qualifying evidence",
-            "evidence_mix": {},
-        }
-
-    def get_effective_evidence_score(doc: dict) -> int:
-        """Compute effective score after per-document adjustments (e.g., sample size)."""
-        evidence_category = doc.get("evidence_category")
-        base_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
-        sample_size = doc.get("sample_size")
-        if should_apply_document_sample_penalty(evidence_category, sample_size):
-            return max(0, base_score - 1)
-        return base_score
-
-    # Count by evidence category and effective scores
-    counts = {key: 0 for key in EVIDENCE_CATEGORY_TO_KEY.values()}
-    effective_score_counts = [0] * 6
-
-    for doc in qualifying_docs:
-        cat = doc.get("evidence_category")
-        if cat:
-            key = EVIDENCE_CATEGORY_TO_KEY.get(cat)
-            if key:
-                counts[key] += 1
-        effective_score = get_effective_evidence_score(doc)
-        if 0 <= effective_score <= 5:
-            effective_score_counts[effective_score] += 1
-
-    # Determine base rating from highest effective score present
-    base_rating = max(
-        (score for score, count in enumerate(effective_score_counts) if count),
-        default=0,
-    )
-
-    # Start with base rating before applying penalties and caps
-    final_rating = base_rating
-    applied_cap = None
-
-    # Calculate potential caps (applied after sample size penalty)
-    caps = []
-
-    # Single-study caps
-    if base_rating == 5 and counts["systematic_review"] == 1:
-        caps.append(("single_srma", 4))
-    if base_rating == 4 and counts["rct"] == 1:
-        caps.append(("single_rct", 3))
-    if base_rating == 3 and counts["observational"] == 1:
-        caps.append(("single_obs", 2))
-
-    # Density cap
-    if project_total_docs > 0 and counts["systematic_review"] == 0:
-        density = len(qualifying_docs) / project_total_docs
-        if density < DENSITY_THRESHOLD:
-            caps.append(("density", 3))
-
-    # Apply strictest cap
-    for cap_type, cap_value in caps:
-        if cap_value < final_rating:
-            final_rating = cap_value
-            applied_cap = cap_type
-
-    # Build evidence mix for display (only non-zero counts)
-    evidence_mix = {k: v for k, v in counts.items() if v > 0}
-
-    # Log if cap was applied (and not already logged for sample size)
-    if applied_cap and applied_cap != "small_sample":
-        logger.info(
-            f"Evidence cap applied: base={base_rating}, final={final_rating}, "
-            f"cap={applied_cap}, docs={len(qualifying_docs)}"
-        )
-
-    return {
-        "stars": final_rating,
-        "base_rating": base_rating,
-        "cap_applied": applied_cap,
-        "cap_message": CAP_MESSAGES.get(applied_cap) if applied_cap else None,
-        "evidence_mix": evidence_mix,
-    }
-
-
-def _parse_sample_size(value: object) -> Optional[int]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, float):
-        if value <= 0 or value != value:
-            return None
-        return int(value)
-    if isinstance(value, str):
-        cleaned = value.replace(",", "").strip()
-        if cleaned.isdigit():
-            parsed = int(cleaned)
-            return parsed if parsed > 0 else None
-        match = re.search(r"\d+", cleaned)
-        if match:
-            parsed = int(match.group(0))
-            return parsed if parsed > 0 else None
-    return None
-
-
-def get_document_sample_size(doc: dict) -> Optional[int]:
-    extraction_results = doc.get("extraction_results") or {}
-    interventions = extraction_results.get("interventions") or []
-    if not isinstance(interventions, list) or not interventions:
-        return None
-    primary = interventions[0]
-    if not isinstance(primary, dict):
-        return None
-    return _parse_sample_size(primary.get("sample_size"))
-
-
-def should_apply_document_sample_penalty(
-    evidence_category: str | None, sample_size: Optional[int]
-) -> bool:
-    if evidence_category not in CAUSAL_EVIDENCE_CATEGORIES:
-        return False
-    if sample_size is None or sample_size == 0:
-        return False
-    return sample_size < SMALL_SAMPLE_THRESHOLD
 
 
 # END-I - INFO REGION END
@@ -917,7 +764,7 @@ async def get_project_documents(
             sample_size = get_document_sample_size(doc)
             if sample_size is not None or "sample_size" not in doc_copy:
                 doc_copy["sample_size"] = sample_size
-            penalty_applied = should_apply_document_sample_penalty(
+            penalty_applied = should_apply_sample_penalty(
                 evidence_category, sample_size
             )
             doc_copy["evidence_strength"] = (
