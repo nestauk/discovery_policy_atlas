@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import type { RiskTheme } from '@/types/search'
 
 interface RiskWarningsProps {
@@ -13,11 +14,13 @@ export function RiskWarnings({ risks }: RiskWarningsProps) {
     return null
   }
 
+  const sortedRisks = [...risks].sort((a, b) => (b.frequency || 0) - (a.frequency || 0))
+
   return (
     <div className="rounded border border-slate-200 bg-white p-3 space-y-3">
       <div className="text-sm font-medium text-slate-900">Risk Warnings</div>
       <div className="space-y-2">
-        {risks.map((risk, idx) => (
+        {sortedRisks.map((risk, idx) => (
           <div key={`${risk.theme_name}-${idx}`} className="flex items-start justify-between gap-3">
             <div>
               <div className="text-sm text-slate-800">{risk.theme_name}</div>
@@ -26,13 +29,14 @@ export function RiskWarnings({ risks }: RiskWarningsProps) {
               )}
               <div className="text-xs text-slate-500 mt-1">
                 Frequency: {risk.frequency}
-                {risk.linked_intervention_theme_id ? ' · Linked to intervention' : ''}
               </div>
             </div>
             {risk.has_harm_warning && (
-              <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
-                Harm warning
-              </Badge>
+              <Tooltip content="Raised when unintended consequences appear in more than 20% of high-quality sources for this risk theme.">
+                <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
+                  Harm warning
+                </Badge>
+              </Tooltip>
             )}
           </div>
         ))}

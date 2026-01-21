@@ -228,6 +228,7 @@ export function InterventionsNavigator({
   const [error, setError] = useState<string | null>(null)
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [expandedInterventions, setExpandedInterventions] = useState<Set<string>>(new Set())
+  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
   
   // Fallback state for extracted interventions (when synthesis is not done)
   const [fallbackInterventions, setFallbackInterventions] = useState<InterventionData[] | null>(null)
@@ -312,6 +313,18 @@ export function InterventionsNavigator({
         newExpanded.delete(themeName)
       } else {
         newExpanded.add(themeName)
+      }
+      return newExpanded
+    })
+  }, [])
+
+  const toggleDetails = useCallback((detailsKey: string) => {
+    setExpandedDetails(prev => {
+      const newExpanded = new Set(prev)
+      if (newExpanded.has(detailsKey)) {
+        newExpanded.delete(detailsKey)
+      } else {
+        newExpanded.add(detailsKey)
       }
       return newExpanded
     })
@@ -885,7 +898,13 @@ export function InterventionsNavigator({
                             <div className="space-y-2">
                               <div className="text-sm font-medium text-slate-700">Impact Profile</div>
                               <div className="grid gap-2">
-                                {intervention.outcome_themes.map((outcome) => (
+                                {[...intervention.outcome_themes]
+                                  .sort(
+                                    (a, b) =>
+                                      (b.positive_count + b.negative_count + b.null_count) -
+                                      (a.positive_count + a.negative_count + a.null_count)
+                                  )
+                                  .map((outcome) => (
                                   <ImpactProfileCard
                                     key={`${intervention.theme_name}-${outcome.outcome_name}`}
                                     outcome={outcome}
@@ -900,21 +919,31 @@ export function InterventionsNavigator({
                           ) : null}
                         </div>
 
-                        <div className="space-y-3">
-                          {/* Detailed Interventions */}
-                          {intervention.detailed_interventions?.length ? (
-                            <div>
-                              <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                              <NavigatorInterventionsTable
+                        {intervention.detailed_interventions?.length ? (
+                          <div className="space-y-2">
+                            <button
+                              type="button"
+                              className="flex items-center gap-2 text-sm font-medium text-slate-700"
+                              onClick={() => toggleDetails(`all-${intervention.theme_name}`)}
+                            >
+                              {expandedDetails.has(`all-${intervention.theme_name}`) ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                              Detailed interventions
+                            </button>
+                            {expandedDetails.has(`all-${intervention.theme_name}`) && (
+                              <NavigatorInterventionsTable 
                                 interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
                               />
-                            </div>
-                          ) : (
-                            <div className="text-sm text-slate-600">
-                              <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
-                            </div>
-                          )}
-                        </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-slate-600">
+                            <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
+                          </div>
+                        )}
                       </CardContent>
                     )}
                   </Card>
@@ -1028,7 +1057,13 @@ export function InterventionsNavigator({
                                     <div className="space-y-2">
                                       <div className="text-sm font-medium text-slate-700">Impact Profile</div>
                                       <div className="grid gap-2">
-                                        {intervention.outcome_themes.map((outcome) => (
+                                        {[...intervention.outcome_themes]
+                                          .sort(
+                                            (a, b) =>
+                                              (b.positive_count + b.negative_count + b.null_count) -
+                                              (a.positive_count + a.negative_count + a.null_count)
+                                          )
+                                          .map((outcome) => (
                                           <ImpactProfileCard
                                             key={`${intervention.theme_name}-${outcome.outcome_name}`}
                                             outcome={outcome}
@@ -1043,21 +1078,33 @@ export function InterventionsNavigator({
                                   ) : null}
                                 </div>
 
-                                <div className="space-y-3">
-                                  {/* Detailed Interventions */}
-                                  {intervention.detailed_interventions?.length ? (
-                                    <div>
-                                      <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                                      <NavigatorInterventionsTable
+                                {intervention.detailed_interventions?.length ? (
+                                  <div className="space-y-2">
+                                    <button
+                                      type="button"
+                                      className="flex items-center gap-2 text-sm font-medium text-slate-700"
+                                      onClick={() =>
+                                        toggleDetails(`details-${issue.theme_name}-${intervention.theme_name}`)
+                                      }
+                                    >
+                                      {expandedDetails.has(`details-${issue.theme_name}-${intervention.theme_name}`) ? (
+                                        <ChevronDown className="h-4 w-4" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4" />
+                                      )}
+                                      Detailed interventions
+                                    </button>
+                                    {expandedDetails.has(`details-${issue.theme_name}-${intervention.theme_name}`) && (
+                                      <NavigatorInterventionsTable 
                                         interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
                                       />
-                                    </div>
-                                  ) : (
-                                    <div className="text-sm text-slate-600">
-                                      <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents.</p>
-                                    </div>
-                                  )}
-                                </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-slate-600">
+                                    <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents.</p>
+                                  </div>
+                                )}
                               </CardContent>
                             )}
                           </Card>

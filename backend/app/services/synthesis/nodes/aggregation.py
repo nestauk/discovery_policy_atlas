@@ -191,6 +191,19 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 }
 
     raw_ext_by_id = {str(e["id"]): e for e in raw_extractions}
+    intervention_theme_by_extraction_id: Dict[str, str] = {}
+    for t in final_intervention_themes:
+        for c in t.concepts:
+            intervention_theme_by_extraction_id[str(c.id)] = t.name
+
+    intervention_extraction_by_doc_idx: Dict[Tuple[str, int], str] = {}
+    for ext in raw_extractions:
+        if ext.get("type") != "intervention":
+            continue
+        doc_uuid = ext.get("doc_uuid")
+        idx = ext.get("intervention_idx")
+        if doc_uuid and idx is not None:
+            intervention_extraction_by_doc_idx[(doc_uuid, idx)] = str(ext["id"])
 
     # Build doc_uuid -> result extractions mapping (for effect data)
     doc_to_results: Dict[str, List[Dict]] = {}
@@ -319,60 +332,103 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     outcome_doc_effects: Dict[str, Dict[str, List[str]]] = {}
 
     for t in final_outcome_themes:
-        doc_ids = set()
-        pos, neg, null = 0, 0, 0
-        doc_effect_list: Dict[str, List[str]] = {}
+        per_intervention: Dict[str, Dict] = {}
 
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             raw_ext = raw_ext_by_id.get(c.id, {})
-            doc_id = meta.get("doc_id")
-            if doc_id:
-                doc_ids.add(doc_id)
-            effect_dir = raw_ext.get("effect_direction")
+            if raw_ext.get("type") != "result":
+                continue
             doc_uuid = meta.get("doc_uuid", "")
+            doc_id = meta.get("doc_id")
+            intervention_idx = raw_ext.get("intervention_idx")
+            if not doc_uuid or intervention_idx is None:
+                continue
+
+            intervention_extraction_id = intervention_extraction_by_doc_idx.get(
+                (doc_uuid, intervention_idx)
+            )
+            intervention_theme_name = intervention_theme_by_extraction_id.get(
+                intervention_extraction_id or ""
+            )
+            if not intervention_theme_name:
+                continue
+
+            group = per_intervention.setdefault(
+                intervention_theme_name,
+                {
+                    "doc_ids": set(),
+                    "pos": 0,
+                    "neg": 0,
+                    "null": 0,
+                    "effect_sizes": [],
+                    "doc_effects": {},
+                },
+            )
+            if doc_id:
+                group["doc_ids"].add(doc_id)
+
+            effect_dir = raw_ext.get("effect_direction")
             quality_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
             if effect_dir == "increase":
-                pos += quality_score
+                group["pos"] += quality_score
                 if doc_id:
-                    doc_effect_list.setdefault(doc_id, []).append("positive")
+                    group["doc_effects"].setdefault(doc_id, []).append("positive")
             elif effect_dir == "decrease":
-                neg += quality_score
+                group["neg"] += quality_score
                 if doc_id:
-                    doc_effect_list.setdefault(doc_id, []).append("negative")
+                    group["doc_effects"].setdefault(doc_id, []).append("negative")
             elif effect_dir == "null":
-                null += quality_score
+                group["null"] += quality_score
                 if doc_id:
-                    doc_effect_list.setdefault(doc_id, []).append("null")
+                    group["doc_effects"].setdefault(doc_id, []).append("null")
 
-        if not doc_ids:
-            continue
+            effect_size = raw_ext.get("effect_size", "")
+            if effect_size and len(effect_size) > 2:
+                has_number = bool(re.search(r"\d", effect_size))
+                group["effect_sizes"].append(
+                    (effect_size[:100], quality_score, has_number)
+                )
 
-        total = pos + neg + null
-        if total == 0:
-            consensus = "insufficient"
-        elif pos > neg * 2:
-            consensus = "increase"
-        elif neg > pos * 2:
-            consensus = "decrease"
-        elif null > pos and null > neg:
-            consensus = "no change"
-        else:
-            consensus = "mixed"
+        for intervention_theme_name, group in per_intervention.items():
+            doc_ids = group["doc_ids"]
+            if not doc_ids:
+                continue
+            pos = group["pos"]
+            neg = group["neg"]
+            null = group["null"]
 
-        outcomes.append(
-            OutcomeTheme(
-                outcome_name=t.name,
-                outcome_description=t.description,
-                effect_consensus=consensus,
-                positive_count=pos,
-                negative_count=neg,
-                null_count=null,
-                frequency=len(doc_ids),
-                source_doc_ids=sorted(doc_ids),
+            total = pos + neg + null
+            if total == 0:
+                consensus = "insufficient"
+            elif pos > neg * 2:
+                consensus = "increase"
+            elif neg > pos * 2:
+                consensus = "decrease"
+            elif null > pos and null > neg:
+                consensus = "no change"
+            else:
+                consensus = "mixed"
+
+            outcomes.append(
+                OutcomeTheme(
+                    outcome_name=t.name,
+                    outcome_description=t.description,
+                    effect_consensus=consensus,
+                    positive_count=pos,
+                    negative_count=neg,
+                    null_count=null,
+                    frequency=len(doc_ids),
+                    source_doc_ids=sorted(doc_ids),
+                    sample_effect_sizes=select_representative_effect_sizes(
+                        group["effect_sizes"]
+                    ),
+                    intervention_theme_id=intervention_theme_name,
+                )
             )
-        )
-        outcome_doc_effects[t.name] = doc_effect_list
+            outcome_doc_effects[f"{t.name}::{intervention_theme_name}"] = group[
+                "doc_effects"
+            ]
 
     # Build extraction quotes mapping
     extraction_quotes: Dict[str, List[str]] = {}

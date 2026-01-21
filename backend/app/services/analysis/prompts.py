@@ -198,8 +198,16 @@ Population Fields:
 
 Implementation Profile Fields:
 - inner_setting: Where the intervention is delivered (e.g., School, Clinical/Hospital, Prison, Workplace, Community Centre, Home, Online/Digital)
-- resource_intensity: Cost and infrastructure requirements (e.g., High-Cost/Infrastructure Heavy, Low-Cost/Nudge, Human-Resource Intensive, Technology-Dependent)
-- delivery_complexity: Implementation difficulty (e.g., Simple/Plug-and-Play, Complex/Requires Specialised Training, Systemic/Legislative Change Required)
+- resource_intensity: Cost and infrastructure requirements. Infer from context if not explicit.
+  - High: specialised equipment or facilities, intensive staffing, high ongoing costs
+  - Moderate: structured programmes, training, ongoing staff time, multi-session delivery
+  - Low: information campaigns, simple guidance, lightweight digital tools, minimal resourcing
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
+- delivery_complexity: Implementation difficulty. Infer from intervention type if not explicit.
+  - High: legislative/systemic change, multi-agency coordination, specialist training required
+  - Moderate: cross-team coordination, staff training, ongoing monitoring
+  - Low: plug-and-play materials, single-session delivery, minimal coordination
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
 
 Paper text:
 {full_text}""",
@@ -293,7 +301,14 @@ Rules for Predicted Impact Assessment:
   NOTE: This is a preliminary per-document assessment. Final calibrated bucketing happens during synthesis.
 - causal_reliability: How strongly does this study support a causal claim?
 - transferability_notes: Consider: geography, population, resource requirements, complexity
-- risks_identified: List any risks, harms, or concerns mentioned in the paper
+- risks_identified: List potential harms, adverse effects, or implementation challenges FROM THE INTERVENTION ITSELF.
+  - Include: adverse outcomes, cost/feasibility barriers, equity concerns, sustainability challenges, unintended side effects.
+  - Do NOT include: the underlying problem being addressed, prevalence/scale of the issue, or background harms unrelated to the intervention.
+  - Examples:
+    - ✅ "Implementation requires specialist staffing and training, creating feasibility risks"
+    - ✅ "Sustained funding requirements may limit long-term viability"
+    - ❌ "The problem is widespread and worsening"
+    - ❌ "The issue causes major societal harm"
 - unintended_consequences_detected: True if paper mentions unintended negative effects
 
 Paper text:

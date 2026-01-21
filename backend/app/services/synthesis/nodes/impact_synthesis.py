@@ -70,6 +70,10 @@ DEFAULT_USER_CONSTRAINTS = {
 }
 
 TRANSFERABILITY_MODEL = os.getenv("TRANSFERABILITY_MODEL", "gpt-4o-mini")
+IMPACT_SUMMARY_MODEL = os.getenv("IMPACT_SUMMARY_MODEL", "gpt-4o-mini")
+
+# Target context for transferability evaluation (Policy Atlas users are UK-based).
+DEFAULT_TARGET_GEOGRAPHY = ["UK"]
 
 
 UK_COUNTRY_SET = {
@@ -98,7 +102,8 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
 
     target_inner_setting = state.get("target_inner_setting") or []
     target_population = state.get("target_population") or []
-    target_geography = state.get("target_geography") or ["UK"]
+    target_geography = DEFAULT_TARGET_GEOGRAPHY
+    target_outcomes = state.get("target_outcomes") or []
 
     intervention_extractions = [
         e for e in raw_extractions if e.get("type") == "intervention"
@@ -142,12 +147,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             doc_uuid_by_doc_id,
         )
 
-        intervention_theme_id = find_linked_intervention(
-            outcome.source_doc_ids,
-            interventions,
-            theme_to_doc_uuids,
-            doc_id_by_uuid,
-        )
+        intervention_theme_id = outcome.intervention_theme_id
 
         enriched_outcomes.append(
             OutcomeTheme(
@@ -178,8 +178,15 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             )
         )
 
+    outcomes_by_intervention: Dict[str, List[OutcomeTheme]] = {}
+    for outcome in enriched_outcomes:
+        intervention_key = outcome.intervention_theme_id
+        if intervention_key:
+            outcomes_by_intervention.setdefault(intervention_key, []).append(outcome)
+
     # Enrich interventions with transferability and causal mechanism
     transferability_llm = get_llm(TRANSFERABILITY_MODEL, temperature=0.0)
+    impact_summary_llm = get_llm(IMPACT_SUMMARY_MODEL, temperature=0.2)
 
     async def build_intervention(
         intervention: PolicyIntervention,
@@ -194,14 +201,25 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             doc_scores,
             transferability_llm,
         )
+        outcome_list = outcomes_by_intervention.get(intervention.intervention_name, [])
+        impact_summary = intervention.impact_summary
+        if outcome_list:
+            impact_summary = await generate_impact_summary(
+                intervention,
+                outcome_list,
+                target_outcomes,
+                impact_summary_llm,
+            )
         return PolicyIntervention(
             **intervention.model_dump(
                 exclude={
+                    "impact_summary",
                     "transferability_rating",
                     "transferability_note",
                     "transferability_breakdown",
                 }
             ),
+            impact_summary=impact_summary,
             transferability_rating=rating,
             transferability_note=note,
             transferability_breakdown=breakdown,
@@ -336,6 +354,52 @@ def compute_magnitude_hybrid(
         f"{unique_doc_count} sources"
     )
     return (result, confidence)
+
+
+def format_outcomes_for_summary(outcomes: List[OutcomeTheme]) -> str:
+    """Format outcome themes for summary synthesis."""
+    lines = []
+    for outcome in outcomes:
+        verdict = outcome.verdict_label or "insufficient_evidence"
+        magnitude = outcome.predicted_magnitude or "unknown"
+        counts = (
+            f"{outcome.positive_count}↑ {outcome.negative_count}↓ {outcome.null_count}—"
+        )
+        lines.append(
+            f"- {outcome.outcome_name}: verdict={verdict}, magnitude={magnitude}, counts={counts}"
+        )
+    return "\n".join(lines)
+
+
+async def generate_impact_summary(
+    intervention: PolicyIntervention,
+    outcomes: List[OutcomeTheme],
+    target_outcomes: List[str],
+    llm,
+) -> str:
+    """Generate an LLM summary of the impact profile for an intervention."""
+    outcome_focus = (
+        f"User-specified outcomes of interest: {', '.join(target_outcomes)}."
+        if target_outcomes
+        else "No user-specified outcomes were provided."
+    )
+    prompt = (
+        "You are synthesising the impact profile for a policy intervention in UK policy context. "
+        "Write 2-3 concise sentences in British English.\n\n"
+        f"Intervention: {intervention.intervention_name}\n"
+        f"Description: {intervention.brief_description}\n\n"
+        f"Outcome evidence:\n{format_outcomes_for_summary(outcomes)}\n\n"
+        f"{outcome_focus}\n\n"
+        "Guidance:\n"
+        "- Summarise overall direction and confidence.\n"
+        "- Highlight contested or uncertain outcomes.\n"
+        "- If user-specified outcomes exist, explicitly address them.\n"
+    )
+    try:
+        response = await llm.ainvoke(prompt)
+        return (getattr(response, "content", None) or str(response)).strip()
+    except Exception:
+        return intervention.impact_summary
 
 
 class TransferabilityAssessment(BaseModel):
@@ -499,22 +563,23 @@ async def compute_transferability(
     match_count = sum(1 for s in dimension_scores if s == "Match")
     partial_count = sum(1 for s in dimension_scores if s == "Partial")
     mismatch_count = sum(1 for s in dimension_scores if s == "Mismatch")
+    unknown_count = sum(1 for s in dimension_scores if s == "Unknown")
 
-    if (
-        breakdown.resource_intensity == "Mismatch"
-        or breakdown.delivery_complexity == "Mismatch"
-    ):
+    if mismatch_count > 0:
         rating = "Low Fit"
-        note = "Resource or complexity mismatch may limit applicability"
-    elif match_count + partial_count >= 3:
+        note = "Context mismatch identified in one or more dimensions"
+    elif unknown_count >= 3:
+        rating = "Unknown"
+        note = "Insufficient implementation data for transferability assessment"
+    elif match_count >= 2 and unknown_count <= 1:
         rating = "High Fit"
         note = "Good alignment with target context"
-    elif mismatch_count >= 2:
-        rating = "Low Fit"
-        note = "Multiple context mismatches identified"
-    else:
+    elif match_count >= 1 or partial_count >= 2:
         rating = "Medium Fit"
-        note = "Mixed alignment with target context"
+        note = "Partial alignment with target context"
+    else:
+        rating = "Low Fit"
+        note = "Limited alignment with target context"
 
     return (rating, note, breakdown)
 
