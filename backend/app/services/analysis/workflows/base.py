@@ -229,6 +229,35 @@ class BaseExtractionWorkflow(ABC):
             extra=extra,
         )
 
+    def _get_stage_tags(self, stage_name: str, paper_id: str) -> List[str]:
+        """Build standardized tags for a workflow stage.
+
+        Args:
+            stage_name: The extraction stage (e.g., "issues", "interventions")
+            paper_id: The paper identifier
+
+        Returns:
+            List of tags for Langfuse tracing
+        """
+        return [
+            "component:extraction",
+            f"component:extraction.{stage_name}",
+            f"workflow:{self.workflow_type}",
+            f"paper:{paper_id}",
+            f"model:{self.model_name}",
+        ]
+
+    def _get_run_name(self, stage_name: str) -> str:
+        """Build standardized run name for a workflow stage.
+
+        Args:
+            stage_name: The extraction stage (e.g., "issues", "interventions")
+
+        Returns:
+            Run name in format "{workflow_type}.extraction.{stage_name}"
+        """
+        return f"{self.workflow_type}.extraction.{stage_name}"
+
     def _get_callbacks(self) -> List:
         """Get callback handlers for LLM calls."""
         if self._langfuse_handler:
