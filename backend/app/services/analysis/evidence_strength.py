@@ -113,6 +113,45 @@ def should_apply_sample_penalty(
     return sample_size < SMALL_SAMPLE_THRESHOLD
 
 
+def calculate_document_evidence_score(doc: dict) -> dict:
+    """Calculate evidence score for a single document with sample size penalty.
+
+    This is the single source of truth for document-level evidence scoring.
+    Use this instead of manually calculating the score in multiple places.
+
+    Args:
+        doc: Document dict with 'evidence_category' and optionally 'extraction_results'
+
+    Returns:
+        Dict with:
+        - score: Evidence score (0-5) after any penalties
+        - base_score: Original score before penalties
+        - penalty_applied: Whether sample size penalty was applied
+        - justification: Human-readable explanation
+        - sample_size: Extracted sample size (or None)
+    """
+    evidence_category = doc.get("evidence_category")
+    base_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
+    sample_size = get_document_sample_size(doc)
+    penalty_applied = should_apply_sample_penalty(evidence_category, sample_size)
+
+    score = max(0, base_score - 1) if penalty_applied else base_score
+
+    justification = ""
+    if evidence_category:
+        justification = f"Based on evidence category: {evidence_category}"
+        if penalty_applied:
+            justification = f"{justification}. Score reduced due to sample size < 100"
+
+    return {
+        "score": score,
+        "base_score": base_score,
+        "penalty_applied": penalty_applied,
+        "justification": justification,
+        "sample_size": sample_size,
+    }
+
+
 def _check_aggregate_sample_penalty(
     qualifying_docs: list[dict],
     base_rating: int,

@@ -31,13 +31,11 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsResponse,
 )
 from app.services.analysis.evidence_category import (
-    EVIDENCE_CATEGORY_SCORES,
     EVIDENCE_CATEGORY_RANKS,
 )
 from app.services.analysis.evidence_strength import (
     calculate_evidence_strength,
-    get_document_sample_size,
-    should_apply_sample_penalty,
+    calculate_document_evidence_score,
 )
 
 logger = logging.getLogger(__name__)
@@ -760,23 +758,18 @@ async def get_project_documents(
             doc_copy["evidence_category_rank"] = EVIDENCE_CATEGORY_RANKS.get(
                 evidence_category, 999
             )
-            base_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
-            sample_size = get_document_sample_size(doc)
-            if sample_size is not None and "sample_size" not in doc_copy:
-                doc_copy["sample_size"] = sample_size
-            penalty_applied = should_apply_sample_penalty(
-                evidence_category, sample_size
-            )
-            doc_copy["evidence_strength"] = (
-                base_score - 1 if penalty_applied else base_score
-            )
-            if evidence_category:
-                justification = f"Based on evidence category: {evidence_category}"
-                if penalty_applied:
-                    justification = (
-                        f"{justification}. Score reduced due to sample size < 100"
-                    )
-                doc_copy["evidence_strength_justification"] = justification
+            # Calculate evidence strength with sample size penalty
+            evidence_result = calculate_document_evidence_score(doc)
+            if (
+                evidence_result["sample_size"] is not None
+                and "sample_size" not in doc_copy
+            ):
+                doc_copy["sample_size"] = evidence_result["sample_size"]
+            doc_copy["evidence_strength"] = evidence_result["score"]
+            if evidence_result["justification"]:
+                doc_copy["evidence_strength_justification"] = evidence_result[
+                    "justification"
+                ]
             documents.append(doc_copy)
 
         if filtered_other_count > 0:
@@ -1586,31 +1579,13 @@ async def get_issue_intervention_navigator(
             predicted_impact = conclusion.get("predicted_impact", {}) or {}
 
             # Calculate evidence score with sample size penalty
-            evidence_category = document.get("evidence_category")
-            base_evidence_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
-            sample_size = get_document_sample_size(document)
-            penalty_applied = should_apply_sample_penalty(
-                evidence_category, sample_size
-            )
-            evidence_score = (
-                base_evidence_score - 1 if penalty_applied else base_evidence_score
-            )
-
-            evidence_justification = (
-                f"Based on evidence category: {evidence_category}"
-                if evidence_category
-                else ""
-            )
-            if penalty_applied:
-                evidence_justification = (
-                    f"{evidence_justification}. Score reduced due to sample size < 100"
-                )
+            evidence_result = calculate_document_evidence_score(document)
 
             doc_scores[doc_id] = {
                 "impact_score": predicted_impact.get("stars"),
-                "evidence_score": evidence_score,
+                "evidence_score": evidence_result["score"],
                 "impact_justification": predicted_impact.get("justification", ""),
-                "evidence_justification": evidence_justification,
+                "evidence_justification": evidence_result["justification"],
             }
 
             # Get mappings from extraction results
@@ -2173,20 +2148,9 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                 raw_data = extraction.get("raw_data", {})
 
                 # Get evidence score from category with sample size penalty
-                evidence_category = doc.get("evidence_category")
-                base_score = (
-                    EVIDENCE_CATEGORY_SCORES.get(evidence_category)
-                    if evidence_category
-                    else None
-                )
-                sample_size = get_document_sample_size(doc)
-                penalty_applied = should_apply_sample_penalty(
-                    evidence_category, sample_size
-                )
+                evidence_result = calculate_document_evidence_score(doc)
                 evidence_score = (
-                    base_score - 1
-                    if penalty_applied and base_score is not None
-                    else base_score
+                    evidence_result["score"] if evidence_result["score"] > 0 else None
                 )
 
                 extraction_results = doc.get("extraction_results", {})
@@ -2290,20 +2254,8 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
 
                 # Get evidence score from category with sample size penalty
                 evidence_category = doc.get("evidence_category", "")
-                base_score = (
-                    EVIDENCE_CATEGORY_SCORES.get(evidence_category, "")
-                    if evidence_category
-                    else ""
-                )
-                sample_size = get_document_sample_size(doc)
-                penalty_applied = should_apply_sample_penalty(
-                    evidence_category, sample_size
-                )
-                evidence_score = (
-                    base_score - 1
-                    if penalty_applied and base_score != ""
-                    else base_score
-                )
+                evidence_result = calculate_document_evidence_score(doc)
+                evidence_score = evidence_result["score"] if evidence_category else ""
 
                 extraction_results = doc.get("extraction_results", {}) or {}
                 conclusion = extraction_results.get("conclusion", {}) or {}
