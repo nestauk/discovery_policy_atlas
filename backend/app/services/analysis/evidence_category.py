@@ -33,68 +33,105 @@ from .prompts import EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
-# Valid evidence categories
-EVIDENCE_CATEGORIES = [
-    "Systematic Review and Meta-Analysis",
-    "RCTs and Quasi-Experimental Studies",
-    "Observational Research Studies",
-    "Modelling & Simulation",
-    "Policy Syntheses & Guidance Documents",
-    "Qualitative & Contextual Evidence",
-    "Expert Opinion and Commentary",
-    "Other (Non-evidence documents)",
-    "Unknown / Insufficient information",
+# Single source of truth for evidence categories.
+# Each tuple: (full_name, key, score, short_name, bg_color, text_color)
+# Rank is derived from list order (1-indexed).
+_EVIDENCE_CATEGORY_DATA = [
+    (
+        "Systematic Review and Meta-Analysis",
+        "systematic_review",
+        5,
+        "Systematic Review",
+        "#0F294A",
+        "#FFFFFF",
+    ),
+    (
+        "RCTs and Quasi-Experimental Studies",
+        "rct",
+        4,
+        "RCT/Quasi-Exp",
+        "#9A1BBE",
+        "#FFFFFF",
+    ),
+    (
+        "Observational Research Studies",
+        "observational",
+        3,
+        "Observational",
+        "#0000FF",
+        "#FFFFFF",
+    ),
+    ("Modelling & Simulation", "modelling", 2, "Modelling", "#18A48C", "#FFFFFF"),
+    (
+        "Policy Syntheses & Guidance Documents",
+        "policy",
+        2,
+        "Policy Guidance",
+        "#97D9E3",
+        "#111827",
+    ),
+    (
+        "Qualitative & Contextual Evidence",
+        "qualitative",
+        2,
+        "Qualitative",
+        "#A59BEE",
+        "#111827",
+    ),
+    (
+        "Expert Opinion and Commentary",
+        "opinion",
+        1,
+        "Expert Opinion",
+        "#F6A4B7",
+        "#111827",
+    ),
+    ("Other (Non-evidence documents)", "other", 0, "Other", "#F8F5F4", "#374151"),
+    (
+        "Unknown / Insufficient information",
+        "unknown",
+        0,
+        "Unknown",
+        "#F8F5F4",
+        "#374151",
+    ),
 ]
 
+# Derived mappings (generated once at module load)
+EVIDENCE_CATEGORIES = [row[0] for row in _EVIDENCE_CATEGORY_DATA]
+EVIDENCE_CATEGORY_SCORES = {row[0]: row[2] for row in _EVIDENCE_CATEGORY_DATA}
+EVIDENCE_CATEGORY_RANKS = {
+    row[0]: rank for rank, row in enumerate(_EVIDENCE_CATEGORY_DATA, start=1)
+}
+EVIDENCE_CATEGORY_TO_KEY = {row[0]: row[1] for row in _EVIDENCE_CATEGORY_DATA}
+
+
+def get_evidence_categories_for_api() -> list[dict]:
+    """Get evidence category data formatted for the API/frontend.
+
+    Returns:
+        List of dicts with all category data including display properties.
+    """
+    return [
+        {
+            "name": name,
+            "key": key,
+            "score": score,
+            "rank": rank,
+            "short_name": short_name,
+            "bg_color": bg_color,
+            "text_color": text_color,
+        }
+        for rank, (name, key, score, short_name, bg_color, text_color) in enumerate(
+            _EVIDENCE_CATEGORY_DATA, start=1
+        )
+    ]
+
+
+# Thresholds for evidence strength calculations
 EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
 DENSITY_THRESHOLD = 0.025  # 2.5%
 SMALL_SAMPLE_THRESHOLD = 100  # N < 100 triggers penalty for causal evidence
-
-EVIDENCE_CATEGORY_SCORES = {
-    "Systematic Review and Meta-Analysis": 5,
-    "RCTs and Quasi-Experimental Studies": 4,
-    "Observational Research Studies": 3,
-    "Modelling & Simulation": 2,
-    "Policy Syntheses & Guidance Documents": 2,
-    "Qualitative & Contextual Evidence": 2,
-    "Expert Opinion and Commentary": 1,
-    "Other (Non-evidence documents)": 0,
-    "Unknown / Insufficient information": 0,
-}
-
-EVIDENCE_CATEGORY_RANKS = {
-    "Systematic Review and Meta-Analysis": 1,
-    "RCTs and Quasi-Experimental Studies": 2,
-    "Observational Research Studies": 3,
-    "Modelling & Simulation": 4,
-    "Policy Syntheses & Guidance Documents": 5,
-    "Qualitative & Contextual Evidence": 6,
-    "Expert Opinion and Commentary": 7,
-    "Unknown / Insufficient information": 8,
-}
-
-EVIDENCE_MIX_SHORT_NAMES = {
-    "Systematic Review and Meta-Analysis": "SR/MA",
-    "RCTs and Quasi-Experimental Studies": "RCT",
-    "Observational Research Studies": "Observational",
-    "Modelling & Simulation": "Modelling",
-    "Policy Syntheses & Guidance Documents": "Policy",
-    "Qualitative & Contextual Evidence": "Qualitative",
-    "Expert Opinion and Commentary": "Opinion",
-    "Unknown / Insufficient information": "Unknown",
-}
-
-# Maps full category names to short keys for evidence mix counting.
-EVIDENCE_CATEGORY_TO_KEY = {
-    "Systematic Review and Meta-Analysis": "systematic_review",
-    "RCTs and Quasi-Experimental Studies": "rct",
-    "Observational Research Studies": "observational",
-    "Modelling & Simulation": "modelling",
-    "Policy Syntheses & Guidance Documents": "policy",
-    "Qualitative & Contextual Evidence": "qualitative",
-    "Expert Opinion and Commentary": "opinion",
-    "Unknown / Insufficient information": "unknown",
-}
 
 CAP_MESSAGES = {
     "single_srma": "Limited by single systematic review",

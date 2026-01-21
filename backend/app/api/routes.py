@@ -4,11 +4,22 @@ import io
 from datetime import datetime
 from app.core.auth import get_current_user, CurrentUser
 from app.services.download import download_service
+from app.services.analysis.evidence_category import get_evidence_categories_for_api
 import logging
 
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+
+@router.get("/api/config/evidence-categories")
+async def get_evidence_categories():
+    """Get evidence category configuration for the frontend.
+
+    Returns all evidence categories with their display properties (colors,
+    short names, scores, ranks) from the single source of truth in the backend.
+    """
+    return {"categories": get_evidence_categories_for_api()}
 
 
 @router.get("/api/download/{download_key}")
