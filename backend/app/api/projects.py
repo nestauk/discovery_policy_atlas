@@ -762,7 +762,7 @@ async def get_project_documents(
             )
             base_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
             sample_size = get_document_sample_size(doc)
-            if sample_size is not None or "sample_size" not in doc_copy:
+            if sample_size is not None and "sample_size" not in doc_copy:
                 doc_copy["sample_size"] = sample_size
             penalty_applied = should_apply_sample_penalty(
                 evidence_category, sample_size
@@ -1121,6 +1121,8 @@ async def get_project_interventions(
                         "documents": [],
                         # Track evidence info for all documents (for strength calculation)
                         "documents_with_evidence": [],
+                        # Track which doc_ids have been added to avoid duplicates
+                        "_seen_doc_ids": set(),
                     }
 
                 # Add document info
@@ -1133,7 +1135,7 @@ async def get_project_interventions(
                     }
                 )
 
-                # Get sample size for this intervention (used for both tracking and penalty)
+                # Get sample size for this intervention (for aggregate stats display)
                 sample_size = intervention.get("sample_size")
                 sample_size_int = None
                 if sample_size:
@@ -1142,22 +1144,45 @@ async def get_project_interventions(
                     except (ValueError, TypeError):
                         pass
 
-                # Track evidence info for strength calculation (including sample size for penalty)
-                aggregated_interventions[intervention_key][
-                    "documents_with_evidence"
-                ].append(
-                    {
-                        "doc_id": document.get("doc_id"),
-                        "evidence_category": document.get("evidence_category"),
-                        "evidence_confidence": document.get("evidence_confidence"),
-                        "sample_size": sample_size_int,
-                    }
-                )
-
                 # Add sample size to list if available (for aggregate stats)
                 if sample_size_int is not None:
                     aggregated_interventions[intervention_key]["sample_sizes"].append(
                         sample_size_int
+                    )
+
+                # Track evidence info for strength calculation (one entry per document)
+                # Use document-level max sample size for penalty calculation
+                doc_id = document.get("doc_id")
+                if (
+                    doc_id
+                    not in aggregated_interventions[intervention_key]["_seen_doc_ids"]
+                ):
+                    aggregated_interventions[intervention_key]["_seen_doc_ids"].add(
+                        doc_id
+                    )
+
+                    # Calculate max sample size from ALL interventions in this document
+                    doc_sample_sizes = []
+                    for intv in interventions:
+                        intv_sample_size = intv.get("sample_size")
+                        if intv_sample_size:
+                            try:
+                                doc_sample_sizes.append(int(intv_sample_size))
+                            except (ValueError, TypeError):
+                                pass
+                    max_sample_size = (
+                        max(doc_sample_sizes) if doc_sample_sizes else None
+                    )
+
+                    aggregated_interventions[intervention_key][
+                        "documents_with_evidence"
+                    ].append(
+                        {
+                            "doc_id": doc_id,
+                            "evidence_category": document.get("evidence_category"),
+                            "evidence_confidence": document.get("evidence_confidence"),
+                            "sample_size": max_sample_size,
+                        }
                     )
 
                 # Add result count and summaries for this intervention
@@ -1267,6 +1292,7 @@ async def get_project_interventions(
             # Clean up temporary fields
             del intervention_data["sample_sizes"]
             del intervention_data["documents_with_evidence"]
+            del intervention_data["_seen_doc_ids"]
 
             interventions_list.append(intervention_data)
 
@@ -1559,17 +1585,32 @@ async def get_issue_intervention_navigator(
             conclusion = extraction_results.get("conclusion", {}) or {}
             predicted_impact = conclusion.get("predicted_impact", {}) or {}
 
+            # Calculate evidence score with sample size penalty
+            evidence_category = document.get("evidence_category")
+            base_evidence_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
+            sample_size = get_document_sample_size(document)
+            penalty_applied = should_apply_sample_penalty(
+                evidence_category, sample_size
+            )
+            evidence_score = (
+                base_evidence_score - 1 if penalty_applied else base_evidence_score
+            )
+
+            evidence_justification = (
+                f"Based on evidence category: {evidence_category}"
+                if evidence_category
+                else ""
+            )
+            if penalty_applied:
+                evidence_justification = (
+                    f"{evidence_justification}. Score reduced due to sample size < 100"
+                )
+
             doc_scores[doc_id] = {
                 "impact_score": predicted_impact.get("stars"),
-                "evidence_score": EVIDENCE_CATEGORY_SCORES.get(
-                    document.get("evidence_category"), 0
-                ),
+                "evidence_score": evidence_score,
                 "impact_justification": predicted_impact.get("justification", ""),
-                "evidence_justification": (
-                    f"Based on evidence category: {document.get('evidence_category')}"
-                    if document.get("evidence_category")
-                    else ""
-                ),
+                "evidence_justification": evidence_justification,
             }
 
             # Get mappings from extraction results
@@ -2131,12 +2172,21 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 raw_data = extraction.get("raw_data", {})
 
-                # Get evidence score from category and impact score from conclusion
+                # Get evidence score from category with sample size penalty
                 evidence_category = doc.get("evidence_category")
-                evidence_score = (
+                base_score = (
                     EVIDENCE_CATEGORY_SCORES.get(evidence_category)
                     if evidence_category
                     else None
+                )
+                sample_size = get_document_sample_size(doc)
+                penalty_applied = should_apply_sample_penalty(
+                    evidence_category, sample_size
+                )
+                evidence_score = (
+                    base_score - 1
+                    if penalty_applied and base_score is not None
+                    else base_score
                 )
 
                 extraction_results = doc.get("extraction_results", {})
@@ -2238,12 +2288,21 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     logger.warning(f"Skipping None document at index {i}")
                     continue
 
-                # Get evidence score from category and impact score from conclusion
+                # Get evidence score from category with sample size penalty
                 evidence_category = doc.get("evidence_category", "")
-                evidence_score = (
+                base_score = (
                     EVIDENCE_CATEGORY_SCORES.get(evidence_category, "")
                     if evidence_category
                     else ""
+                )
+                sample_size = get_document_sample_size(doc)
+                penalty_applied = should_apply_sample_penalty(
+                    evidence_category, sample_size
+                )
+                evidence_score = (
+                    base_score - 1
+                    if penalty_applied and base_score != ""
+                    else base_score
                 )
 
                 extraction_results = doc.get("extraction_results", {}) or {}

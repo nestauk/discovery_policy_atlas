@@ -38,7 +38,10 @@ export async function fetchEvidenceCategories(): Promise<EvidenceCategory[]> {
     return fetchPromise
   }
 
-  fetchPromise = fetch('/api/config/evidence-categories')
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '')
+
+  fetchPromise = fetch(`${cleanBaseUrl}/api/config/evidence-categories`)
     .then(res => {
       if (!res.ok) throw new Error('Failed to fetch evidence categories')
       return res.json()
@@ -81,47 +84,36 @@ const FALLBACK_CATEGORIES: EvidenceCategory[] = [
   { name: 'Unknown / Insufficient information', key: 'unknown', score: 0, rank: 9, short_name: 'Unknown', bg_color: '#F8F5F4', text_color: '#374151' },
 ]
 
-// Helper to convert hex color to Tailwind-compatible format
-function hexToTailwindBg(hex: string): string {
-  return `bg-[${hex}]`
-}
-
-function hexToTailwindText(hex: string): string {
-  // Map common text colors to Tailwind classes for better compatibility
-  if (hex === '#FFFFFF') return 'text-white'
-  if (hex === '#111827') return 'text-gray-900'
-  if (hex === '#374151') return 'text-gray-700'
-  return `text-[${hex}]`
-}
-
 /**
  * Get colors for an evidence category, with fallback for unknown categories.
+ * Returns raw hex values for use with inline styles (Tailwind can't handle dynamic class names).
  */
 export function getEvidenceCategoryColors(category: string): EvidenceCategoryColors {
   const categories = getEvidenceCategories()
   const found = categories.find(c => c.name === category)
   if (found) {
     return {
-      bg: hexToTailwindBg(found.bg_color),
-      text: hexToTailwindText(found.text_color),
+      bg: found.bg_color,
+      text: found.text_color,
     }
   }
-  return { bg: 'bg-gray-100', text: 'text-gray-700' }
+  return { bg: '#F3F4F6', text: '#374151' }  // gray-100, gray-700
 }
 
 /**
  * Get colors for an evidence mix key (derived from category colors).
+ * Returns raw hex values for use with inline styles.
  */
 export function getEvidenceMixColors(key: string): EvidenceCategoryColors {
   const categories = getEvidenceCategories()
   const found = categories.find(c => c.key === key)
   if (found) {
     return {
-      bg: hexToTailwindBg(found.bg_color),
-      text: hexToTailwindText(found.text_color),
+      bg: found.bg_color,
+      text: found.text_color,
     }
   }
-  return { bg: 'bg-gray-100', text: 'text-gray-700' }
+  return { bg: '#F3F4F6', text: '#374151' }  // gray-100, gray-700
 }
 
 /**
@@ -266,10 +258,11 @@ export function computeEvidenceMixFromInterventions(
 }
 
 // Legacy exports for backward compatibility (derived from categories)
+// Now returns raw hex values for inline styles
 export const EVIDENCE_CATEGORY_COLORS: Record<string, EvidenceCategoryColors> = Object.fromEntries(
   FALLBACK_CATEGORIES.map(c => [c.name, {
-    bg: hexToTailwindBg(c.bg_color),
-    text: hexToTailwindText(c.text_color),
+    bg: c.bg_color,
+    text: c.text_color,
   }])
 )
 

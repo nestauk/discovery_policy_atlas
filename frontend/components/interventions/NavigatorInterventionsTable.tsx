@@ -244,7 +244,13 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                 <div className="col-span-2">
                   {intervention.evidence_category ? (
                     <Tooltip content={intervention.evidence_category}>
-                      <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${getEvidenceCategoryColors(intervention.evidence_category).bg} ${getEvidenceCategoryColors(intervention.evidence_category).text} cursor-help whitespace-normal leading-tight`}>
+                      <span
+                        className="inline-block px-2 py-1 rounded text-xs font-medium cursor-help whitespace-normal leading-tight"
+                        style={{
+                          backgroundColor: getEvidenceCategoryColors(intervention.evidence_category).bg,
+                          color: getEvidenceCategoryColors(intervention.evidence_category).text,
+                        }}
+                      >
                         {getEvidenceCategoryShortName(intervention.evidence_category)}
                       </span>
                     </Tooltip>

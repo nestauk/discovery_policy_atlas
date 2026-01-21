@@ -182,7 +182,10 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
           : category
         return (
           <Tooltip content={tooltipContent}>
-            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${colors.bg} ${colors.text} cursor-help whitespace-normal leading-tight`}>
+            <span
+              className="inline-block px-2 py-1 rounded text-xs font-medium cursor-help whitespace-normal leading-tight"
+              style={{ backgroundColor: colors.bg, color: colors.text }}
+            >
               {displayName}
             </span>
           </Tooltip>

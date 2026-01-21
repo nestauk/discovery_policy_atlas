@@ -210,7 +210,13 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
                 <div className="col-span-2">
                   {intervention.evidence_category ? (
                     <Tooltip content={intervention.evidence_category}>
-                      <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${getEvidenceCategoryColors(intervention.evidence_category).bg} ${getEvidenceCategoryColors(intervention.evidence_category).text} cursor-help whitespace-normal leading-tight`}>
+                      <span
+                        className="inline-block px-2 py-1 rounded text-xs font-medium cursor-help whitespace-normal leading-tight"
+                        style={{
+                          backgroundColor: getEvidenceCategoryColors(intervention.evidence_category).bg,
+                          color: getEvidenceCategoryColors(intervention.evidence_category).text,
+                        }}
+                      >
                         {getEvidenceCategoryShortName(intervention.evidence_category)}
                       </span>
                     </Tooltip>
@@ -240,7 +246,11 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
                         {Object.entries(intervention.evidence_mix).map(([key, count]) => (
                           <span
                             key={key}
-                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${getEvidenceMixColors(key).bg} ${getEvidenceMixColors(key).text}`}
+                            className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium"
+                            style={{
+                              backgroundColor: getEvidenceMixColors(key).bg,
+                              color: getEvidenceMixColors(key).text,
+                            }}
                           >
                             {getEvidenceMixDisplayName(key)} ({count})
                           </span>

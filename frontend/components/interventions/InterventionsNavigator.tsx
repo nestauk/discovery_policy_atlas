@@ -599,7 +599,7 @@ export function InterventionsNavigator({
                           {intervention.stars !== undefined && (
                             <div className="text-right">
                               <div className="text-xs text-slate-500">Evidence:</div>
-                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.evidence_mix, intervention.cap_message)}>
+                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, computeEvidenceMixFromInterventions(intervention.detailed_interventions), intervention.cap_message)}>
                                 <div className="flex items-center cursor-help">
                                   {renderStars(intervention.stars, false)}
                                 </div>
@@ -714,7 +714,7 @@ export function InterventionsNavigator({
                                   {intervention.stars !== undefined && (
                                     <div className="text-right">
                                       <div className="text-xs text-slate-500">Evidence:</div>
-                                      <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.evidence_mix, intervention.cap_message)}>
+                                      <Tooltip content={getEvidenceScoreExplanation(intervention.stars, computeEvidenceMixFromInterventions(intervention.detailed_interventions), intervention.cap_message)}>
                                         <div className="flex items-center cursor-help">
                                           {renderStars(intervention.stars, false)}
                                         </div>
