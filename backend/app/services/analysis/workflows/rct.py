@@ -35,20 +35,13 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage A: Extract issues."""
         try:
-            tags = [
-                "component:extraction",
-                "component:extraction.issues",
-                "workflow:rct",
-                f"paper:{state['paper_id']}",
-                f"model:{self.model_name}",
-            ]
-
+            paper_id = state["paper_id"]
             result = await self._run_prompt_stage(
                 ISSUES_PROMPT,
                 {"full_text": state["full_text"]},
-                tags,
-                "rct.extraction.issues",
-                extra={"paper_id": state["paper_id"]},
+                self._get_stage_tags("issues", paper_id),
+                self._get_run_name("issues"),
+                extra={"paper_id": paper_id},
             )
 
             extraction = IssuesExtraction(**result)
@@ -63,20 +56,13 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
     async def _extract_interventions(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage B: Extract interventions."""
         try:
-            tags = [
-                "component:extraction",
-                "component:extraction.interventions",
-                "workflow:rct",
-                f"paper:{state['paper_id']}",
-                f"model:{self.model_name}",
-            ]
-
+            paper_id = state["paper_id"]
             result = await self._run_prompt_stage(
                 INTERVENTIONS_PROMPT,
                 {"full_text": state["full_text"]},
-                tags,
-                "rct.extraction.interventions",
-                extra={"paper_id": state["paper_id"]},
+                self._get_stage_tags("interventions", paper_id),
+                self._get_run_name("interventions"),
+                extra={"paper_id": paper_id},
             )
 
             extraction = InterventionsExtraction(**result)
@@ -104,18 +90,11 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
             if not state["issues"] or not state["interventions"]:
                 return {"mappings": []}
 
+            paper_id = state["paper_id"]
             issues_json = self._serialize_for_prompt(state["issues"], "issues")
             interventions_json = self._serialize_for_prompt(
                 state["interventions"], "interventions"
             )
-
-            tags = [
-                "component:extraction",
-                "component:extraction.mappings",
-                "workflow:rct",
-                f"paper:{state['paper_id']}",
-                f"model:{self.model_name}",
-            ]
 
             result = await self._run_prompt_stage(
                 MAPPING_PROMPT,
@@ -124,9 +103,9 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                     "issues_json": issues_json,
                     "interventions_json": interventions_json,
                 },
-                tags,
-                "rct.extraction.mappings",
-                extra={"paper_id": state["paper_id"]},
+                self._get_stage_tags("mappings", paper_id),
+                self._get_run_name("mappings"),
+                extra={"paper_id": paper_id},
             )
 
             extraction = MappingsExtraction(**result)
@@ -144,19 +123,14 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
             if not state["interventions"]:
                 return {"results": []}
 
+            paper_id = state["paper_id"]
+            tags = self._get_stage_tags("results", paper_id)
             all_results = []
 
             # Process each intervention
             for intervention in state["interventions"]:
                 try:
                     one_intervention_json = json.dumps(intervention.model_dump())
-                    tags = [
-                        "component:extraction",
-                        "component:extraction.results",
-                        "workflow:rct",
-                        f"paper:{state['paper_id']}",
-                        f"model:{self.model_name}",
-                    ]
 
                     result = await self._run_prompt_stage(
                         RESULTS_PROMPT,
@@ -165,9 +139,9 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                             "one_intervention_json": one_intervention_json,
                         },
                         tags,
-                        "rct.extraction.results",
+                        self._get_run_name("results"),
                         extra={
-                            "paper_id": state["paper_id"],
+                            "paper_id": paper_id,
                             "intervention_idx": intervention.idx,
                         },
                     )
@@ -200,6 +174,7 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
     async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
         """Stage E: Extract study conclusions with evidence strength assessment."""
         try:
+            paper_id = state["paper_id"]
             interventions_json = (
                 json.dumps(
                     [
@@ -212,23 +187,15 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 else "No interventions extracted"
             )
 
-            tags = [
-                "component:extraction",
-                "component:extraction.conclusions",
-                "workflow:rct",
-                f"paper:{state['paper_id']}",
-                f"model:{self.model_name}",
-            ]
-
             result = await self._run_prompt_stage(
                 CONCLUSIONS_PROMPT,
                 {
                     "full_text": state["full_text"],
                     "interventions_json": interventions_json,
                 },
-                tags,
-                "rct.extraction.conclusions",
-                extra={"paper_id": state["paper_id"]},
+                self._get_stage_tags("conclusions", paper_id),
+                self._get_run_name("conclusions"),
+                extra={"paper_id": paper_id},
             )
 
             extraction = ConclusionsExtraction(**result)
