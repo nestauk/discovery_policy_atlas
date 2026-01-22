@@ -13,6 +13,13 @@ const ratingStyles: Record<string, string> = {
   Unknown: 'bg-slate-50 text-slate-600 border-slate-200',
 }
 
+const requirementsStyles: Record<string, string> = {
+  Low: 'bg-green-50 text-green-700 border-green-200',
+  Medium: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+  High: 'bg-red-50 text-red-700 border-red-200',
+  Unknown: 'bg-slate-50 text-slate-600 border-slate-200',
+}
+
 const contextDimensions = ['inner_setting', 'population', 'geography'] as const
 const implementationDimensions = [
   'cost',
@@ -36,10 +43,11 @@ export function TransferabilityScore({
 }: TransferabilityScoreProps) {
   const [expanded, setExpanded] = useState(false)
   const contextRating = breakdown?.context_fit_rating || rating || 'Unknown'
-  const implementationRating = breakdown?.implementation_fit_rating
-  const hasImplementationConstraints = Boolean(
-    breakdown?.implementation_constraints_specified,
-  )
+  const requirementsRating =
+    breakdown?.implementation_requirements_rating || 'Unknown'
+  const hasAnyToleranceExceeded = Object.values(
+    breakdown?.implementation_exceeds_tolerance || {},
+  ).some(Boolean)
 
   if (!rating && !breakdown) {
     return null
@@ -57,9 +65,10 @@ export function TransferabilityScore({
           </Badge>
           <Badge
             variant="outline"
-            className={`text-xs ${ratingStyles[implementationRating || 'Unknown'] || ratingStyles.Unknown}`}
+            className={`text-xs ${requirementsStyles[requirementsRating] || requirementsStyles.Unknown}`}
           >
-            Implementation Fit: {hasImplementationConstraints ? (implementationRating || 'Unknown') : 'Evidence context'}
+            Implementation requirements: {requirementsRating}
+            {hasAnyToleranceExceeded ? ' ⚠️' : ''}
           </Badge>
         </div>
         <button

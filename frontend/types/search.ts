@@ -94,6 +94,7 @@ export interface MagnitudeDetail {
   source_count: number;
   total_sources: number;
   measurement_count: number;
+  dominant_scale: string;
   thresholds: string;
 }
 
@@ -109,7 +110,7 @@ export interface CausalityDetail {
     geography: string;
     notes?: Record<string, string>;
     context_fit_rating?: string;
-    implementation_fit_rating?: string | null;
+  implementation_requirements_rating?: 'Low' | 'Medium' | 'High' | 'Unknown';
     implementation_constraints_specified?: boolean;
     implementation_evidence?: Record<string, string>;
     implementation_constraints?: Record<string, string>;

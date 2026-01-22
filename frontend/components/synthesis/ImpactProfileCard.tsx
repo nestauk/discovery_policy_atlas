@@ -30,6 +30,15 @@ const magnitudeStyles: Record<string, string> = {
 const toLabel = (value?: string) =>
   value ? value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : ''
 
+const scaleLabelMap: Record<string, string> = {
+  cohens_d: "Cohen's d",
+  smd: 'SMD',
+  or: 'Odds ratio',
+  rr: 'Risk ratio',
+  percentage: 'Percentage points',
+  percent: 'Percent',
+}
+
 interface ImpactProfileCardProps {
   outcome: OutcomeTheme
 }
@@ -78,15 +87,20 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
     const bucketText = Object.entries(magnitudeDetail.bucket_counts || {})
       .map(([bucket, count]) => `${toLabel(bucket)}: ${count}`)
       .join(', ')
-    const sourcesText = `${magnitudeDetail.source_count} of ${magnitudeDetail.total_sources} sources`
+    const sourcesText = `${magnitudeDetail.source_count} of ${magnitudeDetail.total_sources} studies had quantitative effect data`
     const measurementsText = `${magnitudeDetail.measurement_count} measurements`
     const thresholdsText = magnitudeDetail.thresholds
+    const scaleLabel =
+      scaleLabelMap[magnitudeDetail.dominant_scale] ||
+      toLabel(magnitudeDetail.dominant_scale)
     const parts = [
       directionLabel ? `Direction: ${directionLabel}.` : '',
       bucketText ? `Buckets: ${bucketText}.` : '',
-      sourcesText ? `Sources: ${sourcesText}.` : '',
-      measurementsText ? `Measurements: ${measurementsText}.` : '',
-      thresholdsText ? `Thresholds: ${thresholdsText}.` : ''
+      sourcesText ? `${sourcesText}.` : '',
+      measurementsText ? `${measurementsText}.` : '',
+      thresholdsText
+        ? `Thresholds${scaleLabel ? ` (${scaleLabel})` : ''}: ${thresholdsText}.`
+        : ''
     ].filter(Boolean)
     return parts.join(' ')
   }

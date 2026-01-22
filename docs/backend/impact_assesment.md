@@ -1,12 +1,4 @@
-# Impact assessment (Next-Gen Impact Evaluation, v2.2)
-
-This document describes the Impact Assessment process in Policy Atlas, based on:
-
-- `docs/backend/impact_assessment_plan.md` (spec v2.2)
-- `docs/backend/impact_assessment_tier_1.md`
-- `docs/backend/impact_assessment_tier_2.md`
-- `docs/backend/impact_assessment_tier_3.md`
-- `docs/backend/impact_assessment_tier_4.md`
+# Impact assessment
 
 Impact assessment answers (per intervention and outcome):
 
@@ -49,10 +41,11 @@ The system receives an **evidence quality score** (Int 1–5) for each document 
   - per-outcome **consensus meter** (directional evidence counts) in the UI
 - **Intervention-level transferability**:
   - **Context Fit** rating + breakdown (inner setting, population, geography; target geography fixed to UK)
-  - **Implementation Fit** rating + breakdown (cost, staffing, implementation complexity) when user constraints are provided
+  - **Implementation requirements** rating (Low/Medium/High/Unknown) derived from evidence levels
   - Implementation dimensions always show **evidence levels** (low/moderate/high/unknown)
   - When user tolerances are provided, show an **exceeds tolerance** flag per dimension
-  - LLM-based explanations per dimension are stored in breakdown notes (context similarity + tolerance alignment)
+  - Badge always shows requirements rating; warning indicator appears if any dimension exceeds tolerance
+  - LLM-based explanations per dimension are stored in breakdown notes (context similarity + evidence/tolerance alignment)
 - **Risk profile**:
   - clustered risk themes
   - harm warning flag (where thresholds are met; UI may choose not to surface the label)
@@ -138,11 +131,11 @@ Tier 2 consumes Tier 1 extractions and produces theme-level synthesis with evide
    - Compute and attach:
      - verdict label + explanation (evidence-based direction labels)
      - discord flag + reason (contested evidence)
-   - predicted magnitude + structured magnitude detail (direction, bucket counts, sources, measurements, thresholds)
-   - transferability rating + breakdown (6 dimensions; target geography fixed to UK)
+  - predicted magnitude + structured magnitude detail (direction, bucket counts, sources, measurements, dominant scale, thresholds)
+    - transferability rating + breakdown (6 dimensions; target geography fixed to UK)
    - inner setting / population / geography use LLM semantic similarity (default model: GPT-4o-mini)
    - cost / staffing / implementation complexity use ordinal tolerance comparison; add LLM explanation of tolerance alignment
-   - risk themes linked to interventions + harm warning flag
+     - risk themes linked to interventions + harm warning flag
 
 ## Synthesis rules and guardrails
 

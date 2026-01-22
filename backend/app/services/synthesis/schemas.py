@@ -417,7 +417,7 @@ class TransferabilityBreakdown(BaseModel):
     geography: str
     notes: Dict[str, str] = Field(default_factory=dict)
     context_fit_rating: Optional[str] = None
-    implementation_fit_rating: Optional[str] = None
+    implementation_requirements_rating: Optional[str] = None
     implementation_constraints_specified: bool = False
     implementation_evidence: Dict[str, str] = Field(default_factory=dict)
     implementation_constraints: Dict[str, str] = Field(default_factory=dict)
@@ -432,6 +432,7 @@ class MagnitudeDetail(BaseModel):
     source_count: int
     total_sources: int
     measurement_count: int
+    dominant_scale: str
     thresholds: str
 
 

@@ -420,6 +420,7 @@ def compute_magnitude_hybrid(
         source_count=unique_doc_count,
         total_sources=total_sources,
         measurement_count=measurement_count,
+        dominant_scale=dominant_scale,
         thresholds=format_effect_thresholds(dominant_scale),
     )
     return (result, detail)
@@ -524,6 +525,26 @@ def infer_evidence_level(levels: List[Optional[str]]) -> str:
     if not counts:
         return "unknown"
     return max(counts, key=counts.get)
+
+
+def compute_implementation_requirements_rating(
+    evidence_levels: Dict[str, str],
+) -> str:
+    """Compute overall implementation requirements rating using the max rule."""
+    level_priority = {"high": 3, "moderate": 2, "low": 1}
+    known_levels = [
+        level_priority.get(level, 0)
+        for level in evidence_levels.values()
+        if level in level_priority
+    ]
+    if not known_levels:
+        return "Unknown"
+    max_priority = max(known_levels)
+    if max_priority == 3:
+        return "High"
+    if max_priority == 2:
+        return "Medium"
+    return "Low"
 
 
 def build_evidence_note(
@@ -632,6 +653,35 @@ async def explain_tolerance_dimension(
         )
     except Exception:
         return f"{dimension_name.replace('_', ' ')} evidence {status}."
+
+
+async def explain_evidence_dimension(
+    dimension_name: str,
+    evidence_level: str,
+    justifications: List[Optional[str]],
+    llm,
+) -> str:
+    """Summarise evidence context using a short LLM explanation."""
+    filtered = [j.strip() for j in justifications if j and j.strip()]
+    joined = "; ".join(filtered[:3]) if filtered else "No specific details provided."
+    prompt = (
+        "Write one short sentence explaining the evidence context for implementation "
+        "requirements.\n\n"
+        f"Dimension: {dimension_name}\n"
+        f"Evidence level: {evidence_level}\n"
+        f"Evidence details: {joined}\n\n"
+        "Keep it factual and concise."
+    )
+    try:
+        response = await llm.ainvoke(prompt)
+        content = (getattr(response, "content", None) or str(response)).strip()
+        if content:
+            return content
+    except Exception:
+        pass
+    if evidence_level == "unknown":
+        return f"Insufficient evidence context for {dimension_name.replace('_', ' ')}."
+    return f"Evidence suggests {evidence_level} {dimension_name.replace('_', ' ')}."
 
 
 async def compute_transferability(
@@ -760,6 +810,9 @@ async def compute_transferability(
         "implementation_complexity": infer_evidence_level(complexity_levels),
     }
     breakdown.implementation_evidence = evidence_levels
+    breakdown.implementation_requirements_rating = (
+        compute_implementation_requirements_rating(evidence_levels)
+    )
 
     def compare_tolerance_level(
         tolerance_level: Optional[str], evidence_level: Optional[str]
@@ -790,7 +843,9 @@ async def compute_transferability(
                 bool(exceeds),
                 llm,
             )
-        return inferred, build_evidence_note(dimension, inferred, justifications)
+        return inferred, await explain_evidence_dimension(
+            dimension, inferred, justifications, llm
+        )
 
     (
         (cost_level, cost_note),
@@ -870,17 +925,6 @@ async def compute_transferability(
     context_rating, context_note = compute_fit_rating(context_scores, "context")
 
     breakdown.context_fit_rating = context_rating
-    breakdown.implementation_fit_rating = None
-    if breakdown.implementation_constraints_specified:
-        exceeds_values = list(breakdown.implementation_exceeds_tolerance.values())
-        if not exceeds_values:
-            breakdown.implementation_fit_rating = "Unknown"
-        elif all(exceeds_values):
-            breakdown.implementation_fit_rating = "Poor Fit"
-        elif any(exceeds_values):
-            breakdown.implementation_fit_rating = "Limited Fit"
-        else:
-            breakdown.implementation_fit_rating = "Good Fit"
 
     return (context_rating, context_note, breakdown)
 
