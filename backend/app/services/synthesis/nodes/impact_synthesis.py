@@ -20,6 +20,8 @@ from app.services.synthesis.schemas import (
     SemanticMagnitudeType,
     CausalityClaimType,
     RiskTheme,
+    MagnitudeDetail,
+    CausalityDetail,
 )
 from app.utils.llm.llm_utils import get_llm
 
@@ -65,8 +67,9 @@ EFFECT_SIZE_SCALES = {
 
 
 DEFAULT_USER_CONSTRAINTS = {
-    "resource_intensity": "moderate",
-    "delivery_complexity": "moderate",
+    "cost": "moderate",
+    "staffing": "moderate",
+    "implementation_complexity": "moderate",
 }
 
 TRANSFERABILITY_MODEL = os.getenv("TRANSFERABILITY_MODEL", "gpt-4o-mini")
@@ -97,6 +100,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     raw_extractions = state.get("raw_extractions") or []
     doc_scores = state.get("doc_scores") or {}
     theme_to_doc_uuids = state.get("theme_to_doc_uuids") or {}
+    theme_to_extraction_ids = state.get("theme_to_extraction_ids") or {}
     doc_metadata = state.get("doc_metadata") or {}
     extraction_to_doc = state.get("extraction_to_doc") or {}
 
@@ -104,6 +108,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     target_population = state.get("target_population") or []
     target_geography = DEFAULT_TARGET_GEOGRAPHY
     target_outcomes = state.get("target_outcomes") or []
+    implementation_constraints = state.get("implementation_constraints") or {}
 
     intervention_extractions = [
         e for e in raw_extractions if e.get("type") == "intervention"
@@ -134,7 +139,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             ),
         )
 
-        magnitude, magnitude_confidence = compute_magnitude_hybrid(
+        magnitude, magnitude_detail = compute_magnitude_hybrid(
             outcome.source_doc_ids,
             result_extractions,
             doc_scores,
@@ -158,7 +163,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
                         "discord_flag",
                         "discord_reason",
                         "predicted_magnitude",
-                        "magnitude_confidence",
+                        "magnitude_detail",
                         "intervention_theme_id",
                         "primary_causal_mechanism",
                         "causal_mechanism_detail",
@@ -171,7 +176,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
                 discord_flag=discord_flag,
                 discord_reason=discord_reason,
                 predicted_magnitude=magnitude,
-                magnitude_confidence=magnitude_confidence,
+                magnitude_detail=magnitude_detail,
                 intervention_theme_id=intervention_theme_id,
                 primary_causal_mechanism=primary_causal_mechanism,
                 causal_mechanism_detail=causal_mechanism_detail,
@@ -192,12 +197,15 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
         intervention: PolicyIntervention,
     ) -> PolicyIntervention:
         doc_uuids = theme_to_doc_uuids.get(intervention.intervention_name, [])
+        extraction_ids = theme_to_extraction_ids.get(intervention.intervention_name, [])
         rating, note, breakdown = await compute_transferability(
             doc_uuids,
+            extraction_ids,
             intervention_extractions,
             target_inner_setting,
             target_population,
             target_geography,
+            implementation_constraints,
             doc_scores,
             transferability_llm,
         )
@@ -208,6 +216,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
                 intervention,
                 outcome_list,
                 target_outcomes,
+                state.get("research_question") or "Not specified",
                 impact_summary_llm,
             )
         return PolicyIntervention(
@@ -245,8 +254,16 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             for doc_uuid in risk_doc_uuids
             if doc_id_by_uuid.get(doc_uuid)
         }
-        linked_intervention_id = link_risk_to_intervention(
+        linked_interventions = link_risk_to_interventions(
             risk_doc_uuids, enriched_interventions, theme_to_doc_uuids
+        )
+        linked_intervention_id = next(
+            (
+                item["intervention_name"]
+                for item in linked_interventions
+                if item.get("link_strength") == "primary"
+            ),
+            None,
         )
         has_harm_warning = compute_harm_warning(
             list(risk_doc_ids), conclusion_extractions, doc_scores, doc_uuid_by_doc_id
@@ -260,6 +277,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
                 source_doc_ids=sorted(risk_doc_ids),
                 has_harm_warning=has_harm_warning,
                 linked_intervention_theme_id=linked_intervention_id,
+                linked_interventions=linked_interventions,
             )
         )
 
@@ -270,6 +288,12 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     }
 
 
+WELL_EVIDENCED_THRESHOLD = 15
+EVIDENCED_THRESHOLD = 8
+MINIMUM_THRESHOLD = 5
+DISCORD_RATIO = 0.4
+
+
 def determine_verdict(
     pos_weight: int,
     neg_weight: int,
@@ -278,12 +302,12 @@ def determine_verdict(
 ) -> Tuple[VerdictType, bool, Optional[str]]:
     """Determine verdict using ratio-based discord detection."""
     total = pos_weight + neg_weight + null_weight
-    if total < 5:
+    if total < MINIMUM_THRESHOLD:
         return ("insufficient_evidence", False, None)
 
     if pos_weight > 0 and neg_weight > 0:
         ratio = min(pos_weight, neg_weight) / max(pos_weight, neg_weight)
-        if ratio > 0.4:
+        if ratio > DISCORD_RATIO:
             return (
                 "contested",
                 True,
@@ -291,15 +315,25 @@ def determine_verdict(
             )
 
     if null_weight > pos_weight and null_weight > neg_weight:
-        verdict: VerdictType = "ineffective"
+        verdict: VerdictType = "no_effect"
     elif pos_weight > neg_weight:
-        verdict = "high_confidence_positive" if pos_weight > 15 else "lean_positive"
+        if pos_weight > WELL_EVIDENCED_THRESHOLD:
+            verdict = "well_evidenced_increase"
+        elif pos_weight > EVIDENCED_THRESHOLD:
+            verdict = "evidenced_increase"
+        else:
+            verdict = "suggested_increase"
     elif neg_weight > pos_weight:
-        verdict = "high_confidence_negative" if neg_weight > 15 else "lean_negative"
+        if neg_weight > WELL_EVIDENCED_THRESHOLD:
+            verdict = "well_evidenced_decrease"
+        elif neg_weight > EVIDENCED_THRESHOLD:
+            verdict = "evidenced_decrease"
+        else:
+            verdict = "suggested_decrease"
     else:
         verdict = "insufficient_evidence"
 
-    if not has_attribution_claims and verdict.startswith("high_confidence"):
+    if not has_attribution_claims and verdict.startswith("well_evidenced"):
         verdict = "probable_contribution"
 
     return (verdict, False, None)
@@ -310,9 +344,10 @@ def compute_magnitude_hybrid(
     result_extractions: List[Dict],
     doc_scores: Dict[str, Dict],
     doc_uuid_by_doc_id: Dict[str, str],
-) -> Tuple[SemanticMagnitudeType, str]:
+) -> Tuple[SemanticMagnitudeType, Optional[MagnitudeDetail]]:
     """Compute magnitude from effect sizes using hybrid scale detection."""
-    parsed_effects: List[Tuple[SemanticMagnitudeType, int, str]] = []
+    parsed_effects: List[Dict[str, object]] = []
+    direction_weights = {"increase": 0, "decrease": 0}
     for ext in result_extractions:
         doc_id = ext.get("doc_id") or ""
         if doc_id not in source_doc_ids:
@@ -321,6 +356,9 @@ def compute_magnitude_hybrid(
         effect_type = (ext.get("effect_size_type") or "").lower()
         doc_uuid = doc_uuid_by_doc_id.get(doc_id, "")
         quality = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
+        effect_direction = (ext.get("effect_direction") or "").lower()
+        if effect_direction in direction_weights:
+            direction_weights[effect_direction] += quality
 
         numeric_val = parse_effect_size_value(effect_size)
         if numeric_val is None:
@@ -328,14 +366,36 @@ def compute_magnitude_hybrid(
 
         scale_type = detect_scale_type(effect_type, effect_size)
         magnitude = apply_magnitude_thresholds(numeric_val, scale_type)
-        parsed_effects.append((magnitude, quality, doc_id))
+        parsed_effects.append(
+            {
+                "magnitude": magnitude,
+                "quality": quality,
+                "doc_id": doc_id,
+                "direction": effect_direction,
+                "scale_type": scale_type,
+            }
+        )
 
     if not parsed_effects:
-        return ("unknown", "No quantifiable effect sizes found")
+        return ("unknown", None)
+
+    direction = resolve_effect_direction(direction_weights)
+    aligned_effects = [
+        effect
+        for effect in parsed_effects
+        if direction == "contested" or effect.get("direction") == direction
+    ]
+    if not aligned_effects:
+        return ("unknown", None)
 
     weights: Dict[str, int] = {}
-    for mag, qual, _ in parsed_effects:
+    scale_counts: Dict[str, int] = {}
+    for effect in aligned_effects:
+        mag = effect["magnitude"]
+        qual = int(effect["quality"])
+        scale = str(effect["scale_type"])
         weights[mag] = weights.get(mag, 0) + qual
+        scale_counts[scale] = scale_counts.get(scale, 0) + 1
 
     magnitude_order = ["marginal", "moderate", "substantial", "transformational"]
     max_weight = max(weights.values())
@@ -348,12 +408,21 @@ def compute_magnitude_hybrid(
     else:
         result = top[0]
 
-    unique_doc_count = len({doc_id for _, _, doc_id in parsed_effects if doc_id})
-    confidence = (
-        f"Based on {len(parsed_effects)} effect size measurements across "
-        f"{unique_doc_count} sources"
+    unique_doc_count = len(
+        {effect["doc_id"] for effect in aligned_effects if effect.get("doc_id")}
     )
-    return (result, confidence)
+    total_sources = len({doc_id for doc_id in source_doc_ids if doc_id})
+    measurement_count = len(aligned_effects)
+    dominant_scale = max(scale_counts.items(), key=lambda x: x[1])[0]
+    detail = MagnitudeDetail(
+        direction=direction,
+        bucket_counts=weights,
+        source_count=unique_doc_count,
+        total_sources=total_sources,
+        measurement_count=measurement_count,
+        thresholds=format_effect_thresholds(dominant_scale),
+    )
+    return (result, detail)
 
 
 def format_outcomes_for_summary(outcomes: List[OutcomeTheme]) -> str:
@@ -375,6 +444,7 @@ async def generate_impact_summary(
     intervention: PolicyIntervention,
     outcomes: List[OutcomeTheme],
     target_outcomes: List[str],
+    research_question: str,
     llm,
 ) -> str:
     """Generate an LLM summary of the impact profile for an intervention."""
@@ -384,16 +454,18 @@ async def generate_impact_summary(
         else "No user-specified outcomes were provided."
     )
     prompt = (
-        "You are synthesising the impact profile for a policy intervention in UK policy context. "
-        "Write 2-3 concise sentences in British English.\n\n"
+        "You are summarising the impact of a policy intervention for UK policymakers.\n\n"
+        f"Research question: {research_question}\n"
         f"Intervention: {intervention.intervention_name}\n"
         f"Description: {intervention.brief_description}\n\n"
         f"Outcome evidence:\n{format_outcomes_for_summary(outcomes)}\n\n"
         f"{outcome_focus}\n\n"
-        "Guidance:\n"
-        "- Summarise overall direction and confidence.\n"
-        "- Highlight contested or uncertain outcomes.\n"
-        "- If user-specified outcomes exist, explicitly address them.\n"
+        "Write 2-3 sentences that:\n"
+        "1. Directly state the intervention's effect on the outcome of interest (if specified)\n"
+        "2. Note the evidence strength (well-evidenced, evidenced, or suggested)\n"
+        "3. Flag any contested or insufficient evidence areas\n\n"
+        "Be direct and factual. Interpret direction in context (e.g., a decrease in obesity is positive). "
+        "Do not use jargon. Write for a non-specialist policy audience."
     )
     try:
         response = await llm.ainvoke(prompt)
@@ -405,7 +477,9 @@ async def generate_impact_summary(
 class TransferabilityAssessment(BaseModel):
     """Structured output for transferability assessment."""
 
-    match_level: str = Field(..., description="Match, Partial, or Mismatch")
+    match_level: str = Field(
+        ..., description="match, similar, comparable, partial, or mismatch"
+    )
     explanation: str = Field(..., description="One sentence explanation")
 
 
@@ -413,12 +487,52 @@ def normalise_match_level(value: str) -> str:
     """Normalise match level to supported labels."""
     lowered = (value or "").strip().lower()
     if lowered == "match":
-        return "Match"
+        return "match"
+    if lowered == "similar":
+        return "similar"
+    if lowered == "comparable":
+        return "comparable"
     if lowered == "partial":
-        return "Partial"
+        return "partial"
     if lowered == "mismatch":
-        return "Mismatch"
-    return "Unknown"
+        return "mismatch"
+    return "unknown"
+
+
+def normalise_level(value: Optional[str]) -> Optional[str]:
+    """Normalise ordinal levels to low/moderate/high."""
+    if not value:
+        return None
+    lowered = value.strip().lower()
+    if "high" in lowered:
+        return "high"
+    if "moderate" in lowered:
+        return "moderate"
+    if "low" in lowered:
+        return "low"
+    return None
+
+
+def infer_evidence_level(levels: List[Optional[str]]) -> str:
+    """Infer the most common evidence level from extracted data."""
+    counts: Dict[str, int] = {}
+    for raw in levels:
+        level = normalise_level(raw)
+        if not level:
+            continue
+        counts[level] = counts.get(level, 0) + 1
+    if not counts:
+        return "unknown"
+    return max(counts, key=counts.get)
+
+
+def build_evidence_note(
+    dimension_name: str, level: str, justifications: List[Optional[str]]
+) -> str:
+    """Summarise evidence context notes for a dimension."""
+    if level == "unknown":
+        return f"Insufficient evidence context for {dimension_name.replace('_', ' ')}."
+    return f"Evidence suggests {level} {dimension_name.replace('_', ' ')}."
 
 
 async def assess_transferability_dimension(
@@ -441,22 +555,28 @@ async def assess_transferability_dimension(
     target_values = [v for v in target_values if v and v.strip()]
     evidence_values = [v for v in evidence_values if v and v.strip()]
     if not target_values or not evidence_values:
-        return ("Unknown", "Insufficient context for assessment")
+        return ("unknown", "Insufficient context for assessment")
 
     prompt = (
         "You are assessing transferability of research evidence to a target context.\n\n"
         f"Dimension: {dimension_name}\n"
-        f"Target context: {target_values}\n"
+        f"Target context options: {target_values}\n"
         f"Evidence context: {evidence_values}\n\n"
-        "Assess how well the evidence context matches the target context for this "
-        "dimension.\n\n"
+        "The user is interested in any of the target context options. If the evidence "
+        "matches one or more of the target options, that is a good match.\n\n"
+        "Match levels:\n"
+        "- match: Evidence matches at least one target option directly\n"
+        "- similar: Evidence is highly similar to at least one target option\n"
+        "- comparable: Evidence is from a comparable context to at least one target option\n"
+        "- partial: Some overlap with target options, but adaptation needed\n"
+        "- mismatch: No meaningful overlap\n\n"
         "Consider:\n"
         "- For geography: socioeconomic development level, healthcare system similarity, "
         "cultural context\n"
         "- For population: age group overlap, demographic similarity, vulnerability factors\n"
         "- For setting: delivery environment similarity, institutional context\n\n"
         "Respond with JSON:\n"
-        '{"match_level": "Match|Partial|Mismatch", "explanation": "One sentence reason"}'
+        '{"match_level": "match|similar|comparable|partial|mismatch", "explanation": "One sentence reason"}'
     )
 
     try:
@@ -470,26 +590,71 @@ async def assess_transferability_dimension(
             explanation = "No explanation provided"
         return (match_level, explanation)
     except Exception:
-        return ("Unknown", "LLM assessment failed")
+        return ("unknown", "LLM assessment failed")
+
+
+async def explain_tolerance_dimension(
+    dimension_name: str,
+    tolerance_level: str,
+    evidence_level: str,
+    exceeds_tolerance: bool,
+    llm,
+) -> str:
+    """Summarise tolerance alignment using a short LLM explanation.
+
+    Args:
+        dimension_name: Name of the dimension being assessed.
+        tolerance_level: User-specified tolerance level.
+        evidence_level: Evidence-based level from extractions.
+        exceeds_tolerance: Whether evidence exceeds the tolerance.
+        llm: LLM client to use for explanation.
+
+    Returns:
+        Short explanation sentence.
+    """
+    status = (
+        "exceeds the user tolerance"
+        if exceeds_tolerance
+        else "is within the user tolerance"
+    )
+    prompt = (
+        "Write one short sentence explaining tolerance alignment.\n\n"
+        f"Dimension: {dimension_name}\n"
+        f"User tolerance: {tolerance_level}\n"
+        f"Evidence level: {evidence_level}\n"
+        f"Status: {status}\n\n"
+        "Keep it factual and concise."
+    )
+    try:
+        response = await llm.ainvoke(prompt)
+        return (getattr(response, "content", None) or str(response)).strip() or (
+            f"{dimension_name.replace('_', ' ')} evidence {status}."
+        )
+    except Exception:
+        return f"{dimension_name.replace('_', ' ')} evidence {status}."
 
 
 async def compute_transferability(
     doc_uuids: List[str],
+    extraction_ids: List[str],
     intervention_extractions: List[Dict],
     target_inner_setting: List[str],
     target_population: List[str],
     target_geography: List[str],
+    implementation_constraints: Optional[Dict[str, Optional[str]]],
     doc_scores: Dict[str, Dict],
     llm,
 ) -> Tuple[str, str, TransferabilityBreakdown]:
-    """Compute transferability across five dimensions.
+    """Compute transferability across context and implementation dimensions.
 
     Args:
         doc_uuids: Document UUIDs associated with the intervention.
+        extraction_ids: Extraction IDs assigned to the intervention theme.
         intervention_extractions: Raw intervention extractions.
         target_inner_setting: Target inner setting values.
         target_population: Target population values.
         target_geography: Target geography values.
+        implementation_constraints: Optional user-specified implementation constraints.
         doc_scores: Document score metadata.
         llm: LLM client to use for semantic similarity.
 
@@ -497,19 +662,46 @@ async def compute_transferability(
         Tuple[str, str, TransferabilityBreakdown]: Rating, note, and breakdown.
     """
     breakdown = TransferabilityBreakdown(
-        inner_setting="Unknown",
-        population="Unknown",
-        geography="Unknown",
-        resource_intensity="Unknown",
-        delivery_complexity="Unknown",
+        inner_setting="unknown",
+        population="unknown",
+        geography="unknown",
         notes={},
+        implementation_constraints_specified=False,
+        implementation_evidence={},
+        implementation_constraints={},
+        implementation_exceeds_tolerance={},
     )
 
-    relevant_extractions = [
-        e for e in intervention_extractions if e.get("doc_uuid") in doc_uuids
-    ]
+    extraction_id_set = {str(ex_id) for ex_id in extraction_ids if ex_id}
+    if extraction_id_set:
+        relevant_extractions = [
+            e for e in intervention_extractions if str(e.get("id")) in extraction_id_set
+        ]
+    else:
+        relevant_extractions = [
+            e for e in intervention_extractions if e.get("doc_uuid") in doc_uuids
+        ]
     if not relevant_extractions:
         return ("Unknown", "No intervention data available", breakdown)
+
+    cost_levels = [
+        e.get("cost_level") or e.get("resource_intensity") for e in relevant_extractions
+    ]
+    cost_justifications = [e.get("cost_justification") for e in relevant_extractions]
+    staffing_levels = [
+        e.get("staffing_level") or e.get("resource_intensity")
+        for e in relevant_extractions
+    ]
+    staffing_justifications = [
+        e.get("staffing_justification") for e in relevant_extractions
+    ]
+    complexity_levels = [
+        e.get("implementation_complexity_level") or e.get("delivery_complexity")
+        for e in relevant_extractions
+    ]
+    complexity_justifications = [
+        e.get("implementation_complexity_justification") for e in relevant_extractions
+    ]
 
     (
         (inner_setting_level, inner_setting_note),
@@ -544,44 +736,153 @@ async def compute_transferability(
         "population": population_note,
         "geography": geography_note,
     }
-    breakdown.resource_intensity = resolve_level_dimension(
-        DEFAULT_USER_CONSTRAINTS["resource_intensity"],
-        [e.get("resource_intensity") for e in relevant_extractions],
-    )
-    breakdown.delivery_complexity = resolve_level_dimension(
-        DEFAULT_USER_CONSTRAINTS["delivery_complexity"],
-        [e.get("delivery_complexity") for e in relevant_extractions],
+
+    constraints = implementation_constraints or {}
+    constraint_values = {
+        "cost": normalise_level(constraints.get("cost")),
+        "staffing": normalise_level(constraints.get("staffing")),
+        "implementation_complexity": normalise_level(
+            constraints.get("implementation_complexity")
+        ),
+    }
+    specified_constraints = {
+        key: value for key, value in constraint_values.items() if value
+    }
+    breakdown.implementation_constraints_specified = bool(specified_constraints)
+    breakdown.implementation_constraints = specified_constraints
+    breakdown.implementation_exceeds_tolerance = {
+        key: False for key in ("cost", "staffing", "implementation_complexity")
+    }
+
+    evidence_levels = {
+        "cost": infer_evidence_level(cost_levels),
+        "staffing": infer_evidence_level(staffing_levels),
+        "implementation_complexity": infer_evidence_level(complexity_levels),
+    }
+    breakdown.implementation_evidence = evidence_levels
+
+    def compare_tolerance_level(
+        tolerance_level: Optional[str], evidence_level: Optional[str]
+    ) -> Optional[bool]:
+        level_map = {"low": 1, "moderate": 2, "high": 3}
+        if not tolerance_level or not evidence_level:
+            return None
+        tolerance_val = level_map.get(tolerance_level)
+        evidence_val = level_map.get(evidence_level)
+        if tolerance_val is None or evidence_val is None:
+            return None
+        return evidence_val > tolerance_val
+
+    async def assess_or_infer_level(
+        dimension: str,
+        target_level: Optional[str],
+        levels: List[Optional[str]],
+        justifications: List[Optional[str]],
+    ) -> Tuple[str, str]:
+        inferred = evidence_levels.get(dimension, "unknown")
+        if target_level:
+            exceeds = compare_tolerance_level(target_level, inferred)
+            breakdown.implementation_exceeds_tolerance[dimension] = bool(exceeds)
+            return inferred, await explain_tolerance_dimension(
+                dimension,
+                target_level,
+                inferred,
+                bool(exceeds),
+                llm,
+            )
+        return inferred, build_evidence_note(dimension, inferred, justifications)
+
+    (
+        (cost_level, cost_note),
+        (staffing_level, staffing_note),
+        (complexity_level, complexity_note),
+    ) = await asyncio.gather(
+        assess_or_infer_level(
+            "cost",
+            specified_constraints.get("cost"),
+            cost_levels,
+            cost_justifications,
+        ),
+        assess_or_infer_level(
+            "staffing",
+            specified_constraints.get("staffing"),
+            staffing_levels,
+            staffing_justifications,
+        ),
+        assess_or_infer_level(
+            "implementation_complexity",
+            specified_constraints.get("implementation_complexity"),
+            complexity_levels,
+            complexity_justifications,
+        ),
     )
 
-    dimension_scores = [
-        breakdown.inner_setting,
-        breakdown.population,
-        breakdown.geography,
-        breakdown.resource_intensity,
-        breakdown.delivery_complexity,
+    breakdown.notes.update(
+        {
+            "cost": cost_note,
+            "staffing": staffing_note,
+            "implementation_complexity": complexity_note,
+        }
+    )
+
+    match_scores = {
+        "match": 1.0,
+        "similar": 0.85,
+        "comparable": 0.7,
+        "partial": 0.4,
+        "mismatch": 0.0,
+        "unknown": None,
+    }
+
+    def compute_fit_rating(
+        scores: List[Optional[float]], scope_label: str
+    ) -> Tuple[str, str]:
+        valid_scores = [score for score in scores if score is not None]
+        if len(valid_scores) < 2:
+            return (
+                "Unknown",
+                f"Insufficient {scope_label} data for transferability assessment",
+            )
+        if any(score == 0.0 for score in valid_scores):
+            return (
+                "Poor Fit",
+                f"{scope_label.capitalize()} mismatch identified in one or more dimensions",
+            )
+        average_score = sum(valid_scores) / len(valid_scores)
+        if average_score >= 0.85:
+            return ("Excellent Fit", "Strong alignment with target context")
+        if average_score >= 0.70:
+            return ("Good Fit", "Good alignment with minor gaps")
+        if average_score >= 0.50:
+            return ("Moderate Fit", "Partial alignment; adaptation likely needed")
+        if average_score >= 0.30:
+            return (
+                "Limited Fit",
+                "Significant gaps; substantial adaptation likely needed",
+            )
+        return ("Poor Fit", "Minimal alignment with target context")
+
+    context_scores = [
+        match_scores.get(breakdown.inner_setting),
+        match_scores.get(breakdown.population),
+        match_scores.get(breakdown.geography),
     ]
-    match_count = sum(1 for s in dimension_scores if s == "Match")
-    partial_count = sum(1 for s in dimension_scores if s == "Partial")
-    mismatch_count = sum(1 for s in dimension_scores if s == "Mismatch")
-    unknown_count = sum(1 for s in dimension_scores if s == "Unknown")
+    context_rating, context_note = compute_fit_rating(context_scores, "context")
 
-    if mismatch_count > 0:
-        rating = "Low Fit"
-        note = "Context mismatch identified in one or more dimensions"
-    elif unknown_count >= 3:
-        rating = "Unknown"
-        note = "Insufficient implementation data for transferability assessment"
-    elif match_count >= 2 and unknown_count <= 1:
-        rating = "High Fit"
-        note = "Good alignment with target context"
-    elif match_count >= 1 or partial_count >= 2:
-        rating = "Medium Fit"
-        note = "Partial alignment with target context"
-    else:
-        rating = "Low Fit"
-        note = "Limited alignment with target context"
+    breakdown.context_fit_rating = context_rating
+    breakdown.implementation_fit_rating = None
+    if breakdown.implementation_constraints_specified:
+        exceeds_values = list(breakdown.implementation_exceeds_tolerance.values())
+        if not exceeds_values:
+            breakdown.implementation_fit_rating = "Unknown"
+        elif all(exceeds_values):
+            breakdown.implementation_fit_rating = "Poor Fit"
+        elif any(exceeds_values):
+            breakdown.implementation_fit_rating = "Limited Fit"
+        else:
+            breakdown.implementation_fit_rating = "Good Fit"
 
-    return (rating, note, breakdown)
+    return (context_rating, context_note, breakdown)
 
 
 def compute_causal_mechanism(
@@ -589,7 +890,7 @@ def compute_causal_mechanism(
     result_extractions: List[Dict],
     doc_scores: Dict[str, Dict],
     doc_uuid_by_doc_id: Dict[str, str],
-) -> Tuple[Optional[CausalityClaimType], Optional[str]]:
+) -> Tuple[Optional[CausalityClaimType], Optional[CausalityDetail]]:
     """Determine primary causal mechanism based on result-level claims."""
     weights: Dict[str, int] = {}
     for ext in result_extractions:
@@ -605,10 +906,36 @@ def compute_causal_mechanism(
     if not weights:
         return (None, None)
     primary = max(weights.items(), key=lambda x: x[1])[0]
-    detail = "Weighted support: " + ", ".join(
-        f"{claim}={score}" for claim, score in sorted(weights.items())
+    detail = CausalityDetail(
+        attribution=weights.get("attribution", 0),
+        contribution=weights.get("contribution", 0),
+        correlation=weights.get("correlation", 0),
     )
     return (primary, detail)
+
+
+def resolve_effect_direction(direction_weights: Dict[str, int]) -> str:
+    """Resolve the dominant effect direction for magnitude counting."""
+    increase = direction_weights.get("increase", 0)
+    decrease = direction_weights.get("decrease", 0)
+    if increase == 0 and decrease == 0:
+        return "contested"
+    if increase and decrease:
+        ratio = min(increase, decrease) / max(increase, decrease)
+        if ratio > DISCORD_RATIO:
+            return "contested"
+    if increase >= decrease:
+        return "increase"
+    return "decrease"
+
+
+def format_effect_thresholds(scale_type: str) -> str:
+    """Format effect size thresholds for tooltip display."""
+    if scale_type in ("cohens_d", "smd"):
+        return "d<0.2=marginal, 0.2-0.5=moderate, 0.5-0.8=substantial, >0.8=transformational"
+    if scale_type in ("or", "rr"):
+        return "1.0-1.2=marginal, 1.2-1.5=moderate, 1.5-2.0=substantial, >2.0=transformational"
+    return "0-5=marginal, 5-15=moderate, 15-30=substantial, >30=transformational"
 
 
 def check_attribution_claims(
@@ -643,23 +970,42 @@ def find_linked_intervention(
     return best_name
 
 
-def link_risk_to_intervention(
+def link_risk_to_interventions(
     risk_doc_uuids: set[str],
     interventions: List[PolicyIntervention],
     theme_to_doc_uuids: Dict[str, List[str]],
-) -> Optional[str]:
-    """Link risk theme to intervention via document overlap."""
+    min_overlap: int = 1,
+) -> List[Dict[str, str]]:
+    """Link risk theme to multiple interventions via document overlap.
+
+    Args:
+        risk_doc_uuids: Document UUIDs associated with the risk theme.
+        interventions: Aggregated intervention themes.
+        theme_to_doc_uuids: Mapping from theme name to associated document UUIDs.
+        min_overlap: Minimum overlap count to establish a link.
+
+    Returns:
+        List[Dict[str, str]]: Linked interventions with link_strength.
+    """
     if not risk_doc_uuids:
-        return None
-    best_name = None
-    best_overlap = 0
+        return []
+    overlaps: List[Tuple[str, int]] = []
     for intervention in interventions:
         uuids = set(theme_to_doc_uuids.get(intervention.intervention_name, []))
         overlap = len(risk_doc_uuids.intersection(uuids))
-        if overlap > best_overlap:
-            best_overlap = overlap
-            best_name = intervention.intervention_name
-    return best_name
+        if overlap >= min_overlap:
+            overlaps.append((intervention.intervention_name, overlap))
+
+    if not overlaps:
+        return []
+
+    overlaps.sort(key=lambda x: x[1], reverse=True)
+    max_overlap = overlaps[0][1]
+    linked = []
+    for name, overlap in overlaps:
+        strength = "primary" if overlap == max_overlap else "secondary"
+        linked.append({"intervention_name": name, "link_strength": strength})
+    return linked
 
 
 def compute_harm_warning(
@@ -793,18 +1139,22 @@ def resolve_level_dimension(target: str, evidence_values: List[Optional[str]]) -
 
 def generate_verdict_description(verdict: VerdictType, outcome: OutcomeTheme) -> str:
     """Generate a concise verdict description."""
-    if verdict == "high_confidence_positive":
-        return "Evidence strongly supports a positive impact."
-    if verdict == "high_confidence_negative":
-        return "Evidence strongly supports a negative impact."
+    if verdict == "well_evidenced_increase":
+        return "Evidence strongly supports an upward effect on this outcome."
+    if verdict == "well_evidenced_decrease":
+        return "Evidence strongly supports a downward effect on this outcome."
+    if verdict == "evidenced_increase":
+        return "Evidence supports an upward effect on this outcome."
+    if verdict == "evidenced_decrease":
+        return "Evidence supports a downward effect on this outcome."
+    if verdict == "suggested_increase":
+        return "Limited evidence suggests an upward effect on this outcome."
+    if verdict == "suggested_decrease":
+        return "Limited evidence suggests a downward effect on this outcome."
     if verdict == "contested":
-        return "Evidence is split between positive and negative findings."
-    if verdict == "ineffective":
+        return "Evidence is split between upward and downward effects."
+    if verdict == "no_effect":
         return "Evidence suggests no consistent effect."
-    if verdict == "lean_positive":
-        return "Evidence trends positive but is not definitive."
-    if verdict == "lean_negative":
-        return "Evidence trends negative but is not definitive."
     if verdict == "probable_contribution":
         return "Evidence suggests contribution but lacks strong attribution."
     return "Insufficient evidence to determine impact."

@@ -8,6 +8,7 @@ from themes.
 from __future__ import annotations
 
 from collections import Counter
+import math
 from typing import Dict, List, Tuple
 import re
 
@@ -265,11 +266,12 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 ] += 1
 
         # Aggregate effect counts and sizes from result extractions
-        pos, neg, null = 0, 0, 0
+        pos, neg, null = 0.0, 0.0, 0.0
         effect_size_candidates: List[Tuple[str, int, bool]] = []
         related_outcomes: List[str] = []
         for doc_uuid in doc_uuids:
-            quality_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
+            raw_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
+            weight = raw_score / 5.0
             for result_ext in doc_to_results.get(doc_uuid, []):
                 # Support both 'direction' (new schema) and 'effect_direction' (legacy)
                 effect_dir = (
@@ -277,16 +279,16 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                     or result_ext.get("effect_direction", "")
                 ).lower()
                 if effect_dir in ("increase", "positive"):
-                    pos += quality_score
+                    pos += weight
                 elif effect_dir in ("decrease", "negative"):
-                    neg += quality_score
+                    neg += weight
                 elif effect_dir in ("null", "none", "no effect"):
-                    null += quality_score
+                    null += weight
                 effect_size = result_ext.get("effect_size", "")
                 if effect_size and len(effect_size) > 2:
                     has_number = bool(re.search(r"\d", effect_size))
                     effect_size_candidates.append(
-                        (effect_size[:100], quality_score, has_number)
+                        (effect_size[:100], raw_score, has_number)
                     )
                 outcome_var = result_ext.get("outcome_variable", "")
                 if outcome_var and outcome_var not in related_outcomes:
@@ -295,6 +297,9 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         if not doc_ids:
             continue
 
+        pos = math.ceil(pos)
+        neg = math.ceil(neg)
+        null = math.ceil(null)
         total = pos + neg + null
         if total == 0:
             consensus = "insufficient"
@@ -358,9 +363,9 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 intervention_theme_name,
                 {
                     "doc_ids": set(),
-                    "pos": 0,
-                    "neg": 0,
-                    "null": 0,
+                    "pos": 0.0,
+                    "neg": 0.0,
+                    "null": 0.0,
                     "effect_sizes": [],
                     "doc_effects": {},
                 },
@@ -369,34 +374,33 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 group["doc_ids"].add(doc_id)
 
             effect_dir = raw_ext.get("effect_direction")
-            quality_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
+            raw_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
+            weight = raw_score / 5.0
             if effect_dir == "increase":
-                group["pos"] += quality_score
+                group["pos"] += weight
                 if doc_id:
                     group["doc_effects"].setdefault(doc_id, []).append("positive")
             elif effect_dir == "decrease":
-                group["neg"] += quality_score
+                group["neg"] += weight
                 if doc_id:
                     group["doc_effects"].setdefault(doc_id, []).append("negative")
             elif effect_dir == "null":
-                group["null"] += quality_score
+                group["null"] += weight
                 if doc_id:
                     group["doc_effects"].setdefault(doc_id, []).append("null")
 
             effect_size = raw_ext.get("effect_size", "")
             if effect_size and len(effect_size) > 2:
                 has_number = bool(re.search(r"\d", effect_size))
-                group["effect_sizes"].append(
-                    (effect_size[:100], quality_score, has_number)
-                )
+                group["effect_sizes"].append((effect_size[:100], raw_score, has_number))
 
         for intervention_theme_name, group in per_intervention.items():
             doc_ids = group["doc_ids"]
             if not doc_ids:
                 continue
-            pos = group["pos"]
-            neg = group["neg"]
-            null = group["null"]
+            pos = math.ceil(group["pos"])
+            neg = math.ceil(group["neg"])
+            null = math.ceil(group["null"])
 
             total = pos + neg + null
             if total == 0:
@@ -441,32 +445,42 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 extraction_quotes[doc_uuid] = []
             extraction_quotes[doc_uuid].append(quote)
 
-    # Build theme -> doc_uuid mapping for constrained RAG retrieval
+    # Build theme -> doc_uuid and extraction_id mappings for constrained retrieval
     theme_to_doc_uuids: Dict[str, List[str]] = {}
+    theme_to_extraction_ids: Dict[str, List[str]] = {}
 
     for t in final_intervention_themes:
         uuids = []
+        extraction_ids = []
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             if meta.get("doc_uuid"):
                 uuids.append(meta["doc_uuid"])
+            extraction_ids.append(str(c.id))
         theme_to_doc_uuids[t.name] = list(set(uuids))
+        theme_to_extraction_ids[t.name] = list(set(extraction_ids))
 
     for t in final_issue_themes:
         uuids = []
+        extraction_ids = []
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             if meta.get("doc_uuid"):
                 uuids.append(meta["doc_uuid"])
+            extraction_ids.append(str(c.id))
         theme_to_doc_uuids[t.name] = list(set(uuids))
+        theme_to_extraction_ids[t.name] = list(set(extraction_ids))
 
     for t in final_outcome_themes:
         uuids = []
+        extraction_ids = []
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             if meta.get("doc_uuid"):
                 uuids.append(meta["doc_uuid"])
+            extraction_ids.append(str(c.id))
         theme_to_doc_uuids[t.name] = list(set(uuids))
+        theme_to_extraction_ids[t.name] = list(set(extraction_ids))
 
     print(
         f"Built {len(issues)} issues, {len(interventions)} interventions, {len(outcomes)} outcomes"
@@ -480,4 +494,5 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         "extraction_quotes": extraction_quotes,
         "outcome_doc_effects": outcome_doc_effects,
         "theme_to_doc_uuids": theme_to_doc_uuids,
+        "theme_to_extraction_ids": theme_to_extraction_ids,
     }

@@ -52,6 +52,14 @@ class UnifiedReference(BaseModel):
     ] = None  # "full_text" | "abstract" - what was used for extraction
 
 
+class ImplementationConstraints(BaseModel):
+    """Optional implementation constraints provided by the user."""
+
+    cost: Optional[str] = None  # "high" | "moderate" | "low" | null
+    staffing: Optional[str] = None
+    implementation_complexity: Optional[str] = None
+
+
 class SearchContext(BaseModel):
     """Flat search context payload sent by the search wizard."""
 
@@ -67,6 +75,7 @@ class SearchContext(BaseModel):
     time_to: Optional[str] = None
     max_results: Optional[int] = None
     additional_questions: List[str] = Field(default_factory=list)
+    implementation_constraints: Optional[ImplementationConstraints] = None
 
 
 # Search wizard API request/response schemas

@@ -384,12 +384,14 @@ class EvidenceCoverageSnapshot(BaseModel):
 
 
 VerdictType = Literal[
-    "high_confidence_positive",
-    "high_confidence_negative",
+    "well_evidenced_increase",
+    "well_evidenced_decrease",
+    "evidenced_increase",
+    "evidenced_decrease",
+    "suggested_increase",
+    "suggested_decrease",
     "contested",
-    "ineffective",
-    "lean_positive",
-    "lean_negative",
+    "no_effect",
     "insufficient_evidence",
     "probable_contribution",
 ]
@@ -413,9 +415,32 @@ class TransferabilityBreakdown(BaseModel):
     inner_setting: str
     population: str
     geography: str
-    resource_intensity: str
-    delivery_complexity: str
     notes: Dict[str, str] = Field(default_factory=dict)
+    context_fit_rating: Optional[str] = None
+    implementation_fit_rating: Optional[str] = None
+    implementation_constraints_specified: bool = False
+    implementation_evidence: Dict[str, str] = Field(default_factory=dict)
+    implementation_constraints: Dict[str, str] = Field(default_factory=dict)
+    implementation_exceeds_tolerance: Dict[str, bool] = Field(default_factory=dict)
+
+
+class MagnitudeDetail(BaseModel):
+    """Structured magnitude breakdown for tooltips."""
+
+    direction: Literal["increase", "decrease", "contested"]
+    bucket_counts: Dict[str, int] = Field(default_factory=dict)
+    source_count: int
+    total_sources: int
+    measurement_count: int
+    thresholds: str
+
+
+class CausalityDetail(BaseModel):
+    """Structured causal mechanism counts for tooltips."""
+
+    attribution: int = 0
+    contribution: int = 0
+    correlation: int = 0
 
 
 class RiskTheme(BaseModel):
@@ -427,6 +452,7 @@ class RiskTheme(BaseModel):
     source_doc_ids: List[str] = Field(default_factory=list)
     has_harm_warning: bool = False
     linked_intervention_theme_id: Optional[str] = None
+    linked_interventions: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class OutcomeTheme(BaseModel):
@@ -448,10 +474,10 @@ class OutcomeTheme(BaseModel):
     discord_flag: bool = Field(False)
     discord_reason: Optional[str] = Field(None)
     predicted_magnitude: Optional[SemanticMagnitudeType] = Field(None)
-    magnitude_confidence: Optional[str] = Field(None)
+    magnitude_detail: Optional[MagnitudeDetail] = Field(None)
     intervention_theme_id: Optional[str] = Field(None)
     primary_causal_mechanism: Optional[CausalityClaimType] = Field(None)
-    causal_mechanism_detail: Optional[str] = Field(None)
+    causal_mechanism_detail: Optional[CausalityDetail] = Field(None)
 
 
 class InterventionDetails(BaseModel):

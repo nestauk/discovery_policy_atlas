@@ -37,21 +37,25 @@ The system receives an **evidence quality score** (Int 1–5) for each document 
   - inner setting (delivery environment)
   - geography (evidence sourcing)
   - **transferability target geography is fixed to UK** for Policy Atlas users
+  - implementation constraints (optional): cost, staffing, implementation complexity
 
 ### Outputs
 
 - **Outcome-level impact profile**:
   - verdict label + explanation
   - discord/contested flag + reason (where applicable)
-  - predicted magnitude + confidence text
-  - causal mechanism (attribution / contribution / correlation) and detail (Tier 2; may be refined further in Tier 4)
+  - predicted magnitude + structured magnitude detail (direction, bucket counts, source/measurement counts, thresholds)
+  - causal mechanism (attribution / contribution / correlation) + structured support counts
   - per-outcome **consensus meter** (directional evidence counts) in the UI
-- **Intervention-level context fit**:
-  - transferability rating + breakdown (inner setting, population, geography, resource intensity, delivery complexity; target geography fixed to UK)
-  - LLM-based similarity explanations per dimension (stored in breakdown notes)
+- **Intervention-level transferability**:
+  - **Context Fit** rating + breakdown (inner setting, population, geography; target geography fixed to UK)
+  - **Implementation Fit** rating + breakdown (cost, staffing, implementation complexity) when user constraints are provided
+  - Implementation dimensions always show **evidence levels** (low/moderate/high/unknown)
+  - When user tolerances are provided, show an **exceeds tolerance** flag per dimension
+  - LLM-based explanations per dimension are stored in breakdown notes (context similarity + tolerance alignment)
 - **Risk profile**:
   - clustered risk themes
-  - harm warnings (where thresholds are met)
+  - harm warning flag (where thresholds are met; UI may choose not to surface the label)
   - linkage between risks and the relevant intervention themes
 
 ## Tier 1 (“Reader”): atomic extraction per document
@@ -81,8 +85,9 @@ Tier 1 extracts the intervention plus CFIR-inspired delivery characteristics:
 - **population_intervened** (beneficiary proxy)
 - **population_demographics**
 - **inner_setting** (e.g., School, Clinical/Hospital, Prison, Community)
-- **resource_intensity**
-- **delivery_complexity**
+- **cost_level** + justification
+- **staffing_level** + justification
+- **implementation_complexity_level** + justification
 - supporting quote(s)
 
 ### Conclusions (document-level impact vector)
@@ -125,20 +130,43 @@ Tier 2 consumes Tier 1 extractions and produces theme-level synthesis with evide
 
 4. **Aggregation**
    - Compute **quality-weighted** counts for outcomes:
-     - positive/negative/null buckets are sums of evidence quality scores
+     - positive/negative/null buckets are sums of (evidence quality score / 5), rounded up to whole numbers
    - Select representative effect sizes (quality-prioritised, numeric-biased, deduplicated).
+   - Build theme→extraction ID mappings to scope transferability to assigned extractions.
 
 5. **Impact synthesis (enrichment)**
    - Compute and attach:
-     - verdict label + explanation
+     - verdict label + explanation (evidence-based direction labels)
      - discord flag + reason (contested evidence)
-     - predicted magnitude + confidence text (hybrid, effect-size aware; confidence counts effect-size measurements and also reports the number of unique sources)
-    - transferability rating + breakdown (5 dimensions; target geography fixed to UK)
-    - inner setting / population / geography use LLM semantic similarity (default model: GPT-4o-mini)
-    - resource intensity and delivery complexity targets are currently defaulted
-     - risk themes linked to interventions + harm warning flag
+   - predicted magnitude + structured magnitude detail (direction, bucket counts, sources, measurements, thresholds)
+   - transferability rating + breakdown (6 dimensions; target geography fixed to UK)
+   - inner setting / population / geography use LLM semantic similarity (default model: GPT-4o-mini)
+   - cost / staffing / implementation complexity use ordinal tolerance comparison; add LLM explanation of tolerance alignment
+   - risk themes linked to interventions + harm warning flag
 
 ## Synthesis rules and guardrails
+
+### Transferability match levels
+
+Each transferability dimension uses a 6-level scale:
+
+- `match`
+- `similar`
+- `comparable`
+- `partial`
+- `mismatch`
+- `unknown`
+
+### Verdict labels (direction + evidence strength)
+
+Verdicts communicate **direction** and **evidence strength** (not magnitude or causality):
+
+- `well_evidenced_increase` / `well_evidenced_decrease`
+- `evidenced_increase` / `evidenced_decrease`
+- `suggested_increase` / `suggested_decrease`
+- `contested`, `no_effect`, `insufficient_evidence`, `probable_contribution`
+
+Direction should be interpreted in outcome context (e.g., a decrease in obesity is a positive result).
 
 ### Null vs “no data”
 
@@ -159,7 +187,7 @@ If unintended consequences are flagged in a sufficiently large fraction of high-
 
 ### Contribution fallback
 
-Where strong “high confidence” verdicts would imply causal certainty but **attribution-quality evidence is absent**, downgrade the verdict to avoid overstating causal certainty.
+Where strong “well evidenced” verdicts would imply causal certainty but **attribution-quality evidence is absent**, downgrade the verdict to avoid overstating causal certainty.
 
 ## Persistence (database)
 
@@ -167,12 +195,15 @@ Tier 2 persists synthesis results into Supabase tables (see the migration work i
 
 - `synthesis_themes`
   - supports risk themes via `theme_type='risk'`
-  - stores transferability fields (and, for risks, harm warning + linkage to interventions)
+  - stores transferability fields (and, for risks, harm warning + primary linkage to interventions)
+- `theme_intervention_links`
+  - many-to-many links between risk/issue themes and intervention themes (primary + secondary links)
 - `synthesis_outcome_themes`
   - stores verdict and magnitude fields for outcome themes
   - **one row per intervention–outcome pair** (same outcome can appear under multiple interventions)
   - links outcomes to interventions via `intervention_theme_id`
   - causal mechanism fields belong at outcome granularity (intervention–outcome), not only intervention level
+  - magnitude and causal detail fields are stored as JSON
 
 Operational note: apply the relevant migration(s) before expecting new synthesis fields to appear in stored summaries.
 
@@ -188,8 +219,8 @@ The API should expose (and the frontend can display):
 
 - outcome verdicts (label + description)
 - discord flags (contested evidence)
-- magnitude estimate + confidence
-- causal mechanism at outcome level (computed in Tier 2; may be refined further in Tier 4)
+- magnitude estimate + structured magnitude detail
+- causal mechanism at outcome level + structured support counts
 - transferability rating + breakdown at intervention level
 - risk themes + harm warnings linked back to interventions
 
@@ -205,6 +236,7 @@ Intervention-level `impact_summary` is generated by an LLM to synthesise the imp
 - summarises overall evidence direction and confidence
 - highlights contested or uncertain outcomes
 - **explicitly addresses user-specified outcomes** if provided in the search wizard
+- references the **research question** to keep the summary focused and direct
 
 ## Notes on legacy scores
 

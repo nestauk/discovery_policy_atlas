@@ -9,6 +9,7 @@ Handles reading/writing synthesis results to:
 - theme_assignments: Extraction to theme mappings
 """
 
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -28,6 +29,20 @@ from app.services.synthesis.schemas import (
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
+    """Parse a JSON field that may be stored as text."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return None
 
 
 def get_supabase():
@@ -174,10 +189,12 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                     discord_flag=ot.get("discord_flag") or False,
                     discord_reason=ot.get("discord_reason"),
                     predicted_magnitude=ot.get("predicted_magnitude"),
-                    magnitude_confidence=ot.get("magnitude_confidence"),
+                    magnitude_detail=_parse_json_field(ot.get("magnitude_detail")),
                     intervention_theme_id=ot.get("intervention_theme_id"),
                     primary_causal_mechanism=ot.get("primary_causal_mechanism"),
-                    causal_mechanism_detail=ot.get("causal_mechanism_detail"),
+                    causal_mechanism_detail=_parse_json_field(
+                        ot.get("causal_mechanism_detail")
+                    ),
                 )
             )
 
@@ -431,7 +448,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "discord_flag": out_dict.get("discord_flag", False),
                 "discord_reason": out_dict.get("discord_reason"),
                 "predicted_magnitude": out_dict.get("predicted_magnitude"),
-                "magnitude_confidence": out_dict.get("magnitude_confidence"),
+                "magnitude_detail": out_dict.get("magnitude_detail"),
                 "primary_causal_mechanism": out_dict.get("primary_causal_mechanism"),
                 "causal_mechanism_detail": out_dict.get("causal_mechanism_detail"),
                 "intervention_theme_id": intervention_link,
@@ -480,6 +497,22 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "created_at": datetime.utcnow().isoformat(),
             }
         ).execute()
+
+        linked_interventions = risk_dict.get("linked_interventions") or []
+        for item in linked_interventions:
+            intervention_name = item.get("intervention_name")
+            link_strength = item.get("link_strength", "secondary")
+            if intervention_name in intervention_id_by_name:
+                supabase.table("theme_intervention_links").insert(
+                    {
+                        "theme_id": risk_theme_id,
+                        "intervention_theme_id": intervention_id_by_name[
+                            intervention_name
+                        ],
+                        "link_strength": link_strength,
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                ).execute()
 
 
 def _dedupe(items: List[str]) -> List[str]:

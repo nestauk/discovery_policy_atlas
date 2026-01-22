@@ -55,8 +55,12 @@ class InterventionItem(BaseModel):
     supporting_quote: str
     # NEW fields (v2.2 CFIR-inspired Implementation Profile)
     inner_setting: Optional[str] = None
-    resource_intensity: Optional[str] = None
-    delivery_complexity: Optional[str] = None
+    cost_level: Optional[str] = None
+    cost_justification: Optional[str] = None
+    staffing_level: Optional[str] = None
+    staffing_justification: Optional[str] = None
+    implementation_complexity_level: Optional[str] = None
+    implementation_complexity_justification: Optional[str] = None
 
 
 class MappingItem(BaseModel):

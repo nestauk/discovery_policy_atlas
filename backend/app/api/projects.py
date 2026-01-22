@@ -1,12 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
+import asyncio
+from datetime import datetime
+import json
 import logging
 import os
-from datetime import datetime
-import uuid
 from typing import Optional, List, Dict
+import uuid
 import pandas as pd
-import asyncio
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.search_wizard import SearchWizardService
@@ -56,6 +57,21 @@ from app.services.analysis.utils.navigator import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
+    """Parse a JSON field that may be stored as text."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return None
+
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 
@@ -1695,6 +1711,13 @@ async def get_issue_intervention_navigator(
             .execute()
         )
         outcome_themes = outcome_themes_res.data or []
+        for outcome in outcome_themes:
+            outcome["magnitude_detail"] = _parse_json_field(
+                outcome.get("magnitude_detail")
+            )
+            outcome["causal_mechanism_detail"] = _parse_json_field(
+                outcome.get("causal_mechanism_detail")
+            )
 
         outcomes_by_intervention: Dict[str, List[Dict]] = {}
         for outcome in outcome_themes:
@@ -1703,7 +1726,33 @@ async def get_issue_intervention_navigator(
                 outcomes_by_intervention.setdefault(intervention_id, []).append(outcome)
 
         risks_by_intervention: Dict[str, List[Dict]] = {}
+        risk_theme_ids = [t.get("id") for t in risk_theme_rows if t.get("id")]
+        links_by_theme: Dict[str, List[Dict]] = {}
+        if risk_theme_ids:
+            links_res = (
+                vectorization_service.supabase.table("theme_intervention_links")
+                .select("theme_id, intervention_theme_id, link_strength")
+                .in_("theme_id", risk_theme_ids)
+                .execute()
+            )
+            for link in links_res.data or []:
+                links_by_theme.setdefault(link["theme_id"], []).append(
+                    {
+                        "intervention_theme_id": link["intervention_theme_id"],
+                        "link_strength": link["link_strength"],
+                    }
+                )
+
         for risk_theme in risk_theme_rows:
+            linked_interventions = links_by_theme.get(risk_theme.get("id"), [])
+            if linked_interventions:
+                risk_theme["linked_interventions"] = linked_interventions
+                for linked in linked_interventions:
+                    risks_by_intervention.setdefault(
+                        linked["intervention_theme_id"], []
+                    ).append(risk_theme)
+                continue
+
             linked_id = risk_theme.get("linked_intervention_theme_id")
             if linked_id:
                 risks_by_intervention.setdefault(linked_id, []).append(risk_theme)

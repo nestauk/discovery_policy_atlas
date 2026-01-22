@@ -52,6 +52,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     target_outcomes = search_query.get("outcome") or []
     target_geography = search_query.get("geography") or ["UK"]
     target_inner_setting = search_query.get("inner_setting") or []
+    implementation_constraints = search_query.get("implementation_constraints") or {}
     # Normalise to list[str]
     if isinstance(target_population, str):
         target_population = [target_population]
@@ -158,6 +159,16 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 "inner_setting": str(raw.get("inner_setting") or ""),
                 "resource_intensity": str(raw.get("resource_intensity") or ""),
                 "delivery_complexity": str(raw.get("delivery_complexity") or ""),
+                "cost_level": str(raw.get("cost_level") or ""),
+                "cost_justification": str(raw.get("cost_justification") or ""),
+                "staffing_level": str(raw.get("staffing_level") or ""),
+                "staffing_justification": str(raw.get("staffing_justification") or ""),
+                "implementation_complexity_level": str(
+                    raw.get("implementation_complexity_level") or ""
+                ),
+                "implementation_complexity_justification": str(
+                    raw.get("implementation_complexity_justification") or ""
+                ),
             }
         elif et == "issue":
             return {
@@ -216,6 +227,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         "target_outcomes": target_outcomes,
         "target_geography": target_geography,
         "target_inner_setting": target_inner_setting,
+        "implementation_constraints": implementation_constraints,
         "doc_metadata": doc_metadata,
         "doc_scores": doc_scores,
         "extraction_to_doc": extraction_to_doc,

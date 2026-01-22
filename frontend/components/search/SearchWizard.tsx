@@ -104,6 +104,11 @@ export type SearchContext = {
     selected: string[]; // Selected outcome options (examples + custom)
     keepBroad: boolean; // "Keep it broad" option
   };
+  implementationConstraints: {
+    cost: string;
+    staffing: string;
+    implementationComplexity: string;
+  };
   parameters: {
     sources: ("openalex" | "overton")[];
     access: Access;
@@ -124,6 +129,11 @@ interface WizardState {
   population: { selected: string[]; keepBroad: boolean };
   innerSetting: { selected: string[]; noPreference: boolean };
   outcome: { selected: string[]; keepBroad: boolean };
+  implementationConstraints: {
+    cost: string;
+    staffing: string;
+    implementationComplexity: string;
+  };
   generatedPopulationOptions: string[];
   generatedInnerSettingOptions: string[];
   generatedOutcomeOptions: string[];
@@ -152,6 +162,11 @@ export const useWizard = create<WizardState>((set, get) => ({
   population: { selected: [], keepBroad: false },
   innerSetting: { selected: [], noPreference: true },
   outcome: { selected: [], keepBroad: false },
+  implementationConstraints: {
+    cost: "Any",
+    staffing: "Any",
+    implementationComplexity: "Any",
+  },
   generatedPopulationOptions: [],
   generatedInnerSettingOptions: [],
   generatedOutcomeOptions: [],
@@ -206,6 +221,7 @@ export const useWizard = create<WizardState>((set, get) => ({
       population: s.population,
       innerSetting: s.innerSetting.noPreference ? [] : s.innerSetting.selected,
       outcome: s.outcome,
+      implementationConstraints: s.implementationConstraints,
       parameters: s.parameters,
       screeningFactors: s.screeningFactors,
       additionalQuestions: s.additionalQuestions,
@@ -699,6 +715,7 @@ function ScreenOutcome() {
 function ScreenParameters() {
   const s = useWizard();
   const [selectedCountry, setSelectedCountry] = useState("");
+  const constraintOptions = ["Any", "Low", "Moderate", "High"];
 
   const toggleAccess = (k: keyof Access) => {
     s.set({ parameters: { ...s.parameters, access: { ...s.parameters.access, [k]: !s.parameters.access[k] } } });
@@ -845,6 +862,85 @@ function ScreenParameters() {
               </Button>
             </div>
           </div>
+        </div>
+
+        {/* Implementation constraints (optional) */}
+        <div className="max-w-2xl">
+          <details className="rounded-xl border border-gray-200 bg-gray-50/40 p-4">
+            <summary className="cursor-pointer text-sm font-medium text-gray-800">
+              Implementation constraints (optional)
+            </summary>
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-gray-600">
+                Share resource or complexity limits if relevant. Leave as “Any” to skip matching.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-500">Cost tolerance</div>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    value={s.implementationConstraints.cost}
+                    onChange={(e) =>
+                      s.set({
+                        implementationConstraints: {
+                          ...s.implementationConstraints,
+                          cost: e.target.value,
+                        },
+                      })
+                    }
+                  >
+                    {constraintOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-500">Staffing capacity</div>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    value={s.implementationConstraints.staffing}
+                    onChange={(e) =>
+                      s.set({
+                        implementationConstraints: {
+                          ...s.implementationConstraints,
+                          staffing: e.target.value,
+                        },
+                      })
+                    }
+                  >
+                    {constraintOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-500">Complexity tolerance</div>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    value={s.implementationConstraints.implementationComplexity}
+                    onChange={(e) =>
+                      s.set({
+                        implementationConstraints: {
+                          ...s.implementationConstraints,
+                          implementationComplexity: e.target.value,
+                        },
+                      })
+                    }
+                  >
+                    {constraintOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </details>
         </div>
 
       </div>
@@ -1062,6 +1158,11 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
   const s = useWizard();
   const context = s.buildContext();
   const impliedQuestion = generateImpliedResearchQuestion(context);
+  const hasImplementationConstraints = [
+    context.implementationConstraints.cost,
+    context.implementationConstraints.staffing,
+    context.implementationConstraints.implementationComplexity,
+  ].some((value) => value && value !== "Any");
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
@@ -1121,6 +1222,18 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
               <span>{context.parameters.geography.join(", ")}</span>
             </div>
           )}
+          <div>
+            <span className="font-medium">Implementation constraints: </span>
+            {hasImplementationConstraints ? (
+              <span>
+                Cost: {context.implementationConstraints.cost}, Staffing:{" "}
+                {context.implementationConstraints.staffing}, Complexity:{" "}
+                {context.implementationConstraints.implementationComplexity}
+              </span>
+            ) : (
+              <span className="text-gray-500">Not specified</span>
+            )}
+          </div>
           <div>
             <span className="font-medium">Time window: </span>
             <span>{context.parameters.timePreset.replaceAll("_", " ")}</span>

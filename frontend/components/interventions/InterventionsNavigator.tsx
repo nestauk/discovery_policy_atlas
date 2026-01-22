@@ -229,6 +229,7 @@ export function InterventionsNavigator({
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [expandedInterventions, setExpandedInterventions] = useState<Set<string>>(new Set())
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
+  const [expandedInsufficientOutcomes, setExpandedInsufficientOutcomes] = useState<Set<string>>(new Set())
   
   // Fallback state for extracted interventions (when synthesis is not done)
   const [fallbackInterventions, setFallbackInterventions] = useState<InterventionData[] | null>(null)
@@ -325,6 +326,18 @@ export function InterventionsNavigator({
         newExpanded.delete(detailsKey)
       } else {
         newExpanded.add(detailsKey)
+      }
+      return newExpanded
+    })
+  }, [])
+
+  const toggleInsufficientOutcomes = useCallback((key: string) => {
+    setExpandedInsufficientOutcomes(prev => {
+      const newExpanded = new Set(prev)
+      if (newExpanded.has(key)) {
+        newExpanded.delete(key)
+      } else {
+        newExpanded.add(key)
       }
       return newExpanded
     })
@@ -897,20 +910,61 @@ export function InterventionsNavigator({
                           {intervention.outcome_themes?.length ? (
                             <div className="space-y-2">
                               <div className="text-sm font-medium text-slate-700">Impact Profile</div>
-                              <div className="grid gap-2">
-                                {[...intervention.outcome_themes]
-                                  .sort(
-                                    (a, b) =>
-                                      (b.positive_count + b.negative_count + b.null_count) -
-                                      (a.positive_count + a.negative_count + a.null_count)
-                                  )
-                                  .map((outcome) => (
-                                  <ImpactProfileCard
-                                    key={`${intervention.theme_name}-${outcome.outcome_name}`}
-                                    outcome={outcome}
-                                  />
-                                ))}
-                              </div>
+                              {(() => {
+                                const sortedOutcomes = [...intervention.outcome_themes].sort(
+                                  (a, b) =>
+                                    (b.positive_count + b.negative_count + b.null_count) -
+                                    (a.positive_count + a.negative_count + a.null_count)
+                                )
+                                const primaryOutcomes = sortedOutcomes.filter(
+                                  (outcome) => outcome.verdict_label !== 'insufficient_evidence'
+                                )
+                                const insufficientOutcomes = sortedOutcomes.filter(
+                                  (outcome) => outcome.verdict_label === 'insufficient_evidence'
+                                )
+                                const insufficientKey = `all-${intervention.theme_name}-insufficient`
+
+                                return (
+                                  <div className="space-y-2">
+                                    <div className="grid gap-2">
+                                      {primaryOutcomes.map((outcome) => (
+                                        <ImpactProfileCard
+                                          key={`${intervention.theme_name}-${outcome.outcome_name}`}
+                                          outcome={outcome}
+                                        />
+                                      ))}
+                                    </div>
+                                    {insufficientOutcomes.length > 0 && (
+                                      <div className="space-y-2">
+                                        <button
+                                          type="button"
+                                          className="flex items-center gap-2 text-xs font-medium text-slate-600"
+                                          onClick={() => toggleInsufficientOutcomes(insufficientKey)}
+                                        >
+                                          {expandedInsufficientOutcomes.has(insufficientKey) ? (
+                                            <ChevronDown className="h-4 w-4" />
+                                          ) : (
+                                            <ChevronRight className="h-4 w-4" />
+                                          )}
+                                          {expandedInsufficientOutcomes.has(insufficientKey)
+                                            ? `Hide ${insufficientOutcomes.length} outcomes with insufficient evidence`
+                                            : `Show ${insufficientOutcomes.length} outcomes with insufficient evidence`}
+                                        </button>
+                                        {expandedInsufficientOutcomes.has(insufficientKey) && (
+                                          <div className="grid gap-2">
+                                            {insufficientOutcomes.map((outcome) => (
+                                              <ImpactProfileCard
+                                                key={`${intervention.theme_name}-${outcome.outcome_name}-insufficient`}
+                                                outcome={outcome}
+                                              />
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
                             </div>
                           ) : null}
 
@@ -1056,20 +1110,63 @@ export function InterventionsNavigator({
                                   {intervention.outcome_themes?.length ? (
                                     <div className="space-y-2">
                                       <div className="text-sm font-medium text-slate-700">Impact Profile</div>
-                                      <div className="grid gap-2">
-                                        {[...intervention.outcome_themes]
-                                          .sort(
-                                            (a, b) =>
-                                              (b.positive_count + b.negative_count + b.null_count) -
-                                              (a.positive_count + a.negative_count + a.null_count)
-                                          )
-                                          .map((outcome) => (
-                                          <ImpactProfileCard
-                                            key={`${intervention.theme_name}-${outcome.outcome_name}`}
-                                            outcome={outcome}
-                                          />
-                                        ))}
-                                      </div>
+                                      {(() => {
+                                        const sortedOutcomes = [...intervention.outcome_themes].sort(
+                                          (a, b) =>
+                                            (b.positive_count + b.negative_count + b.null_count) -
+                                            (a.positive_count + a.negative_count + a.null_count)
+                                        )
+                                        const primaryOutcomes = sortedOutcomes.filter(
+                                          (outcome) => outcome.verdict_label !== 'insufficient_evidence'
+                                        )
+                                        const insufficientOutcomes = sortedOutcomes.filter(
+                                          (outcome) => outcome.verdict_label === 'insufficient_evidence'
+                                        )
+                                        const insufficientKey = `${issue.theme_name}-${intervention.theme_name}-insufficient`
+
+                                        return (
+                                          <div className="space-y-2">
+                                            <div className="grid gap-2">
+                                              {primaryOutcomes.map((outcome) => (
+                                                <ImpactProfileCard
+                                                  key={`${intervention.theme_name}-${outcome.outcome_name}`}
+                                                  outcome={outcome}
+                                                />
+                                              ))}
+                                            </div>
+                                            {insufficientOutcomes.length > 0 && (
+                                              <div className="space-y-2">
+                                                <button
+                                                  type="button"
+                                                  className="flex items-center gap-2 text-xs font-medium text-slate-600"
+                                                  onClick={() =>
+                                                    toggleInsufficientOutcomes(insufficientKey)
+                                                  }
+                                                >
+                                                  {expandedInsufficientOutcomes.has(insufficientKey) ? (
+                                                    <ChevronDown className="h-4 w-4" />
+                                                  ) : (
+                                                    <ChevronRight className="h-4 w-4" />
+                                                  )}
+                                                  {expandedInsufficientOutcomes.has(insufficientKey)
+                                                    ? `Hide ${insufficientOutcomes.length} outcomes with insufficient evidence`
+                                                    : `Show ${insufficientOutcomes.length} outcomes with insufficient evidence`}
+                                                </button>
+                                                {expandedInsufficientOutcomes.has(insufficientKey) && (
+                                                  <div className="grid gap-2">
+                                                    {insufficientOutcomes.map((outcome) => (
+                                                      <ImpactProfileCard
+                                                        key={`${intervention.theme_name}-${outcome.outcome_name}-insufficient`}
+                                                        outcome={outcome}
+                                                      />
+                                                    ))}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )
+                                      })()}
                                     </div>
                                   ) : null}
 

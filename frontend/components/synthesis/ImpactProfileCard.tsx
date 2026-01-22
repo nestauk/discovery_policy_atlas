@@ -7,12 +7,14 @@ import { ConsensusMeter } from '@/components/synthesis/ConsensusMeter'
 import type { OutcomeTheme } from '@/types/search'
 
 const verdictStyles: Record<string, string> = {
-  high_confidence_positive: 'bg-green-50 text-green-700 border-green-200',
-  high_confidence_negative: 'bg-red-50 text-red-700 border-red-200',
-  lean_positive: 'bg-green-50 text-green-700 border-green-200',
-  lean_negative: 'bg-red-50 text-red-700 border-red-200',
+  well_evidenced_increase: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  well_evidenced_decrease: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  evidenced_increase: 'bg-green-50 text-green-700 border-green-200',
+  evidenced_decrease: 'bg-green-50 text-green-700 border-green-200',
+  suggested_increase: 'bg-lime-50 text-lime-700 border-lime-200',
+  suggested_decrease: 'bg-lime-50 text-lime-700 border-lime-200',
   contested: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-  ineffective: 'bg-slate-50 text-slate-700 border-slate-200',
+  no_effect: 'bg-slate-50 text-slate-700 border-slate-200',
   insufficient_evidence: 'bg-slate-50 text-slate-700 border-slate-200',
   probable_contribution: 'bg-blue-50 text-blue-700 border-blue-200',
 }
@@ -36,15 +38,21 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
   const verdictLabel = outcome.verdict_label
   const magnitudeLabel = outcome.predicted_magnitude
   const causalLabel = outcome.primary_causal_mechanism
+  const magnitudeDetail = outcome.magnitude_detail
+  const causalityDetail = outcome.causal_mechanism_detail
+  const sourceCount =
+    outcome.source_doc_ids?.length ?? outcome.frequency ?? undefined
 
   const verdictTooltips: Record<string, string> = {
-    high_confidence_positive: 'Strong, consistent evidence supports a positive impact.',
-    high_confidence_negative: 'Strong, consistent evidence supports a negative impact.',
-    lean_positive: 'Evidence trends positive but is not definitive.',
-    lean_negative: 'Evidence trends negative but is not definitive.',
-    contested: 'Evidence is split between positive and negative findings.',
-    ineffective: 'Evidence suggests no consistent effect.',
-    insufficient_evidence: 'Too little evidence to determine impact direction.',
+    well_evidenced_increase: 'Strong, consistent evidence supports an upward effect.',
+    well_evidenced_decrease: 'Strong, consistent evidence supports a downward effect.',
+    evidenced_increase: 'Moderate evidence supports an upward effect.',
+    evidenced_decrease: 'Moderate evidence supports a downward effect.',
+    suggested_increase: 'Limited evidence suggests an upward effect.',
+    suggested_decrease: 'Limited evidence suggests a downward effect.',
+    contested: 'Evidence is split between upward and downward effects.',
+    no_effect: 'Evidence suggests no consistent effect.',
+    insufficient_evidence: 'Too little evidence to determine effect direction.',
     probable_contribution: 'Evidence suggests contribution without strong attribution.'
   }
 
@@ -60,6 +68,45 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
     moderate: 'Moderate effect size with practical significance.',
     marginal: 'Small effect size with limited practical impact.',
     unknown: 'Insufficient data to estimate magnitude.'
+  }
+
+  const buildMagnitudeTooltip = () => {
+    if (!magnitudeDetail) {
+      return magnitudeTooltips[magnitudeLabel || 'unknown'] || 'Estimated effect size category'
+    }
+    const directionLabel = toLabel(magnitudeDetail.direction)
+    const bucketText = Object.entries(magnitudeDetail.bucket_counts || {})
+      .map(([bucket, count]) => `${toLabel(bucket)}: ${count}`)
+      .join(', ')
+    const sourcesText = `${magnitudeDetail.source_count} of ${magnitudeDetail.total_sources} sources`
+    const measurementsText = `${magnitudeDetail.measurement_count} measurements`
+    const thresholdsText = magnitudeDetail.thresholds
+    const parts = [
+      directionLabel ? `Direction: ${directionLabel}.` : '',
+      bucketText ? `Buckets: ${bucketText}.` : '',
+      sourcesText ? `Sources: ${sourcesText}.` : '',
+      measurementsText ? `Measurements: ${measurementsText}.` : '',
+      thresholdsText ? `Thresholds: ${thresholdsText}.` : ''
+    ].filter(Boolean)
+    return parts.join(' ')
+  }
+
+  const buildCausalityTooltip = () => {
+    if (!causalityDetail) {
+      return causalityTooltips[causalLabel || 'correlation'] || 'Causal strength of the evidence'
+    }
+    const parts = [
+      causalityDetail.attribution
+        ? `${causalityDetail.attribution} source${causalityDetail.attribution === 1 ? '' : 's'} support attribution`
+        : '',
+      causalityDetail.contribution
+        ? `${causalityDetail.contribution} source${causalityDetail.contribution === 1 ? '' : 's'} support contribution`
+        : '',
+      causalityDetail.correlation
+        ? `${causalityDetail.correlation} source${causalityDetail.correlation === 1 ? '' : 's'} support correlation`
+        : ''
+    ].filter(Boolean)
+    return parts.length ? parts.join(', ') : 'No causal claims reported.'
   }
 
   return (
@@ -89,14 +136,14 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
 
       <div className="flex flex-wrap items-center gap-2">
         {causalLabel && (
-          <Tooltip content={causalityTooltips[causalLabel] || 'Causal strength of the evidence'}>
+          <Tooltip content={buildCausalityTooltip()}>
             <Badge variant="outline" className="text-xs bg-white">
               Causality: {toLabel(causalLabel)}
             </Badge>
           </Tooltip>
         )}
         {magnitudeLabel && (
-          <Tooltip content={magnitudeTooltips[magnitudeLabel] || 'Estimated effect size category'}>
+          <Tooltip content={buildMagnitudeTooltip()}>
             <Badge
               variant="outline"
               className={`text-xs ${magnitudeStyles[magnitudeLabel] || 'bg-slate-50 text-slate-600 border-slate-200'}`}
@@ -118,13 +165,8 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
         positiveCount={outcome.positive_count ?? 0}
         negativeCount={outcome.negative_count ?? 0}
         nullCount={outcome.null_count ?? 0}
+        sourceCount={sourceCount}
       />
-
-      {outcome.magnitude_confidence && (
-        <div className="text-xs text-slate-500">
-          {outcome.magnitude_confidence}
-        </div>
-      )}
 
       {outcome.verdict_description && (
         <div className="text-xs text-slate-600">

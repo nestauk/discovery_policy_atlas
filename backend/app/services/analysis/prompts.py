@@ -178,7 +178,7 @@ INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
             """Task: Extract 2–6 ACTIVE INTERVENTIONS/PROGRAMS evaluated or proposed, that are the main focus of the study.
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"...","inner_setting":"...|null","resource_intensity":"...|null","delivery_complexity":"...|null"}}], "coverage_note":"string"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","study_type":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"...","inner_setting":"...|null","cost_level":"...|null","cost_justification":"...|null","staffing_level":"...|null","staffing_justification":"...|null","implementation_complexity_level":"...|null","implementation_complexity_justification":"...|null"}}], "coverage_note":"string"}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
@@ -198,16 +198,27 @@ Population Fields:
 
 Implementation Profile Fields:
 - inner_setting: Where the intervention is delivered (e.g., School, Clinical/Hospital, Prison, Workplace, Community Centre, Home, Online/Digital)
-- resource_intensity: Cost and infrastructure requirements. Infer from context if not explicit.
-  - High: specialised equipment or facilities, intensive staffing, high ongoing costs
-  - Moderate: structured programmes, training, ongoing staff time, multi-session delivery
-  - Low: information campaigns, simple guidance, lightweight digital tools, minimal resourcing
+
+- cost_level: Budget and financial requirements. Infer from context if not explicit.
+  - High: significant capital investment, high ongoing operational costs, specialist equipment
+  - Moderate: structured programme costs, ongoing consumables, facility requirements
+  - Low: minimal financial outlay, uses existing resources, low-cost materials
   Return one of: High | Moderate | Low | null (only if truly unknowable)
-- delivery_complexity: Implementation difficulty. Infer from intervention type if not explicit.
-  - High: legislative/systemic change, multi-agency coordination, specialist training required
-  - Moderate: cross-team coordination, staff training, ongoing monitoring
+- cost_justification: 1-2 sentences explaining the cost assessment based on evidence in the paper.
+
+- staffing_level: Human capital and staffing requirements. Infer from context if not explicit.
+  - High: specialist professionals required, intensive staffing ratios, extensive expertise needed
+  - Moderate: trained staff required, dedicated personnel, some specialist knowledge
+  - Low: minimal staffing, can be delivered by generalists, self-service possible
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
+- staffing_justification: 1-2 sentences explaining the staffing assessment based on evidence in the paper.
+
+- implementation_complexity_level: Implementation and coordination difficulty. Infer from context if not explicit.
+  - High: legislative/systemic change, multi-agency coordination, significant training required
+  - Moderate: cross-team coordination, staff training, ongoing monitoring systems
   - Low: plug-and-play materials, single-session delivery, minimal coordination
   Return one of: High | Moderate | Low | null (only if truly unknowable)
+- implementation_complexity_justification: 1-2 sentences explaining the complexity assessment based on evidence in the paper.
 
 Paper text:
 {full_text}""",

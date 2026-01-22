@@ -68,12 +68,14 @@ export interface SearchParams {
 
   // Synthesis summary types (Enhanced)
   export type VerdictType = 
-    | 'high_confidence_positive'
-    | 'high_confidence_negative'
+    | 'well_evidenced_increase'
+    | 'well_evidenced_decrease'
+    | 'evidenced_increase'
+    | 'evidenced_decrease'
+    | 'suggested_increase'
+    | 'suggested_decrease'
     | 'contested'
-    | 'ineffective'
-    | 'lean_positive'
-    | 'lean_negative'
+    | 'no_effect'
     | 'insufficient_evidence'
     | 'probable_contribution';
 
@@ -86,13 +88,32 @@ export interface SearchParams {
 
   export type CausalityClaimType = 'attribution' | 'contribution' | 'correlation';
 
+export interface MagnitudeDetail {
+  direction: 'increase' | 'decrease' | 'contested';
+  bucket_counts: Record<string, number>;
+  source_count: number;
+  total_sources: number;
+  measurement_count: number;
+  thresholds: string;
+}
+
+export interface CausalityDetail {
+  attribution: number;
+  contribution: number;
+  correlation: number;
+}
+
   export interface TransferabilityBreakdown {
     inner_setting: string;
     population: string;
     geography: string;
-    resource_intensity: string;
-    delivery_complexity: string;
     notes?: Record<string, string>;
+    context_fit_rating?: string;
+    implementation_fit_rating?: string | null;
+    implementation_constraints_specified?: boolean;
+    implementation_evidence?: Record<string, string>;
+    implementation_constraints?: Record<string, string>;
+  implementation_exceeds_tolerance?: Record<string, boolean>;
   }
 
   export interface RiskTheme {
@@ -102,6 +123,10 @@ export interface SearchParams {
     source_doc_ids: string[];
     has_harm_warning: boolean;
     linked_intervention_theme_id?: string;
+    linked_interventions?: Array<{
+      intervention_theme_id: string;
+      link_strength: string;
+    }>;
   }
   export interface KeyIssue {
     issue_theme: string
@@ -169,10 +194,10 @@ export interface SearchParams {
     discord_flag?: boolean
     discord_reason?: string
     predicted_magnitude?: SemanticMagnitudeType
-    magnitude_confidence?: string
+  magnitude_detail?: MagnitudeDetail
     intervention_theme_id?: string
   primary_causal_mechanism?: CausalityClaimType
-  causal_mechanism_detail?: string
+  causal_mechanism_detail?: CausalityDetail
   }
 
   // Structured briefing types for frontend rendering

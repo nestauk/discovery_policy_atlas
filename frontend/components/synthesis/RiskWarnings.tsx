@@ -1,8 +1,6 @@
 'use client'
 
 import React from 'react'
-import { Badge } from '@/components/ui/badge'
-import { Tooltip } from '@/components/ui/tooltip'
 import type { RiskTheme } from '@/types/search'
 
 interface RiskWarningsProps {
@@ -31,13 +29,6 @@ export function RiskWarnings({ risks }: RiskWarningsProps) {
                 Frequency: {risk.frequency}
               </div>
             </div>
-            {risk.has_harm_warning && (
-              <Tooltip content="Raised when unintended consequences appear in more than 20% of high-quality sources for this risk theme.">
-                <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
-                  Harm warning
-                </Badge>
-              </Tooltip>
-            )}
           </div>
         ))}
       </div>

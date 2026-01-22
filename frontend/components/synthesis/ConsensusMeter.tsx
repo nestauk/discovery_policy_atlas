@@ -4,6 +4,7 @@ interface ConsensusMeterProps {
   positiveCount: number
   negativeCount: number
   nullCount: number
+  sourceCount?: number
 }
 
 const formatPercent = (value: number): string => {
@@ -16,7 +17,8 @@ const formatPercent = (value: number): string => {
 export function ConsensusMeter({
   positiveCount,
   negativeCount,
-  nullCount
+  nullCount,
+  sourceCount
 }: ConsensusMeterProps) {
   const total = positiveCount + negativeCount + nullCount
   if (total <= 0) {
@@ -48,7 +50,8 @@ export function ConsensusMeter({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-        <span>N={total}</span>
+        {sourceCount !== undefined && <span>Sources: {sourceCount}</span>}
+        <span>Weight: {total}</span>
         <span>{positiveCount}↑ ({formatPercent(positivePct)})</span>
         <span>{nullCount}— ({formatPercent(nullPct)})</span>
         <span>{negativeCount}↓ ({formatPercent(negativePct)})</span>

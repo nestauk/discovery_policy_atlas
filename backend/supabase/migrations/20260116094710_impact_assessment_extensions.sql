@@ -22,9 +22,9 @@ ALTER TABLE synthesis_outcome_themes
   ADD COLUMN IF NOT EXISTS discord_flag boolean DEFAULT false,
   ADD COLUMN IF NOT EXISTS discord_reason text,
   ADD COLUMN IF NOT EXISTS predicted_magnitude varchar,
-  ADD COLUMN IF NOT EXISTS magnitude_confidence text,
+  ADD COLUMN IF NOT EXISTS magnitude_detail jsonb,
   ADD COLUMN IF NOT EXISTS primary_causal_mechanism varchar,
-  ADD COLUMN IF NOT EXISTS causal_mechanism_detail text,
+  ADD COLUMN IF NOT EXISTS causal_mechanism_detail jsonb,
   ADD COLUMN IF NOT EXISTS intervention_theme_id uuid REFERENCES synthesis_themes(id);
 
 -- Indexes for efficient lookups
@@ -41,4 +41,22 @@ COMMENT ON COLUMN synthesis_outcome_themes.negative_count IS
   'Weighted score: sum of evidence_quality_score for negative direction results';
 COMMENT ON COLUMN synthesis_outcome_themes.null_count IS
   'Weighted score: sum of evidence_quality_score for null/no-effect results';
+
+-- Junction table for many-to-many theme-to-intervention links (risks and issues)
+CREATE TABLE IF NOT EXISTS theme_intervention_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  theme_id UUID NOT NULL REFERENCES synthesis_themes(id) ON DELETE CASCADE,
+  intervention_theme_id UUID NOT NULL REFERENCES synthesis_themes(id) ON DELETE CASCADE,
+  link_strength VARCHAR(20) DEFAULT 'primary' CHECK (link_strength IN ('primary', 'secondary')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(theme_id, intervention_theme_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_theme_links_theme ON theme_intervention_links(theme_id);
+CREATE INDEX IF NOT EXISTS idx_theme_links_intervention ON theme_intervention_links(intervention_theme_id);
+
+COMMENT ON TABLE theme_intervention_links IS
+  'Many-to-many links between risk/issue themes and intervention themes';
+COMMENT ON COLUMN theme_intervention_links.link_strength IS
+  'primary = strongest document overlap, secondary = additional relevant intervention';
 
