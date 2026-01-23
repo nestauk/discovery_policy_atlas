@@ -192,6 +192,9 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 {
                     "full_text": state["full_text"],
                     "interventions_json": interventions_json,
+                    "evidence_strength_context": self._build_evidence_strength_context(
+                        state
+                    ),
                 },
                 self._get_stage_tags("conclusions", paper_id),
                 self._get_run_name("conclusions"),

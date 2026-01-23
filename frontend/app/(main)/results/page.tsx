@@ -81,35 +81,6 @@ interface AnalysisDocument {
   }
 }
 
-const parseSampleSize = (value: unknown): number | undefined => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value > 0 ? Math.trunc(value) : undefined
-  }
-  if (typeof value === 'string') {
-    const cleaned = value.replace(/,/g, '').trim()
-    const match = cleaned.match(/\d+/)
-    if (match) {
-      const parsed = Number.parseInt(match[0], 10)
-      return parsed > 0 ? parsed : undefined
-    }
-  }
-  return undefined
-}
-
-const getDocumentSampleSize = (doc: AnalysisDocument): number | undefined => {
-  if (typeof doc.sample_size === 'number') {
-    return doc.sample_size > 0 ? doc.sample_size : undefined
-  }
-  const interventions = doc.extraction_results?.interventions
-  if (Array.isArray(interventions) && interventions.length > 0) {
-    const primary = interventions[0]
-    if (primary && typeof primary === 'object') {
-      const sampleSize = (primary as { sample_size?: unknown }).sample_size
-      return parseSampleSize(sampleSize)
-    }
-  }
-  return undefined
-}
 
 
 
@@ -790,7 +761,7 @@ export default function AnalysisResultsPage() {
         text_source: doc.text_source,
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
-        sample_size: getDocumentSampleSize(doc),
+        sample_size: doc.sample_size ?? undefined,
         // Add evidence categorisation fields
         evidence_category: doc.evidence_category,
         evidence_confidence: doc.evidence_confidence,

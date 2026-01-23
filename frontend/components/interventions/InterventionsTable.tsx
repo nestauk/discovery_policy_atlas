@@ -385,6 +385,19 @@ export function InterventionsTable({ interventions, loading = false }: Intervent
                             <Badge variant="outline" className="text-xs">
                               {doc.source}
                             </Badge>
+                            {intervention.evidence_category && (
+                              <Tooltip content={intervention.evidence_category}>
+                                <span
+                                  className="inline-block px-2 py-0.5 rounded text-[10px] font-medium cursor-help whitespace-nowrap"
+                                  style={{
+                                    backgroundColor: getEvidenceCategoryColors(intervention.evidence_category).bg,
+                                    color: getEvidenceCategoryColors(intervention.evidence_category).text,
+                                  }}
+                                >
+                                  {getEvidenceCategoryShortName(intervention.evidence_category)}
+                                </span>
+                              </Tooltip>
+                            )}
                             {doc.landing_page_url ? (
                               <a 
                                 href={doc.landing_page_url} 

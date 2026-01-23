@@ -30,6 +30,7 @@ from ..schemas_langchain import (
     ResultItem,
     ConclusionItem,
 )
+from ..evidence_strength import calculate_document_evidence_score
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,60 @@ class BaseExtractionWorkflow(ABC):
         workflow.add_edge("validate_and_filter", END)
 
         return workflow.compile()
+
+    def _build_evidence_strength_context(self, state: WorkflowState) -> str:
+        """Build a compact evidence-strength context string for prompts."""
+        category = (
+            state.get("evidence_category") or "Unknown / Insufficient information"
+        )
+        confidence = state.get("evidence_confidence")
+
+        category_explanations = {
+            "Systematic Review and Meta-Analysis": "Synthesizes multiple studies to provide the strongest evidence tier.",
+            "RCTs and Quasi-Experimental Studies": "Causal designs with controls; strongest primary-study evidence.",
+            "Observational Research Studies": "Non-randomized evidence showing associations; weaker causal certainty.",
+            "Modelling & Simulation": "Modelled or simulated evidence, not direct empirical outcomes.",
+            "Policy Syntheses & Guidance Documents": "Policy-focused synthesis or guidance rather than primary evidence.",
+            "Qualitative & Contextual Evidence": "Interview/qualitative/contextual evidence; rich but not causal.",
+            "Expert Opinion and Commentary": "Expert commentary without primary empirical testing.",
+            "Other (Non-evidence documents)": "Not research evidence.",
+            "Unknown / Insufficient information": "Insufficient information to classify evidence quality.",
+        }
+
+        interventions = state.get("interventions") or []
+        extraction_results = {
+            "interventions": [
+                intervention.model_dump() for intervention in interventions
+            ]
+        }
+        doc_stub = {
+            "evidence_category": category,
+            "extraction_results": extraction_results,
+        }
+
+        evidence_result = calculate_document_evidence_score(doc_stub)
+        sample_size = evidence_result.get("sample_size")
+        base_score = evidence_result.get("base_score")
+        final_score = evidence_result.get("score")
+        penalty_applied = evidence_result.get("penalty_applied")
+
+        penalty_note = ""
+        if penalty_applied:
+            penalty_note = " (penalized for small sample size < 100)"
+
+        confidence_text = (
+            f"{confidence:.2f}" if isinstance(confidence, (int, float)) else "unknown"
+        )
+        sample_text = str(sample_size) if sample_size is not None else "unknown"
+
+        return (
+            "Evidence strength context (computed):\n"
+            f"- Evidence category: {category}\n"
+            f"  Meaning: {category_explanations.get(category, 'No description available.')}\n"
+            f"- Evidence confidence: {confidence_text}\n"
+            f"- Document evidence strength: {final_score}/5 (base {base_score}/5){penalty_note}\n"
+            f"- Sample size (N): {sample_text}\n"
+        )
 
     @abstractmethod
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:

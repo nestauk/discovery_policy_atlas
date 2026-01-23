@@ -215,48 +215,6 @@ export function formatEvidenceMixCompact(evidenceMix?: Record<string, number>): 
     .join(', ')
 }
 
-/**
- * Compute evidence mix from detailed interventions, counting unique documents only.
- * Deduplicates by doc_id to avoid counting the same document multiple times
- * when it has multiple interventions.
- */
-export function computeEvidenceMixFromInterventions(
-  detailedInterventions?: Array<{
-    evidence_category?: string
-    source_documents?: Array<{ doc_id?: string }>
-  }>
-): Record<string, number> {
-  if (!detailedInterventions || detailedInterventions.length === 0) {
-    return {}
-  }
-
-  const categories = getEvidenceCategories()
-  const categoryToKey = Object.fromEntries(categories.map(c => [c.name, c.key]))
-
-  // Track unique documents by doc_id
-  const seenDocIds = new Set<string>()
-  const counts: Record<string, number> = {}
-
-  for (const intervention of detailedInterventions) {
-    // Get doc_id from source_documents (typically first entry)
-    const docId = intervention.source_documents?.[0]?.doc_id
-    if (!docId || seenDocIds.has(docId)) {
-      continue // Skip if no doc_id or already counted
-    }
-
-    seenDocIds.add(docId)
-
-    // Count by evidence category
-    const category = intervention.evidence_category
-    if (category) {
-      const key = categoryToKey[category] || 'unknown'
-      counts[key] = (counts[key] || 0) + 1
-    }
-  }
-
-  return counts
-}
-
 // Legacy exports for backward compatibility (derived from categories)
 // Now returns raw hex values for inline styles
 export const EVIDENCE_CATEGORY_COLORS: Record<string, EvidenceCategoryColors> = Object.fromEntries(

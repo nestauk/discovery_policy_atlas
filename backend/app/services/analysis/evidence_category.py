@@ -105,6 +105,25 @@ EVIDENCE_CATEGORY_RANKS = {
 }
 EVIDENCE_CATEGORY_TO_KEY = {row[0]: row[1] for row in _EVIDENCE_CATEGORY_DATA}
 
+# Thresholds for evidence strength calculations
+EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
+DENSITY_THRESHOLD = 0.025  # 2.5%
+SMALL_SAMPLE_THRESHOLD = 100  # N < 100 triggers penalty for causal evidence
+
+CAP_MESSAGES = {
+    "single_srma": "Limited by single systematic review",
+    "single_rct": "Limited by single experimental study",
+    "single_obs": "Limited by single observational study",
+    "density": "Limited by small evidence base",
+    "small_sample": "All studies have sample sizes under 100, limiting statistical power",
+}
+
+# Evidence categories where sample size matters for causal inference
+CAUSAL_EVIDENCE_CATEGORIES = {
+    "RCTs and Quasi-Experimental Studies",
+    "Observational Research Studies",
+}
+
 
 def get_evidence_categories_for_api() -> list[dict]:
     """Get evidence category data formatted for the API/frontend.
@@ -126,20 +145,6 @@ def get_evidence_categories_for_api() -> list[dict]:
             _EVIDENCE_CATEGORY_DATA, start=1
         )
     ]
-
-
-# Thresholds for evidence strength calculations
-EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
-DENSITY_THRESHOLD = 0.025  # 2.5%
-SMALL_SAMPLE_THRESHOLD = 100  # N < 100 triggers penalty for causal evidence
-
-CAP_MESSAGES = {
-    "single_srma": "Limited by single systematic review",
-    "single_rct": "Limited by single experimental study",
-    "single_obs": "Limited by single observational study",
-    "density": "Limited by small evidence base",
-    "small_sample": "All studies have sample sizes under 100, limiting statistical power",
-}
 
 
 # TODO: Consider extracting common batch processing logic (shared with RelevanceService)

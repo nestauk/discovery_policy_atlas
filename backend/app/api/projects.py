@@ -34,6 +34,7 @@ from app.services.analysis.evidence_category import (
     EVIDENCE_CATEGORY_RANKS,
 )
 from app.services.analysis.evidence_strength import (
+    _parse_sample_size,
     calculate_evidence_strength,
     calculate_document_evidence_score,
     get_document_max_sample_size,
@@ -762,11 +763,9 @@ async def get_project_documents(
             )
             # Calculate evidence strength with sample size penalty
             evidence_result = calculate_document_evidence_score(doc)
-            if (
-                evidence_result["sample_size"] is not None
-                and "sample_size" not in doc_copy
-            ):
-                doc_copy["sample_size"] = evidence_result["sample_size"]
+            doc_copy["sample_size"] = evidence_result[
+                "sample_size"
+            ]  # Always include (may be None)
             doc_copy["evidence_strength"] = evidence_result["score"]
             if evidence_result["justification"]:
                 doc_copy["evidence_strength_justification"] = evidence_result[
@@ -1604,6 +1603,85 @@ async def get_issue_intervention_navigator(
             if doc_mapping_pairs:
                 doc_mappings[doc_id] = doc_mapping_pairs
 
+        # First pass: collect shared_docs for each issue-intervention pair
+        # This finds docs that are linked to BOTH an issue AND an intervention
+        # Store per-pair for reuse, and build union per intervention
+        issue_intervention_shared_docs: dict[
+            tuple[str, str], list[str]
+        ] = {}  # (issue_id, intervention_id) -> [doc_ids]
+        intervention_shared_docs_union: dict[
+            str, set[str]
+        ] = {}  # intervention_id -> set of doc_ids
+
+        for issue_theme in issue_themes:
+            issue_theme_id = issue_theme["id"]
+            issue_extraction_ids = theme_to_extractions.get(issue_theme_id, [])
+
+            for intervention_theme in intervention_themes:
+                intervention_theme_id = intervention_theme["id"]
+                intervention_extraction_ids = theme_to_extractions.get(
+                    intervention_theme_id, []
+                )
+
+                # Find documents that have both issue and intervention extractions
+                pair_shared_docs = []
+                for doc_id, mapping_pairs in doc_mappings.items():
+                    doc_has_issue = any(
+                        issue_ext_id in issue_extraction_ids
+                        for issue_ext_id, _ in mapping_pairs
+                    )
+                    doc_has_intervention = any(
+                        intervention_ext_id in intervention_extraction_ids
+                        for _, intervention_ext_id in mapping_pairs
+                    )
+
+                    if doc_has_issue and doc_has_intervention:
+                        pair_shared_docs.append(doc_id)
+                        # Also add to intervention union
+                        if intervention_theme_id not in intervention_shared_docs_union:
+                            intervention_shared_docs_union[
+                                intervention_theme_id
+                            ] = set()
+                        intervention_shared_docs_union[intervention_theme_id].add(
+                            doc_id
+                        )
+
+                # Store for reuse in navigator building
+                if pair_shared_docs:
+                    issue_intervention_shared_docs[
+                        (issue_theme_id, intervention_theme_id)
+                    ] = pair_shared_docs
+
+        # Pre-compute intervention-level evidence strength from UNION of shared_docs
+        # Only includes docs that are linked to both an issue AND this intervention
+        intervention_evidence_cache = {}
+        for intervention_theme in intervention_themes:
+            intervention_theme_id = intervention_theme["id"]
+            intervention_doc_ids = intervention_shared_docs_union.get(
+                intervention_theme_id, set()
+            )
+
+            # Build evidence info from documents in the union
+            documents_with_evidence = []
+            for doc_id in intervention_doc_ids:
+                doc = docs_by_doc_id.get(doc_id)
+                if not doc:
+                    continue
+                extraction_results = doc.get("extraction_results", {}) or {}
+                interventions = extraction_results.get("interventions", [])
+                max_sample_size = get_document_max_sample_size(interventions)
+                documents_with_evidence.append(
+                    build_document_evidence_info(doc, max_sample_size, doc_id)
+                )
+
+            # Calculate and cache evidence strength for this intervention theme
+            intervention_evidence_cache[
+                intervention_theme_id
+            ] = calculate_evidence_strength(
+                documents_with_evidence,
+                len(documents),
+            )
+
         # Now build the navigator structure
         navigator_issue_themes = []
 
@@ -1633,31 +1711,21 @@ async def get_issue_intervention_navigator(
                     intervention_theme_id, []
                 )
 
-                # Find documents that have both issue and intervention extractions
-                shared_docs = []
-                impact_scores = []
-                evidence_scores = []
+                # Use pre-computed shared_docs from first pass
+                pair_key = (theme_id, intervention_theme_id)
+                shared_docs = issue_intervention_shared_docs.get(pair_key, [])
 
-                for doc_id, mapping_pairs in doc_mappings.items():
-                    doc_has_issue = any(
-                        issue_ext_id in issue_extraction_ids
-                        for issue_ext_id, _ in mapping_pairs
-                    )
-                    doc_has_intervention = any(
-                        intervention_ext_id in intervention_extraction_ids
-                        for _, intervention_ext_id in mapping_pairs
-                    )
-
-                    if doc_has_issue and doc_has_intervention:
-                        shared_docs.append(doc_id)
+                # Only include intervention themes that have actual connections
+                if shared_docs:
+                    # Collect scores for this pair's shared docs
+                    impact_scores = []
+                    evidence_scores = []
+                    for doc_id in shared_docs:
                         scores = doc_scores.get(doc_id, {})
                         if scores.get("impact_score") is not None:
                             impact_scores.append(scores["impact_score"])
                         if scores.get("evidence_score") is not None:
                             evidence_scores.append(scores["evidence_score"])
-
-                # Only include intervention themes that have actual connections
-                if shared_docs:
                     # Calculate average impact score (still use averaging for impact)
                     avg_impact_score = (
                         sum(impact_scores) / len(impact_scores)
@@ -1665,8 +1733,22 @@ async def get_issue_intervention_navigator(
                         else None
                     )
 
-                    # Collect evidence info for the new evidence strength calculation
-                    documents_with_evidence = []
+                    # Use pre-computed evidence strength from UNION of shared_docs across all issues
+                    # Only includes docs linked to both an issue AND this intervention
+                    evidence_strength = intervention_evidence_cache.get(
+                        intervention_theme_id,
+                        {
+                            "stars": 0,
+                            "base_rating": 0,
+                            "cap_applied": None,
+                            "cap_message": None,
+                            "evidence_mix": {},
+                        },
+                    )
+
+                    # Calculate issue-specific evidence_mix from shared_docs only
+                    # This shows evidence linking THIS intervention to THIS issue
+                    issue_documents_with_evidence = []
                     for shared_doc_id in shared_docs:
                         doc = docs_by_doc_id.get(shared_doc_id)
                         if not doc:
@@ -1674,16 +1756,15 @@ async def get_issue_intervention_navigator(
                         extraction_results = doc.get("extraction_results", {}) or {}
                         interventions = extraction_results.get("interventions", [])
                         max_sample_size = get_document_max_sample_size(interventions)
-                        documents_with_evidence.append(
+                        issue_documents_with_evidence.append(
                             build_document_evidence_info(
                                 doc, max_sample_size, shared_doc_id
                             )
                         )
 
-                    # Calculate evidence strength using new methodology
-                    evidence_strength = calculate_evidence_strength(
-                        documents_with_evidence,
-                        len(documents),  # project total docs for density calculation
+                    issue_evidence_strength = calculate_evidence_strength(
+                        issue_documents_with_evidence,
+                        len(documents),
                     )
 
                     # Build detailed interventions from the extractions
@@ -1784,6 +1865,8 @@ async def get_issue_intervention_navigator(
                                         break
 
                                 evidence_cat = doc.get("evidence_category")
+                                evidence_result = calculate_document_evidence_score(doc)
+                                doc_sample_size = evidence_result.get("sample_size")
                                 detailed_interventions.append(
                                     {
                                         "name": intervention_name,
@@ -1796,7 +1879,9 @@ async def get_issue_intervention_navigator(
                                         "evidence_category": evidence_cat,
                                         "is_systematic_review": evidence_cat
                                         == "Systematic Review and Meta-Analysis",
-                                        "sample_size": raw_data.get("sample_size"),
+                                        "sample_size": _parse_sample_size(
+                                            raw_data.get("sample_size")
+                                        ),
                                         "impact_score": doc_scores.get(
                                             doc.get("doc_id"), {}
                                         ).get("impact_score"),
@@ -1818,6 +1903,8 @@ async def get_issue_intervention_navigator(
                                                 "landing_page_url": doc.get(
                                                     "landing_page_url"
                                                 ),
+                                                "evidence_category": evidence_cat,
+                                                "sample_size": doc_sample_size,
                                             }
                                         ],
                                     }
@@ -1864,7 +1951,12 @@ async def get_issue_intervention_navigator(
                             "base_rating": evidence_strength["base_rating"],
                             "cap_applied": evidence_strength["cap_applied"],
                             "cap_message": evidence_strength["cap_message"],
+                            # evidence_mix: intervention-level (all docs for this intervention)
                             "evidence_mix": evidence_strength["evidence_mix"],
+                            # issue_evidence_mix: issue-specific (only shared docs)
+                            "issue_evidence_mix": issue_evidence_strength[
+                                "evidence_mix"
+                            ],
                             "detailed_interventions": list(
                                 unique_interventions.values()
                             ),

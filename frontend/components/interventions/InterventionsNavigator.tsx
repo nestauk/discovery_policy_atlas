@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch'
 import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
 import { NavigatorInterventionsTable } from '@/components/interventions/NavigatorInterventionsTable'
 import { type InterventionData } from '@/components/interventions/InterventionsTable'
-import { getEvidenceScoreExplanation, formatEvidenceMixCompact, computeEvidenceMixFromInterventions } from '@/lib/evidenceCategories'
+import { getEvidenceScoreExplanation, formatEvidenceMixCompact, getEvidenceCategories } from '@/lib/evidenceCategories'
 import { Tooltip } from '@/components/ui/tooltip'
 
 interface IssueTheme {
@@ -33,7 +33,8 @@ interface InterventionTheme {
   base_rating?: number
   cap_applied?: string | null
   cap_message?: string | null
-  evidence_mix?: Record<string, number>
+  evidence_mix?: Record<string, number>  // Intervention-level (all docs for this intervention)
+  issue_evidence_mix?: Record<string, number>  // Issue-specific (only shared docs)
   detailed_interventions?: DetailedIntervention[]
 }
 
@@ -79,7 +80,63 @@ interface DetailedIntervention {
     title?: string
     source?: string
     landing_page_url?: string
+    evidence_category?: string
   }>
+}
+
+interface AggregatedInterventionRow {
+  name: string
+  type: string
+  country: string
+  description: string
+  evidence_category?: string
+  evidence_categories?: string[]
+  is_systematic_review?: boolean
+  result_count: number
+  results_summary: Array<{
+    outcome: string
+    direction: string
+    effect_size?: string
+    effect_size_type?: string
+    p_value?: string
+    uncertainty?: string
+    result_text?: string
+    supporting_quote?: string
+    population_measured?: string
+    subgroup_or_dose?: string
+    heterogeneity_I2?: string
+    tau2?: string
+    summary_statistic?: string
+    estimate_level?: string
+    n_studies?: number
+    sample_size?: number
+    stratum_type?: string
+    stratum_value?: string
+    evidence_category?: string
+    is_systematic_review?: boolean
+  }>
+  outcome_groups?: Array<{
+    document: {
+      doc_id: string
+      title: string
+      source: string
+      landing_page_url?: string
+      evidence_category?: string
+      reported_sample_size?: number
+    }
+    results: AggregatedInterventionRow['results_summary']
+  }>
+  total_sample_size: number | null
+  documents: Array<{
+    doc_id: string
+    title: string
+    source: string
+    landing_page_url?: string
+  }>
+  impact_score?: number
+  evidence_score?: number
+  impact_justification?: string
+  evidence_justification?: string
 }
 
 interface NavigatorData {
@@ -121,7 +178,7 @@ export function InterventionsNavigator({
   
   // Use external state if provided, otherwise use internal state
   const [internalViewMode, setInternalViewMode] = useState<'grouped' | 'all'>('all')
-  const [internalSortBy, setInternalSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
+  const [internalSortBy, setInternalSortBy] = useState<'frequency' | 'impact' | 'evidence'>('evidence')
   const [internalIsPreparingDownload, setInternalIsPreparingDownload] = useState(false)
   
   const viewMode = externalViewMode ?? internalViewMode
@@ -257,8 +314,25 @@ export function InterventionsNavigator({
     }
   }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken, onDownload])
 
-  const renderStars = useCallback((score?: number, showDecimal: boolean = true) => {
-    if (score === undefined || score === null) return null
+  const renderStars = useCallback((score?: number, showDecimal: boolean = true, noDataTooltip?: string) => {
+    // Show greyed stars with tooltip when no score
+    if (score === undefined || score === null || score === 0) {
+      return (
+        <Tooltip content={noDataTooltip || "Not enough data"}>
+          <div className="flex items-center gap-1 cursor-help">
+            <div className="flex">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Star
+                  key={i}
+                  className="h-3 w-3 fill-gray-200 text-gray-200"
+                />
+              ))}
+            </div>
+            {showDecimal && <span className="text-xs text-slate-400">N/A</span>}
+          </div>
+        </Tooltip>
+      )
+    }
     return (
       <div className="flex items-center gap-1">
         <div className="flex">
@@ -306,18 +380,17 @@ export function InterventionsNavigator({
             existing.impact_scores.push(intervention.avg_impact_score)
           }
           // Keep the highest stars rating when combining themes
+          // evidence_mix is now pre-computed per intervention theme (deduplicated),
+          // so we just keep it alongside the stars rating
           if (intervention.stars !== undefined && (existing.stars === undefined || intervention.stars > existing.stars)) {
             existing.stars = intervention.stars
             existing.base_rating = intervention.base_rating
             existing.cap_applied = intervention.cap_applied
             existing.cap_message = intervention.cap_message
-          }
-          // Merge evidence_mix counts
-          if (intervention.evidence_mix) {
-            existing.evidence_mix = existing.evidence_mix || {}
-            Object.entries(intervention.evidence_mix).forEach(([key, count]) => {
-              existing.evidence_mix[key] = (existing.evidence_mix[key] || 0) + count
-            })
+            existing.evidence_mix = intervention.evidence_mix
+          } else if (!existing.evidence_mix && intervention.evidence_mix) {
+            // Fallback: keep first evidence_mix if we don't have one yet
+            existing.evidence_mix = intervention.evidence_mix
           }
           // Keep the first impact_summary we encounter (if current doesn't have one)
           if (!existing.impact_summary && intervention.impact_summary) {
@@ -356,50 +429,253 @@ export function InterventionsNavigator({
   }, [data, sortInterventions])
 
   const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
-    return detailedInterventions.map((detail) => ({
-      name: detail.name,
-      type: detail.type || 'Unknown',
-      country: detail.country || 'Unknown',
-      description: detail.description,
-      evidence_category: detail.evidence_category,
-      is_systematic_review: detail.is_systematic_review,
-      result_count: detail.results?.length || 0,
-      results_summary: (detail.results || []).map(result => ({
-        outcome: result.outcome_variable || 'Outcome',
-        // Support both 'direction' (new schema) and 'effect_direction' (legacy)
-        direction: result.direction || result.effect_direction || 'unknown',
-        effect_size: result.effect_size,
-        effect_size_type: result.effect_size_type,
-        p_value: result.p_value,
-        uncertainty: result.uncertainty,
-        result_text: result.result_text,
-        supporting_quote: undefined,
-        population_measured: result.population_measured,
-        subgroup_or_dose: result.subgroup_or_dose,
-        // SR-specific fields for meta-analysis results
-        heterogeneity_I2: result.heterogeneity_I2,
-        tau2: result.tau2,
-        summary_statistic: result.summary_statistic,
-        estimate_level: result.estimate_level,
-        // Sample size fields
-        n_studies: result.n_studies,
-        sample_size: result.sample_size,
-        // Stratum fields
-        stratum_type: result.stratum_type,
-        stratum_value: result.stratum_value,
-      })),
-      total_sample_size: detail.sample_size || null,
-      documents: detail.source_documents?.map(doc => ({
-        doc_id: doc.doc_id || '',
-        title: doc.title || 'Unknown',
-        source: doc.source || 'Unknown',
-        landing_page_url: doc.landing_page_url || detail.document_url,
-      })) || [],
-      impact_score: detail.impact_score,
-      evidence_score: detail.evidence_score,
-      impact_justification: detail.impact_justification,
-      evidence_justification: detail.evidence_justification,
-    }))
+    if (!detailedInterventions || detailedInterventions.length === 0) {
+      return []
+    }
+
+    const categories = getEvidenceCategories()
+    const categoryRank = new Map(categories.map(category => [category.name, category.rank]))
+
+    const aggregated = new Map<string, {
+      name: string
+      types: Set<string>
+      countries: Set<string>
+      description: string
+      evidence_categories: Set<string>
+      has_sr: boolean
+      has_non_sr: boolean
+      result_count: number
+      results_summary: AggregatedInterventionRow['results_summary']
+      outcome_groups: Map<string, {
+        document: AggregatedInterventionRow['outcome_groups'][number]['document']
+        results: AggregatedInterventionRow['results_summary']
+      }>
+      total_sample_size: number | null
+      documents: Map<string, AggregatedInterventionRow['documents'][number]>
+      evidence_scores: Array<{ score: number; justification?: string }>
+      impact_justifications: Array<{ score: number; justification?: string }>
+    }>()
+
+    const getDisplayValue = (value?: string) => {
+      if (!value) return null
+      const trimmed = value.trim()
+      return trimmed && trimmed !== 'Unknown' ? trimmed : null
+    }
+
+    let unknownDocumentCounter = 0
+
+    detailedInterventions.forEach((detail) => {
+      const name = detail.name?.trim()
+      if (!name) return
+
+      if (!aggregated.has(name)) {
+        aggregated.set(name, {
+          name,
+          types: new Set(),
+          countries: new Set(),
+          description: '',
+          evidence_categories: new Set(),
+          has_sr: false,
+          has_non_sr: false,
+          result_count: 0,
+          results_summary: [],
+          outcome_groups: new Map(),
+          total_sample_size: null,
+          documents: new Map(),
+          evidence_scores: [],
+          impact_justifications: [],
+        })
+      }
+
+      const entry = aggregated.get(name)!
+      const typeValue = getDisplayValue(detail.type)
+      if (typeValue) entry.types.add(typeValue)
+      const countryValue = getDisplayValue(detail.country)
+      if (countryValue) entry.countries.add(countryValue)
+
+      if (detail.description) {
+        if (!entry.description || detail.description.length > entry.description.length) {
+          entry.description = detail.description
+        }
+      }
+
+      if (detail.evidence_category) {
+        entry.evidence_categories.add(detail.evidence_category)
+        if (detail.evidence_category === 'Systematic Review and Meta-Analysis') {
+          entry.has_sr = true
+        } else {
+          entry.has_non_sr = true
+        }
+      }
+
+      const results = detail.results || []
+      const sourceDoc = detail.source_documents?.[0]
+      const docKey = sourceDoc?.doc_id
+        || sourceDoc?.landing_page_url
+        || sourceDoc?.title
+        || `${name}-unknown-${unknownDocumentCounter++}`
+      const parseSampleSize = (value: unknown) => {
+        if (typeof value === 'number' && value > 0) return value
+        if (typeof value === 'string') {
+          const cleaned = value.replace(/,/g, '').trim()
+          const parsed = Number(cleaned)
+          if (!Number.isNaN(parsed) && parsed > 0) return parsed
+        }
+        return 0
+      }
+
+      const reportedSampleSize = Math.max(
+        parseSampleSize(detail.sample_size),
+        ...results.map(result => result.sample_size || 0)
+      )
+      const document = {
+        doc_id: sourceDoc?.doc_id || '',
+        title: sourceDoc?.title || 'Unknown',
+        source: sourceDoc?.source || 'Unknown',
+        landing_page_url: sourceDoc?.landing_page_url || detail.document_url,
+        evidence_category: sourceDoc?.evidence_category,
+        reported_sample_size: reportedSampleSize > 0 ? reportedSampleSize : undefined,
+      }
+
+      if (!entry.outcome_groups.has(docKey)) {
+        entry.outcome_groups.set(docKey, { document, results: [] })
+      }
+      const outcomeGroup = entry.outcome_groups.get(docKey)!
+
+      entry.result_count += results.length
+      entry.results_summary.push(
+        ...results.map(result => ({
+          outcome: result.outcome_variable || 'Outcome',
+          direction: result.direction || result.effect_direction || 'unknown',
+          effect_size: result.effect_size,
+          effect_size_type: result.effect_size_type,
+          p_value: result.p_value,
+          uncertainty: result.uncertainty,
+          result_text: result.result_text,
+          supporting_quote: undefined,
+          population_measured: result.population_measured,
+          subgroup_or_dose: result.subgroup_or_dose,
+          heterogeneity_I2: result.heterogeneity_I2,
+          tau2: result.tau2,
+          summary_statistic: result.summary_statistic,
+          estimate_level: result.estimate_level,
+          n_studies: result.n_studies,
+          sample_size: result.sample_size,
+          stratum_type: result.stratum_type,
+          stratum_value: result.stratum_value,
+          evidence_category: detail.evidence_category,
+          is_systematic_review: detail.evidence_category === 'Systematic Review and Meta-Analysis',
+        }))
+      )
+
+      outcomeGroup.results.push(
+        ...results.map(result => ({
+          outcome: result.outcome_variable || 'Outcome',
+          direction: result.direction || result.effect_direction || 'unknown',
+          effect_size: result.effect_size,
+          effect_size_type: result.effect_size_type,
+          p_value: result.p_value,
+          uncertainty: result.uncertainty,
+          result_text: result.result_text,
+          supporting_quote: undefined,
+          population_measured: result.population_measured,
+          subgroup_or_dose: result.subgroup_or_dose,
+          heterogeneity_I2: result.heterogeneity_I2,
+          tau2: result.tau2,
+          summary_statistic: result.summary_statistic,
+          estimate_level: result.estimate_level,
+          n_studies: result.n_studies,
+          sample_size: result.sample_size,
+          stratum_type: result.stratum_type,
+          stratum_value: result.stratum_value,
+          evidence_category: detail.evidence_category,
+          is_systematic_review: detail.evidence_category === 'Systematic Review and Meta-Analysis',
+        }))
+      )
+
+      const docSampleSize = parseSampleSize(sourceDoc?.sample_size)
+      if (docSampleSize > 0) {
+        entry.total_sample_size = entry.total_sample_size === null
+          ? docSampleSize
+          : Math.max(entry.total_sample_size, docSampleSize)
+      }
+
+      detail.source_documents?.forEach(doc => {
+        const docId = doc.doc_id || ''
+        if (!docId) return
+        if (!entry.documents.has(docId)) {
+          entry.documents.set(docId, {
+            doc_id: docId,
+            title: doc.title || 'Unknown',
+            source: doc.source || 'Unknown',
+            landing_page_url: doc.landing_page_url || detail.document_url,
+          })
+        }
+      })
+
+      if (typeof detail.impact_score === 'number') {
+        entry.impact_justifications.push({
+          score: detail.impact_score,
+          justification: detail.impact_justification,
+        })
+      }
+
+      if (typeof detail.evidence_score === 'number') {
+        entry.evidence_scores.push({
+          score: detail.evidence_score,
+          justification: detail.evidence_justification,
+        })
+      }
+    })
+
+    return Array.from(aggregated.values()).map((entry) => {
+      const evidenceCategories = Array.from(entry.evidence_categories).sort((a, b) => {
+        const rankA = categoryRank.get(a) ?? 999
+        const rankB = categoryRank.get(b) ?? 999
+        return rankA - rankB
+      })
+      const primaryCategory = evidenceCategories[0]
+      const isSystematicReview = entry.has_sr && !entry.has_non_sr
+
+      const evidenceScoreEntry = entry.evidence_scores.reduce<{ score?: number; justification?: string }>(
+        (best, current) => {
+          if (best.score === undefined || current.score > best.score) {
+            return { score: current.score, justification: current.justification }
+          }
+          return best
+        },
+        {}
+      )
+
+      const impactScoreEntry = entry.impact_justifications.reduce<{ score?: number; justification?: string }>(
+        (best, current) => {
+          if (best.score === undefined || current.score > best.score) {
+            return { score: current.score, justification: current.justification }
+          }
+          return best
+        },
+        {}
+      )
+
+      return {
+        name: entry.name,
+        type: entry.types.size > 0 ? Array.from(entry.types).join(', ') : 'Unknown',
+        country: entry.countries.size > 0 ? Array.from(entry.countries).join(', ') : 'Unknown',
+        description: entry.description,
+        evidence_category: primaryCategory,
+        evidence_categories: evidenceCategories.length > 0 ? evidenceCategories : undefined,
+        is_systematic_review: isSystematicReview,
+        result_count: entry.result_count,
+        results_summary: entry.results_summary,
+        outcome_groups: Array.from(entry.outcome_groups.values()),
+        total_sample_size: entry.total_sample_size,
+        documents: Array.from(entry.documents.values()),
+        impact_score: impactScoreEntry.score,
+        evidence_score: evidenceScoreEntry.score,
+        impact_justification: impactScoreEntry.justification,
+        evidence_justification: evidenceScoreEntry.justification,
+      }
+    })
   }, [])
   
   // Convert fallback interventions to navigator format
@@ -423,10 +699,9 @@ export function InterventionsNavigator({
     }))
   }, [])
 
-  // Render evidence mix summary from detailed interventions
-  const renderEvidenceMix = useCallback((detailedInterventions: DetailedIntervention[] | undefined) => {
-    const computedMix = computeEvidenceMixFromInterventions(detailedInterventions)
-    const mixText = formatEvidenceMixCompact(computedMix)
+  // Render evidence mix summary from backend-provided evidence_mix
+  const renderEvidenceMix = useCallback((evidenceMix: Record<string, number> | undefined) => {
+    const mixText = formatEvidenceMixCompact(evidenceMix)
     if (!mixText) return null
     return (
       <p className="text-sm text-slate-600">
@@ -590,28 +865,28 @@ export function InterventionsNavigator({
                                   {intervention.impact_summary}
                                 </p>
                               )}
-                              {renderEvidenceMix(intervention.detailed_interventions)}
+                              {renderEvidenceMix(intervention.evidence_mix)}
                             </div>
                           )}
                         </div>
-                        
+
                         <div className="flex items-start gap-4 ml-4">
-                          {intervention.stars !== undefined && (
-                            <div className="text-right">
-                              <div className="text-xs text-slate-500">Evidence:</div>
-                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, computeEvidenceMixFromInterventions(intervention.detailed_interventions), intervention.cap_message)}>
+                          <div className="text-right">
+                            <div className="text-xs text-slate-500">Evidence:</div>
+                            {intervention.stars !== undefined ? (
+                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.evidence_mix, intervention.cap_message)}>
                                 <div className="flex items-center cursor-help">
                                   {renderStars(intervention.stars, false)}
                                 </div>
                               </Tooltip>
-                            </div>
-                          )}
-                          {intervention.avg_impact_score && (
-                            <div className="text-right">
-                              <div className="text-xs text-slate-500">Impact:</div>
-                              {renderStars(intervention.avg_impact_score, true)}
-                            </div>
-                          )}
+                            ) : (
+                              renderStars(undefined, false)
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs text-slate-500">Impact:</div>
+                            {renderStars(intervention.avg_impact_score, true)}
+                          </div>
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Frequency:</div>
                             <div className="flex items-center gap-1 justify-end">
@@ -705,28 +980,28 @@ export function InterventionsNavigator({
                                           {intervention.impact_summary}
                                         </p>
                                       )}
-                                      {renderEvidenceMix(intervention.detailed_interventions)}
+                                      {renderEvidenceMix(intervention.issue_evidence_mix)}
                                     </div>
                                   )}
                                 </div>
-                                
+
                                 <div className="flex items-start gap-4 ml-4">
-                                  {intervention.stars !== undefined && (
-                                    <div className="text-right">
-                                      <div className="text-xs text-slate-500">Evidence:</div>
-                                      <Tooltip content={getEvidenceScoreExplanation(intervention.stars, computeEvidenceMixFromInterventions(intervention.detailed_interventions), intervention.cap_message)}>
+                                  <div className="text-right">
+                                    <div className="text-xs text-slate-500">Evidence:</div>
+                                    {intervention.stars !== undefined ? (
+                                      <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.issue_evidence_mix, intervention.cap_message)}>
                                         <div className="flex items-center cursor-help">
                                           {renderStars(intervention.stars, false)}
                                         </div>
                                       </Tooltip>
-                                    </div>
-                                  )}
-                                  {intervention.avg_impact_score && (
-                                    <div className="text-right">
-                                      <div className="text-xs text-slate-500">Impact:</div>
-                                      {renderStars(intervention.avg_impact_score, true)}
-                                    </div>
-                                  )}
+                                    ) : (
+                                      renderStars(undefined, false)
+                                    )}
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xs text-slate-500">Impact:</div>
+                                    {renderStars(intervention.avg_impact_score, true)}
+                                  </div>
                                   <div className="text-right">
                                     <div className="text-xs text-slate-500">Frequency:</div>
                                     <div className="flex items-center gap-1">

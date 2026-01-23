@@ -13,6 +13,8 @@ interface StarRatingProps {
   tooltip?: string
   /** Display mode: 'badge' for X/5 format, 'icons' for star icons only, 'icons-with-number' for both */
   mode?: DisplayMode
+  /** Show greyed stars instead of "N/A" text when stars is null/undefined */
+  showGreyedStarsOnNull?: boolean
 }
 
 export function StarRating({
@@ -21,7 +23,8 @@ export function StarRating({
   size = 'sm',
   className,
   tooltip,
-  mode = 'badge'
+  mode = 'badge',
+  showGreyedStarsOnNull = false
 }: StarRatingProps) {
   const sizeConfig = {
     sm: { text: 'text-xs', icon: 'h-3 w-3', minWidth: 'min-w-[2rem]' },
@@ -29,7 +32,28 @@ export function StarRating({
     lg: { text: 'text-base', icon: 'h-5 w-5', minWidth: 'min-w-[3rem]' },
   }[size]
 
+  // Handle null/undefined stars
   if (stars == null) {
+    if (showGreyedStarsOnNull) {
+      // Show all greyed stars with tooltip
+      const greyedStars = (
+        <span className={cn("inline-flex items-center gap-0.5", className)}>
+          {Array.from({ length: maxStars }, (_, i) => (
+            <Star
+              key={i}
+              className={cn(sizeConfig.icon, "fill-gray-200 text-gray-200")}
+            />
+          ))}
+        </span>
+      )
+      return (
+        <Tooltip content={tooltip || "Not enough data"}>
+          {greyedStars}
+        </Tooltip>
+      )
+    }
+
+    // Default: show "N/A" text
     const naDisplay = (
       <span className={cn(
         "text-slate-400",
@@ -49,6 +73,25 @@ export function StarRating({
     }
 
     return naDisplay
+  }
+
+  // Handle 0 stars case - show all greyed stars
+  if (stars === 0) {
+    const greyedStars = (
+      <span className={cn("inline-flex items-center gap-0.5", className)}>
+        {Array.from({ length: maxStars }, (_, i) => (
+          <Star
+            key={i}
+            className={cn(sizeConfig.icon, "fill-gray-200 text-gray-200")}
+          />
+        ))}
+      </span>
+    )
+    return (
+      <Tooltip content={tooltip || "Not enough data"}>
+        {greyedStars}
+      </Tooltip>
+    )
   }
 
   // Star icons component

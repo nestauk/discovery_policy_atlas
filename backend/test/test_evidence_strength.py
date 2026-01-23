@@ -1,7 +1,10 @@
 """Unit tests for evidence strength calculation with sample size penalty."""
 
+import logging
 
 from app.services.analysis.evidence_strength import calculate_evidence_strength
+
+logger = logging.getLogger(__name__)
 
 
 def _make_doc(
@@ -32,6 +35,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("single_rct_small_sample result=%s", result)
         assert result["base_rating"] == 4
         # Sample size penalty applied (4->3), single_rct cap is 3, doesn't reduce further
         assert result["stars"] == 3
@@ -49,6 +53,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("multiple_small_rcts result=%s", result)
         assert result["base_rating"] == 4
         assert result["cap_applied"] == "small_sample"
         assert result["stars"] == 3  # 4 -> 3 from sample size penalty
@@ -62,6 +67,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("single_rct_large_sample result=%s", result)
         assert result["base_rating"] == 4
         # Only single-study cap, no sample size penalty
         assert result["cap_applied"] == "single_rct"
@@ -79,6 +85,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("mixed_small_large_rcts result=%s", result)
         assert result["base_rating"] == 4
         # No sample size penalty because one study has N>=100
         assert result["cap_applied"] is None
@@ -96,6 +103,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("unknown_sample_sizes result=%s", result)
         assert result["base_rating"] == 4
         # No penalty because no known sample sizes
         assert result["cap_applied"] is None
@@ -113,6 +121,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("small_known_unknown result=%s", result)
         assert result["base_rating"] == 4
         # Penalty applies because ALL known samples are small
         assert result["cap_applied"] == "small_sample"
@@ -126,6 +135,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("observational_small_sample result=%s", result)
         assert result["base_rating"] == 3
         assert result["cap_applied"] == "small_sample"
         assert result["stars"] == 2  # 3 -> 2
@@ -137,6 +147,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("single_systematic_review result=%s", result)
         assert result["base_rating"] == 5
         # Only single-study cap for SR, no sample size penalty
         assert result["cap_applied"] == "single_srma"
@@ -147,6 +158,7 @@ class TestSampleSizePenalty:
         docs = [_make_doc("Modelling & Simulation", sample_size=50, doc_id="1")]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("modelling_no_penalty result=%s", result)
         assert result["base_rating"] == 2
         assert result["cap_applied"] is None
         assert result["stars"] == 2
@@ -163,6 +175,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("boundary_n99 result=%s", result)
         assert result["cap_applied"] == "small_sample"
         assert result["stars"] == 3
 
@@ -178,6 +191,7 @@ class TestSampleSizePenalty:
         ]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("boundary_n100 result=%s", result)
         assert result["cap_applied"] is None
         assert result["stars"] == 4
 
@@ -190,6 +204,7 @@ class TestEvidenceStrengthBasics:
         docs = [_make_doc("RCTs and Quasi-Experimental Studies", confidence=0.3)]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("no_qualifying_documents result=%s", result)
         assert result["stars"] == 0
         assert result["cap_message"] == "No qualifying evidence"
 
@@ -197,6 +212,7 @@ class TestEvidenceStrengthBasics:
         """Empty document list returns 0 stars."""
         result = calculate_evidence_strength([], project_total_docs=10)
 
+        logger.info("empty_documents result=%s", result)
         assert result["stars"] == 0
 
     def test_evidence_hierarchy(self):
@@ -222,6 +238,12 @@ class TestEvidenceStrengthBasics:
         rct_result = calculate_evidence_strength(rct_docs, project_total_docs=10)
         obs_result = calculate_evidence_strength(obs_docs, project_total_docs=10)
 
+        logger.info(
+            "evidence_hierarchy results=sr:%s rct:%s obs:%s",
+            sr_result,
+            rct_result,
+            obs_result,
+        )
         assert sr_result["base_rating"] == 5
         assert rct_result["base_rating"] == 4
         assert obs_result["base_rating"] == 3
@@ -236,6 +258,7 @@ class TestCapStacking:
         docs = [_make_doc("Observational Research Studies", sample_size=50, doc_id="1")]
         result = calculate_evidence_strength(docs, project_total_docs=10)
 
+        logger.info("cap_stacking_observational result=%s", result)
         # Base: 3, sample penalty: -1 -> 2, single_obs cap: 2 (doesn't reduce further)
         assert result["base_rating"] == 3
         assert result["stars"] == 2

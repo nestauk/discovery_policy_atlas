@@ -29,16 +29,10 @@ from .evidence_category import (
     DENSITY_THRESHOLD,
     SMALL_SAMPLE_THRESHOLD,
     CAP_MESSAGES,
+    CAUSAL_EVIDENCE_CATEGORIES,
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Evidence categories where sample size matters for causal inference
-CAUSAL_EVIDENCE_CATEGORIES = {
-    "RCTs and Quasi-Experimental Studies",
-    "Observational Research Studies",
-}
 
 
 def _parse_sample_size(value: object) -> Optional[int]:
@@ -166,7 +160,7 @@ def calculate_document_evidence_score(doc: dict) -> dict:
     if evidence_category:
         justification = f"Based on evidence category: {evidence_category}"
         if penalty_applied:
-            justification = f"{justification}. Score reduced due to sample size < 100"
+            justification = f"{justification}. Score reduced due to sample size < 100."
 
     return {
         "score": score,
