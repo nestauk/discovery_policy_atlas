@@ -1941,7 +1941,7 @@ async def get_issue_intervention_navigator(
                         if detail.get("source_documents")
                     }
                     used_doc_ids.discard(None)
-                    issue_doc_ids = used_doc_ids or set(shared_docs)
+                    issue_doc_ids = used_doc_ids
 
                     issue_documents_with_evidence = []
                     for shared_doc_id in issue_doc_ids:
@@ -1988,8 +1988,11 @@ async def get_issue_intervention_navigator(
                                 unique_interventions[name] = detail
 
                     display_evidence_mix: dict[str, int] = {}
-                    for detail in unique_interventions.values():
-                        category = detail.get("evidence_category")
+                    for doc_id in issue_doc_ids:
+                        doc = docs_by_doc_id.get(doc_id)
+                        if not doc:
+                            continue
+                        category = doc.get("evidence_category")
                         if not category:
                             continue
                         key = EVIDENCE_CATEGORY_TO_KEY.get(category, "unknown")

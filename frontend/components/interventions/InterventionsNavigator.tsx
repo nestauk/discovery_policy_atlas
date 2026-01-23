@@ -363,9 +363,17 @@ export function InterventionsNavigator({
     const categories = getEvidenceCategories()
     const categoryToKey = new Map(categories.map(category => [category.name, category.key]))
     const counts: Record<string, number> = {}
+    const seenDocIds = new Set<string>()
     for (const detail of detailedInterventions) {
-      if (!detail.evidence_category) continue
-      const key = categoryToKey.get(detail.evidence_category) || 'unknown'
+      const sourceDoc = detail.source_documents?.[0]
+      const docId = sourceDoc?.doc_id
+      const evidenceCategory = sourceDoc?.evidence_category || detail.evidence_category
+      if (!evidenceCategory) continue
+      if (docId) {
+        if (seenDocIds.has(docId)) continue
+        seenDocIds.add(docId)
+      }
+      const key = categoryToKey.get(evidenceCategory) || 'unknown'
       counts[key] = (counts[key] || 0) + 1
     }
     return counts
