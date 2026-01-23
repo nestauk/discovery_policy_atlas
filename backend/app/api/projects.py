@@ -32,6 +32,7 @@ from app.services.analysis.schemas import (
 )
 from app.services.analysis.evidence_category import (
     EVIDENCE_CATEGORY_RANKS,
+    EVIDENCE_CATEGORY_TO_KEY,
 )
 from app.services.analysis.evidence_strength import (
     _parse_sample_size,
@@ -1652,13 +1653,56 @@ async def get_issue_intervention_navigator(
                         (issue_theme_id, intervention_theme_id)
                     ] = pair_shared_docs
 
+        # Pre-compute which docs actually produce detailed interventions per theme.
+        # Aligns evidence strength/mix to what the UI can display.
+        intervention_docs_with_details: dict[str, set[str]] = {}
+        for intervention_theme in intervention_themes:
+            intervention_theme_id = intervention_theme["id"]
+            intervention_extraction_ids = theme_to_extractions.get(
+                intervention_theme_id, []
+            )
+            candidate_doc_ids = intervention_shared_docs_union.get(
+                intervention_theme_id, set()
+            )
+            if not candidate_doc_ids or not intervention_extraction_ids:
+                continue
+            for ext_id in intervention_extraction_ids:
+                extraction = extractions_by_id.get(str(ext_id))
+                if not extraction or not extraction.get("analysis_document_id"):
+                    continue
+                doc = docs_by_id.get(str(extraction["analysis_document_id"]))
+                if not doc:
+                    continue
+                doc_id = doc.get("doc_id")
+                if not doc_id or doc_id not in candidate_doc_ids:
+                    continue
+                extraction_results = doc.get("extraction_results", {}) or {}
+                interventions_data = extraction_results.get("interventions", [])
+                intervention_name = extraction.get(
+                    "label", (extraction.get("raw_data") or {}).get("name", "")
+                )
+                if not intervention_name:
+                    continue
+                if any(
+                    intervention_data.get("name") == intervention_name
+                    or intervention_data.get("label") == intervention_name
+                    for intervention_data in interventions_data
+                ):
+                    intervention_docs_with_details.setdefault(
+                        intervention_theme_id, set()
+                    ).add(doc_id)
+
         # Pre-compute intervention-level evidence strength from UNION of shared_docs
         # Only includes docs that are linked to both an issue AND this intervention
         intervention_evidence_cache = {}
         for intervention_theme in intervention_themes:
             intervention_theme_id = intervention_theme["id"]
-            intervention_doc_ids = intervention_shared_docs_union.get(
+            aligned_doc_ids = intervention_docs_with_details.get(
                 intervention_theme_id, set()
+            )
+            intervention_doc_ids = (
+                aligned_doc_ids
+                or intervention_shared_docs_union.get(intervention_theme_id, set())
             )
 
             # Build evidence info from documents in the union
@@ -1744,27 +1788,6 @@ async def get_issue_intervention_navigator(
                             "cap_message": None,
                             "evidence_mix": {},
                         },
-                    )
-
-                    # Calculate issue-specific evidence_mix from shared_docs only
-                    # This shows evidence linking THIS intervention to THIS issue
-                    issue_documents_with_evidence = []
-                    for shared_doc_id in shared_docs:
-                        doc = docs_by_doc_id.get(shared_doc_id)
-                        if not doc:
-                            continue
-                        extraction_results = doc.get("extraction_results", {}) or {}
-                        interventions = extraction_results.get("interventions", [])
-                        max_sample_size = get_document_max_sample_size(interventions)
-                        issue_documents_with_evidence.append(
-                            build_document_evidence_info(
-                                doc, max_sample_size, shared_doc_id
-                            )
-                        )
-
-                    issue_evidence_strength = calculate_evidence_strength(
-                        issue_documents_with_evidence,
-                        len(documents),
                     )
 
                     # Build detailed interventions from the extractions
@@ -1910,6 +1933,35 @@ async def get_issue_intervention_navigator(
                                     }
                                 )
 
+                    # Calculate issue-specific evidence_mix from shared_docs only,
+                    # but align to docs that actually contributed detailed interventions.
+                    used_doc_ids = {
+                        detail.get("source_documents", [{}])[0].get("doc_id")
+                        for detail in detailed_interventions
+                        if detail.get("source_documents")
+                    }
+                    used_doc_ids.discard(None)
+                    issue_doc_ids = used_doc_ids or set(shared_docs)
+
+                    issue_documents_with_evidence = []
+                    for shared_doc_id in issue_doc_ids:
+                        doc = docs_by_doc_id.get(shared_doc_id)
+                        if not doc:
+                            continue
+                        extraction_results = doc.get("extraction_results", {}) or {}
+                        interventions = extraction_results.get("interventions", [])
+                        max_sample_size = get_document_max_sample_size(interventions)
+                        issue_documents_with_evidence.append(
+                            build_document_evidence_info(
+                                doc, max_sample_size, shared_doc_id
+                            )
+                        )
+
+                    issue_evidence_strength = calculate_evidence_strength(
+                        issue_documents_with_evidence,
+                        len(documents),
+                    )
+
                     # Deduplicate by name, keeping the highest evidence score
                     unique_interventions = {}
                     for detail in detailed_interventions:
@@ -1935,6 +1987,14 @@ async def get_issue_intervention_navigator(
                             if new_rank < existing_rank:
                                 unique_interventions[name] = detail
 
+                    display_evidence_mix: dict[str, int] = {}
+                    for detail in unique_interventions.values():
+                        category = detail.get("evidence_category")
+                        if not category:
+                            continue
+                        key = EVIDENCE_CATEGORY_TO_KEY.get(category, "unknown")
+                        display_evidence_mix[key] = display_evidence_mix.get(key, 0) + 1
+
                     related_interventions.append(
                         {
                             "theme_name": intervention_theme_name,
@@ -1957,6 +2017,13 @@ async def get_issue_intervention_navigator(
                             "issue_evidence_mix": issue_evidence_strength[
                                 "evidence_mix"
                             ],
+                            # issue_display_evidence_mix: aligns to detailed interventions shown
+                            "issue_display_evidence_mix": display_evidence_mix,
+                            # issue_*: issue-specific evidence strength/caps
+                            "issue_stars": issue_evidence_strength["stars"],
+                            "issue_base_rating": issue_evidence_strength["base_rating"],
+                            "issue_cap_applied": issue_evidence_strength["cap_applied"],
+                            "issue_cap_message": issue_evidence_strength["cap_message"],
                             "detailed_interventions": list(
                                 unique_interventions.values()
                             ),

@@ -35,6 +35,12 @@ interface InterventionTheme {
   cap_message?: string | null
   evidence_mix?: Record<string, number>  // Intervention-level (all docs for this intervention)
   issue_evidence_mix?: Record<string, number>  // Issue-specific (only shared docs)
+  display_evidence_mix?: Record<string, number>
+  issue_display_evidence_mix?: Record<string, number>
+  issue_stars?: number
+  issue_base_rating?: number
+  issue_cap_applied?: string | null
+  issue_cap_message?: string | null
   detailed_interventions?: DetailedIntervention[]
 }
 
@@ -350,6 +356,21 @@ export function InterventionsNavigator({
     )
   }, [])
 
+  const computeDisplayEvidenceMix = useCallback((detailedInterventions?: DetailedIntervention[]) => {
+    if (!detailedInterventions || detailedInterventions.length === 0) {
+      return {}
+    }
+    const categories = getEvidenceCategories()
+    const categoryToKey = new Map(categories.map(category => [category.name, category.key]))
+    const counts: Record<string, number> = {}
+    for (const detail of detailedInterventions) {
+      if (!detail.evidence_category) continue
+      const key = categoryToKey.get(detail.evidence_category) || 'unknown'
+      counts[key] = (counts[key] || 0) + 1
+    }
+    return counts
+  }, [])
+
   const sortInterventions = useCallback((interventions: InterventionTheme[]) => {
     return [...interventions].sort((a, b) => {
       switch (sortBy) {
@@ -423,10 +444,11 @@ export function InterventionsNavigator({
       avg_impact_score: intervention.impact_scores.length > 0
         ? intervention.impact_scores.reduce((a: number, b: number) => a + b, 0) / intervention.impact_scores.length
         : undefined,
+      display_evidence_mix: computeDisplayEvidenceMix(intervention.detailed_interventions),
     }))
 
     return sortInterventions(interventions)
-  }, [data, sortInterventions])
+  }, [data, sortInterventions, computeDisplayEvidenceMix])
 
   const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
     if (!detailedInterventions || detailedInterventions.length === 0) {
@@ -865,7 +887,7 @@ export function InterventionsNavigator({
                                   {intervention.impact_summary}
                                 </p>
                               )}
-                              {renderEvidenceMix(intervention.evidence_mix)}
+                              {renderEvidenceMix(intervention.display_evidence_mix || intervention.evidence_mix)}
                             </div>
                           )}
                         </div>
@@ -874,7 +896,7 @@ export function InterventionsNavigator({
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Evidence:</div>
                             {intervention.stars !== undefined ? (
-                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.evidence_mix, intervention.cap_message)}>
+                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.display_evidence_mix || intervention.evidence_mix, intervention.cap_message)}>
                                 <div className="flex items-center cursor-help">
                                   {renderStars(intervention.stars, false)}
                                 </div>
@@ -980,7 +1002,7 @@ export function InterventionsNavigator({
                                           {intervention.impact_summary}
                                         </p>
                                       )}
-                                      {renderEvidenceMix(intervention.issue_evidence_mix)}
+                                      {renderEvidenceMix(intervention.issue_display_evidence_mix || intervention.issue_evidence_mix)}
                                     </div>
                                   )}
                                 </div>
@@ -988,10 +1010,10 @@ export function InterventionsNavigator({
                                 <div className="flex items-start gap-4 ml-4">
                                   <div className="text-right">
                                     <div className="text-xs text-slate-500">Evidence:</div>
-                                    {intervention.stars !== undefined ? (
-                                      <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.issue_evidence_mix, intervention.cap_message)}>
+                                    {intervention.issue_stars !== undefined ? (
+                                      <Tooltip content={getEvidenceScoreExplanation(intervention.issue_stars, intervention.issue_display_evidence_mix || intervention.issue_evidence_mix, intervention.issue_cap_message)}>
                                         <div className="flex items-center cursor-help">
-                                          {renderStars(intervention.stars, false)}
+                                          {renderStars(intervention.issue_stars, false)}
                                         </div>
                                       </Tooltip>
                                     ) : (

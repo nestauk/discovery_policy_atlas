@@ -199,11 +199,12 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       width: '10%',
       sorter: (a, b) => (a.evidence_strength ?? 0) - (b.evidence_strength ?? 0),
       render: (_text, record) => {
-        const score = record.evidence_strength ?? null
+        const score = record.evidence_strength
+        const displayScore = score === 0 ? null : score ?? null
         const tooltip = record.evidence_strength_justification
         return (
           <StarRating
-            stars={score}
+            stars={displayScore}
             size="sm"
             tooltip={tooltip}
           />
