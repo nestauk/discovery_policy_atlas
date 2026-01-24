@@ -11,6 +11,7 @@ import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
+import { fetchEvidenceCategories } from '@/lib/evidenceCategories'
 
 const sidebarItems = [
   { name: 'Projects', href: '/projects', icon: FolderOpen },
@@ -82,6 +83,11 @@ export default function AgentLayout({
     if (!isLoaded) return
     if (!isSignedIn) router.push('/login')
   }, [isSignedIn, isLoaded, router])
+
+  // Prime evidence categories cache from backend API
+  useEffect(() => {
+    fetchEvidenceCategories()
+  }, [])
 
   // Auto-expand test section if user is on a test page
   useEffect(() => {

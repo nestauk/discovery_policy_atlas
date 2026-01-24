@@ -157,11 +157,15 @@ const EVIDENCE_TYPE_FULL_NAMES: Record<string, string> = {
   'unknown': 'unclassified evidence',
 }
 
-/** Evidence types in order of strength (strongest first) */
-const EVIDENCE_TYPE_ORDER = [
-  'systematic_review', 'rct', 'observational', 'modelling',
-  'policy', 'qualitative', 'opinion'
-] as const
+/**
+ * Get evidence type keys in order of strength (strongest first).
+ * Derived from backend categories, excluding 'other' and 'unknown'.
+ */
+function getEvidenceTypeOrder(): string[] {
+  return getEvidenceCategories()
+    .filter(c => c.key !== 'other' && c.key !== 'unknown')
+    .map(c => c.key)
+}
 
 /**
  * Generate an explanation for an intervention theme's evidence score.
@@ -176,7 +180,7 @@ export function getEvidenceScoreExplanation(
 
   // Build explanation based on ACTUAL evidence present, not star level
   if (evidenceMix && Object.keys(evidenceMix).length > 0) {
-    const presentTypes = EVIDENCE_TYPE_ORDER
+    const presentTypes = getEvidenceTypeOrder()
       .filter(key => evidenceMix[key] && evidenceMix[key] > 0)
       .map(key => EVIDENCE_TYPE_FULL_NAMES[key])
 
@@ -207,7 +211,7 @@ export function formatEvidenceMixCompact(evidenceMix?: Record<string, number>): 
   }
 
   // Order by evidence strength (highest first), including 'unknown' at the end
-  const orderWithUnknown = [...EVIDENCE_TYPE_ORDER, 'unknown'] as const
+  const orderWithUnknown = [...getEvidenceTypeOrder(), 'unknown']
 
   return orderWithUnknown
     .filter(key => evidenceMix[key] && evidenceMix[key] > 0)

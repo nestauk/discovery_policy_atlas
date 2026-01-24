@@ -35,6 +35,7 @@ from app.services.analysis.evidence_category import (
     EVIDENCE_CATEGORY_TO_KEY,
 )
 from app.services.analysis.evidence_strength import (
+    UNKNOWN_RANK,
     _parse_sample_size,
     calculate_evidence_strength,
     calculate_document_evidence_score,
@@ -767,7 +768,7 @@ async def get_project_documents(
                 doc_copy["cited_by_count"] = doc_copy["citation_count"]
             evidence_category = doc_copy.get("evidence_category")
             doc_copy["evidence_category_rank"] = EVIDENCE_CATEGORY_RANKS.get(
-                evidence_category, 999
+                evidence_category, UNKNOWN_RANK
             )
             # Calculate evidence strength with sample size penalty
             evidence_result = calculate_document_evidence_score(doc)
@@ -1071,15 +1072,17 @@ async def get_project_interventions(
         project_total_docs = len(docs_result.data)
 
         # Process interventions from all documents
-        aggregated_interventions = {}
+        aggregated_interventions: dict[str, dict] = {}
+        # Separate accumulator for temporary data (sample_sizes, seen_doc_ids, docs_with_evidence)
+        accumulator: dict[str, dict] = {}
 
         def get_evidence_category_rank(evidence_category: str | None) -> int:
             """Convert evidence category to numeric rank for sorting (lower = better).
             Based on evidence hierarchy: SR > RCT > Observational > etc."""
             if not evidence_category:
-                return 999  # Unknown/missing goes to the end
+                return UNKNOWN_RANK  # Unknown/missing goes to the end
 
-            return EVIDENCE_CATEGORY_RANKS.get(evidence_category, 999)
+            return EVIDENCE_CATEGORY_RANKS.get(evidence_category, UNKNOWN_RANK)
 
         for document in docs_result.data:
             extraction_results = document.get("extraction_results", {})
@@ -1104,7 +1107,7 @@ async def get_project_interventions(
                 intervention_key = f"{intervention_name}_{intervention.get('type', '')}_{intervention.get('country', '')}"
 
                 if intervention_key not in aggregated_interventions:
-                    # Initialize intervention data
+                    # Initialize intervention data (final output fields only)
                     evidence_cat = document.get("evidence_category")
                     aggregated_interventions[intervention_key] = {
                         "name": intervention_name,
@@ -1117,14 +1120,15 @@ async def get_project_interventions(
                         ),
                         "is_systematic_review": evidence_cat
                         == "Systematic Review and Meta-Analysis",
-                        "sample_sizes": [],
                         "result_count": 0,
                         "results_summary": [],
                         "documents": [],
-                        # Track evidence info for all documents (for strength calculation)
+                    }
+                    # Initialize accumulator for temporary tracking data
+                    accumulator[intervention_key] = {
+                        "sample_sizes": [],
+                        "seen_doc_ids": set(),
                         "documents_with_evidence": [],
-                        # Track which doc_ids have been added to avoid duplicates
-                        "_seen_doc_ids": set(),
                     }
 
                 # Add document info
@@ -1138,35 +1142,22 @@ async def get_project_interventions(
                 )
 
                 # Get sample size for this intervention (for aggregate stats display)
-                sample_size = intervention.get("sample_size")
-                sample_size_int = None
-                if sample_size:
-                    try:
-                        sample_size_int = int(sample_size)
-                    except (ValueError, TypeError):
-                        pass
+                sample_size_int = _parse_sample_size(intervention.get("sample_size"))
 
                 # Add sample size to list if available (for aggregate stats)
                 if sample_size_int is not None:
-                    aggregated_interventions[intervention_key]["sample_sizes"].append(
+                    accumulator[intervention_key]["sample_sizes"].append(
                         sample_size_int
                     )
 
                 # Track evidence info for strength calculation (one entry per document)
                 # Use document-level max sample size for penalty calculation
                 doc_id = document.get("doc_id")
-                if (
-                    doc_id
-                    not in aggregated_interventions[intervention_key]["_seen_doc_ids"]
-                ):
-                    aggregated_interventions[intervention_key]["_seen_doc_ids"].add(
-                        doc_id
-                    )
+                if doc_id not in accumulator[intervention_key]["seen_doc_ids"]:
+                    accumulator[intervention_key]["seen_doc_ids"].add(doc_id)
 
                     max_sample_size = get_document_max_sample_size(interventions)
-                    aggregated_interventions[intervention_key][
-                        "documents_with_evidence"
-                    ].append(
+                    accumulator[intervention_key]["documents_with_evidence"].append(
                         build_document_evidence_info(document, max_sample_size, doc_id)
                     )
 
@@ -1211,9 +1202,12 @@ async def get_project_interventions(
 
         # Convert to list and add computed fields
         interventions_list = []
-        for key, intervention_data in aggregated_interventions.items():
+        for intervention_key, intervention_data in aggregated_interventions.items():
+            # Get temporary data from accumulator
+            acc = accumulator[intervention_key]
+            sample_sizes = acc["sample_sizes"]
+
             # Calculate aggregate sample size
-            sample_sizes = intervention_data["sample_sizes"]
             if sample_sizes:
                 intervention_data["total_sample_size"] = sum(sample_sizes)
                 intervention_data["avg_sample_size"] = sum(sample_sizes) / len(
@@ -1265,7 +1259,7 @@ async def get_project_interventions(
 
             # Calculate evidence strength using new methodology
             evidence_strength = calculate_evidence_strength(
-                intervention_data["documents_with_evidence"],
+                acc["documents_with_evidence"],
                 project_total_docs,
             )
             intervention_data["stars"] = evidence_strength["stars"]
@@ -1273,11 +1267,6 @@ async def get_project_interventions(
             intervention_data["cap_applied"] = evidence_strength["cap_applied"]
             intervention_data["cap_message"] = evidence_strength["cap_message"]
             intervention_data["evidence_mix"] = evidence_strength["evidence_mix"]
-
-            # Clean up temporary fields
-            del intervention_data["sample_sizes"]
-            del intervention_data["documents_with_evidence"]
-            del intervention_data["_seen_doc_ids"]
 
             interventions_list.append(intervention_data)
 
@@ -1666,16 +1655,19 @@ async def get_issue_intervention_navigator(
                     intervention_theme_id, []
                 )
 
-                # Use pre-computed shared_docs from first pass
+                # Use pre-computed shared docs from first pass:
+                # documents linked to BOTH this issue AND this intervention
                 pair_key = (theme_id, intervention_theme_id)
-                shared_docs = issue_intervention_shared_docs.get(pair_key, [])
+                issue_intervention_shared_docs_for_pair = (
+                    issue_intervention_shared_docs.get(pair_key, [])
+                )
 
                 # Only include intervention themes that have actual connections
-                if shared_docs:
+                if issue_intervention_shared_docs_for_pair:
                     # Collect scores for this pair's shared docs
                     impact_scores = []
                     evidence_scores = []
-                    for doc_id in shared_docs:
+                    for doc_id in issue_intervention_shared_docs_for_pair:
                         scores = doc_scores.get(doc_id, {})
                         if scores.get("impact_score") is not None:
                             impact_scores.append(scores["impact_score"])
@@ -1709,7 +1701,11 @@ async def get_issue_intervention_navigator(
                             doc = docs_by_id.get(
                                 str(extraction["analysis_document_id"])
                             )
-                            if doc and doc.get("doc_id") in shared_docs:
+                            if (
+                                doc
+                                and doc.get("doc_id")
+                                in issue_intervention_shared_docs_for_pair
+                            ):
                                 raw_data = extraction.get("raw_data", {})
 
                                 # Extract results from document's extraction_results
@@ -1888,7 +1884,7 @@ async def get_issue_intervention_navigator(
                             "impact_summary": intervention_theme.get(
                                 "impact_summary", ""
                             ),
-                            "frequency": len(shared_docs),
+                            "frequency": len(issue_intervention_shared_docs_for_pair),
                             "avg_impact_score": round(avg_impact_score, 1)
                             if avg_impact_score
                             else None,

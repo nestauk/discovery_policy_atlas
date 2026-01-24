@@ -20,7 +20,7 @@ Penalties and caps are applied based on:
 
 import logging
 import re
-from typing import Optional
+from typing import Optional, TypedDict
 
 from .evidence_category import (
     EVIDENCE_CATEGORY_SCORES,
@@ -34,6 +34,29 @@ from .evidence_category import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Fallback rank for unknown/missing evidence categories (sorts to end)
+UNKNOWN_RANK = 999
+
+
+class DocumentEvidenceScoreResult(TypedDict):
+    """Return type for calculate_document_evidence_score()."""
+
+    score: int
+    base_score: int
+    penalty_applied: bool
+    justification: str
+    sample_size: Optional[int]
+
+
+class EvidenceStrengthResult(TypedDict):
+    """Return type for calculate_evidence_strength()."""
+
+    stars: int
+    base_rating: int
+    cap_applied: str | None
+    cap_message: str | None
+    evidence_mix: dict[str, int]
 
 
 def _parse_sample_size(value: object) -> Optional[int]:
@@ -85,16 +108,24 @@ def get_document_sample_size(doc: dict) -> Optional[int]:
 
 
 def get_document_max_sample_size(interventions: list[dict]) -> Optional[int]:
+    """Get the maximum sample size across all interventions in a document.
+
+    Used for evidence strength calculations where we need a single
+    representative sample size for documents with multiple interventions.
+
+    Args:
+        interventions: List of intervention dicts with optional 'sample_size' field
+
+    Returns:
+        Maximum valid sample size found, or None if no valid sizes exist
+    """
     if not interventions:
         return None
     sample_sizes = []
     for intervention in interventions:
-        sample_size = intervention.get("sample_size")
-        if sample_size:
-            try:
-                sample_sizes.append(int(sample_size))
-            except (ValueError, TypeError):
-                pass
+        parsed = _parse_sample_size(intervention.get("sample_size"))
+        if parsed is not None:
+            sample_sizes.append(parsed)
     return max(sample_sizes) if sample_sizes else None
 
 
@@ -169,9 +200,11 @@ def deduplicate_interventions(
             unique[name] = detail
         elif new_score == existing_score:
             existing_rank = EVIDENCE_CATEGORY_RANKS.get(
-                existing.get("evidence_category"), 999
+                existing.get("evidence_category"), UNKNOWN_RANK
             )
-            new_rank = EVIDENCE_CATEGORY_RANKS.get(detail.get("evidence_category"), 999)
+            new_rank = EVIDENCE_CATEGORY_RANKS.get(
+                detail.get("evidence_category"), UNKNOWN_RANK
+            )
             if new_rank < existing_rank:
                 unique[name] = detail
     return unique
@@ -201,7 +234,7 @@ def should_apply_sample_penalty(
     return sample_size < SMALL_SAMPLE_THRESHOLD
 
 
-def calculate_document_evidence_score(doc: dict) -> dict:
+def calculate_document_evidence_score(doc: dict) -> DocumentEvidenceScoreResult:
     """Calculate evidence score for a single document with sample size penalty.
 
     This is the single source of truth for document-level evidence scoring.
@@ -210,12 +243,8 @@ def calculate_document_evidence_score(doc: dict) -> dict:
         doc: Document dict with 'evidence_category' and optionally 'extraction_results'
 
     Returns:
-        Dict with:
-        - score: Evidence score (0-5) after any penalties
-        - base_score: Original score before penalties
-        - penalty_applied: Whether sample size penalty was applied
-        - justification: Human-readable explanation
-        - sample_size: Extracted sample size (or None)
+        DocumentEvidenceScoreResult with score, base_score, penalty_applied,
+        justification, and sample_size fields.
     """
     evidence_category = doc.get("evidence_category")
     base_score = EVIDENCE_CATEGORY_SCORES.get(evidence_category, 0)
@@ -287,7 +316,7 @@ def _check_aggregate_sample_penalty(
 def calculate_evidence_strength(
     documents_with_evidence: list[dict],
     project_total_docs: int,
-) -> dict:
+) -> EvidenceStrengthResult:
     """Calculate evidence strength rating for an intervention.
 
     Args:
@@ -296,12 +325,8 @@ def calculate_evidence_strength(
         project_total_docs: Total documents in project (for density calculation)
 
     Returns:
-        Dict with:
-        - stars: Final rating after all penalties (0-5)
-        - base_rating: Rating from evidence categories BEFORE penalties
-        - cap_applied: Type of cap/penalty applied (if any)
-        - cap_message: Human-readable explanation of cap
-        - evidence_mix: Counts by evidence type key
+        EvidenceStrengthResult with stars, base_rating, cap_applied,
+        cap_message, and evidence_mix fields.
     """
     # Filter to documents meeting confidence threshold
     qualifying_docs = [
