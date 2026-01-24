@@ -43,6 +43,11 @@ from app.services.analysis.evidence_strength import (
     build_evidence_info_for_docs,
     deduplicate_interventions,
 )
+from app.services.analysis.navigator_service import (
+    compute_shared_docs_mappings,
+    compute_intervention_docs_with_details,
+    compute_intervention_evidence_cache,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1607,119 +1612,33 @@ async def get_issue_intervention_navigator(
             if doc_mapping_pairs:
                 doc_mappings[doc_id] = doc_mapping_pairs
 
-        # First pass: collect shared_docs for each issue-intervention pair
-        # This finds docs that are linked to BOTH an issue AND an intervention
-        # Store per-pair for reuse, and build union per intervention
-        issue_intervention_shared_docs: dict[
-            tuple[str, str], list[str]
-        ] = {}  # (issue_id, intervention_id) -> [doc_ids]
-        intervention_shared_docs_union: dict[
-            str, set[str]
-        ] = {}  # intervention_id -> set of doc_ids
+        # Pre-compute shared document mappings and evidence strength
+        # See navigator_service.py for detailed documentation
+        (
+            issue_intervention_shared_docs,
+            intervention_shared_docs_union,
+        ) = compute_shared_docs_mappings(
+            issue_themes,
+            intervention_themes,
+            theme_to_extractions,
+            doc_mappings,
+        )
 
-        for issue_theme in issue_themes:
-            issue_theme_id = issue_theme["id"]
-            issue_extraction_ids = theme_to_extractions.get(issue_theme_id, [])
+        intervention_docs_with_details = compute_intervention_docs_with_details(
+            intervention_themes,
+            theme_to_extractions,
+            intervention_shared_docs_union,
+            extractions_by_id,
+            docs_by_id,
+        )
 
-            for intervention_theme in intervention_themes:
-                intervention_theme_id = intervention_theme["id"]
-                intervention_extraction_ids = theme_to_extractions.get(
-                    intervention_theme_id, []
-                )
-
-                # Find documents that have both issue and intervention extractions
-                pair_shared_docs = []
-                for doc_id, mapping_pairs in doc_mappings.items():
-                    doc_has_issue = any(
-                        issue_ext_id in issue_extraction_ids
-                        for issue_ext_id, _ in mapping_pairs
-                    )
-                    doc_has_intervention = any(
-                        intervention_ext_id in intervention_extraction_ids
-                        for _, intervention_ext_id in mapping_pairs
-                    )
-
-                    if doc_has_issue and doc_has_intervention:
-                        pair_shared_docs.append(doc_id)
-                        # Also add to intervention union
-                        if intervention_theme_id not in intervention_shared_docs_union:
-                            intervention_shared_docs_union[
-                                intervention_theme_id
-                            ] = set()
-                        intervention_shared_docs_union[intervention_theme_id].add(
-                            doc_id
-                        )
-
-                # Store for reuse in navigator building
-                if pair_shared_docs:
-                    issue_intervention_shared_docs[
-                        (issue_theme_id, intervention_theme_id)
-                    ] = pair_shared_docs
-
-        # Pre-compute which docs actually produce detailed interventions per theme.
-        # Aligns evidence strength/mix to what the UI can display.
-        intervention_docs_with_details: dict[str, set[str]] = {}
-        for intervention_theme in intervention_themes:
-            intervention_theme_id = intervention_theme["id"]
-            intervention_extraction_ids = theme_to_extractions.get(
-                intervention_theme_id, []
-            )
-            candidate_doc_ids = intervention_shared_docs_union.get(
-                intervention_theme_id, set()
-            )
-            if not candidate_doc_ids or not intervention_extraction_ids:
-                continue
-            for ext_id in intervention_extraction_ids:
-                extraction = extractions_by_id.get(str(ext_id))
-                if not extraction or not extraction.get("analysis_document_id"):
-                    continue
-                doc = docs_by_id.get(str(extraction["analysis_document_id"]))
-                if not doc:
-                    continue
-                doc_id = doc.get("doc_id")
-                if not doc_id or doc_id not in candidate_doc_ids:
-                    continue
-                extraction_results = doc.get("extraction_results", {}) or {}
-                interventions_data = extraction_results.get("interventions", [])
-                intervention_name = extraction.get(
-                    "label", (extraction.get("raw_data") or {}).get("name", "")
-                )
-                if not intervention_name:
-                    continue
-                if any(
-                    intervention_data.get("name") == intervention_name
-                    or intervention_data.get("label") == intervention_name
-                    for intervention_data in interventions_data
-                ):
-                    intervention_docs_with_details.setdefault(
-                        intervention_theme_id, set()
-                    ).add(doc_id)
-
-        # Pre-compute intervention-level evidence strength from UNION of shared_docs
-        # Only includes docs that are linked to both an issue AND this intervention
-        intervention_evidence_cache = {}
-        for intervention_theme in intervention_themes:
-            intervention_theme_id = intervention_theme["id"]
-            aligned_doc_ids = intervention_docs_with_details.get(
-                intervention_theme_id, set()
-            )
-            intervention_doc_ids = (
-                aligned_doc_ids
-                or intervention_shared_docs_union.get(intervention_theme_id, set())
-            )
-
-            # Build evidence info from documents in the union
-            documents_with_evidence = build_evidence_info_for_docs(
-                intervention_doc_ids, docs_by_doc_id
-            )
-
-            # Calculate and cache evidence strength for this intervention theme
-            intervention_evidence_cache[
-                intervention_theme_id
-            ] = calculate_evidence_strength(
-                documents_with_evidence,
-                len(documents),
-            )
+        intervention_evidence_cache = compute_intervention_evidence_cache(
+            intervention_themes,
+            intervention_docs_with_details,
+            intervention_shared_docs_union,
+            docs_by_doc_id,
+            len(documents),
+        )
 
         # Now build the navigator structure
         navigator_issue_themes = []
@@ -1731,9 +1650,6 @@ async def get_issue_intervention_navigator(
             frequency = issue_theme.get("frequency", 0)
 
             logger.info(f"Processing issue theme: {theme_name} (freq: {frequency})")
-
-            # Get extractions assigned to this issue theme
-            issue_extraction_ids = theme_to_extractions.get(theme_id, [])
 
             # Find related intervention themes based on document co-occurrence
             related_interventions = []

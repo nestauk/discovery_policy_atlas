@@ -205,7 +205,6 @@ def calculate_document_evidence_score(doc: dict) -> dict:
     """Calculate evidence score for a single document with sample size penalty.
 
     This is the single source of truth for document-level evidence scoring.
-    Use this instead of manually calculating the score in multiple places.
 
     Args:
         doc: Document dict with 'evidence_category' and optionally 'extraction_results'
