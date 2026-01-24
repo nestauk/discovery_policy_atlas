@@ -1842,11 +1842,16 @@ async def get_issue_intervention_navigator(
                                     }
                                 )
 
+                    # Deduplicate by name, keeping the highest evidence score
+                    unique_interventions = deduplicate_interventions(
+                        detailed_interventions
+                    )
+
                     # Calculate issue-specific evidence_mix from shared_docs only,
-                    # but align to docs that actually contributed detailed interventions.
+                    # but align to docs that actually contributed visible intervention cards.
                     used_doc_ids = {
                         detail.get("source_documents", [{}])[0].get("doc_id")
-                        for detail in detailed_interventions
+                        for detail in unique_interventions.values()
                         if detail.get("source_documents")
                     }
                     used_doc_ids.discard(None)
@@ -1859,11 +1864,6 @@ async def get_issue_intervention_navigator(
                     issue_evidence_strength = calculate_evidence_strength(
                         issue_documents_with_evidence,
                         len(documents),
-                    )
-
-                    # Deduplicate by name, keeping the highest evidence score
-                    unique_interventions = deduplicate_interventions(
-                        detailed_interventions
                     )
 
                     display_evidence_mix: dict[str, int] = {}

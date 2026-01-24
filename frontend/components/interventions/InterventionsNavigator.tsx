@@ -414,6 +414,99 @@ export function InterventionsNavigator({
     return counts
   }, [])
 
+  const parseSampleSizeValue = useCallback((value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return Math.trunc(value)
+    }
+    if (typeof value === 'string') {
+      const cleaned = value.replace(/,/g, '').trim()
+      if (!cleaned) return null
+      const match = cleaned.match(/\d+/)
+      if (!match) return null
+      const parsed = Number(match[0])
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+    }
+    return null
+  }, [])
+
+  // Apply frontend caps + sample-size penalty for All Interventions aggregation.
+  // Mirrors backend logic in evidence_strength.py where possible.
+  const applyFrontendEvidenceCaps = useCallback((
+    stars: number | undefined,
+    evidenceMix: Record<string, number>,
+    detailedInterventions: DetailedIntervention[] | undefined,
+    fallbackCapMessage?: string | null
+  ): { stars: number | undefined; capMessage?: string | null } => {
+    if (stars === undefined) return { stars, capMessage: fallbackCapMessage ?? null }
+
+    let adjustedStars = stars
+    const capMessages: string[] = []
+    const categories = getEvidenceCategories()
+    const categoryToKey = new Map(categories.map(category => [category.name, category.key]))
+
+    const hasSystematicReview = (evidenceMix['systematic_review'] || 0) > 0
+    const hasRct = (evidenceMix['rct'] || 0) > 0
+    const hasObservational = (evidenceMix['observational'] || 0) > 0
+    const hasCausal = hasRct || hasObservational
+
+    // Apply small-sample penalty for causal evidence if all known samples are < 100
+    if (!hasSystematicReview && hasCausal && detailedInterventions?.length) {
+      const seenDocIds = new Set<string>()
+      const causalSampleSizes: number[] = []
+
+      detailedInterventions.forEach((detail, idx) => {
+        const sourceDoc = detail.source_documents?.[0]
+        const docId = sourceDoc?.doc_id || `${detail.name || 'unknown'}-${idx}`
+        const evidenceCategory = sourceDoc?.evidence_category || detail.evidence_category
+        if (!evidenceCategory) return
+        const key = categoryToKey.get(evidenceCategory)
+        if (key !== 'rct' && key !== 'observational') return
+        if (seenDocIds.has(docId)) return
+        seenDocIds.add(docId)
+
+        const sampleSize = parseSampleSizeValue(sourceDoc?.sample_size)
+        if (sampleSize !== null) {
+          causalSampleSizes.push(sampleSize)
+        }
+      })
+
+      if (
+        causalSampleSizes.length > 0
+        && causalSampleSizes.every(sample => sample < 100)
+      ) {
+        adjustedStars = Math.max(0, adjustedStars - 1)
+        capMessages.push(
+          'All studies have sample sizes under 100, limiting statistical power'
+        )
+      }
+    }
+
+    // Apply single-study caps based on evidence mix
+    if ((evidenceMix['systematic_review'] || 0) === 1 && adjustedStars > 4) {
+      adjustedStars = 4
+      capMessages.push('Limited by single systematic review')
+    }
+    if ((evidenceMix['rct'] || 0) === 1 && !hasSystematicReview && adjustedStars > 3) {
+      adjustedStars = 3
+      capMessages.push('Limited by single experimental study')
+    }
+    if (
+      (evidenceMix['observational'] || 0) === 1
+      && !hasSystematicReview
+      && !hasRct
+      && adjustedStars > 2
+    ) {
+      adjustedStars = 2
+      capMessages.push('Limited by single observational study')
+    }
+
+    const capMessage = capMessages.length > 0
+      ? capMessages.join('. ')
+      : (fallbackCapMessage ?? null)
+
+    return { stars: adjustedStars, capMessage }
+  }, [parseSampleSizeValue])
+
   const sortInterventions = useCallback((interventions: InterventionTheme[]) => {
     return [...interventions].sort((a, b) => {
       switch (sortBy) {
@@ -482,16 +575,27 @@ export function InterventionsNavigator({
       })
     })
 
-    const interventions = Array.from(interventionsMap.values()).map(intervention => ({
-      ...intervention,
-      avg_impact_score: intervention.impact_scores.length > 0
-        ? intervention.impact_scores.reduce((a: number, b: number) => a + b, 0) / intervention.impact_scores.length
-        : undefined,
-      display_evidence_mix: computeDisplayEvidenceMix(intervention.detailed_interventions),
-    }))
+    const interventions = Array.from(interventionsMap.values()).map(intervention => {
+      const displayMix = computeDisplayEvidenceMix(intervention.detailed_interventions)
+      const capResult = applyFrontendEvidenceCaps(
+        intervention.stars,
+        displayMix,
+        intervention.detailed_interventions,
+        intervention.cap_message
+      )
+      return {
+        ...intervention,
+        avg_impact_score: intervention.impact_scores.length > 0
+          ? intervention.impact_scores.reduce((a: number, b: number) => a + b, 0) / intervention.impact_scores.length
+          : undefined,
+        display_evidence_mix: displayMix,
+        stars: capResult.stars,
+        cap_message: capResult.capMessage ?? null,
+      }
+    })
 
     return sortInterventions(interventions)
-  }, [data, sortInterventions, computeDisplayEvidenceMix])
+  }, [data, sortInterventions, computeDisplayEvidenceMix, applyFrontendEvidenceCaps])
 
   const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
     if (!detailedInterventions || detailedInterventions.length === 0) {
