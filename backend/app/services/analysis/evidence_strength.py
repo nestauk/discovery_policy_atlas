@@ -24,6 +24,7 @@ from typing import Optional
 
 from .evidence_category import (
     EVIDENCE_CATEGORY_SCORES,
+    EVIDENCE_CATEGORY_RANKS,
     EVIDENCE_CATEGORY_TO_KEY,
     EVIDENCE_CONFIDENCE_THRESHOLD,
     DENSITY_THRESHOLD,
@@ -106,6 +107,74 @@ def build_document_evidence_info(
         "evidence_confidence": doc.get("evidence_confidence"),
         "sample_size": sample_size,
     }
+
+
+def build_evidence_info_for_docs(
+    doc_ids: set[str],
+    docs_by_doc_id: dict[str, dict],
+) -> list[dict]:
+    """Build evidence info list from a set of document IDs.
+
+    Consolidates the pattern of iterating over doc_ids, extracting
+    interventions, and building evidence info dicts for use with
+    calculate_evidence_strength().
+
+    Args:
+        doc_ids: Set of document IDs to process
+        docs_by_doc_id: Mapping of doc_id -> document dict
+
+    Returns:
+        List of evidence info dicts ready for calculate_evidence_strength()
+    """
+    result = []
+    for doc_id in doc_ids:
+        doc = docs_by_doc_id.get(doc_id)
+        if not doc:
+            continue
+        extraction_results = doc.get("extraction_results", {}) or {}
+        interventions = extraction_results.get("interventions", [])
+        max_sample_size = get_document_max_sample_size(interventions)
+        result.append(build_document_evidence_info(doc, max_sample_size, doc_id))
+    return result
+
+
+def deduplicate_interventions(
+    detailed_interventions: list[dict],
+) -> dict[str, dict]:
+    """Deduplicate interventions by name, keeping the highest quality one.
+
+    When multiple interventions share the same name, keeps the one with:
+    1. Highest evidence score (primary criterion)
+    2. Higher-ranked evidence category (tiebreaker)
+
+    Args:
+        detailed_interventions: List of intervention dicts with 'name',
+            'evidence_score', and 'evidence_category' fields
+
+    Returns:
+        Dict mapping intervention name -> best intervention dict
+    """
+    unique: dict[str, dict] = {}
+    for detail in detailed_interventions:
+        name = detail.get("name", "")
+        if not name:
+            continue
+        existing = unique.get(name)
+        if not existing:
+            unique[name] = detail
+            continue
+        existing_score = existing.get("evidence_score") or 0
+        new_score = detail.get("evidence_score") or 0
+        if new_score > existing_score:
+            unique[name] = detail
+        elif new_score == existing_score:
+            existing_rank = EVIDENCE_CATEGORY_RANKS.get(
+                existing.get("evidence_category"), 999
+            )
+            new_rank = EVIDENCE_CATEGORY_RANKS.get(detail.get("evidence_category"), 999)
+            if new_rank < existing_rank:
+                unique[name] = detail
+    return unique
 
 
 def should_apply_sample_penalty(

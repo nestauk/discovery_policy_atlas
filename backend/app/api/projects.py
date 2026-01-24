@@ -40,64 +40,11 @@ from app.services.analysis.evidence_strength import (
     calculate_document_evidence_score,
     get_document_max_sample_size,
     build_document_evidence_info,
+    build_evidence_info_for_docs,
+    deduplicate_interventions,
 )
 
 logger = logging.getLogger(__name__)
-
-
-# --- Helper functions for evidence calculations ---
-
-
-def _build_evidence_info_for_docs(
-    doc_ids: set[str],
-    docs_by_doc_id: dict[str, dict],
-) -> list[dict]:
-    """Build evidence info list from a set of document IDs.
-
-    Consolidates repeated pattern of iterating over doc_ids, extracting
-    interventions, and building evidence info dicts.
-    """
-    result = []
-    for doc_id in doc_ids:
-        doc = docs_by_doc_id.get(doc_id)
-        if not doc:
-            continue
-        extraction_results = doc.get("extraction_results", {}) or {}
-        interventions = extraction_results.get("interventions", [])
-        max_sample_size = get_document_max_sample_size(interventions)
-        result.append(build_document_evidence_info(doc, max_sample_size, doc_id))
-    return result
-
-
-def _deduplicate_interventions(
-    detailed_interventions: list[dict],
-) -> dict[str, dict]:
-    """Deduplicate interventions by name, keeping highest evidence score.
-
-    When scores are equal, keeps the one with the higher-ranked evidence category.
-    """
-    unique = {}
-    for detail in detailed_interventions:
-        name = detail.get("name", "")
-        if not name:
-            continue
-        existing = unique.get(name)
-        if not existing:
-            unique[name] = detail
-            continue
-        existing_score = existing.get("evidence_score") or 0
-        new_score = detail.get("evidence_score") or 0
-        if new_score > existing_score:
-            unique[name] = detail
-        elif new_score == existing_score:
-            existing_rank = EVIDENCE_CATEGORY_RANKS.get(
-                existing.get("evidence_category"), 999
-            )
-            new_rank = EVIDENCE_CATEGORY_RANKS.get(detail.get("evidence_category"), 999)
-            if new_rank < existing_rank:
-                unique[name] = detail
-    return unique
-
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 
@@ -1762,7 +1709,7 @@ async def get_issue_intervention_navigator(
             )
 
             # Build evidence info from documents in the union
-            documents_with_evidence = _build_evidence_info_for_docs(
+            documents_with_evidence = build_evidence_info_for_docs(
                 intervention_doc_ids, docs_by_doc_id
             )
 
@@ -1993,7 +1940,7 @@ async def get_issue_intervention_navigator(
                     used_doc_ids.discard(None)
                     issue_doc_ids = used_doc_ids
 
-                    issue_documents_with_evidence = _build_evidence_info_for_docs(
+                    issue_documents_with_evidence = build_evidence_info_for_docs(
                         issue_doc_ids, docs_by_doc_id
                     )
 
@@ -2003,7 +1950,7 @@ async def get_issue_intervention_navigator(
                     )
 
                     # Deduplicate by name, keeping the highest evidence score
-                    unique_interventions = _deduplicate_interventions(
+                    unique_interventions = deduplicate_interventions(
                         detailed_interventions
                     )
 
