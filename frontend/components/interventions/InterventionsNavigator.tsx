@@ -149,6 +149,41 @@ interface NavigatorData {
   issue_themes: IssueTheme[]
 }
 
+// Type for result summary entries
+type ResultSummary = AggregatedInterventionRow['results_summary'][number]
+
+// Type for input results (from DetailedIntervention)
+type ResultInput = DetailedIntervention['results'][number]
+
+/**
+ * Maps a raw result object to the standardized ResultSummary format.
+ * Consolidates duplicated mapping logic.
+ */
+function mapResultToSummary(result: ResultInput, evidenceCategory?: string): ResultSummary {
+  return {
+    outcome: result.outcome_variable || 'Outcome',
+    direction: result.direction || result.effect_direction || 'unknown',
+    effect_size: result.effect_size,
+    effect_size_type: result.effect_size_type,
+    p_value: result.p_value,
+    uncertainty: result.uncertainty,
+    result_text: result.result_text,
+    supporting_quote: undefined,
+    population_measured: result.population_measured,
+    subgroup_or_dose: result.subgroup_or_dose,
+    heterogeneity_I2: result.heterogeneity_I2,
+    tau2: result.tau2,
+    summary_statistic: result.summary_statistic,
+    estimate_level: result.estimate_level,
+    n_studies: result.n_studies,
+    sample_size: result.sample_size,
+    stratum_type: result.stratum_type,
+    stratum_value: result.stratum_value,
+    evidence_category: evidenceCategory,
+    is_systematic_review: evidenceCategory === 'Systematic Review and Meta-Analysis',
+  }
+}
+
 interface InterventionsNavigatorProps {
   showHeader?: boolean
   viewMode?: 'grouped' | 'all'
@@ -573,55 +608,9 @@ export function InterventionsNavigator({
       const outcomeGroup = entry.outcome_groups.get(docKey)!
 
       entry.result_count += results.length
-      entry.results_summary.push(
-        ...results.map(result => ({
-          outcome: result.outcome_variable || 'Outcome',
-          direction: result.direction || result.effect_direction || 'unknown',
-          effect_size: result.effect_size,
-          effect_size_type: result.effect_size_type,
-          p_value: result.p_value,
-          uncertainty: result.uncertainty,
-          result_text: result.result_text,
-          supporting_quote: undefined,
-          population_measured: result.population_measured,
-          subgroup_or_dose: result.subgroup_or_dose,
-          heterogeneity_I2: result.heterogeneity_I2,
-          tau2: result.tau2,
-          summary_statistic: result.summary_statistic,
-          estimate_level: result.estimate_level,
-          n_studies: result.n_studies,
-          sample_size: result.sample_size,
-          stratum_type: result.stratum_type,
-          stratum_value: result.stratum_value,
-          evidence_category: detail.evidence_category,
-          is_systematic_review: detail.evidence_category === 'Systematic Review and Meta-Analysis',
-        }))
-      )
-
-      outcomeGroup.results.push(
-        ...results.map(result => ({
-          outcome: result.outcome_variable || 'Outcome',
-          direction: result.direction || result.effect_direction || 'unknown',
-          effect_size: result.effect_size,
-          effect_size_type: result.effect_size_type,
-          p_value: result.p_value,
-          uncertainty: result.uncertainty,
-          result_text: result.result_text,
-          supporting_quote: undefined,
-          population_measured: result.population_measured,
-          subgroup_or_dose: result.subgroup_or_dose,
-          heterogeneity_I2: result.heterogeneity_I2,
-          tau2: result.tau2,
-          summary_statistic: result.summary_statistic,
-          estimate_level: result.estimate_level,
-          n_studies: result.n_studies,
-          sample_size: result.sample_size,
-          stratum_type: result.stratum_type,
-          stratum_value: result.stratum_value,
-          evidence_category: detail.evidence_category,
-          is_systematic_review: detail.evidence_category === 'Systematic Review and Meta-Analysis',
-        }))
-      )
+      const mappedResults = results.map(result => mapResultToSummary(result, detail.evidence_category))
+      entry.results_summary.push(...mappedResults)
+      outcomeGroup.results.push(...mappedResults)
 
       const docSampleSize = parseSampleSize(sourceDoc?.sample_size)
       if (docSampleSize > 0) {
