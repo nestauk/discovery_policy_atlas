@@ -1894,7 +1894,7 @@ async def get_issue_intervention_navigator(
                         "description": intervention.get("description", ""),
                         "impact_summary": intervention.get("impact_summary", ""),
                         "frequency": 0,
-                        "detailed_interventions": [],
+                        "detailed_interventions_by_doc": {},  # Dedupe by doc_id
                         "impact_scores": [],
                     }
 
@@ -1907,16 +1907,20 @@ async def get_issue_intervention_navigator(
                 if not entry["impact_summary"] and intervention.get("impact_summary"):
                     entry["impact_summary"] = intervention["impact_summary"]
 
-                # Collect ALL detailed_interventions (no dedup here)
-                entry["detailed_interventions"].extend(
-                    intervention.get("detailed_interventions", [])
-                )
+                # Deduplicate detailed_interventions by doc_id
+                # Same document appearing under multiple issues should only show once
+                for detail in intervention.get("detailed_interventions", []):
+                    source_docs = detail.get("source_documents") or []
+                    doc_id = source_docs[0].get("doc_id") if source_docs else None
+                    if doc_id and doc_id not in entry["detailed_interventions_by_doc"]:
+                        entry["detailed_interventions_by_doc"][doc_id] = detail
 
         # Calculate evidence strength and build final list
         all_interventions = []
 
         for theme_name, entry in all_interventions_map.items():
-            detailed = entry["detailed_interventions"]
+            # Convert deduped dict to list
+            detailed = list(entry["detailed_interventions_by_doc"].values())
 
             # Skip if no cards
             if not detailed:
