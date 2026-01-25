@@ -19,29 +19,32 @@ interface IssueTheme {
   theme_name: string
   description: string
   frequency: number
-  related_interventions: InterventionTheme[]
+  related_interventions: IssueInterventionTheme[]
 }
 
-interface InterventionTheme {
+interface BaseInterventionTheme {
   theme_name: string
   description: string
   impact_summary?: string
   frequency: number
   avg_impact_score?: number
-  // New evidence strength methodology
-  stars?: number
-  base_rating?: number
-  cap_applied?: string | null
-  cap_message?: string | null
-  evidence_mix?: Record<string, number>  // Intervention-level (all docs for this intervention)
-  issue_evidence_mix?: Record<string, number>  // Issue-specific (only shared docs)
-  display_evidence_mix?: Record<string, number>
+  detailed_interventions?: DetailedIntervention[]
+}
+
+interface IssueInterventionTheme extends BaseInterventionTheme {
   issue_display_evidence_mix?: Record<string, number>
   issue_stars?: number
   issue_base_rating?: number
   issue_cap_applied?: string | null
   issue_cap_message?: string | null
-  detailed_interventions?: DetailedIntervention[]
+}
+
+interface AllInterventionTheme extends BaseInterventionTheme {
+  stars?: number
+  base_rating?: number
+  cap_applied?: string | null
+  cap_message?: string | null
+  display_evidence_mix?: Record<string, number>
 }
 
 interface DetailedIntervention {
@@ -87,6 +90,7 @@ interface DetailedIntervention {
     source?: string
     landing_page_url?: string
     evidence_category?: string
+    evidence_confidence?: number
   }>
 }
 
@@ -147,6 +151,7 @@ interface AggregatedInterventionRow {
 
 interface NavigatorData {
   issue_themes: IssueTheme[]
+  all_interventions?: AllInterventionTheme[]
 }
 
 // Type for result summary entries
@@ -391,211 +396,38 @@ export function InterventionsNavigator({
     )
   }, [])
 
-  const computeDisplayEvidenceMix = useCallback((detailedInterventions?: DetailedIntervention[]) => {
-    if (!detailedInterventions || detailedInterventions.length === 0) {
-      return {}
-    }
-    const categories = getEvidenceCategories()
-    const categoryToKey = new Map(categories.map(category => [category.name, category.key]))
-    const counts: Record<string, number> = {}
-    const seenDocIds = new Set<string>()
-    for (const detail of detailedInterventions) {
-      const sourceDoc = detail.source_documents?.[0]
-      const docId = sourceDoc?.doc_id
-      const evidenceCategory = sourceDoc?.evidence_category || detail.evidence_category
-      if (!evidenceCategory) continue
-      if (docId) {
-        if (seenDocIds.has(docId)) continue
-        seenDocIds.add(docId)
-      }
-      const key = categoryToKey.get(evidenceCategory) || 'unknown'
-      counts[key] = (counts[key] || 0) + 1
-    }
-    return counts
-  }, [])
-
-  const parseSampleSizeValue = useCallback((value: unknown): number | null => {
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      return Math.trunc(value)
-    }
-    if (typeof value === 'string') {
-      const cleaned = value.replace(/,/g, '').trim()
-      if (!cleaned) return null
-      const match = cleaned.match(/\d+/)
-      if (!match) return null
-      const parsed = Number(match[0])
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : null
-    }
-    return null
-  }, [])
-
-  // Apply frontend caps + sample-size penalty for All Interventions aggregation.
-  // Mirrors backend logic in evidence_strength.py where possible.
-  const applyFrontendEvidenceCaps = useCallback((
-    stars: number | undefined,
-    evidenceMix: Record<string, number>,
-    detailedInterventions: DetailedIntervention[] | undefined,
-    fallbackCapMessage?: string | null
-  ): { stars: number | undefined; capMessage?: string | null } => {
-    if (stars === undefined) return { stars, capMessage: fallbackCapMessage ?? null }
-
-    let adjustedStars = stars
-    const capMessages: string[] = []
-    const categories = getEvidenceCategories()
-    const categoryToKey = new Map(categories.map(category => [category.name, category.key]))
-
-    const hasSystematicReview = (evidenceMix['systematic_review'] || 0) > 0
-    const hasRct = (evidenceMix['rct'] || 0) > 0
-    const hasObservational = (evidenceMix['observational'] || 0) > 0
-    const hasCausal = hasRct || hasObservational
-
-    // Apply small-sample penalty for causal evidence if all known samples are < 100
-    if (!hasSystematicReview && hasCausal && detailedInterventions?.length) {
-      const seenDocIds = new Set<string>()
-      const causalSampleSizes: number[] = []
-
-      detailedInterventions.forEach((detail, idx) => {
-        const sourceDoc = detail.source_documents?.[0]
-        const docId = sourceDoc?.doc_id || `${detail.name || 'unknown'}-${idx}`
-        const evidenceCategory = sourceDoc?.evidence_category || detail.evidence_category
-        if (!evidenceCategory) return
-        const key = categoryToKey.get(evidenceCategory)
-        if (key !== 'rct' && key !== 'observational') return
-        if (seenDocIds.has(docId)) return
-        seenDocIds.add(docId)
-
-        const sampleSize = parseSampleSizeValue(sourceDoc?.sample_size)
-        if (sampleSize !== null) {
-          causalSampleSizes.push(sampleSize)
-        }
-      })
-
-      if (
-        causalSampleSizes.length > 0
-        && causalSampleSizes.every(sample => sample < 100)
-      ) {
-        adjustedStars = Math.max(0, adjustedStars - 1)
-        capMessages.push(
-          'All studies have sample sizes under 100, limiting statistical power'
-        )
-      }
-    }
-
-    // Apply single-study caps based on evidence mix
-    if ((evidenceMix['systematic_review'] || 0) === 1 && adjustedStars > 4) {
-      adjustedStars = 4
-      capMessages.push('Limited by single systematic review')
-    }
-    if ((evidenceMix['rct'] || 0) === 1 && !hasSystematicReview && adjustedStars > 3) {
-      adjustedStars = 3
-      capMessages.push('Limited by single experimental study')
-    }
-    if (
-      (evidenceMix['observational'] || 0) === 1
-      && !hasSystematicReview
-      && !hasRct
-      && adjustedStars > 2
-    ) {
-      adjustedStars = 2
-      capMessages.push('Limited by single observational study')
-    }
-
-    const capMessage = capMessages.length > 0
-      ? capMessages.join('. ')
-      : (fallbackCapMessage ?? null)
-
-    return { stars: adjustedStars, capMessage }
-  }, [parseSampleSizeValue])
-
-  const sortInterventions = useCallback((interventions: InterventionTheme[]) => {
+  const sortIssueInterventions = useCallback((interventions: IssueInterventionTheme[]) => {
     return [...interventions].sort((a, b) => {
       switch (sortBy) {
         case 'impact':
           return (b.avg_impact_score || 0) - (a.avg_impact_score || 0)
         case 'evidence':
-          // Use new stars field instead of avg_evidence_score
+          return (b.issue_stars ?? 0) - (a.issue_stars ?? 0)
+        case 'frequency':
+        default:
+          return (b.frequency || 0) - (a.frequency || 0)
+      }
+    })
+  }, [sortBy])
+
+  const sortAllInterventions = useCallback((interventions: AllInterventionTheme[]) => {
+    return [...interventions].sort((a, b) => {
+      switch (sortBy) {
+        case 'impact':
+          return (b.avg_impact_score || 0) - (a.avg_impact_score || 0)
+        case 'evidence':
           return (b.stars ?? 0) - (a.stars ?? 0)
         case 'frequency':
         default:
-          return (b.detailed_interventions?.length || 0) - (a.detailed_interventions?.length || 0)
+          return (b.frequency || 0) - (a.frequency || 0)
       }
     })
   }, [sortBy])
 
   const getAllInterventions = useMemo(() => {
-    if (!data) return []
-
-    const interventionsMap = new Map()
-
-    data.issue_themes.forEach(issue => {
-      issue.related_interventions.forEach(intervention => {
-        const key = intervention.theme_name
-        if (interventionsMap.has(key)) {
-          const existing = interventionsMap.get(key)
-          existing.frequency += intervention.frequency
-          if (intervention.avg_impact_score) {
-            existing.impact_scores.push(intervention.avg_impact_score)
-          }
-          // Keep the highest stars rating when combining themes
-          // evidence_mix is now pre-computed per intervention theme (deduplicated),
-          // so we just keep it alongside the stars rating
-          if (intervention.stars !== undefined && (existing.stars === undefined || intervention.stars > existing.stars)) {
-            existing.stars = intervention.stars
-            existing.base_rating = intervention.base_rating
-            existing.cap_applied = intervention.cap_applied
-            existing.cap_message = intervention.cap_message
-            existing.evidence_mix = intervention.evidence_mix
-          } else if (!existing.evidence_mix && intervention.evidence_mix) {
-            // Fallback: keep first evidence_mix if we don't have one yet
-            existing.evidence_mix = intervention.evidence_mix
-          }
-          // Keep the first impact_summary we encounter (if current doesn't have one)
-          if (!existing.impact_summary && intervention.impact_summary) {
-            existing.impact_summary = intervention.impact_summary
-          }
-          // Deduplicate detailed interventions by name + evidence_category
-          // This preserves different evidence types for the same intervention
-          const newDetails = intervention.detailed_interventions || []
-          newDetails.forEach(detail => {
-            const exists = existing.detailed_interventions.some(
-              (d: DetailedIntervention) => d.name === detail.name && d.evidence_category === detail.evidence_category
-            )
-            if (!exists) {
-              existing.detailed_interventions.push(detail)
-            }
-          })
-        } else {
-          interventionsMap.set(key, {
-            ...intervention,
-            impact_scores: intervention.avg_impact_score ? [intervention.avg_impact_score] : [],
-            evidence_mix: intervention.evidence_mix ? { ...intervention.evidence_mix } : {},
-            detailed_interventions: [...(intervention.detailed_interventions || [])]
-          })
-        }
-      })
-    })
-
-    const interventions = Array.from(interventionsMap.values()).map(intervention => {
-      const displayMix = computeDisplayEvidenceMix(intervention.detailed_interventions)
-      const capResult = applyFrontendEvidenceCaps(
-        intervention.stars,
-        displayMix,
-        intervention.detailed_interventions,
-        intervention.cap_message
-      )
-      return {
-        ...intervention,
-        avg_impact_score: intervention.impact_scores.length > 0
-          ? intervention.impact_scores.reduce((a: number, b: number) => a + b, 0) / intervention.impact_scores.length
-          : undefined,
-        display_evidence_mix: displayMix,
-        stars: capResult.stars,
-        cap_message: capResult.capMessage ?? null,
-      }
-    })
-
-    return sortInterventions(interventions)
-  }, [data, sortInterventions, computeDisplayEvidenceMix, applyFrontendEvidenceCaps])
+    if (!data?.all_interventions) return []
+    return sortAllInterventions(data.all_interventions)
+  }, [data, sortAllInterventions])
 
   const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
     if (!detailedInterventions || detailedInterventions.length === 0) {
@@ -822,7 +654,7 @@ export function InterventionsNavigator({
     }))
   }, [])
 
-  // Render evidence mix summary from backend-provided evidence_mix
+  // Render evidence mix summary from backend-provided display mix
   const renderEvidenceMix = useCallback((evidenceMix: Record<string, number> | undefined) => {
     const mixText = formatEvidenceMixCompact(evidenceMix)
     if (!mixText) return null
@@ -988,7 +820,7 @@ export function InterventionsNavigator({
                                   {intervention.impact_summary}
                                 </p>
                               )}
-                              {renderEvidenceMix(intervention.display_evidence_mix || intervention.evidence_mix)}
+                              {renderEvidenceMix(intervention.display_evidence_mix)}
                             </div>
                           )}
                         </div>
@@ -997,7 +829,7 @@ export function InterventionsNavigator({
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Evidence:</div>
                             {intervention.stars !== undefined ? (
-                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.display_evidence_mix || intervention.evidence_mix, intervention.cap_message)}>
+                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.display_evidence_mix, intervention.cap_message)}>
                                 <div className="flex items-center cursor-help">
                                   {renderStars(intervention.stars, false)}
                                 </div>
@@ -1013,7 +845,7 @@ export function InterventionsNavigator({
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Frequency:</div>
                             <div className="flex items-center gap-1 justify-end">
-                              <span className="text-xs text-slate-600 text-right">{intervention.detailed_interventions?.length || 0}</span>
+                              <span className="text-xs text-slate-600 text-right">{intervention.frequency}</span>
                             </div>
                           </div>
                           <div className="ml-2">
@@ -1083,7 +915,7 @@ export function InterventionsNavigator({
                           Interventions:
                         </h4>
                         
-                        {sortInterventions(issue.related_interventions).map((intervention) => (
+                        {sortIssueInterventions(issue.related_interventions).map((intervention) => (
                           <Card key={intervention.theme_name} className="ml-6">
                             <CardHeader className="pb-2">
                               <div 
@@ -1103,7 +935,7 @@ export function InterventionsNavigator({
                                           {intervention.impact_summary}
                                         </p>
                                       )}
-                                      {renderEvidenceMix(intervention.issue_display_evidence_mix || intervention.issue_evidence_mix)}
+                                      {renderEvidenceMix(intervention.issue_display_evidence_mix)}
                                     </div>
                                   )}
                                 </div>
@@ -1112,7 +944,7 @@ export function InterventionsNavigator({
                                   <div className="text-right">
                                     <div className="text-xs text-slate-500">Evidence:</div>
                                     {intervention.issue_stars !== undefined ? (
-                                      <Tooltip content={getEvidenceScoreExplanation(intervention.issue_stars, intervention.issue_display_evidence_mix || intervention.issue_evidence_mix, intervention.issue_cap_message)}>
+                                      <Tooltip content={getEvidenceScoreExplanation(intervention.issue_stars, intervention.issue_display_evidence_mix, intervention.issue_cap_message)}>
                                         <div className="flex items-center cursor-help">
                                           {renderStars(intervention.issue_stars, false)}
                                         </div>
@@ -1128,7 +960,7 @@ export function InterventionsNavigator({
                                   <div className="text-right">
                                     <div className="text-xs text-slate-500">Frequency:</div>
                                     <div className="flex items-center gap-1">
-                                      <span className="text-xs text-slate-600">{intervention.detailed_interventions?.length || 0}</span>
+                                      <span className="text-xs text-slate-600">{intervention.frequency}</span>
                                     </div>
                                   </div>
                                   <div className="ml-2">

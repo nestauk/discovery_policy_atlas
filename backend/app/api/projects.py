@@ -32,7 +32,6 @@ from app.services.analysis.schemas import (
 )
 from app.services.analysis.evidence_category import (
     EVIDENCE_CATEGORY_RANKS,
-    EVIDENCE_CATEGORY_TO_KEY,
 )
 from app.services.analysis.evidence_strength import (
     UNKNOWN_RANK,
@@ -42,12 +41,12 @@ from app.services.analysis.evidence_strength import (
     get_document_max_sample_size,
     build_document_evidence_info,
     build_evidence_info_for_docs,
+    build_evidence_info_from_detailed_interventions,
+    compute_display_evidence_mix_from_detailed,
     deduplicate_interventions,
 )
 from app.services.analysis.navigator_service import (
     compute_shared_docs_mappings,
-    compute_intervention_docs_with_details,
-    compute_intervention_evidence_cache,
 )
 
 logger = logging.getLogger(__name__)
@@ -1603,30 +1602,11 @@ async def get_issue_intervention_navigator(
 
         # Pre-compute shared document mappings and evidence strength
         # See navigator_service.py for detailed documentation
-        (
-            issue_intervention_shared_docs,
-            intervention_shared_docs_union,
-        ) = compute_shared_docs_mappings(
+        issue_intervention_shared_docs = compute_shared_docs_mappings(
             issue_themes,
             intervention_themes,
             theme_to_extractions,
             doc_mappings,
-        )
-
-        intervention_docs_with_details = compute_intervention_docs_with_details(
-            intervention_themes,
-            theme_to_extractions,
-            intervention_shared_docs_union,
-            extractions_by_id,
-            docs_by_id,
-        )
-
-        intervention_evidence_cache = compute_intervention_evidence_cache(
-            intervention_themes,
-            intervention_docs_with_details,
-            intervention_shared_docs_union,
-            docs_by_doc_id,
-            len(documents),
         )
 
         # Now build the navigator structure
@@ -1678,19 +1658,6 @@ async def get_issue_intervention_navigator(
                         sum(impact_scores) / len(impact_scores)
                         if impact_scores
                         else None
-                    )
-
-                    # Use pre-computed evidence strength from UNION of shared_docs across all issues
-                    # Only includes docs linked to both an issue AND this intervention
-                    evidence_strength = intervention_evidence_cache.get(
-                        intervention_theme_id,
-                        {
-                            "stars": 0,
-                            "base_rating": 0,
-                            "cap_applied": None,
-                            "cap_message": None,
-                            "evidence_mix": {},
-                        },
                     )
 
                     # Build detailed interventions from the extractions
@@ -1836,6 +1803,9 @@ async def get_issue_intervention_navigator(
                                                     "landing_page_url"
                                                 ),
                                                 "evidence_category": evidence_cat,
+                                                "evidence_confidence": doc.get(
+                                                    "evidence_confidence"
+                                                ),
                                                 "sample_size": doc_sample_size,
                                             }
                                         ],
@@ -1847,7 +1817,7 @@ async def get_issue_intervention_navigator(
                         detailed_interventions
                     )
 
-                    # Calculate issue-specific evidence_mix from shared_docs only,
+                    # Calculate issue-specific evidence strength from shared_docs only,
                     # but align to docs that actually contributed visible intervention cards.
                     used_doc_ids = {
                         detail.get("source_documents", [{}])[0].get("doc_id")
@@ -1866,16 +1836,9 @@ async def get_issue_intervention_navigator(
                         len(documents),
                     )
 
-                    display_evidence_mix: dict[str, int] = {}
-                    for doc_id in issue_doc_ids:
-                        doc = docs_by_doc_id.get(doc_id)
-                        if not doc:
-                            continue
-                        category = doc.get("evidence_category")
-                        if not category:
-                            continue
-                        key = EVIDENCE_CATEGORY_TO_KEY.get(category, "unknown")
-                        display_evidence_mix[key] = display_evidence_mix.get(key, 0) + 1
+                    display_evidence_mix = compute_display_evidence_mix_from_detailed(
+                        list(unique_interventions.values())
+                    )
 
                     related_interventions.append(
                         {
@@ -1888,17 +1851,6 @@ async def get_issue_intervention_navigator(
                             "avg_impact_score": round(avg_impact_score, 1)
                             if avg_impact_score
                             else None,
-                            # New evidence strength methodology (replaces avg_evidence_score)
-                            "stars": evidence_strength["stars"],
-                            "base_rating": evidence_strength["base_rating"],
-                            "cap_applied": evidence_strength["cap_applied"],
-                            "cap_message": evidence_strength["cap_message"],
-                            # evidence_mix: intervention-level (all docs for this intervention)
-                            "evidence_mix": evidence_strength["evidence_mix"],
-                            # issue_evidence_mix: issue-specific (only shared docs)
-                            "issue_evidence_mix": issue_evidence_strength[
-                                "evidence_mix"
-                            ],
                             # issue_display_evidence_mix: aligns to detailed interventions shown
                             "issue_display_evidence_mix": display_evidence_mix,
                             # issue_*: issue-specific evidence strength/caps
@@ -1929,9 +1881,89 @@ async def get_issue_intervention_navigator(
         # Sort issue themes by frequency
         navigator_issue_themes.sort(key=lambda x: x["frequency"], reverse=True)
 
+        # Aggregate interventions across all issues for all_interventions view
+        all_interventions_map: dict[str, dict] = {}
+
+        for issue_theme in navigator_issue_themes:
+            for intervention in issue_theme["related_interventions"]:
+                theme_name = intervention["theme_name"]
+
+                if theme_name not in all_interventions_map:
+                    all_interventions_map[theme_name] = {
+                        "theme_name": theme_name,
+                        "description": intervention.get("description", ""),
+                        "impact_summary": intervention.get("impact_summary", ""),
+                        "frequency": 0,
+                        "detailed_interventions": [],
+                        "impact_scores": [],
+                    }
+
+                entry = all_interventions_map[theme_name]
+                entry["frequency"] += intervention.get("frequency", 0)
+
+                if intervention.get("avg_impact_score") is not None:
+                    entry["impact_scores"].append(intervention["avg_impact_score"])
+
+                if not entry["impact_summary"] and intervention.get("impact_summary"):
+                    entry["impact_summary"] = intervention["impact_summary"]
+
+                # Collect ALL detailed_interventions (no dedup here)
+                entry["detailed_interventions"].extend(
+                    intervention.get("detailed_interventions", [])
+                )
+
+        # Calculate evidence strength and build final list
+        all_interventions = []
+
+        for theme_name, entry in all_interventions_map.items():
+            detailed = entry["detailed_interventions"]
+
+            # Skip if no cards
+            if not detailed:
+                continue
+
+            # Calculate evidence strength from combined cards
+            docs_with_evidence = build_evidence_info_from_detailed_interventions(
+                detailed
+            )
+            strength = calculate_evidence_strength(docs_with_evidence, len(documents))
+
+            # Calculate display evidence mix
+            display_mix = compute_display_evidence_mix_from_detailed(detailed)
+
+            # Calculate average impact
+            impact_scores = entry["impact_scores"]
+            avg_impact = (
+                sum(impact_scores) / len(impact_scores) if impact_scores else None
+            )
+
+            all_interventions.append(
+                {
+                    "theme_name": theme_name,
+                    "description": entry["description"],
+                    "impact_summary": entry["impact_summary"],
+                    "frequency": entry["frequency"],
+                    "avg_impact_score": round(avg_impact, 1)
+                    if avg_impact is not None
+                    else None,
+                    "stars": strength["stars"],
+                    "base_rating": strength["base_rating"],
+                    "cap_applied": strength["cap_applied"],
+                    "cap_message": strength["cap_message"],
+                    "display_evidence_mix": display_mix,
+                    "detailed_interventions": detailed,
+                }
+            )
+
+        # Sort by frequency
+        all_interventions.sort(key=lambda x: x["frequency"], reverse=True)
+
         logger.info(f"Returning {len(navigator_issue_themes)} issue themes")
 
-        return {"issue_themes": navigator_issue_themes}
+        return {
+            "issue_themes": navigator_issue_themes,
+            "all_interventions": all_interventions,
+        }
 
     except Exception as e:
         logger.error(

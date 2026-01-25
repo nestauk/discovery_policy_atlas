@@ -169,6 +169,67 @@ def build_evidence_info_for_docs(
     return result
 
 
+def build_evidence_info_from_detailed_interventions(
+    detailed_interventions: list[dict],
+) -> list[dict]:
+    """Extract unique document evidence info from detailed interventions.
+
+    Args:
+        detailed_interventions: List of detailed intervention dicts,
+            each with source_documents containing doc evidence info
+
+    Returns:
+        List of document evidence dicts suitable for calculate_evidence_strength()
+    """
+    docs_by_id: dict[str, dict] = {}
+
+    for detail in detailed_interventions:
+        source_docs = detail.get("source_documents") or []
+        if not source_docs:
+            continue
+
+        source_doc = source_docs[0]
+        doc_id = source_doc.get("doc_id")
+
+        if doc_id and doc_id not in docs_by_id:
+            docs_by_id[doc_id] = {
+                "doc_id": doc_id,
+                "evidence_category": source_doc.get("evidence_category"),
+                "evidence_confidence": source_doc.get("evidence_confidence", 1.0),
+                "sample_size": detail.get("sample_size"),
+            }
+
+    return list(docs_by_id.values())
+
+
+def compute_display_evidence_mix_from_detailed(
+    detailed_interventions: list[dict],
+) -> dict[str, int]:
+    """Compute evidence mix from detailed interventions, deduped by doc_id."""
+    seen_doc_ids: set[str] = set()
+    mix: dict[str, int] = {}
+
+    for detail in detailed_interventions:
+        source_docs = detail.get("source_documents") or []
+        if not source_docs:
+            continue
+
+        source_doc = source_docs[0]
+        doc_id = source_doc.get("doc_id")
+
+        if doc_id and doc_id in seen_doc_ids:
+            continue
+        if doc_id:
+            seen_doc_ids.add(doc_id)
+
+        category = source_doc.get("evidence_category")
+        if category:
+            key = EVIDENCE_CATEGORY_TO_KEY.get(category, "unknown")
+            mix[key] = mix.get(key, 0) + 1
+
+    return mix
+
+
 def deduplicate_interventions(
     detailed_interventions: list[dict],
 ) -> dict[str, dict]:
