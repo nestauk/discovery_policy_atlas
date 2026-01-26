@@ -33,18 +33,100 @@ from .prompts import EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT
 logger = logging.getLogger(__name__)
 
 
-# Valid evidence categories
-EVIDENCE_CATEGORIES = [
-    "Systematic Review and Meta-Analysis",
-    "RCTs and Quasi-Experimental Studies",
-    "Observational Research Studies",
-    "Modelling & Simulation",
-    "Policy Syntheses & Guidance Documents",
-    "Qualitative & Contextual Evidence",
-    "Expert Opinion and Commentary",
-    "Other (Non-evidence documents)",
-    "Unknown / Insufficient information",
+# Single source of truth for evidence categories.
+# Each tuple: (full_name, key, score, short_name, bg_color, text_color)
+# Rank is derived from list order (1-indexed).
+_EVIDENCE_CATEGORY_DATA = [
+    (
+        "Systematic Review and Meta-Analysis",
+        "systematic_review",
+        5,
+        "Systematic Review",
+        "#0F294A",
+        "#FFFFFF",
+    ),
+    (
+        "RCTs and Quasi-Experimental Studies",
+        "rct",
+        4,
+        "RCT/Quasi-Exp",
+        "#9A1BBE",
+        "#FFFFFF",
+    ),
+    (
+        "Observational Research Studies",
+        "observational",
+        3,
+        "Observational",
+        "#0000FF",
+        "#FFFFFF",
+    ),
+    ("Modelling & Simulation", "modelling", 2, "Modelling", "#18A48C", "#FFFFFF"),
+    (
+        "Policy Syntheses & Guidance Documents",
+        "policy",
+        2,
+        "Policy Guidance",
+        "#97D9E3",
+        "#111827",
+    ),
+    (
+        "Qualitative & Contextual Evidence",
+        "qualitative",
+        2,
+        "Qualitative",
+        "#A59BEE",
+        "#111827",
+    ),
+    (
+        "Expert Opinion and Commentary",
+        "opinion",
+        1,
+        "Expert Opinion",
+        "#F6A4B7",
+        "#111827",
+    ),
+    ("Other (Non-evidence documents)", "other", 0, "Other", "#F8F5F4", "#374151"),
+    (
+        "Unknown / Insufficient information",
+        "unknown",
+        0,
+        "Unknown",
+        "#F8F5F4",
+        "#374151",
+    ),
 ]
+
+# Derived mappings (generated once at module load)
+EVIDENCE_CATEGORIES = [row[0] for row in _EVIDENCE_CATEGORY_DATA]
+EVIDENCE_CATEGORY_SHORT_NAMES = {row[0]: row[3] for row in _EVIDENCE_CATEGORY_DATA}
+EVIDENCE_CATEGORY_SCORES = {row[0]: row[2] for row in _EVIDENCE_CATEGORY_DATA}
+EVIDENCE_CATEGORY_RANKS = {
+    row[0]: rank for rank, row in enumerate(_EVIDENCE_CATEGORY_DATA, start=1)
+}
+EVIDENCE_CATEGORY_TO_KEY = {row[0]: row[1] for row in _EVIDENCE_CATEGORY_DATA}
+
+
+def get_evidence_categories_for_api() -> list[dict]:
+    """Get evidence category data formatted for the API/frontend.
+
+    Returns:
+        List of dicts with all category data including display properties.
+    """
+    return [
+        {
+            "name": name,
+            "key": key,
+            "score": score,
+            "rank": rank,
+            "short_name": short_name,
+            "bg_color": bg_color,
+            "text_color": text_color,
+        }
+        for rank, (name, key, score, short_name, bg_color, text_color) in enumerate(
+            _EVIDENCE_CATEGORY_DATA, start=1
+        )
+    ]
 
 
 # TODO: Consider extracting common batch processing logic (shared with RelevanceService)
