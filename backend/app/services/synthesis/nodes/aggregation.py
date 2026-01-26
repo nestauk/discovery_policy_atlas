@@ -38,6 +38,8 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     countries: Counter = Counter()
     source_types: Counter = Counter()
     evidence_categories: Counter = Counter()
+    years: Counter = Counter()
+    evidence_doc_count = 0
 
     for ext in raw_extractions:
         if ext.get("type") == "intervention":
@@ -48,15 +50,20 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
             if country:
                 countries[country] += 1
 
-    years: Counter = Counter()
+    # Count document-level stats, excluding "Other (Non-evidence documents)"
     for doc in doc_metadata.values():
+        ev_cat = doc.get("evidence_category")
+        # Skip non-evidence documents for all counts
+        if ev_cat == "Other (Non-evidence documents)":
+            continue
+
+        evidence_doc_count += 1
         if doc.get("year"):
             years[doc["year"]] += 1
         # Count source types (institutional: Academic, Government, NGO, etc.)
         src_type = normalize_source_type(doc.get("source"), doc.get("document_type"))
         source_types[src_type] += 1
         # Count evidence categories (methodological: Systematic Review, RCT, etc.)
-        ev_cat = doc.get("evidence_category")
         if ev_cat:
             evidence_categories[ev_cat] += 1
 
@@ -87,7 +94,7 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     }
 
     coverage = EvidenceCoverageSnapshot(
-        total_sources=len(doc_metadata),
+        total_sources=evidence_doc_count,
         study_types=filtered_study_types,
         source_types=dict(source_types),
         evidence_categories=dict(evidence_categories),
