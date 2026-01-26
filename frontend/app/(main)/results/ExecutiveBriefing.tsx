@@ -227,7 +227,7 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
           <div className="text-slate-700">{sourceTypeSummary}</div>
         </div>
         <div>
-          <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Evidence Categories</div>
+          <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Evidence Types</div>
           <div className="text-slate-700">{evidenceCategorySummary}</div>
         </div>
         <div>
@@ -661,7 +661,7 @@ export function ExecutiveBriefing({
               <div class="value">${evidenceCoverage.total_sources} documents</div>
             </div>
             <div>
-              <div class="label">Evidence Categories</div>
+              <div class="label">Evidence Types</div>
               <div class="value">${evidenceCategories}</div>
             </div>
             <div>
