@@ -112,6 +112,10 @@ class SynthesisState(TypedDict, total=False):
 
     # Theme to document mappings (for constrained RAG)
     theme_to_doc_uuids: Dict[str, List[str]]  # theme_name -> [doc_uuid, ...]
+    theme_to_extraction_ids: Dict[str, List[str]]  # theme_name -> [extraction_id, ...]
+    db_theme_to_extraction_ids: Dict[
+        str, List[str]
+    ]  # theme_name -> [extraction_id, ...]
 
     # RAG retrieval results (legacy - kept for backward compatibility)
     theme_evidence: Dict[str, List[RetrievedChunk]]

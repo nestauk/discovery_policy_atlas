@@ -101,6 +101,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     doc_scores = state.get("doc_scores") or {}
     theme_to_doc_uuids = state.get("theme_to_doc_uuids") or {}
     theme_to_extraction_ids = state.get("theme_to_extraction_ids") or {}
+    db_theme_to_extraction_ids = state.get("db_theme_to_extraction_ids") or {}
     doc_metadata = state.get("doc_metadata") or {}
     extraction_to_doc = state.get("extraction_to_doc") or {}
 
@@ -198,6 +199,12 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     ) -> PolicyIntervention:
         doc_uuids = theme_to_doc_uuids.get(intervention.intervention_name, [])
         extraction_ids = theme_to_extraction_ids.get(intervention.intervention_name, [])
+        if db_theme_to_extraction_ids:
+            db_extraction_ids = db_theme_to_extraction_ids.get(
+                intervention.intervention_name, []
+            )
+            if db_extraction_ids:
+                extraction_ids = db_extraction_ids
         rating, note, breakdown = await compute_transferability(
             doc_uuids,
             extraction_ids,
@@ -575,8 +582,11 @@ async def assess_transferability_dimension(
     """
     target_values = [v for v in target_values if v and v.strip()]
     evidence_values = [v for v in evidence_values if v and v.strip()]
-    if not target_values or not evidence_values:
-        return ("unknown", "Insufficient context for assessment")
+    if not evidence_values:
+        return ("unknown", "No evidence data available for this dimension")
+    if not target_values:
+        summary = await summarise_evidence_context(dimension_name, evidence_values, llm)
+        return ("not_compared", f"{summary} No target specified for comparison.")
 
     prompt = (
         "You are assessing transferability of research evidence to a target context.\n\n"
@@ -684,6 +694,46 @@ async def explain_evidence_dimension(
     return f"Evidence suggests {evidence_level} {dimension_name.replace('_', ' ')}."
 
 
+async def summarise_evidence_context(
+    dimension_name: str,
+    evidence_values: List[Optional[str]],
+    llm,
+) -> str:
+    """Summarise evidence values when no target context is specified.
+
+    Args:
+        dimension_name: Name of the dimension being summarised.
+        evidence_values: Evidence context values for the dimension.
+        llm: LLM client to use for summarisation.
+
+    Returns:
+        Concise evidence summary sentence.
+    """
+    cleaned = [v.strip() for v in evidence_values if v and str(v).strip()]
+    unique = []
+    for value in cleaned:
+        if value not in unique:
+            unique.append(value)
+    joined = (
+        "; ".join(unique[:6]) if unique else "No specific evidence values provided."
+    )
+    prompt = (
+        "Summarise the evidence context for a transferability dimension in one short "
+        "sentence for a policymaker. Use British English.\n\n"
+        f"Dimension: {dimension_name}\n"
+        f"Evidence values: {joined}\n\n"
+        "Keep it factual and concise. Do not mention that a target is missing."
+    )
+    try:
+        response = await llm.ainvoke(prompt)
+        content = (getattr(response, "content", None) or str(response)).strip()
+        if content:
+            return content
+    except Exception:
+        pass
+    return f"Evidence includes {', '.join(unique[:3])}."
+
+
 async def compute_transferability(
     doc_uuids: List[str],
     extraction_ids: List[str],
@@ -716,6 +766,7 @@ async def compute_transferability(
         population="unknown",
         geography="unknown",
         notes={},
+        data_availability={},
         implementation_constraints_specified=False,
         implementation_evidence={},
         implementation_constraints={},
@@ -733,6 +784,14 @@ async def compute_transferability(
         ]
     if not relevant_extractions:
         return ("Unknown", "No intervention data available", breakdown)
+
+    def count_available(values: List[Optional[str]]) -> int:
+        return sum(1 for value in values if value and str(value).strip())
+
+    total_extractions = len(relevant_extractions)
+    inner_setting_values = [e.get("inner_setting") for e in relevant_extractions]
+    population_values = [e.get("population_intervened") for e in relevant_extractions]
+    geography_values = [e.get("country") for e in relevant_extractions]
 
     cost_levels = [
         e.get("cost_level") or e.get("resource_intensity") for e in relevant_extractions
@@ -752,6 +811,15 @@ async def compute_transferability(
     complexity_justifications = [
         e.get("implementation_complexity_justification") for e in relevant_extractions
     ]
+
+    breakdown.data_availability = {
+        "inner_setting": f"{count_available(inner_setting_values)} of {total_extractions}",
+        "population": f"{count_available(population_values)} of {total_extractions}",
+        "geography": f"{count_available(geography_values)} of {total_extractions}",
+        "cost": f"{count_available(cost_levels)} of {total_extractions}",
+        "staffing": f"{count_available(staffing_levels)} of {total_extractions}",
+        "implementation_complexity": f"{count_available(complexity_levels)} of {total_extractions}",
+    }
 
     (
         (inner_setting_level, inner_setting_note),
@@ -887,6 +955,7 @@ async def compute_transferability(
         "partial": 0.4,
         "mismatch": 0.0,
         "unknown": None,
+        "not_compared": None,
     }
 
     def compute_fit_rating(

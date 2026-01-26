@@ -109,6 +109,7 @@ export interface CausalityDetail {
     population: string;
     geography: string;
     notes?: Record<string, string>;
+    data_availability?: Record<string, string>;
     context_fit_rating?: string;
   implementation_requirements_rating?: 'Low' | 'Medium' | 'High' | 'Unknown';
     implementation_constraints_specified?: boolean;

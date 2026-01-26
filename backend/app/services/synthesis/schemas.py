@@ -416,6 +416,7 @@ class TransferabilityBreakdown(BaseModel):
     population: str
     geography: str
     notes: Dict[str, str] = Field(default_factory=dict)
+    data_availability: Dict[str, str] = Field(default_factory=dict)
     context_fit_rating: Optional[str] = None
     implementation_requirements_rating: Optional[str] = None
     implementation_constraints_specified: bool = False
