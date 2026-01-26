@@ -8,14 +8,18 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, HelpCircle } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
+import { pingBackend } from '@/lib/api'
 import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
+import { OrganizationManager } from '@/components/OrganizationManager'
+
+const getResultsHref = (activeProjectId?: string) => 
+  activeProjectId ? `/projects/${activeProjectId}` : '/projects'
 
 const sidebarItems = [
   { name: 'Projects', href: '/projects', icon: FolderOpen },
   { name: 'Search', href: '/search', icon: Search },
-  { name: 'Results', href: '/results', icon: FileText },
   { name: 'FAQ', href: '/faq', icon: HelpCircle },
 ]
 
@@ -80,7 +84,11 @@ export default function AgentLayout({
 
   useEffect(() => {
     if (!isLoaded) return
-    if (!isSignedIn) router.push('/login')
+    if (!isSignedIn) {
+      router.push('/login')
+    } else {
+      pingBackend()
+    }
   }, [isSignedIn, isLoaded, router])
 
   // Auto-expand test section if user is on a test page
@@ -161,6 +169,17 @@ export default function AgentLayout({
               </Link>
             ))}
             
+            {/* Results link - dynamic based on active project */}
+            <Link href={getResultsHref(activeProject?.id)}>
+              <Button
+                variant={pathname?.startsWith('/projects/') && pathname !== '/projects' ? "secondary" : "ghost"}
+                className="w-full justify-start h-auto p-3 text-left"
+              >
+                <FileText className="mr-3 h-4 w-4 text-slate-500" />
+                <div className="font-medium text-sm">Results</div>
+              </Button>
+            </Link>
+            
             {/* Feedback Button */}
             {activeProject && (
               <FeedbackButton
@@ -212,7 +231,7 @@ export default function AgentLayout({
 
         {/* User */}
         <div className="p-4 border-t border-slate-100">
-          <div className="flex items-center gap-3">
+          <div className="flex items-start gap-3">
             <div className="flex-shrink-0">
               <UserButton 
                 appearance={{
@@ -225,17 +244,18 @@ export default function AgentLayout({
                 }}
               />
             </div>
-            <div className="flex-1 min-w-0 flex items-center">
+            <div className="flex-1 min-w-0 flex flex-col gap-0.5">
               <p className="text-sm font-medium text-slate-900 truncate leading-none">
                 {user?.firstName || user?.emailAddresses?.[0]?.emailAddress || 'User'}
               </p>
+              <OrganizationManager />
             </div>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col ml-64 bg-white">
+      <div className="flex-1 flex flex-col ml-64">
         {children}
       </div>
 

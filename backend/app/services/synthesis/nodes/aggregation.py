@@ -34,6 +34,9 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     raw_extractions = state.get("raw_extractions") or []
     doc_metadata = state.get("doc_metadata") or {}
 
+    # total_screened = all documents loaded for synthesis (already passed relevance screening)
+    total_screened = len(doc_metadata)
+
     study_types: Counter = Counter()
     countries: Counter = Counter()
     source_types: Counter = Counter()
@@ -94,7 +97,10 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     }
 
     coverage = EvidenceCoverageSnapshot(
-        total_sources=evidence_doc_count,
+        # total_screened = all documents originally screened
+        # total_synthesised = evidence documents excluding "Other (Non-evidence documents)"
+        total_screened=total_screened,
+        total_synthesised=evidence_doc_count,
         study_types=filtered_study_types,
         source_types=dict(source_types),
         evidence_categories=dict(evidence_categories),
@@ -351,6 +357,14 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         theme_to_doc_uuids[t.name] = list(set(uuids))
 
     for t in final_issue_themes:
+        uuids = []
+        for c in t.concepts:
+            meta = ex_metadata.get(c.id, {})
+            if meta.get("doc_uuid"):
+                uuids.append(meta["doc_uuid"])
+        theme_to_doc_uuids[t.name] = list(set(uuids))
+
+    for t in final_outcome_themes:
         uuids = []
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})

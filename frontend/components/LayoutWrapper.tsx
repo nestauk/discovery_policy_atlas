@@ -9,7 +9,7 @@ export function ConditionalHeader() {
   const isHomePage = pathname === '/';
   
   // Routes that use the (main) layout with sidebar - don't show header
-  const mainAppRoutes = ['/projects', '/search', '/results', '/faq', '/test_extraction', '/text_extractions'];
+  const mainAppRoutes = ['/projects', '/search', '/faq', '/test_extraction', '/text_extractions'];
   const isMainAppPage = mainAppRoutes.some(route => pathname?.startsWith(route));
 
   if (isLoginPage || isHomePage || isMainAppPage) {

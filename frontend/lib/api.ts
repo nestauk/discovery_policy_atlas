@@ -1,6 +1,22 @@
 import { useAuth } from "@clerk/nextjs";
 import { AnalysisProject } from "./analysisProjectStore";
 
+export const pingBackend = async (): Promise<boolean> => {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+  
+  try {
+    const response = await fetch(`${cleanBaseUrl}/health`, { 
+      method: 'GET',
+      cache: 'no-store'
+    });
+    return response.ok;
+  } catch (error) {
+    console.log('Backend ping failed (server may be waking up):', error);
+    return false;
+  }
+};
+
 // Standalone auth fetch to allow usage from non-React files (e.g., Zustand stores)
 export const fetchWithAuthExternal = async (
   url: string,
@@ -158,6 +174,19 @@ export function useAPI() {
     });
   };
 
+  const rerunSynthesisForProject = async (
+    projectId: string,
+    options: { force?: boolean; invalidate_previous?: boolean } = {}
+  ) => {
+    return fetchWithAuth(`api/analysis-projects/${projectId}/rerun-synthesis`, {
+      method: 'POST',
+      body: JSON.stringify({
+        force: options.force ?? true,
+        invalidate_previous: options.invalidate_previous ?? true,
+      }),
+    });
+  };
+
   const getDocumentExtraction = async (projectId: string, documentId: string) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}/documents/${documentId}/extraction`);
   };
@@ -191,6 +220,7 @@ export function useAPI() {
     updateAnalysisProject,
     deleteAnalysisProject,
     runAnalysisForProject,
+    rerunSynthesisForProject,
     getDocumentExtraction,
     getProjectInterventions,
   };

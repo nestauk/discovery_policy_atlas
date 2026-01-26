@@ -66,6 +66,7 @@ export interface SearchParams {
   }
 
   // Synthesis summary types (Enhanced)
+  // Synthesis summary types (Enhanced)
   export interface KeyIssue {
     issue_theme: string
     summary_description: string
@@ -103,7 +104,8 @@ export interface SearchParams {
   }
 
   export interface EvidenceCoverageSnapshot {
-    total_sources: number
+    total_screened: number
+    total_synthesised: number
     study_types: Record<string, number>
     source_types: Record<string, number>
     evidence_categories?: Record<string, number>
@@ -143,6 +145,10 @@ export interface SearchParams {
     intervention_name: string
     citation_numbers: number[]
     context: string
+    key_study_description?: string
+    key_study_citation?: number
+  delivery_features?: string[]
+  subgroup_effects?: string[]
     impact_narrative: string
     outcome_effects: OutcomeEffect[]
   }
@@ -151,6 +157,7 @@ export interface SearchParams {
     number: number
     title: string
     description: string
+    implementation_option?: string
     citation_numbers: number[]
   }
 
@@ -168,6 +175,14 @@ export interface SearchParams {
     citation_numbers_used: number[]
   }
 
+export interface SynthesisSection {
+  title: string
+  content_type: 'paragraphs' | 'bullets'
+  paragraphs: string[]
+  bullets: string[]
+  citation_numbers_used: number[]
+}
+
   export interface CoreAnswer {
     query: string
     answer: string
@@ -180,6 +195,7 @@ export interface SearchParams {
     evidence_snapshot_summary: string
     background_section?: BackgroundSection
     interventions_table: InterventionTableRow[]
+  synthesis_sections?: SynthesisSection[]
     recommendations: RecommendationItem[]
     top_citations: TopCitationItem[]
     follow_up_suggestions: string[]
