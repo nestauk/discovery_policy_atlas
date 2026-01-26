@@ -50,7 +50,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     docs_res = (
         supabase.table("analysis_documents")
         .select(
-            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results"
+            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category"
         )
         .eq("analysis_project_id", project_id)
         .execute()
@@ -74,6 +74,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             "url": doc.get("landing_page_url") or doc.get("pdf_url"),
             "source": doc.get("source"),
             "document_type": doc.get("document_type"),
+            "evidence_category": doc.get("evidence_category"),
         }
 
         # Extract evidence strength and impact scores from conclusion

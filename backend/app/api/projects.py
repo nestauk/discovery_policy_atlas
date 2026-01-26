@@ -30,6 +30,7 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
+from app.services.analysis.evidence_category import EVIDENCE_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -895,14 +896,9 @@ async def get_project_charts_data(
         # Sort evidence categories by strength (predefined order)
         # Exclude "Other (Non-evidence documents)" - these are filtered out during acquisition
         evidence_category_order = [
-            "Systematic Review and Meta-Analysis",
-            "RCTs and Quasi-Experimental Studies",
-            "Observational Research Studies",
-            "Modelling & Simulation",
-            "Policy Syntheses & Guidance Documents",
-            "Qualitative & Contextual Evidence",
-            "Expert Opinion and Commentary",
-            "Unknown / Insufficient information",
+            cat
+            for cat in EVIDENCE_CATEGORIES
+            if cat != "Other (Non-evidence documents)"
         ]
 
         documents_by_evidence_category = []

@@ -53,16 +53,16 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
         if doc.get("year"):
             years[doc["year"]] += 1
         # Count source types (institutional: Academic, Government, NGO, etc.)
-        src_type = normalize_source_type(doc.get("source"), doc.get("type"))
+        src_type = normalize_source_type(doc.get("source"), doc.get("document_type"))
         source_types[src_type] += 1
         # Count evidence categories (methodological: Systematic Review, RCT, etc.)
         ev_cat = doc.get("evidence_category")
         if ev_cat:
             evidence_categories[ev_cat] += 1
 
-    # Determine strength based on study design quality
-    rct_count = sum(c for st, c in study_types.items() if "rct" in st.lower())
-    meta_count = sum(c for st, c in study_types.items() if "meta" in st.lower())
+    # Determine strength based on evidence category quality
+    rct_count = evidence_categories.get("RCTs and Quasi-Experimental Studies", 0)
+    meta_count = evidence_categories.get("Systematic Review and Meta-Analysis", 0)
 
     if meta_count >= 3 or rct_count >= 5:
         strength = "High"
