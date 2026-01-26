@@ -378,7 +378,7 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 
 **Examples**:
 - Cochrane reviews summarizing dozens of trials
-- Systematic reviews from Blueprint
+- JAMA / The Lancet / BMJ meta-analyses
 - Papers with explicit PRISMA methodology
 
 **Keywords**: "systematic review", "meta-analysis", "Cochrane", "PRISMA", "pooled analysis"
@@ -415,7 +415,9 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 **Keywords**: "simulation", "model", "forecast", "projection", "computational model", "scenario analysis"
 
 ## 5. Policy Syntheses & Guidance Documents
-**Definition**: A policy synthesis or guidance document is a report whose primary aim is to aggregate, interpret, summarise, and translate existing evidence into actionable insights, guidance or recommendations for policymakers or practitioners, rather than to present new primary empirical findings. Documents aimed mainly at informing individual consumers, rather than policymakers or practitioners, should go into the 'Other' category rather than be treated as evidence. Such documents typically:
+**Definition**: A policy synthesis or guidance document is a report whose primary aim is to aggregate, interpret, summarise, and translate existing evidence into actionable insights, guidance or recommendations for policymakers or practitioners, rather than to present new primary empirical findings.
+ 
+ Such documents typically:
 - Begin with a summary of the policy problem or question
 - Draw on evidence from multiple sources
 - Provide an integrated appraisal of that evidence
@@ -427,6 +429,8 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 - Think tank policy reports
 - Sectoral guidance documents for practitioners (e.g., "MCS Guidelines on Heat Pump Installation Standards")
 
+ **Exclusion**: Documents aimed mainly at informing individual consumers, rather than policymakers or practitioners, should instead go into the 'Other' category.
+
 **Keywords**: "policy brief", "white paper", "guidance", "recommendations", "policy framework"
 
 ## 6. Qualitative & Contextual Evidence
@@ -437,7 +441,7 @@ EVIDENCE_CATEGORIES_DEFINITION = """
 **Examples**:
 - Qualitative studies from charities
 - Case studies
-- Parliamentary commission evidence synthesis
+- Thematic analysis of stakeholder interviews
 
 **Keywords**: "qualitative", "interview", "focus group", "case study", "thematic analysis", "lived experience"
 
