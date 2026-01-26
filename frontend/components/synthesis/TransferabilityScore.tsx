@@ -101,7 +101,7 @@ export function TransferabilityScore({
             )
           })}
           <div className="text-[11px] uppercase tracking-wide text-slate-400 pt-2">
-            Implementation fit
+            Implementation complexity
           </div>
           {implementationDimensions.map((key) => {
             const evidenceValue = breakdown?.implementation_evidence?.[key]
