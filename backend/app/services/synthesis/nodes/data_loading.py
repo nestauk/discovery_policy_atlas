@@ -161,7 +161,10 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 "outcome_variable": str(
                     raw.get("outcome_variable") or row.get("label") or ""
                 ),
-                "effect_direction": str(raw.get("effect_direction") or ""),
+                # Support both 'direction' (new schema) and 'effect_direction' (legacy)
+                "effect_direction": str(
+                    raw.get("direction") or raw.get("effect_direction") or ""
+                ),
                 "effect_size": str(raw.get("effect_size") or ""),
                 "effect_size_type": str(raw.get("effect_size_type") or ""),
                 "p_value": raw.get("p_value"),
@@ -217,7 +220,9 @@ async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
                 Concept(id=ext["id"], canonical_description=desc)
             )
         if ext.get("type") == "result" or ext.get("outcome_variable"):
-            desc = f"Outcome: {ext.get('outcome_variable', '')}. Effect: {ext.get('effect_direction', '')}"
+            # Support both 'direction' (new) and 'effect_direction' (legacy)
+            effect_dir = ext.get("direction") or ext.get("effect_direction", "")
+            desc = f"Outcome: {ext.get('outcome_variable', '')}. Effect: {effect_dir}"
             outcome_concepts.append(Concept(id=ext["id"], canonical_description=desc))
 
     print(

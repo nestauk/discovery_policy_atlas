@@ -1239,40 +1239,24 @@ async def get_project_interventions(
         # Process interventions from all documents
         aggregated_interventions = {}
 
-        def get_study_type_rank(study_type):
-            """Convert study type letter to numeric rank for sorting (lower = better)
-            g (RCT) is highest quality, empty is lowest quality"""
-            if not study_type:
-                return 999  # Empty types go to the end (lowest quality)
+        def get_evidence_category_rank(evidence_category: str | None) -> int:
+            """Convert evidence category to numeric rank for sorting (lower = better).
+            Based on evidence hierarchy: SR > RCT > Observational > etc."""
+            if not evidence_category:
+                return 999  # Unknown/missing goes to the end
 
-            # Study type is already a letter (a-j) from Maryland Scientific Methods Scale
-            study_type_clean = study_type.strip().lower()
-
-            # Reverse ranking so 'g' (RCT) gets rank 1 (highest), 'a' gets rank 8
-            if study_type_clean == "g":  # Randomised controlled trial - highest quality
-                return 1
-            elif study_type_clean == "h":  # Meta-analysis
-                return 2
-            elif study_type_clean == "f":  # Quasi-experimental study
-                return 3
-            elif study_type_clean == "e":  # Comparison of outcomes in treated group
-                return 4
-            elif study_type_clean == "d":  # Study measures outcome pre and post
-                return 5
-            elif study_type_clean == "c":  # Cross-sectional with control variables
-                return 6
-            elif study_type_clean == "b":  # Study measures outcome pre and post
-                return 7
-            elif study_type_clean == "a":  # Purely cross-sectional study
-                return 8
-            elif study_type_clean == "i":  # Policy recommendation/theoretical modelling
-                return 9
-            elif (
-                study_type_clean == "j"
-            ):  # News article/opinion piece/government announcement
-                return 10
-            else:
-                return 999  # Unknown types go to the end
+            category_ranks = {
+                "Systematic Review and Meta-Analysis": 1,
+                "RCTs and Quasi-Experimental Studies": 2,
+                "Observational Research Studies": 3,
+                "Modelling & Simulation": 4,
+                "Policy Syntheses & Guidance Documents": 5,
+                "Qualitative & Contextual Evidence": 6,
+                "Expert Opinion and Commentary": 7,
+                "Other (Non-evidence documents)": 8,
+                "Unknown / Insufficient information": 9,
+            }
+            return category_ranks.get(evidence_category, 999)
 
         for document in docs_result.data:
             extraction_results = document.get("extraction_results", {})
@@ -1298,17 +1282,21 @@ async def get_project_interventions(
 
                 if intervention_key not in aggregated_interventions:
                     # Initialize intervention data
+                    evidence_cat = document.get("evidence_category")
                     aggregated_interventions[intervention_key] = {
                         "name": intervention_name,
                         "type": intervention.get("type", "Unknown"),
                         "country": intervention.get("country", "Unknown"),
                         "description": intervention.get("description", ""),
-                        "study_types": [],
+                        "evidence_category": evidence_cat,
+                        "evidence_category_rank": get_evidence_category_rank(
+                            evidence_cat
+                        ),
+                        "is_systematic_review": evidence_cat
+                        == "Systematic Review and Meta-Analysis",
                         "sample_sizes": [],
                         "result_count": 0,
                         "results_summary": [],
-                        "highest_study_type": None,
-                        "highest_study_type_rank": 999,
                         "documents": [],
                     }
 
@@ -1321,28 +1309,6 @@ async def get_project_interventions(
                         "landing_page_url": document.get("landing_page_url"),
                     }
                 )
-
-                # Add study type if available
-                study_type = intervention.get("study_type")
-                if study_type:
-                    aggregated_interventions[intervention_key]["study_types"].append(
-                        study_type
-                    )
-
-                    # Update highest study type (lowest rank number = highest quality)
-                    study_rank = get_study_type_rank(study_type)
-                    if (
-                        study_rank
-                        < aggregated_interventions[intervention_key][
-                            "highest_study_type_rank"
-                        ]
-                    ):
-                        aggregated_interventions[intervention_key][
-                            "highest_study_type"
-                        ] = study_type
-                        aggregated_interventions[intervention_key][
-                            "highest_study_type_rank"
-                        ] = study_rank
 
                 # Add sample size if available
                 sample_size = intervention.get("sample_size")
@@ -1363,7 +1329,10 @@ async def get_project_interventions(
                 # Add results summaries with detailed information
                 for result in intervention_results:
                     outcome = result.get("outcome_variable", "Unknown outcome")
-                    direction = result.get("effect_direction", "unknown")
+                    # Support both 'direction' (new schema) and 'effect_direction' (legacy) field names
+                    direction = result.get("direction") or result.get(
+                        "effect_direction", "unknown"
+                    )
                     if outcome and outcome != "Unknown outcome":
                         result_detail = {
                             "outcome": outcome,
@@ -1376,6 +1345,15 @@ async def get_project_interventions(
                             "supporting_quote": result.get("supporting_quote"),
                             "population_measured": result.get("population_measured"),
                             "subgroup_or_dose": result.get("subgroup_or_dose"),
+                            "n_studies": result.get("n_studies"),
+                            "sample_size": result.get("sample_size"),
+                            "stratum_type": result.get("stratum_type"),
+                            "stratum_value": result.get("stratum_value"),
+                            # SR-specific fields for meta-analysis results
+                            "heterogeneity_I2": result.get("heterogeneity_I2"),
+                            "tau2": result.get("tau2"),
+                            "summary_statistic": result.get("summary_statistic"),
+                            "estimate_level": result.get("estimate_level"),
                         }
                         aggregated_interventions[intervention_key][
                             "results_summary"
@@ -1437,13 +1415,12 @@ async def get_project_interventions(
 
             # Clean up temporary fields
             del intervention_data["sample_sizes"]
-            del intervention_data["study_types"]
 
             interventions_list.append(intervention_data)
 
-        # Sort by highest study type rank (best first), then by result count
+        # Sort by evidence category rank (best first), then by result count
         interventions_list.sort(
-            key=lambda x: (x["highest_study_type_rank"], -x["result_count"])
+            key=lambda x: (x["evidence_category_rank"], -x["result_count"])
         )
 
         return {"interventions": interventions_list, "total": len(interventions_list)}
@@ -1866,11 +1843,18 @@ async def get_issue_intervention_navigator(
                                                         "outcome_variable": result.get(
                                                             "outcome_variable"
                                                         ),
+                                                        # Support both 'direction' (new) and 'effect_direction' (legacy)
                                                         "effect_direction": result.get(
+                                                            "direction"
+                                                        )
+                                                        or result.get(
                                                             "effect_direction"
                                                         ),
                                                         "effect_size": result.get(
                                                             "effect_size"
+                                                        ),
+                                                        "effect_size_type": result.get(
+                                                            "effect_size_type"
                                                         ),
                                                         "p_value": result.get(
                                                             "p_value"
@@ -1887,10 +1871,34 @@ async def get_issue_intervention_navigator(
                                                         "subgroup_or_dose": result.get(
                                                             "subgroup_or_dose"
                                                         ),
+                                                        "n_studies": result.get(
+                                                            "n_studies"
+                                                        ),
+                                                        "sample_size": result.get(
+                                                            "sample_size"
+                                                        ),
+                                                        "stratum_type": result.get(
+                                                            "stratum_type"
+                                                        ),
+                                                        "stratum_value": result.get(
+                                                            "stratum_value"
+                                                        ),
+                                                        # SR-specific fields for meta-analysis results
+                                                        "heterogeneity_I2": result.get(
+                                                            "heterogeneity_I2"
+                                                        ),
+                                                        "tau2": result.get("tau2"),
+                                                        "summary_statistic": result.get(
+                                                            "summary_statistic"
+                                                        ),
+                                                        "estimate_level": result.get(
+                                                            "estimate_level"
+                                                        ),
                                                     }
                                                 )
                                         break
 
+                                evidence_cat = doc.get("evidence_category")
                                 detailed_interventions.append(
                                     {
                                         "name": intervention_name,
@@ -1900,7 +1908,9 @@ async def get_issue_intervention_navigator(
                                         ),
                                         "type": raw_data.get("type", "Unknown"),
                                         "country": raw_data.get("country"),
-                                        "study_type": raw_data.get("study_type"),
+                                        "evidence_category": evidence_cat,
+                                        "is_systematic_review": evidence_cat
+                                        == "Systematic Review and Meta-Analysis",
                                         "sample_size": raw_data.get("sample_size"),
                                         "impact_score": doc_scores.get(
                                             doc.get("doc_id"), {}
@@ -2244,15 +2254,22 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                                 "description", raw_data.get("description", "")
                             ),
                             "Country": raw_data.get("country", ""),
-                            "Study Type": raw_data.get("study_type", ""),
+                            "Evidence Category": doc.get("evidence_category", ""),
                             "Sample Size": raw_data.get("sample_size", ""),
                             "Impact Score": impact_score,
                             "Evidence Score": evidence_score,
                             "Outcome Variable": result.get("outcome_variable", ""),
-                            "Effect Direction": result.get("effect_direction", ""),
+                            # Support both 'direction' (new) and 'effect_direction' (legacy)
+                            "Effect Direction": result.get("direction")
+                            or result.get("effect_direction", ""),
                             "Effect Size": result.get("effect_size", ""),
                             "P-Value": result.get("p_value", ""),
                             "Uncertainty": result.get("uncertainty", ""),
+                            # SR-specific fields for meta-analysis results
+                            "Heterogeneity I2": result.get("heterogeneity_I2", ""),
+                            "Tau2": result.get("tau2", ""),
+                            "Summary Statistic": result.get("summary_statistic", ""),
+                            "Estimate Level": result.get("estimate_level", ""),
                             "Result Text": result.get("result_text", ""),
                             "Population Measured": result.get(
                                 "population_measured", ""

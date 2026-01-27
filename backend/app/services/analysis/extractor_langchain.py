@@ -15,7 +15,7 @@ import pandas as pd
 import tiktoken
 
 from app.core.config import settings
-from .workflow_langchain import ExtractionWorkflow
+from .workflows import create_workflow
 from .storage import AnalysisStorageService
 
 logger = logging.getLogger(__name__)
@@ -72,12 +72,6 @@ class LangChainExtractorService:
     def __init__(self, config: LangChainExtractionConfig):
         self.config = config
         self.export_dir = Path(config.export_dir)
-        self.workflow = ExtractionWorkflow(
-            model=config.model,
-            temperature=config.temperature,
-            policy_project_id=config.project_id,
-            policy_user_id=config.user_id,
-        )
         # Initialize storage service for interim storage
         self.storage_service = AnalysisStorageService() if config.project_id else None
         # No need to create extractions directory - we'll create consolidated JSON directly
@@ -186,11 +180,31 @@ class LangChainExtractorService:
                     f"✂️  Truncated text from {original_length} to {len(doc_text)} chars"
                 )
 
-            # Run the LangGraph workflow
+            # Run the LangGraph workflow with evidence category routing
             try:
-                extraction = await self.workflow.run(doc_id, doc_text)
+                evidence_category = row.get(
+                    "evidence_category", "RCTs and Quasi-Experimental Studies"
+                )
+                evidence_confidence = row.get("evidence_confidence", 1.0)
+                if pd.isna(evidence_category):
+                    evidence_category = "RCTs and Quasi-Experimental Studies"
+                if pd.isna(evidence_confidence):
+                    evidence_confidence = 1.0
 
-                print("📊 Extraction results:")
+                workflow = create_workflow(
+                    evidence_category=evidence_category,
+                    confidence=float(evidence_confidence),
+                    model=self.config.model,
+                    policy_project_id=self.config.project_id,
+                    policy_user_id=self.config.user_id,
+                )
+                extraction = await workflow.run(
+                    doc_id, doc_text, evidence_category, float(evidence_confidence)
+                )
+
+                print(
+                    f"📊 Extraction results (workflow: {extraction.workflow_used or 'rct'}):"
+                )
                 print(f"  • Issues: {len(extraction.issues)}")
                 print(f"  • Interventions: {len(extraction.interventions)}")
                 print(f"  • Mappings: {len(extraction.mappings)}")
@@ -416,141 +430,6 @@ class LangChainExtractorService:
         except Exception as e:
             logger.error(f"Failed to update references with extraction data: {e}")
 
-    def write_consolidated_json(self, extractions_dir: str, references_csv: str) -> str:
-        """Create single consolidated JSON file with all extractions."""
-        extractions_path = Path(extractions_dir)
-        json_files = list(extractions_path.glob("*.json"))
-
-        # Read all individual extraction files
-        all_extractions = []
-        for json_file in json_files:
-            try:
-                with open(json_file, "r") as f:
-                    extraction_data = json.load(f)
-
-                # Add metadata about the extraction
-                extraction_data["extraction_metadata"] = {
-                    "file_name": json_file.name,
-                    "file_size_bytes": json_file.stat().st_size,
-                    "processed_at": datetime.now().isoformat(),
-                }
-
-                all_extractions.append(extraction_data)
-
-            except Exception as e:
-                logger.error(f"Failed to read extraction file {json_file}: {e}")
-                continue
-
-        # Create consolidated structure
-        consolidated_data = {
-            "run_metadata": {
-                "run_id": self.config.run_id,
-                "export_dir": self.config.export_dir,
-                "use_abstracts_only": self.config.use_abstracts_only,
-                "model": self.config.model,
-                "concurrency": self.config.concurrency,
-                "total_documents": self._count_total_documents(references_csv),
-                "processed_documents": len(all_extractions),
-                "created_at": datetime.now().isoformat(),
-            },
-            "extractions": all_extractions,
-        }
-
-        # Write consolidated JSON
-        consolidated_path = self.export_dir / "extractions.json"
-        with open(consolidated_path, "w") as f:
-            json.dump(consolidated_data, f, indent=2, ensure_ascii=False)
-
-        logger.info(f"Created consolidated extractions file: {consolidated_path}")
-        logger.info(f"Consolidated {len(all_extractions)} extractions")
-
-        return str(consolidated_path)
-
-    def update_references_with_extraction_status(
-        self, references_csv: str, extractions_dir: str
-    ) -> str:
-        """Update references CSV with extraction status and metadata."""
-        try:
-            df = pd.read_csv(references_csv)
-            extractions_path = Path(extractions_dir)
-
-            # Create mapping of doc_id to extraction status
-            extraction_mapping = {}
-
-            # Process successful extractions
-            json_files = list(extractions_path.glob("*.json"))
-            for json_file in json_files:
-                try:
-                    with open(json_file, "r") as f:
-                        extraction_data = json.load(f)
-                        doc_id = extraction_data.get("paper_id")
-
-                        if doc_id:
-                            # Determine text source from the extraction data
-                            text_source = "abstract"  # default
-                            if "text_metadata" in extraction_data:
-                                text_length = extraction_data["text_metadata"].get(
-                                    "text_length", 0
-                                )
-                                # Heuristic: if text is long, likely full text
-                                text_source = (
-                                    "full_text" if text_length > 5000 else "abstract"
-                                )
-
-                            extraction_mapping[doc_id] = {
-                                "extraction_status": "success",
-                                "extraction_error": None,
-                                "text_source": text_source,
-                            }
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to process extraction file {json_file}: {e}"
-                    )
-                    continue
-
-            # Process extraction warnings/failures
-            warnings_file = extractions_path / "extraction_warnings.csv"
-            if warnings_file.exists():
-                try:
-                    warnings_df = pd.read_csv(warnings_file)
-                    for _, warning_row in warnings_df.iterrows():
-                        doc_id = warning_row.get("doc_id")
-                        if doc_id and doc_id not in extraction_mapping:
-                            extraction_mapping[doc_id] = {
-                                "extraction_status": "failed",
-                                "extraction_error": warning_row.get(
-                                    "warning", "Unknown error"
-                                ),
-                                "text_source": None,
-                            }
-                except Exception as e:
-                    logger.warning(f"Failed to process extraction warnings: {e}")
-
-            # Update references DataFrame
-            for idx, row in df.iterrows():
-                doc_id = row.get("doc_id")
-                if doc_id in extraction_mapping:
-                    extraction_info = extraction_mapping[doc_id]
-                    for field, value in extraction_info.items():
-                        df.at[idx, field] = value
-                else:
-                    # Document not processed (likely not relevant or skipped)
-                    df.at[idx, "extraction_status"] = "skipped"
-                    df.at[idx, "extraction_error"] = None
-                    df.at[idx, "text_source"] = None
-
-            # Save updated references CSV
-            df.to_csv(references_csv, index=False)
-            logger.info(
-                f"Updated references CSV with extraction metadata: {references_csv}"
-            )
-
-            return references_csv
-
-        except Exception as e:
-            logger.error(f"Failed to update references with extraction data: {e}")
-            return references_csv
-
     def _count_total_documents(self, references_csv: str) -> int:
         """Count total documents in references CSV."""
         try:
@@ -604,11 +483,11 @@ class LangChainExtractorService:
                         "name": item.get("name"),
                         "type": item.get("type"),
                         "description": item.get("description"),
-                        "study_type": item.get("study_type"),
                         "country": item.get("country"),
                         "population_intervened": item.get("population_intervened"),
                         "population_demographics": item.get("population_demographics"),
                         "sample_size": item.get("sample_size"),
+                        "comparator": item.get("comparator"),
                         "supporting_quote": item.get("supporting_quote"),
                         "source": m.get("source"),
                         "year": m.get("year"),
@@ -636,11 +515,16 @@ class LangChainExtractorService:
                         "doc_id": doc_id,
                         "intervention_idx": item.get("intervention_idx"),
                         "outcome_variable": item.get("outcome_variable"),
-                        "effect_direction": item.get("effect_direction"),
+                        "direction": item.get("direction"),
+                        "estimate_level": item.get("estimate_level"),
                         "effect_size_type": item.get("effect_size_type"),
                         "effect_size": item.get("effect_size"),
                         "uncertainty": item.get("uncertainty"),
                         "p_value": item.get("p_value"),
+                        "heterogeneity_I2": item.get("heterogeneity_I2"),
+                        "tau2": item.get("tau2"),
+                        "summary_statistic": item.get("summary_statistic"),
+                        "impact_magnitude": item.get("impact_magnitude"),
                         "population_measured": item.get("population_measured"),
                         "subgroup_or_dose": item.get("subgroup_or_dose"),
                         "result_text": item.get("result_text"),
@@ -706,11 +590,11 @@ class LangChainExtractorService:
                     "name",
                     "type",
                     "description",
-                    "study_type",
                     "country",
                     "population_intervened",
                     "population_demographics",
                     "sample_size",
+                    "comparator",
                     "supporting_quote",
                     "source",
                     "year",
@@ -744,11 +628,16 @@ class LangChainExtractorService:
                     "doc_id",
                     "intervention_idx",
                     "outcome_variable",
-                    "effect_direction",
+                    "direction",
+                    "estimate_level",
                     "effect_size_type",
                     "effect_size",
                     "uncertainty",
                     "p_value",
+                    "heterogeneity_I2",
+                    "tau2",
+                    "summary_statistic",
+                    "impact_magnitude",
                     "population_measured",
                     "subgroup_or_dose",
                     "result_text",

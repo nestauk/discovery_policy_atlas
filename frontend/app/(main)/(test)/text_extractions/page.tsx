@@ -70,6 +70,8 @@ interface DocumentDetailResult {
       addresses_issues?: number[]
       results?: Array<{
         outcome_variable?: string
+        // Support both 'direction' (new schema) and 'effect_direction' (legacy)
+        direction?: string
         effect_direction?: string
         effect_size_type?: string
         effect_size?: string
@@ -79,6 +81,11 @@ interface DocumentDetailResult {
         subgroup_or_dose?: string
         result_text?: string
         supporting_quote?: string
+        // SR-specific fields for meta-analysis results
+        heterogeneity_I2?: string
+        tau2?: string
+        summary_statistic?: string
+        estimate_level?: string
       }>
     }>
     mappings?: unknown[]
@@ -239,13 +246,14 @@ function DocumentDetailView({ extraction }: {
                                     <span className="font-medium text-green-900 text-sm">
                                       {result.outcome_variable}
                                     </span>
+                                    {/* Support both 'direction' (new) and 'effect_direction' (legacy) */}
                                     <Badge variant="outline" className="text-xs bg-green-100 text-green-700">
-                                      {result.effect_direction}
+                                      {result.direction || result.effect_direction}
                                     </Badge>
                                   </div>
                                   
                                   {/* Quantitative measures */}
-                                  {((result.effect_size && result.effect_size !== 'null') || (result.effect_size_type && result.effect_size_type !== 'null') || (result.uncertainty && result.uncertainty !== 'null') || (result.p_value && result.p_value !== 'null')) && (
+                                  {((result.effect_size && result.effect_size !== 'null') || (result.effect_size_type && result.effect_size_type !== 'null') || (result.uncertainty && result.uncertainty !== 'null') || (result.p_value && result.p_value !== 'null') || (result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null')) && (
                                     <div className="mb-2">
                                       {result.effect_size_type && result.effect_size_type !== 'null' && (
                                         <div className="text-xs text-green-600 mb-1">
@@ -255,7 +263,9 @@ function DocumentDetailView({ extraction }: {
                                       )}
                                       {result.effect_size && result.effect_size !== 'null' && (
                                         <div className="text-xs text-green-600 mb-1">
-                                          <span className="font-medium">Effect Size: </span>
+                                          <span className="font-medium">
+                                            Effect Size{result.summary_statistic && result.summary_statistic !== 'null' ? ` (${result.summary_statistic})` : ''}:{' '}
+                                          </span>
                                           {result.effect_size}
                                         </div>
                                       )}
@@ -270,6 +280,27 @@ function DocumentDetailView({ extraction }: {
                                           <span className="font-medium">P-value: </span>
                                           {result.p_value}
                                         </div>
+                                      )}
+                                      {/* SR-specific: heterogeneity measures for pooled results (always show for SRs) */}
+                                      {result.estimate_level === 'pooled' && (
+                                        <>
+                                          <div className="text-xs text-green-600 mb-1">
+                                            <span className="font-medium">I²: </span>
+                                            {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? (
+                                              result.heterogeneity_I2
+                                            ) : (
+                                              <span className="text-green-400 italic">n/a</span>
+                                            )}
+                                          </div>
+                                          <div className="text-xs text-green-600 mb-1">
+                                            <span className="font-medium">τ²: </span>
+                                            {result.tau2 && result.tau2 !== 'null' ? (
+                                              result.tau2
+                                            ) : (
+                                              <span className="text-green-400 italic">n/a</span>
+                                            )}
+                                          </div>
+                                        </>
                                       )}
                                     </div>
                                   )}

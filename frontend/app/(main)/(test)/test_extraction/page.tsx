@@ -23,6 +23,38 @@ import {
 } from 'lucide-react'
 import { useAPI } from '@/lib/api'
 
+// Evidence category color mapping (matching InterventionsTable)
+const getEvidenceCategoryColor = (category: string): string => {
+  const colorMap: Record<string, string> = {
+    'Systematic Review and Meta-Analysis': 'bg-violet-100 text-violet-800 border-violet-300',
+    'RCTs and Quasi-Experimental Studies': 'bg-blue-100 text-blue-800 border-blue-300',
+    'Observational Research Studies': 'bg-cyan-100 text-cyan-800 border-cyan-300',
+    'Modelling & Simulation': 'bg-amber-100 text-amber-800 border-amber-300',
+    'Policy Syntheses & Guidance Documents': 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    'Qualitative & Contextual Evidence': 'bg-rose-100 text-rose-800 border-rose-300',
+    'Expert Opinion and Commentary': 'bg-slate-100 text-slate-700 border-slate-300',
+    'Other (Non-evidence documents)': 'bg-gray-100 text-gray-600 border-gray-300',
+    'Unknown / Insufficient information': 'bg-gray-100 text-gray-500 border-gray-300',
+  }
+  return colorMap[category] || 'bg-gray-100 text-gray-600 border-gray-300'
+}
+
+// Evidence category short names
+const getEvidenceCategoryShortName = (category: string): string => {
+  const shortNames: Record<string, string> = {
+    'Systematic Review and Meta-Analysis': 'SR/Meta',
+    'RCTs and Quasi-Experimental Studies': 'RCT',
+    'Observational Research Studies': 'Observational',
+    'Modelling & Simulation': 'Modelling',
+    'Policy Syntheses & Guidance Documents': 'Policy',
+    'Qualitative & Contextual Evidence': 'Qualitative',
+    'Expert Opinion and Commentary': 'Opinion',
+    'Other (Non-evidence documents)': 'Other',
+    'Unknown / Insufficient information': 'Unknown',
+  }
+  return shortNames[category] || category
+}
+
 // Types for test extraction results
 interface ExtractionResult {
   document: {
@@ -34,6 +66,8 @@ interface ExtractionResult {
     abstract_or_summary?: string
     is_relevant?: boolean
     extraction_status?: string
+    evidence_category?: string
+    is_systematic_review?: boolean
   }
   extraction: {
     issues: Array<{
@@ -48,11 +82,12 @@ interface ExtractionResult {
       description?: string
       type?: string
       country?: string
-      study_type?: string
       supporting_quote?: string
       addresses_issues?: number[]
       results?: Array<{
         outcome_variable?: string
+        // Support both 'direction' (new schema) and 'effect_direction' (legacy)
+        direction?: string
         effect_direction?: string
         effect_size_type?: string
         effect_size?: string
@@ -62,6 +97,18 @@ interface ExtractionResult {
         subgroup_or_dose?: string
         result_text?: string
         supporting_quote?: string
+        // SR-specific fields for meta-analysis results
+        heterogeneity_I2?: string
+        tau2?: string
+        summary_statistic?: string
+        estimate_level?: string
+        // SR sample size fields
+        n_studies?: number
+        sample_size?: number
+        // Stratum fields (for SR subgroup analyses)
+        stratum_type?: string
+        stratum_value?: string
+        is_primary_stratum?: boolean
       }>
     }>
     mappings?: unknown[]
@@ -74,6 +121,9 @@ interface ExtractionResult {
       text_length?: number
       extraction_time?: string
       custom_prompts_used?: boolean
+      evidence_category?: string
+      evidence_confidence?: number
+      workflow_used?: string
       [key: string]: unknown
     }
   }
@@ -379,6 +429,24 @@ export default function TestExtractionPage() {
                   </CardTitle>
                   {result.extraction.metadata && (
                     <div className="flex gap-2 flex-wrap mt-2">
+                      {result.extraction.metadata.evidence_category && (
+                        <Badge
+                          variant="outline"
+                          className={getEvidenceCategoryColor(result.extraction.metadata.evidence_category)}
+                        >
+                          {getEvidenceCategoryShortName(result.extraction.metadata.evidence_category)}
+                          {result.extraction.metadata.evidence_confidence && (
+                            <span className="ml-1 opacity-70">
+                              ({Math.round((result.extraction.metadata.evidence_confidence as number) * 100)}%)
+                            </span>
+                          )}
+                        </Badge>
+                      )}
+                      {result.extraction.metadata.workflow_used && (
+                        <Badge variant="outline" className="bg-purple-50 text-purple-700">
+                          {result.extraction.metadata.workflow_used} workflow
+                        </Badge>
+                      )}
                       <Badge variant="outline">
                         {result.extraction.metadata.text_length} chars
                       </Badge>
@@ -390,7 +458,7 @@ export default function TestExtractionPage() {
                     </div>
                   )}
                 </div>
-                <Button 
+                <Button
                   onClick={handleDownloadJson}
                   variant="outline"
                   size="sm"
@@ -402,8 +470,9 @@ export default function TestExtractionPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <DocumentDetailView 
+              <DocumentDetailView
                 extraction={result.extraction}
+                isSystematicReview={result.document.is_systematic_review}
               />
             </CardContent>
           </Card>

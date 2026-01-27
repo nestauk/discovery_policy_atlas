@@ -170,7 +170,10 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     # Build doc_uuid -> result extractions mapping (for effect data)
     doc_to_results: Dict[str, List[Dict]] = {}
     for ext in raw_extractions:
-        if ext.get("type") == "result" and ext.get("effect_direction"):
+        # Support both 'direction' (new schema) and 'effect_direction' (legacy)
+        if ext.get("type") == "result" and (
+            ext.get("direction") or ext.get("effect_direction")
+        ):
             meta = ex_metadata.get(ext.get("id", ""), {})
             doc_uuid = meta.get("doc_uuid", "")
             if doc_uuid:
@@ -229,7 +232,11 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         related_outcomes: List[str] = []
         for doc_uuid in doc_uuids:
             for result_ext in doc_to_results.get(doc_uuid, []):
-                effect_dir = result_ext.get("effect_direction", "").lower()
+                # Support both 'direction' (new schema) and 'effect_direction' (legacy)
+                effect_dir = (
+                    result_ext.get("direction")
+                    or result_ext.get("effect_direction", "")
+                ).lower()
                 if effect_dir in ("increase", "positive"):
                     pos += 1
                 elif effect_dir in ("decrease", "negative"):
@@ -291,7 +298,8 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             doc_id = meta.get("doc_id")
             if doc_id:
                 doc_ids.add(doc_id)
-            effect_dir = raw_ext.get("effect_direction")
+            # Support both 'direction' (new schema) and 'effect_direction' (legacy)
+            effect_dir = raw_ext.get("direction") or raw_ext.get("effect_direction")
             if effect_dir == "increase":
                 pos += 1
                 if doc_id:

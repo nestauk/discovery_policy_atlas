@@ -131,3 +131,29 @@ export function getDisplayableCategories(): EvidenceCategory[] {
 export const EVIDENCE_CATEGORY_SHORT_NAMES: Record<string, string> = Object.fromEntries(
   FALLBACK_CATEGORIES.map(c => [c.name, c.short_name])
 )
+
+/**
+ * Color mapping using Tailwind classes (legacy).
+ * Prefer getEvidenceCategoryColors() for new code.
+ */
+export const EVIDENCE_CATEGORY_COLORS: Record<string, EvidenceCategoryColors> = Object.fromEntries(
+  FALLBACK_CATEGORIES.map(c => [c.name, { bg: `bg-[${c.bg_color}]`, text: c.text_color === '#FFFFFF' ? 'text-white' : 'text-gray-900' }])
+)
+
+/**
+ * Get evidence mix display utilities.
+ */
+export function getEvidenceMixColors(key: string): EvidenceCategoryColors {
+  const categories = getEvidenceCategories()
+  const found = categories.find(c => c.key === key)
+  if (found) {
+    return { bg: found.bg_color, text: found.text_color }
+  }
+  return { bg: '#F3F4F6', text: '#374151' }
+}
+
+export function getEvidenceMixDisplayName(key: string): string {
+  const categories = getEvidenceCategories()
+  const found = categories.find(c => c.key === key)
+  return found?.short_name || key
+}
