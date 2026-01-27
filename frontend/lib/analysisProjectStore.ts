@@ -58,6 +58,10 @@ export interface AnalysisDocument {
   relevance_reason?: string
   top_line?: string
   document_type_reason?: string
+  // Evidence categorisation fields (9-category hierarchy)
+  evidence_category?: string
+  evidence_confidence?: number
+  evidence_category_reasoning?: string
   // Acquisition fields
   acquisition_status?: string
   acquisition_error?: string

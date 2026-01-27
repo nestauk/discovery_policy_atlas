@@ -8,15 +8,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { 
-  FileText, 
+import {
+  FileText,
   Loader2,
   ArrowLeft,
   AlertCircle,
   BookOpen,
   Target,
   Bot,
-  Filter,
   Download
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
@@ -49,6 +48,10 @@ interface AnalysisDocument {
   top_line?: string
   doi?: string
   landing_page_url?: string
+  // Evidence categorisation fields
+  evidence_category?: string
+  evidence_confidence?: number
+  evidence_category_reasoning?: string
   full_text_available?: boolean
   extraction_status?: string
   text_source?: string
@@ -109,10 +112,7 @@ export default function ProjectResultsPage() {
   const lastRefreshTimeRef = useRef<number>(0)
   const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
-  
-  // Relevance filtering state
-  const [showRelevantOnly, setShowRelevantOnly] = useState(true)
-  
+
   // Column visibility state
   const [showAdditionalColumns, setShowAdditionalColumns] = useState(false)
   
@@ -815,18 +815,22 @@ export default function ProjectResultsPage() {
         evidence_strength: evidenceStrength?.stars || undefined,
         evidence_strength_justification: evidenceStrength?.justification,
         predicted_impact: predictedImpact?.stars || undefined,
-        predicted_impact_justification: predictedImpact?.justification
+        predicted_impact_justification: predictedImpact?.justification,
+        // Evidence categorisation fields
+        evidence_category: doc.evidence_category,
+        evidence_confidence: doc.evidence_confidence,
+        evidence_category_reasoning: doc.evidence_category_reasoning
       }
     })
 
+    // Always filter to show only relevant documents
     const relevant = allTransformed.filter(doc => doc.is_relevant)
-    const filtered = showRelevantOnly ? relevant : allTransformed
-    
+
     return {
-      transformedPapers: filtered,
+      transformedPapers: relevant,
       relevantCount: relevant.length
     }
-  }, [documents, showRelevantOnly, studyStrengthMapping, sampleSizeMapping])
+  }, [documents, studyStrengthMapping, sampleSizeMapping])
 
   // Show loading state while fetching project
   if (projectLoading) {
@@ -1047,7 +1051,7 @@ export default function ProjectResultsPage() {
                           className="flex items-center gap-2"
                         >
                           <FileText className="h-3 w-3" />
-                          Documents ({showRelevantOnly ? relevantCount : documents.length})
+                          Documents ({relevantCount})
                         </Button>
                       </div>
 
@@ -1064,17 +1068,6 @@ export default function ProjectResultsPage() {
                               onCheckedChange={setShowAdditionalColumns}
                             />
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor="relevance-filter" className="text-sm text-slate-700">
-                              Relevant only
-                            </Label>
-                            <Switch
-                              id="relevance-filter"
-                              checked={showRelevantOnly}
-                              onCheckedChange={setShowRelevantOnly}
-                            />
-                          </div>
-                          
                           {/* Documents Download Button */}
                           <div className="flex items-center gap-2">
                             <Button
@@ -1168,19 +1161,11 @@ export default function ProjectResultsPage() {
                         </div>
                       ) : transformedPapers.length > 0 ? (
                         <PapersTable papers={transformedPapers} showAdditionalColumns={showAdditionalColumns} />
-                      ) : documents.length > 0 && showRelevantOnly ? (
+                      ) : documents.length > 0 ? (
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                           <h3 className="text-lg font-medium text-slate-900 mb-2">No Relevant Documents</h3>
-                          <p className="text-slate-600 mb-4">All {documents.length} documents in this project were marked as non-relevant.</p>
-                          <Button 
-                            variant="outline" 
-                            onClick={() => setShowRelevantOnly(false)}
-                            className="flex items-center gap-2"
-                          >
-                            <Filter className="h-4 w-4" />
-                            Show All Documents
-                          </Button>
+                          <p className="text-slate-600">All {documents.length} documents in this project were marked as non-relevant.</p>
                         </div>
                       ) : (
                         <div className="text-center py-12">

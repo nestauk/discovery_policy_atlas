@@ -841,6 +841,10 @@ class AnalysisStorageService:
             "relevance_reason": ref.relevance_reason,
             "top_line": ref.top_line,
             "document_type_reason": ref.document_type_reason,
+            # Evidence categorisation fields
+            "evidence_category": ref.evidence_category,
+            "evidence_confidence": ref.evidence_confidence,
+            "evidence_category_reasoning": ref.evidence_category_reasoning,
             # Acquisition fields
             "acquisition_status": ref.acquisition_status,
             "acquisition_error": ref.acquisition_error,

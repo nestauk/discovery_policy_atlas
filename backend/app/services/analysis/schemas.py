@@ -29,10 +29,14 @@ class UnifiedReference(BaseModel):
     relevance_confidence: Optional[float] = None
     relevance_reason: Optional[str] = None
     top_line: Optional[str] = None  # Concise summary of main takeaway
-    document_type: Optional[
-        str
-    ] = None  # "research_paper" | "reviews" | "policy_document" | "other"
+    # TODO: Remove document_type fields once old projects no longer need them
+    # Kept for backward compatibility with existing Supabase data
+    document_type: Optional[str] = None
     document_type_reason: Optional[str] = None
+    # Evidence categorisation (replaces document_type)
+    evidence_category: Optional[str] = None
+    evidence_confidence: Optional[float] = None
+    evidence_category_reasoning: Optional[str] = None
     # Acquisition fields
     acquisition_status: Optional[str] = None  # "success" | "failed" | "not_attempted"
     acquisition_error: Optional[str] = None  # Error message if acquisition failed

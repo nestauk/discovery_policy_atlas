@@ -32,6 +32,7 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
+from app.services.analysis.evidence_category import EVIDENCE_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -183,11 +184,8 @@ async def get_synthesis_summary(
                 if cached.evidence_coverage:
                     cached.evidence_coverage.total_screened = total_screened
                     cached.evidence_coverage.total_synthesised = total_synthesised
-                    # Keep total_sources aligned with "screened" for consistent semantics in UI/PDF.
-                    cached.evidence_coverage.total_sources = total_screened
                 else:
                     cached.evidence_coverage = EvidenceCoverageSnapshot(
-                        total_sources=total_screened,
                         total_screened=total_screened,
                         total_synthesised=total_synthesised,
                     )
@@ -943,12 +941,25 @@ async def get_project_documents(
         )
         # Map database field names to frontend expectations
         documents = []
+        filtered_other_count = 0
+
         for doc in docs_result.data:
+            # Filter out "Other (Non-evidence documents)" - these shouldn't reach the UI
+            if doc.get("evidence_category") == "Other (Non-evidence documents)":
+                filtered_other_count += 1
+                continue
+
             doc_copy = doc.copy()
             # Map citation_count (database) to cited_by_count (frontend)
             if "citation_count" in doc_copy:
                 doc_copy["cited_by_count"] = doc_copy["citation_count"]
             documents.append(doc_copy)
+
+        if filtered_other_count > 0:
+            logger.info(
+                f"Filtered {filtered_other_count} 'Other (Non-evidence)' documents from project {project_id} "
+                f"(returning {len(documents)} documents to UI)"
+            )
 
         return {"documents": documents, "total": len(documents)}
 
@@ -966,7 +977,7 @@ async def get_project_charts_data(
         # Get all documents for this project
         docs_result = (
             vectorization_service.supabase.table("analysis_documents")
-            .select("year, source_country, authors")
+            .select("year, source_country, authors, evidence_category")
             .eq("analysis_project_id", project_id)
             .execute()
         )
@@ -976,12 +987,15 @@ async def get_project_charts_data(
                 "documents_by_year": [],
                 "documents_by_country": [],
                 "documents_by_author": [],
+                "documents_by_evidence_category": [],
             }
 
         # Aggregate data
         year_counts = {}
         country_counts = {}
         author_counts = {}
+        evidence_category_counts = {}
+        filtered_other_count = 0
 
         for doc in docs_result.data:
             # Count by year
@@ -1055,6 +1069,15 @@ async def get_project_charts_data(
                             # Regular author or no country data available
                             author_counts[author] = author_counts.get(author, 0) + 1
 
+            # Count by evidence category (track but don't include "Other" in results)
+            evidence_category = doc.get("evidence_category")
+            if evidence_category and evidence_category.strip():
+                if evidence_category == "Other (Non-evidence documents)":
+                    filtered_other_count += 1
+                evidence_category_counts[evidence_category] = (
+                    evidence_category_counts.get(evidence_category, 0) + 1
+                )
+
         # Sort and format data
         documents_by_year = [
             {"year": year, "count": count}
@@ -1075,10 +1098,32 @@ async def get_project_charts_data(
             )[:10]
         ]
 
+        # Sort evidence categories by strength (predefined order)
+        # Exclude "Other (Non-evidence documents)" - these are filtered out during acquisition
+        evidence_category_order = [
+            cat
+            for cat in EVIDENCE_CATEGORIES
+            if cat != "Other (Non-evidence documents)"
+        ]
+
+        documents_by_evidence_category = []
+        for category in evidence_category_order:
+            if category in evidence_category_counts:
+                documents_by_evidence_category.append(
+                    {"category": category, "count": evidence_category_counts[category]}
+                )
+
+        if filtered_other_count > 0:
+            logger.info(
+                f"Charts data for project {project_id}: {filtered_other_count} 'Other (Non-evidence)' documents "
+                f"excluded from evidence category chart (total categories shown: {len(documents_by_evidence_category)})"
+            )
+
         return {
             "documents_by_year": documents_by_year,
             "documents_by_country": documents_by_country,
             "documents_by_author": documents_by_author,
+            "documents_by_evidence_category": documents_by_evidence_category,
         }
 
     except Exception as e:

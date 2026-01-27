@@ -34,23 +34,15 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     raw_extractions = state.get("raw_extractions") or []
     doc_metadata = state.get("doc_metadata") or {}
 
+    # total_screened = all documents loaded for synthesis (already passed relevance screening)
     total_screened = len(doc_metadata)
-    # Prefer explicit screening flag when present; fall back to "synthesised == screened" if unknown
-    relevant_flags = [
-        d.get("is_relevant")
-        for d in (doc_metadata.values() or [])
-        if isinstance(d, dict)
-    ]
-    if any(f is True for f in relevant_flags) or any(
-        f is False for f in relevant_flags
-    ):
-        total_synthesised = sum(1 for f in relevant_flags if f is True)
-    else:
-        total_synthesised = total_screened
 
     study_types: Counter = Counter()
     countries: Counter = Counter()
     source_types: Counter = Counter()
+    evidence_categories: Counter = Counter()
+    years: Counter = Counter()
+    evidence_doc_count = 0
 
     for ext in raw_extractions:
         if ext.get("type") == "intervention":
@@ -61,17 +53,26 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
             if country:
                 countries[country] += 1
 
-    years: Counter = Counter()
+    # Count document-level stats, excluding "Other (Non-evidence documents)"
     for doc in doc_metadata.values():
+        ev_cat = doc.get("evidence_category")
+        # Skip non-evidence documents for all counts
+        if ev_cat == "Other (Non-evidence documents)":
+            continue
+
+        evidence_doc_count += 1
         if doc.get("year"):
             years[doc["year"]] += 1
-        # Count source types
+        # Count source types (institutional: Academic, Government, NGO, etc.)
         src_type = normalize_source_type(doc.get("source"), doc.get("document_type"))
         source_types[src_type] += 1
+        # Count evidence categories (methodological: Systematic Review, RCT, etc.)
+        if ev_cat:
+            evidence_categories[ev_cat] += 1
 
-    # Determine strength based on study design quality
-    rct_count = sum(c for st, c in study_types.items() if "rct" in st.lower())
-    meta_count = sum(c for st, c in study_types.items() if "meta" in st.lower())
+    # Determine strength based on evidence category quality
+    rct_count = evidence_categories.get("RCTs and Quasi-Experimental Studies", 0)
+    meta_count = evidence_categories.get("Systematic Review and Meta-Analysis", 0)
 
     if meta_count >= 3 or rct_count >= 5:
         strength = "High"
@@ -96,13 +97,13 @@ async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
     }
 
     coverage = EvidenceCoverageSnapshot(
-        # Keep total_sources as the overall evidence-base size (screened),
-        # and expose synthesised separately for UI.
-        total_sources=total_screened,
+        # total_screened = all documents originally screened
+        # total_synthesised = evidence documents excluding "Other (Non-evidence documents)"
         total_screened=total_screened,
-        total_synthesised=total_synthesised,
+        total_synthesised=evidence_doc_count,
         study_types=filtered_study_types,
         source_types=dict(source_types),
+        evidence_categories=dict(evidence_categories),
         countries=filtered_countries,
         years={int(k): v for k, v in years.items()},
         overall_strength=strength,

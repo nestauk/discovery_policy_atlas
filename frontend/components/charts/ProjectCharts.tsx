@@ -64,6 +64,7 @@ interface ChartData {
   documents_by_year: Array<{ year: number; count: number }>
   documents_by_country: Array<{ country: string; count: number }>
   documents_by_author: Array<{ author: string; count: number }>
+  documents_by_evidence_category?: Array<{ category: string; count: number }>
 }
 
 export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
@@ -73,6 +74,7 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
   const [showTimelineData, setShowTimelineData] = useState(false)
   const [showCountriesData, setShowCountriesData] = useState(false)
   const [showAuthorsData, setShowAuthorsData] = useState(false)
+  const [showEvidenceData, setShowEvidenceData] = useState(false)
   const { fetchWithAuth } = useAPI()
   const chartsLoadedProjectIdRef = useRef<string | null>(null)
 
@@ -339,13 +341,32 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
     chartData.documents_by_author.forEach(item => {
       csvData.push(`"${item.author}",${item.count}`)
     })
-    
+
     const csvContent = csvData.join('\n')
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
     const link = document.createElement('a')
     const url = URL.createObjectURL(blob)
     link.setAttribute('href', url)
     link.setAttribute('download', createFilename('authors_data'))
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const exportEvidenceData = () => {
+    if (!chartData.documents_by_evidence_category) return
+    const csvData = ['Evidence Category,Documents']
+    chartData.documents_by_evidence_category.forEach(item => {
+      csvData.push(`"${item.category}",${item.count}`)
+    })
+
+    const csvContent = csvData.join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', createFilename('evidence_categories'))
     link.style.visibility = 'hidden'
     document.body.appendChild(link)
     link.click()
@@ -392,6 +413,96 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
         borderRadius: 6,
       },
     ],
+  }
+
+  // Evidence category colors (dark = strong evidence, light = weak evidence)
+  // Removed "Other" - it's filtered out at the backend
+  const evidenceCategoryColors: Record<string, string> = {
+    'Systematic Review and Meta-Analysis': '#0F294A',      // Navy (strongest)
+    'RCTs and Quasi-Experimental Studies': '#9A1BBE',     // Purple
+    'Observational Research Studies': '#0000FF',          // Blue
+    'Modelling & Simulation': '#18A48C',                  // Green
+    'Policy Syntheses & Guidance Documents': '#97D9E3',   // Aqua
+    'Qualitative & Contextual Evidence': '#A59BEE',       // Violet
+    'Expert Opinion and Commentary': '#F6A4B7',           // Pink
+    'Unknown / Insufficient information': '#f8f5f4',      // Light grey (weakest)
+  }
+
+  // Evidence category short names for chart display
+  // Removed "Other" - it's filtered out at the backend
+  const evidenceCategoryShortNames: Record<string, string> = {
+    'Systematic Review and Meta-Analysis': 'Systematic Review',
+    'RCTs and Quasi-Experimental Studies': 'RCT/Quasi-Exp',
+    'Observational Research Studies': 'Observational',
+    'Modelling & Simulation': 'Modelling',
+    'Policy Syntheses & Guidance Documents': 'Policy Guidance',
+    'Qualitative & Contextual Evidence': 'Qualitative',
+    'Expert Opinion and Commentary': 'Expert Opinion',
+    'Unknown / Insufficient information': 'Unknown',
+  }
+
+  // Evidence category chart data - stacked horizontal bar
+  const evidenceCategoryChartData = chartData.documents_by_evidence_category ? {
+    labels: ['Evidence Distribution'],
+    datasets: chartData.documents_by_evidence_category.map((item) => ({
+      label: evidenceCategoryShortNames[item.category] || item.category,
+      data: [item.count],
+      backgroundColor: evidenceCategoryColors[item.category] || '#646363',
+      borderWidth: 0,
+    }))
+  } : null
+
+  // Calculate total for evidence category chart max value
+  const evidenceTotalDocs = evidenceCategoryChartData
+    ? evidenceCategoryChartData.datasets.reduce((sum, dataset) => sum + dataset.data[0], 0)
+    : 0
+
+  const evidenceCategoryOptions = {
+    indexAxis: 'y' as const,
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: true,
+        position: 'bottom' as const,
+        labels: {
+          boxWidth: 12,
+          boxHeight: 12,
+          padding: 8,
+          font: { size: 10 },
+          generateLabels: (chart: unknown) => {
+            const chartData = (chart as { data: typeof evidenceCategoryChartData }).data
+            return chartData.datasets.map((dataset, i) => ({
+              text: `${dataset.label} (${dataset.data[0]})`,
+              fillStyle: dataset.backgroundColor as string,
+              hidden: false,
+              index: i,
+            }))
+          }
+        }
+      },
+      tooltip: {
+        callbacks: {
+          label: (context: { dataset: { label?: string }; parsed: { x: number } }) => {
+            return `${context.dataset.label || 'Unknown'}: ${context.parsed.x} documents`
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        stacked: true,
+        beginAtZero: true,
+        max: evidenceTotalDocs || undefined, // Set max to total so bar fills width
+        grid: { display: false },
+        ticks: { display: false },
+      },
+      y: {
+        stacked: true,
+        grid: { display: false },
+        ticks: { display: false },
+      },
+    },
   }
 
   return (
@@ -538,6 +649,59 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
                         <span className="text-slate-400">{item.count}</span>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {evidenceCategoryChartData && chartData.documents_by_evidence_category && chartData.documents_by_evidence_category.length > 0 && (
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>Evidence Category Distribution</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="h-24">
+                <Bar data={evidenceCategoryChartData} options={evidenceCategoryOptions} />
+              </div>
+
+              {/* Collapsible data section */}
+              <div className="border-t border-slate-100 pt-3">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={() => setShowEvidenceData(!showEvidenceData)}
+                    className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+                  >
+                    {showEvidenceData ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    View data
+                  </button>
+                  <button
+                    onClick={exportEvidenceData}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded transition-colors"
+                  >
+                    <Download className="h-3 w-3" />
+                    Export
+                  </button>
+                </div>
+
+                {showEvidenceData && (
+                  <div className="mt-3 grid gap-1 text-xs">
+                    {chartData.documents_by_evidence_category.map((item) => {
+                      const color = evidenceCategoryColors[item.category] || '#646363'
+                      return (
+                        <div key={item.category} className="flex justify-between items-center py-1 hover:bg-slate-50 px-2 -mx-2 rounded">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded"
+                              style={{ backgroundColor: color }}
+                            />
+                            <span className="select-text font-mono text-slate-700">{item.category}</span>
+                          </div>
+                          <span className="text-slate-400">{item.count}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>

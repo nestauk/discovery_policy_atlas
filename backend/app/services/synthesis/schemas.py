@@ -357,19 +357,20 @@ class StructuredBriefing(BaseModel):
 class EvidenceCoverageSnapshot(BaseModel):
     """Deterministically computed evidence coverage statistics."""
 
-    total_sources: int = Field(
-        ..., description="Total number of unique source documents"
+    total_screened: int = Field(
+        ..., description="Number of documents screened (all retrieved candidates)"
     )
-    total_screened: Optional[int] = Field(
-        None, description="Number of documents screened (all retrieved candidates)"
-    )
-    total_synthesised: Optional[int] = Field(
-        None,
-        description="Number of documents synthesised (documents that passed screening / marked relevant)",
+    total_synthesised: int = Field(
+        ...,
+        description="Number of evidence documents synthesised (excluding 'Other' non-evidence docs)",
     )
     study_types: Dict[str, int] = Field(default_factory=dict)
     source_types: Dict[str, int] = Field(
         default_factory=dict, description="Academic, Government, NGO, etc."
+    )
+    evidence_categories: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Evidence type distribution: Systematic Review, RCT, Observational, etc.",
     )
     countries: Dict[str, int] = Field(default_factory=dict)
     years: Dict[int, int] = Field(default_factory=dict)

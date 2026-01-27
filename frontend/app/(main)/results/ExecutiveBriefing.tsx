@@ -7,9 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
 import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, AlertTriangle, ChevronRight, Download } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import type { 
-  CitationInfo, 
-  EvidenceCoverageSnapshot, 
+import type {
+  CitationInfo,
+  EvidenceCoverageSnapshot,
   StructuredBriefing,
   InterventionTableRow,
   RecommendationItem,
@@ -17,6 +17,10 @@ import type {
   BackgroundSection,
   SynthesisSection as SynthesisSectionType,
 } from "@/types/search";
+import {
+  getEvidenceCategoryShortName,
+  getEvidenceCategoryRank
+} from "@/lib/evidenceCategories";
 
 interface ExecutiveBriefingProps {
   briefing: string;
@@ -39,21 +43,6 @@ interface ExecutiveBriefingProps {
   rerunError?: string | null;
 }
 
-// Study type normalisation
-const STUDY_TYPE_LABELS: Record<string, string> = {
-  'a': 'Systematic Review', 'b': 'Meta-Analysis', 'c': 'RCT',
-  'd': 'Quasi-Experimental', 'e': 'Cohort Study', 'f': 'Case-Control',
-  'g': 'Cross-Sectional', 'h': 'Case Study', 'i': 'Qualitative', 'j': 'Expert Opinion',
-  'systematic review': 'Systematic Review', 'meta-analysis': 'Meta-Analysis',
-  'rct': 'RCT', 'randomised controlled trial': 'RCT', 'randomized controlled trial': 'RCT',
-  'quasi-experimental': 'Quasi-Experimental', 'cohort': 'Cohort Study',
-  'case-control': 'Case-Control', 'cross-sectional': 'Cross-Sectional',
-  'case study': 'Case Study', 'qualitative': 'Qualitative',
-};
-
-function normalizeStudyType(type: string): string {
-  return STUDY_TYPE_LABELS[type.toLowerCase().trim()] || type;
-}
 
 // Citation lookup function type
 type CitationLookupFn = (key: string | number) => CitationInfo | undefined;
@@ -193,25 +182,22 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
     'Unknown': 'bg-slate-100 text-slate-800 border-slate-200',
   };
 
-  const normalizedStudyTypes = useMemo(() => {
-    const normalized: Record<string, number> = {};
-    Object.entries(coverage.study_types || {}).forEach(([type, count]) => {
-      const label = normalizeStudyType(type);
-      normalized[label] = (normalized[label] || 0) + count;
-    });
-    return normalized;
-  }, [coverage.study_types]);
-
-  const studyTypeSummary = Object.entries(normalizedStudyTypes)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
-    .map(([type, count]) => `${count} ${type}`)
-    .join(', ') || 'Various';
+  const evidenceCategorySummary = useMemo(() => {
+    return Object.entries(coverage.evidence_categories || {})
+      // Filter out "Other (Non-evidence documents)"
+      .filter(([type]) => !type.includes('Other (Non-evidence'))
+      // Sort by evidence strength rank (strongest first)
+      .sort((a, b) => getEvidenceCategoryRank(a[0]) - getEvidenceCategoryRank(b[0]))
+      .slice(0, 3)
+      // Use short names for display
+      .map(([type, count]) => `${count} ${getEvidenceCategoryShortName(type)}`)
+      .join(', ') || 'Various';
+  }, [coverage.evidence_categories]);
 
   const countriesEntries = Object.entries(coverage.countries || {}).sort((a, b) => b[1] - a[1]);
   const topCountries = countriesEntries.slice(0, 3).map(([c]) => c);
   const remainingCount = countriesEntries.length - 3;
-  
+
   const countrySummary = countriesEntries.length === 0 ? 'Unknown'
     : remainingCount > 0 ? `${topCountries.join(', ')} +${remainingCount} more`
     : topCountries.join(', ');
@@ -221,10 +207,10 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
     .map(([type, count]) => `${count} ${type}`)
     .join(', ') || 'Various';
 
-  const hasRCTs = Object.keys(normalizedStudyTypes).some(t => 
-    t.toLowerCase().includes('rct') || t.toLowerCase().includes('randomised'));
-  const hasMetas = Object.keys(normalizedStudyTypes).some(t => 
-    t.toLowerCase().includes('meta'));
+  const hasRCTs = Object.keys(coverage.evidence_categories || {}).some(t =>
+    t.includes('RCTs and Quasi-Experimental'));
+  const hasMetas = Object.keys(coverage.evidence_categories || {}).some(t =>
+    t.includes('Systematic Review and Meta-Analysis'));
 
   const filteredGaps = (coverage.gaps || []).filter(gap => {
     if (gap.toLowerCase().includes('no rcts') && hasRCTs) return false;
@@ -245,10 +231,10 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
         <div>
           <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Sources</div>
           <div className="font-semibold text-slate-800">
-            {(coverage.total_synthesised ?? coverage.total_sources)} synthesised
+            {coverage.total_synthesised} synthesised
           </div>
           <div className="text-slate-600 text-xs mt-0.5">
-            Screened: {(coverage.total_screened ?? coverage.total_sources)}
+            Screened: {coverage.total_screened}
           </div>
         </div>
         <div>
@@ -256,8 +242,8 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
           <div className="text-slate-700">{sourceTypeSummary}</div>
         </div>
         <div>
-          <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Study Types</div>
-          <div className="text-slate-700">{studyTypeSummary}</div>
+          <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Evidence Types</div>
+          <div className="text-slate-700">{evidenceCategorySummary}</div>
         </div>
         <div>
           <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Geographic Coverage</div>
@@ -784,15 +770,19 @@ export function ExecutiveBriefing({
         Unknown: "#e5e7eb",
       };
       const strengthColor = strengths[evidenceCoverage.overall_strength] || strengths.Unknown;
-      const studyTypes = Object.entries(evidenceCoverage.study_types || {})
-        .sort((a, b) => b[1] - a[1])
+      const evidenceCategories = Object.entries(evidenceCoverage.evidence_categories || {})
+        // Filter out "Other (Non-evidence documents)"
+        .filter(([type]) => !type.includes('Other (Non-evidence'))
+        // Sort by evidence strength rank (strongest first)
+        .sort((a, b) => getEvidenceCategoryRank(a[0]) - getEvidenceCategoryRank(b[0]))
         .slice(0, 3)
-        .map(([k, v]) => `${v} ${sanitize(k)}`)
+        // Use short names for display
+        .map(([k, v]) => `${v} ${sanitize(getEvidenceCategoryShortName(k))}`)
         .join(", ") || "Various";
       const countryEntries = Object.entries(evidenceCoverage.countries || {}).sort((a, b) => b[1] - a[1]);
       const topCountries = countryEntries.slice(0, 3).map(([c]) => sanitize(c)).join(", ") || "Unknown";
-      const synthesised = (evidenceCoverage.total_synthesised ?? evidenceCoverage.total_sources);
-      const screened = (evidenceCoverage.total_screened ?? evidenceCoverage.total_sources);
+      const synthesised = evidenceCoverage.total_synthesised;
+      const screened = evidenceCoverage.total_screened;
       return `
         <div class="card">
           <div class="card-title">Evidence Base</div>
@@ -804,8 +794,8 @@ export function ExecutiveBriefing({
               <div class="value" style="font-size:10px;color:#64748b;">Screened: ${screened}</div>
             </div>
             <div>
-              <div class="label">Study Types</div>
-              <div class="value">${studyTypes}</div>
+              <div class="label">Evidence Types</div>
+              <div class="value">${evidenceCategories}</div>
             </div>
             <div>
               <div class="label">Geographic Coverage</div>
