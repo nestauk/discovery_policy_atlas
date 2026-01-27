@@ -1,5 +1,5 @@
 /**
- * Evidence category utilities for display across intervention tables.
+ * Evidence category utilities for display across the application.
  *
  * This file provides evidence category display utilities, with data fetched
  * from the backend API to ensure consistency between frontend and backend.
@@ -86,7 +86,7 @@ const FALLBACK_CATEGORIES: EvidenceCategory[] = [
 
 /**
  * Get colors for an evidence category, with fallback for unknown categories.
- * Returns raw hex values for use with inline styles (Tailwind can't handle dynamic class names).
+ * Returns raw hex values for use with inline styles.
  */
 export function getEvidenceCategoryColors(category: string): EvidenceCategoryColors {
   const categories = getEvidenceCategories()
@@ -217,6 +217,24 @@ export function formatEvidenceMixCompact(evidenceMix?: Record<string, number>): 
     .filter(key => evidenceMix[key] && evidenceMix[key] > 0)
     .map(key => `${evidenceMix[key]} ${getEvidenceMixDisplayName(key)}`)
     .join(', ')
+}
+
+/**
+ * Get rank for an evidence category (lower = stronger evidence).
+ * Returns 999 for unknown categories.
+ */
+export function getEvidenceCategoryRank(category: string): number {
+  const categories = getEvidenceCategories()
+  const found = categories.find(c => c.name === category)
+  return found?.rank || 999
+}
+
+/**
+ * Get evidence categories excluding "Other" (non-evidence documents),
+ * useful for display where we filter out non-evidence.
+ */
+export function getDisplayableCategories(): EvidenceCategory[] {
+  return getEvidenceCategories().filter(c => c.key !== 'other')
 }
 
 // Legacy exports for backward compatibility (derived from categories)

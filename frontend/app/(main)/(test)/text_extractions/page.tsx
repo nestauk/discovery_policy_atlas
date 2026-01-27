@@ -447,7 +447,8 @@ export default function ExtractionsPage() {
   }
 
   const goBackToResults = () => {
-    router.push('/results')
+    const projectId = activeProject?.id
+    router.push(projectId ? `/projects/${projectId}` : '/projects')
   }
 
   return (

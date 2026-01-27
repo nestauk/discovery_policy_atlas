@@ -279,14 +279,12 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
 
         logger.info(f"Inserting {len(citations_to_insert)} citations")
         if citations_to_insert:
-            # Use upsert to handle any duplicate key issues
-            for cit in citations_to_insert:
-                try:
-                    supabase.table("synthesis_citations").insert(cit).execute()
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to insert citation {cit.get('citation_key')}: {e}"
-                    )
+            try:
+                supabase.table("synthesis_citations").insert(
+                    citations_to_insert
+                ).execute()
+            except Exception as e:
+                logger.warning(f"Failed to insert citations batch: {e}")
 
     # Build theme->extraction mappings
     theme_to_ex_ids: Dict[str, List[str]] = {}

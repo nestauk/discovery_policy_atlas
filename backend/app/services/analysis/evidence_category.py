@@ -97,8 +97,10 @@ _EVIDENCE_CATEGORY_DATA = [
     ),
 ]
 
+
 # Derived mappings (generated once at module load)
 EVIDENCE_CATEGORIES = [row[0] for row in _EVIDENCE_CATEGORY_DATA]
+EVIDENCE_CATEGORY_SHORT_NAMES = {row[0]: row[3] for row in _EVIDENCE_CATEGORY_DATA}
 EVIDENCE_CATEGORY_SCORES = {row[0]: row[2] for row in _EVIDENCE_CATEGORY_DATA}
 EVIDENCE_CATEGORY_RANKS = {
     row[0]: rank for rank, row in enumerate(_EVIDENCE_CATEGORY_DATA, start=1)
