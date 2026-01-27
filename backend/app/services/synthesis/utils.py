@@ -82,8 +82,6 @@ def normalize_source_type(source: str, document_type: str) -> str:
         return "NGO/Think Tank"
     if doc_type in ("policy document", "policy brief", "policy"):
         return "Policy"
-    if doc_type in ("igo",):
-        return "IGO"
     if doc_type in ("news", "news article", "media"):
         return "Media"
 

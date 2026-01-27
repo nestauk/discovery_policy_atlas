@@ -13,6 +13,8 @@ export interface AnalysisProject {
   created_at: string
   created_by_user_id?: string
   created_by_name?: string
+  organization_id?: string
+  is_demo?: boolean
   search_query?: {
     original_query?: string
     boolean_query?: string

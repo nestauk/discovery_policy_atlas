@@ -207,8 +207,8 @@ def analyze_confidence_by_correctness(merged_df: pd.DataFrame) -> Dict:
         "incorrect_mean_confidence": merged_df[~merged_df["correct"]][
             "evidence_confidence"
         ].mean(),
-        "correct_count": merged_df["correct"].sum(),
-        "incorrect_count": (~merged_df["correct"]).sum(),
+        "correct_count": int(merged_df["correct"].sum()),
+        "incorrect_count": int((~merged_df["correct"]).sum()),
     }
 
     return analysis

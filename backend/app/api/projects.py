@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 import logging
+import os
 from datetime import datetime
 import uuid
 from typing import Optional, List
@@ -14,6 +15,7 @@ from app.services.chatbot import ChatRequest, ChatResponse
 from app.services.chatbot.chat_service import chatbot_service
 from app.services.synthesis.schemas import (
     SynthesisSummary,
+    EvidenceCoverageSnapshot,
     Finding,
     ThematicGroup,
     EvidenceItem,
@@ -30,10 +32,92 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
+from app.services.analysis.evidence_category import EVIDENCE_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
+
+# Organization slug that has access to all projects (dev/admin org)
+ADMIN_ORG_SLUG = "nesta-dev"
+
+
+def can_access_all_projects(user: CurrentUser) -> bool:
+    """Check if user belongs to an admin org that can see all projects."""
+    return user.organization_slug == ADMIN_ORG_SLUG
+
+
+def can_access_project(
+    user: CurrentUser, project_org_id: str | None, project_created_by: str | None = None
+) -> bool:
+    """Check if user can access a specific project based on organization.
+
+    Args:
+        user: Current authenticated user
+        project_org_id: Organization ID of the project
+        project_created_by: User ID who created the project
+    """
+    # Admin org can access everything
+    if can_access_all_projects(user):
+        return True
+
+    # Creators can always access their own projects (regardless of org assignment)
+    if project_created_by == user.user_id:
+        return True
+
+    # Everyone can access demo org projects
+    demo_org_id = os.getenv("DEMO_ORG_ID")
+    if demo_org_id and project_org_id == demo_org_id:
+        return True
+
+    # User can access projects from their own org
+    if user.organization_id and user.organization_id == project_org_id:
+        return True
+
+    return False
+
+
+def get_project_with_auth_check(
+    project_id: str, user: CurrentUser, select: str = "*"
+) -> dict:
+    """Fetch a project and verify the user has access to it.
+
+    Args:
+        project_id: The project UUID
+        user: The current authenticated user
+        select: Columns to select (default: all)
+
+    Returns:
+        The project data dict
+
+    Raises:
+        HTTPException: 404 if not found, 403 if access denied
+    """
+    # Always need organization_id and created_by_user_id for auth check
+    if select != "*":
+        if "organization_id" not in select:
+            select = f"{select}, organization_id"
+        if "created_by_user_id" not in select:
+            select = f"{select}, created_by_user_id"
+
+    result = (
+        vectorization_service.supabase.table("analysis_projects")
+        .select(select)
+        .eq("id", project_id)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = result.data[0]
+
+    if not can_access_project(
+        user, project.get("organization_id"), project.get("created_by_user_id")
+    ):
+        raise HTTPException(status_code=403, detail="Access denied to this project")
+
+    return project
 
 
 # END-I - INFO REGION END
@@ -62,22 +146,53 @@ async def get_synthesis_summary(
     try:
         from app.services.synthesis.logbook import get_synthesis_status
 
-        # Check project status first
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("status")
-            .eq("id", project_id)
-            .execute()
+        # Check project exists and user has access
+        project = get_project_with_auth_check(
+            project_id, current_user, "status, organization_id"
         )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-
-        project_status = project_result.data[0].get("status")
+        project_status = project.get("status")
 
         # Check if synthesis is already cached
         cached = await read_cached_summary(project_id)
         if cached:
+            # Normalise evidence coverage counts to reflect screening outcomes, even for older cached runs.
+            try:
+                screened_res = (
+                    vectorization_service.supabase.table("analysis_documents")
+                    .select("id", count="exact")
+                    .eq("analysis_project_id", project_id)
+                    .execute()
+                )
+                total_screened = (
+                    screened_res.count
+                    if hasattr(screened_res, "count")
+                    else len(screened_res.data or [])
+                )
+                synthesised_res = (
+                    vectorization_service.supabase.table("analysis_documents")
+                    .select("id", count="exact")
+                    .eq("analysis_project_id", project_id)
+                    .eq("is_relevant", True)
+                    .execute()
+                )
+                total_synthesised = (
+                    synthesised_res.count
+                    if hasattr(synthesised_res, "count")
+                    else len(synthesised_res.data or [])
+                )
+
+                if cached.evidence_coverage:
+                    cached.evidence_coverage.total_screened = total_screened
+                    cached.evidence_coverage.total_synthesised = total_synthesised
+                else:
+                    cached.evidence_coverage = EvidenceCoverageSnapshot(
+                        total_screened=total_screened,
+                        total_synthesised=total_synthesised,
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to compute screened/synthesised counts for project {project_id}: {e}"
+                )
             return cached
 
         # If analysis still running or synthesising, return appropriate response
@@ -142,17 +257,25 @@ async def get_synthesis_summary(
 @router.get("")
 @router.get("/")
 async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_user)):
-    """Get all analysis projects"""
+    """Get analysis projects filtered by user's organization."""
     try:
-        result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("*")
-            .order("created_at", desc=True)
-            .execute()
-        )
+        demo_org_id = os.getenv("DEMO_ORG_ID")
+
+        # Use database function for filtering (centralizes authorization logic)
+        result = vectorization_service.supabase.rpc(
+            "get_user_projects",
+            {
+                "p_user_id": current_user.user_id,
+                "p_organization_id": current_user.organization_id,
+                "p_organization_slug": current_user.organization_slug,
+                "p_demo_org_id": demo_org_id,
+                "p_admin_org_slug": ADMIN_ORG_SLUG,
+            },
+        ).execute()
 
         projects = []
         for project_data in result.data:
+            project_org_id = project_data.get("organization_id")
             projects.append(
                 {
                     "id": str(project_data["id"]),
@@ -166,6 +289,9 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
                     "created_at": project_data["created_at"],
                     "created_by_user_id": project_data.get("created_by_user_id"),
                     "created_by_name": project_data.get("created_by_name"),
+                    "organization_id": project_org_id,
+                    "is_demo": demo_org_id is not None
+                    and project_org_id == demo_org_id,
                 }
             )
 
@@ -200,6 +326,7 @@ async def create_analysis_project(
             "created_at": datetime.utcnow().isoformat(),
             "created_by_user_id": current_user.user_id,
             "created_by_name": current_user.name,
+            "organization_id": current_user.organization_id,
         }
 
         result = (
@@ -225,6 +352,7 @@ async def create_analysis_project(
             "created_at": created_project["created_at"],
             "created_by_user_id": created_project.get("created_by_user_id"),
             "created_by_name": created_project.get("created_by_name"),
+            "organization_id": created_project.get("organization_id"),
         }
 
     except HTTPException:
@@ -240,18 +368,8 @@ async def get_analysis_project(
 ):
     """Get a specific analysis project with documents and extractions"""
     try:
-        # Get project
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("*")
-            .eq("id", project_id)
-            .execute()
-        )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-
-        project = project_result.data[0]
+        # Get project with authorization check
+        project = get_project_with_auth_check(project_id, current_user)
 
         # Get documents
         docs_result = (
@@ -291,6 +409,7 @@ async def get_analysis_project(
                 "created_at": project["created_at"],
                 "created_by_user_id": project.get("created_by_user_id"),
                 "created_by_name": project.get("created_by_name"),
+                "organization_id": project.get("organization_id"),
                 "search_query": project.get("search_query"),
             },
             "documents": documents,
@@ -314,6 +433,9 @@ async def update_analysis_project(
 ):
     """Update an analysis project"""
     try:
+        # Check authorization first
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
         # Build update data
         update_data = {}
 
@@ -358,6 +480,7 @@ async def update_analysis_project(
             "created_at": updated_project["created_at"],
             "created_by_user_id": updated_project.get("created_by_user_id"),
             "created_by_name": updated_project.get("created_by_name"),
+            "organization_id": updated_project.get("organization_id"),
         }
 
     except HTTPException:
@@ -373,16 +496,8 @@ async def delete_analysis_project(
 ):
     """Delete an analysis project and all its data"""
     try:
-        # Check if project exists
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("id")
-            .eq("id", project_id)
-            .execute()
-        )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
+        # Check authorization (also verifies project exists)
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
 
         # Clean up chunks that reference analysis_documents from this project
         try:
@@ -429,36 +544,80 @@ async def delete_analysis_project(
         raise HTTPException(status_code=500, detail="Failed to delete analysis project")
 
 
-async def trigger_synthesis_for_project(project_id: str) -> None:
-    """Trigger synthesis for a project if not already running/completed."""
+async def trigger_synthesis_for_project(
+    project_id: str, force: bool = False, invalidate_previous: bool = False
+) -> None:
+    """Trigger synthesis for a project.
+
+    Args:
+        project_id: Analysis project UUID.
+        force: If True, rerun even when a completed run exists.
+        invalidate_previous: If True, mark prior completed runs as invalidated.
+    """
     from app.services.synthesis.logbook import (
         get_synthesis_status,
         create_synthesis_run_placeholder,
+        invalidate_cache,
     )
     from app.services.synthesis.agent import SynthesisAgent
 
-    # Check if synthesis already exists or is running
     synthesis_status = await get_synthesis_status(project_id)
 
-    if synthesis_status in ["running", "completed"]:
-        logger.info(f"Synthesis already {synthesis_status} for project {project_id}")
-        if synthesis_status == "completed":
-            # Mark project as completed since synthesis is done (async to avoid blocking)
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: vectorization_service.supabase.table("analysis_projects")
-                .update({"status": "completed"})
-                .eq("id", project_id)
-                .execute(),
-            )
+    if synthesis_status == "running" and not force:
+        logger.info(f"Synthesis already running for project {project_id}")
         return
+
+    if synthesis_status == "completed" and not force:
+        logger.info(f"Synthesis already completed for project {project_id}")
+        # Keep marking the project completed for consistency
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: vectorization_service.supabase.table("analysis_projects")
+            .update({"status": "completed"})
+            .eq("id", project_id)
+            .execute(),
+        )
+        return
+
+    if invalidate_previous and synthesis_status in [
+        "completed",
+        "failed",
+        "invalidated",
+    ]:
+        try:
+            await invalidate_cache(project_id)
+        except Exception as e:
+            logger.warning(
+                f"Failed to invalidate prior synthesis cache for {project_id}: {e}"
+            )
+
+    if force:
+        try:
+            # Clear prior synthesis_runs rows to satisfy unique constraint on analysis_project_id
+            vectorization_service.supabase.table("synthesis_runs").delete().eq(
+                "analysis_project_id", project_id
+            ).execute()
+        except Exception as e:
+            logger.warning(
+                f"Failed to clear existing synthesis_runs for forced rerun of project {project_id}: {e}"
+            )
 
     # Create placeholder to prevent duplicate runs
     run_id = await create_synthesis_run_placeholder(project_id)
 
     try:
         logger.info(f"Starting synthesis for project {project_id}")
+
+        # Mark project as running (async to avoid blocking)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: vectorization_service.supabase.table("analysis_projects")
+            .update({"status": "running"})
+            .eq("id", project_id)
+            .execute(),
+        )
 
         project_user_id = None
         try:
@@ -479,7 +638,6 @@ async def trigger_synthesis_for_project(project_id: str) -> None:
 
         # Remove the placeholder run before creating the final one (async to avoid blocking)
         supabase = vectorization_service.supabase
-        loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
             lambda: supabase.table("synthesis_runs")
@@ -546,16 +704,8 @@ async def run_analysis_for_project(
         from app.services.analysis.schemas import RunConfig
         from app.core.config import settings
 
-        # Check if project exists
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("*")
-            .eq("id", project_id)
-            .execute()
-        )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
+        # Check authorization (also verifies project exists)
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
 
         # Build run config from request (query comes from search, not from project)
         query = request.get("query", "").strip()
@@ -721,12 +871,68 @@ async def run_analysis_for_project(
         raise HTTPException(status_code=500, detail=f"Failed to run analysis: {str(e)}")
 
 
+@router.post("/{project_id}/rerun-synthesis")
+async def rerun_synthesis_for_project(
+    project_id: str,
+    request: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Manually rerun synthesis using cached analysis outputs.
+
+    Args:
+        project_id: Analysis project UUID.
+        request: Payload containing rerun options.
+        current_user: Authenticated user.
+
+    Returns:
+        JSON response confirming rerun initiation.
+    """
+    try:
+        from app.services.synthesis.logbook import get_synthesis_status
+
+        # Ensure project exists and user has access
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
+        force = bool(request.get("force", True))
+        invalidate_previous = bool(request.get("invalidate_previous", True))
+
+        current_status = await get_synthesis_status(project_id)
+        if current_status == "running" and not force:
+            raise HTTPException(
+                status_code=409,
+                detail="Synthesis is already running for this project; rerun with force=true to override.",
+            )
+
+        await trigger_synthesis_for_project(
+            project_id, force=force, invalidate_previous=invalidate_previous
+        )
+
+        return {
+            "project_id": project_id,
+            "status": "started",
+            "force": force,
+            "invalidate_previous": invalidate_previous,
+            "previous_status": current_status,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rerunning synthesis for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to rerun synthesis: {str(e)}"
+        )
+
+
 @router.get("/{project_id}/documents")
 async def get_project_documents(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)
 ):
     """Get all documents for an analysis project"""
     try:
+        # Check authorization
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
         docs_result = (
             vectorization_service.supabase.table("analysis_documents")
             .select("*")
@@ -895,14 +1101,9 @@ async def get_project_charts_data(
         # Sort evidence categories by strength (predefined order)
         # Exclude "Other (Non-evidence documents)" - these are filtered out during acquisition
         evidence_category_order = [
-            "Systematic Review and Meta-Analysis",
-            "RCTs and Quasi-Experimental Studies",
-            "Observational Research Studies",
-            "Modelling & Simulation",
-            "Policy Syntheses & Guidance Documents",
-            "Qualitative & Contextual Evidence",
-            "Expert Opinion and Commentary",
-            "Unknown / Insufficient information",
+            cat
+            for cat in EVIDENCE_CATEGORIES
+            if cat != "Other (Non-evidence documents)"
         ]
 
         documents_by_evidence_category = []
@@ -1352,17 +1553,8 @@ async def chat_with_project(
 ) -> ChatResponse:
     """Chat with the analysis project using RAG over collected evidence."""
     try:
-        # Verify project exists and user has access
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("id")
-            .eq("id", project_id)
-            .single()
-            .execute()
-        )
-
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
+        # Check authorization
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
 
         # Generate chat response using the chatbot service
         response = await chatbot_service.chat(project_id, request)

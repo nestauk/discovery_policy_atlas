@@ -53,6 +53,7 @@ nav:
     - Overview: backend/overview.md
     - API documentation: backend/api.md
     - Database: backend/database.md
+    - User Management: backend/user-management.md
   - Frontend:
     - Overview: frontend/overview.md
 
