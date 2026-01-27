@@ -30,7 +30,8 @@ from ..schemas_langchain import (
     ResultItem,
     ConclusionItem,
 )
-from ..evidence_strength import calculate_document_evidence_score
+from ..evidence.category import EVIDENCE_CATEGORY_EXPLANATIONS
+from ..evidence.strength import calculate_document_evidence_score
 
 logger = logging.getLogger(__name__)
 
@@ -134,18 +135,6 @@ class BaseExtractionWorkflow(ABC):
         )
         confidence = state.get("evidence_confidence")
 
-        category_explanations = {
-            "Systematic Review and Meta-Analysis": "Synthesizes multiple studies to provide the strongest evidence tier.",
-            "RCTs and Quasi-Experimental Studies": "Causal designs with controls; strongest primary-study evidence.",
-            "Observational Research Studies": "Non-randomized evidence showing associations; weaker causal certainty.",
-            "Modelling & Simulation": "Modelled or simulated evidence, not direct empirical outcomes.",
-            "Policy Syntheses & Guidance Documents": "Policy-focused synthesis or guidance rather than primary evidence.",
-            "Qualitative & Contextual Evidence": "Interview/qualitative/contextual evidence; rich but not causal.",
-            "Expert Opinion and Commentary": "Expert commentary without primary empirical testing.",
-            "Other (Non-evidence documents)": "Not research evidence.",
-            "Unknown / Insufficient information": "Insufficient information to classify evidence quality.",
-        }
-
         interventions = state.get("interventions") or []
         extraction_results = {
             "interventions": [
@@ -175,7 +164,7 @@ class BaseExtractionWorkflow(ABC):
         return (
             "Evidence strength context (computed):\n"
             f"- Evidence category: {category}\n"
-            f"  Meaning: {category_explanations.get(category, 'No description available.')}\n"
+            f"  Meaning: {EVIDENCE_CATEGORY_EXPLANATIONS.get(category, 'No description available.')}\n"
             f"- Evidence confidence: {confidence_text}\n"
             f"- Document evidence strength: {final_score}/5 (base {base_score}/5){penalty_note}\n"
             f"- Sample size (N): {sample_text}\n"
