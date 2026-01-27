@@ -154,10 +154,10 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                     for res in extraction.results:
                         res.intervention_idx = intervention.idx
                         res.estimate_level = "pooled"
-                        # Validate 'intervention variant' strata belong to parent
+                        # Validate intervention-related strata belong to parent
                         if (
                             res.stratum_type
-                            and res.stratum_type.lower() == "intervention variant"
+                            and "intervention" in res.stratum_type.lower()
                             and res.stratum_value
                         ):
                             belongs = await _validate_intervention_variant_belongs(
