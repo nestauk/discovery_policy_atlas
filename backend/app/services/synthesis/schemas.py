@@ -433,7 +433,7 @@ class MagnitudeDetail(BaseModel):
     source_count: int
     total_sources: int
     measurement_count: int
-    dominant_scale: str
+    dominant_scale: Optional[str] = None
     thresholds: str
 
 
