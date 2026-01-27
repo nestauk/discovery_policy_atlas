@@ -87,8 +87,6 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                 extra={"paper_id": paper_id},
             )
             extraction = InterventionsExtraction(**result)
-            for intervention in extraction.interventions:
-                intervention.intervention_semantic_type = "intervention_category"
             logger.info(
                 f"[SR] Extracted {len(extraction.interventions)} intervention categories"
             )

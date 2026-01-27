@@ -67,10 +67,6 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
 
             extraction = InterventionsExtraction(**result)
 
-            # Set intervention_semantic_type for RCT workflow
-            for intervention in extraction.interventions:
-                intervention.intervention_semantic_type = "trial_intervention"
-
             logger.info(
                 f"[RCT] Extracted {len(extraction.interventions)} interventions"
             )
