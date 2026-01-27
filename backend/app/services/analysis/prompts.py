@@ -394,7 +394,6 @@ Sample Size Fields (IMPORTANT - extract these when mentioned in the text):
 Stratum Fields (captures how results vary within an intervention):
 - stratum_type: The dimension of variation (e.g., "follow-up period", "age subgroup", "setting", "intervention variant", "dosage", "comparison type")
 - stratum_value: The specific value for this stratum (e.g., "12 months", "short term", "children 5-11 years", "school-based", "high dose")
-
 Effect Size Fields:
 - effect_size_type: Type of pooled estimate (e.g., "SMD", "pooled OR", "RR", "MD")
 - effect_size: The numeric value (e.g., "-0.11", "0.85")
