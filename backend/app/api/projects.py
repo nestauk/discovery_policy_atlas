@@ -32,11 +32,11 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
-from app.services.analysis.evidence_category import (
+from app.services.analysis.evidence.category import (
     EVIDENCE_CATEGORIES,
     EVIDENCE_CATEGORY_RANKS,
 )
-from app.services.analysis.evidence_strength import (
+from app.services.analysis.evidence.strength import (
     UNKNOWN_RANK,
     _parse_sample_size,
     calculate_evidence_strength,
@@ -48,7 +48,7 @@ from app.services.analysis.evidence_strength import (
     compute_display_evidence_mix_from_detailed,
     deduplicate_interventions,
 )
-from app.services.analysis.navigator_service import (
+from app.services.analysis.utils.navigator import (
     compute_shared_docs_mappings,
 )
 

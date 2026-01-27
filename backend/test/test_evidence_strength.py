@@ -2,7 +2,7 @@
 
 import logging
 
-from app.services.analysis.evidence_strength import calculate_evidence_strength
+from app.services.analysis.evidence.strength import calculate_evidence_strength
 
 logger = logging.getLogger(__name__)
 

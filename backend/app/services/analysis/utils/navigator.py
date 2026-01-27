@@ -1,9 +1,4 @@
-"""
-Navigator service for computing issue-intervention relationships.
-
-This module handles the pre-computation of shared document mappings for
-the issue-intervention navigator.
-"""
+"""Utilities for computing issue-intervention document relationships."""
 
 
 def compute_shared_docs_mappings(
@@ -53,7 +48,6 @@ def compute_shared_docs_mappings(
                 if doc_has_issue and doc_has_intervention:
                     pair_shared_docs.append(doc_id)
 
-            # Store for reuse in navigator building
             if pair_shared_docs:
                 issue_intervention_shared_docs[
                     (issue_theme_id, intervention_theme_id)

@@ -22,7 +22,7 @@ import logging
 import re
 from typing import Optional, TypedDict
 
-from .evidence_category import (
+from .category import (
     EVIDENCE_CATEGORY_SCORES,
     EVIDENCE_CATEGORY_RANKS,
     EVIDENCE_CATEGORY_TO_KEY,

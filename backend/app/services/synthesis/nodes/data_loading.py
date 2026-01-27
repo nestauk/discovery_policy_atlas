@@ -11,7 +11,7 @@ from typing import Dict, List
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState, Concept
 from app.services.synthesis.utils import normalize_study_type
-from app.services.analysis.evidence_strength import calculate_document_evidence_score
+from app.services.analysis.evidence.strength import calculate_document_evidence_score
 
 
 async def load_raw_extractions(state: SynthesisState) -> SynthesisState:

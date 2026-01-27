@@ -28,7 +28,7 @@ import pandas as pd
 
 from app.core.config import settings
 from app.utils.llm import batch_check
-from .prompts import EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT
+from ..prompts import EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
