@@ -985,6 +985,13 @@ async def get_project_documents(
                 doc_copy["evidence_strength_justification"] = evidence_result[
                     "justification"
                 ]
+            # Extract predicted impact from extraction results
+            conclusion = (doc.get("extraction_results") or {}).get("conclusion") or {}
+            predicted_impact = conclusion.get("predicted_impact") or {}
+            doc_copy["predicted_impact"] = predicted_impact.get("stars")
+            doc_copy["predicted_impact_justification"] = predicted_impact.get(
+                "justification"
+            )
             documents.append(doc_copy)
 
         if filtered_other_count > 0:
