@@ -151,6 +151,11 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                     transferability_rating=t.get("transferability_rating"),
                     transferability_note=t.get("transferability_note"),
                     transferability_breakdown=t.get("transferability_breakdown"),
+                    impact_score=t.get("impact_score"),
+                    impact_score_label=t.get("impact_score_label"),
+                    impact_score_breakdown=_parse_json_field(
+                        t.get("impact_score_breakdown")
+                    ),
                 )
             )
 
@@ -404,6 +409,9 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "transferability_rating": intv_dict.get("transferability_rating"),
                 "transferability_note": intv_dict.get("transferability_note"),
                 "transferability_breakdown": intv_dict.get("transferability_breakdown"),
+                "impact_score": intv_dict.get("impact_score"),
+                "impact_score_label": intv_dict.get("impact_score_label"),
+                "impact_score_breakdown": intv_dict.get("impact_score_breakdown"),
                 "created_at": datetime.utcnow().isoformat(),
             }
         ).execute()

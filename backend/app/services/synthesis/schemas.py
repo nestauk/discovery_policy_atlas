@@ -539,6 +539,9 @@ class PolicyIntervention(BaseModel):
     transferability_rating: Optional[str] = Field(None)
     transferability_note: Optional[str] = Field(None)
     transferability_breakdown: Optional[TransferabilityBreakdown] = Field(None)
+    impact_score: Optional[int] = Field(None, description="Impact score (1-5)")
+    impact_score_label: Optional[str] = Field(None, description="Impact score label")
+    impact_score_breakdown: Optional[Dict[str, object]] = Field(None)
 
 
 class SynthesisSummary(BaseModel):

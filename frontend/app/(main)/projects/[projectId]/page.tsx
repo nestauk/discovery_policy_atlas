@@ -86,6 +86,11 @@ interface AnalysisDocument {
     mappings?: unknown[]
     results?: unknown[]
   }
+  impact_score?: number
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown>
+  transferability_score?: number
+  transferability_breakdown?: Record<string, unknown>
 }
 
 type TabType = 'summary' | 'evidence' | 'assistant'
@@ -793,6 +798,21 @@ export default function ProjectResultsPage() {
   // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
+      const conclusion = doc.extraction_results?.conclusion
+      const evidenceStrength = conclusion?.evidence_strength
+      const predictedImpact = conclusion?.predicted_impact
+      const impactScore = doc.impact_score ?? predictedImpact?.stars ?? undefined
+      const impactBreakdown = doc.impact_score_breakdown
+
+      const impactTooltip = impactBreakdown
+        ? [
+            `Evidence: ${impactBreakdown.evidence_strength ?? 'N/A'}`,
+            `Transferability: ${impactBreakdown.transferability ?? 'N/A'}`,
+            `Magnitude: ${impactBreakdown.magnitude_adjustment ?? 'N/A'}`,
+            `Harm: ${impactBreakdown.harm_multiplier ?? 'N/A'}`
+          ].join(' | ')
+        : predictedImpact?.justification
+      
       return {
         id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
         title: String(doc.title || 'Untitled'),
@@ -815,6 +835,15 @@ export default function ProjectResultsPage() {
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
+        evidence_strength: evidenceStrength?.stars || undefined,
+        evidence_strength_justification: evidenceStrength?.justification,
+        predicted_impact: impactScore,
+        predicted_impact_justification: impactTooltip,
+        impact_score: doc.impact_score,
+        impact_score_label: doc.impact_score_label,
+        impact_score_breakdown: doc.impact_score_breakdown,
+        transferability_score: doc.transferability_score,
+        transferability_breakdown: doc.transferability_breakdown
         evidence_strength: doc.evidence_strength || undefined,
         evidence_strength_justification: doc.evidence_strength_justification,
         predicted_impact: doc.predicted_impact || undefined,

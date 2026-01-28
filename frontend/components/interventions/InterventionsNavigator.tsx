@@ -9,15 +9,15 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
-import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
+import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Download } from 'lucide-react'
 import { NavigatorInterventionsTable } from '@/components/interventions/NavigatorInterventionsTable'
 import { ImpactProfileCard } from '@/components/synthesis/ImpactProfileCard'
 import { RiskWarnings } from '@/components/synthesis/RiskWarnings'
 import { TransferabilityScore } from '@/components/synthesis/TransferabilityScore'
 import { type InterventionData } from '@/components/interventions/InterventionsTable'
+import { StarRating } from '@/components/ui/star-rating'
 import type { OutcomeTheme, RiskTheme, TransferabilityBreakdown } from '@/types/search'
 import { getEvidenceScoreExplanation, formatEvidenceMixCompact, getEvidenceCategories } from '@/lib/evidenceCategories'
-import { Tooltip } from '@/components/ui/tooltip'
 
 interface IssueTheme {
   theme_name: string
@@ -31,6 +31,9 @@ interface BaseInterventionTheme {
   description: string
   impact_summary?: string
   frequency: number
+  impact_score?: number
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown> | null
   avg_impact_score?: number
   avg_evidence_score?: number
   detailed_interventions?: DetailedIntervention[]
@@ -67,6 +70,10 @@ interface DetailedIntervention {
   sample_size?: number | null
   impact_score?: number
   evidence_score?: number
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown> | null
+  transferability_score?: number
+  transferability_breakdown?: Record<string, unknown> | null
   impact_justification?: string
   evidence_justification?: string
   document_url?: string
@@ -397,47 +404,44 @@ export function InterventionsNavigator({
     }
   }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken, onDownload])
 
-  const renderStars = useCallback((score?: number, showDecimal: boolean = true, noDataTooltip?: string) => {
-    // Show greyed stars with tooltip when no score
-    if (score === undefined || score === null || score === 0) {
+  const renderStars = useCallback(
+    (score?: number, tooltip?: string, showGreyedStarsOnNull: boolean = false) => {
       return (
-        <Tooltip content={noDataTooltip || "Not enough data"}>
-          <div className="flex items-center gap-1 cursor-help">
-            <div className="flex">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <Star
-                  key={i}
-                  className="h-3 w-3 fill-gray-200 text-gray-200"
-                />
-              ))}
-            </div>
-            {showDecimal && <span className="text-xs text-slate-400">N/A</span>}
-          </div>
-        </Tooltip>
+        <StarRating
+          stars={score != null ? Math.round(score) : null}
+          size="sm"
+          mode="icons"
+          tooltip={tooltip}
+          showGreyedStarsOnNull={showGreyedStarsOnNull}
+        />
       )
+    },
+    []
+  )
+
+  const formatImpactBreakdown = useCallback((breakdown?: Record<string, unknown> | null) => {
+    if (!breakdown) return undefined
+    if (breakdown.net_impact !== undefined) {
+      const net = breakdown.net_impact ?? 'N/A'
+      const pos = breakdown.positive_evidence ?? 'N/A'
+      const neg = breakdown.negative_evidence ?? 'N/A'
+      const nul = breakdown.null_evidence ?? 'N/A'
+      const conf = breakdown.confidence ?? 'N/A'
+      const harm = breakdown.harm_warnings ?? 0
+      return `Net: ${net} | Pos: ${pos} | Neg: ${neg} | Null: ${nul} | Conf: ${conf} | Harm: ${harm}`
     }
-    return (
-      <div className="flex items-center gap-1">
-        <div className="flex">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Star
-              key={i}
-              className={`h-3 w-3 ${
-                i <= Math.round(score) ? 'fill-yellow-400 text-yellow-400' : 'text-slate-300'
-              }`}
-            />
-          ))}
-        </div>
-        {showDecimal && <span className="text-xs text-slate-600">{score.toFixed(1)}</span>}
-      </div>
-    )
+    const evidence = breakdown.evidence_strength ?? 'N/A'
+    const transfer = breakdown.transferability ?? 'N/A'
+    const magnitude = breakdown.magnitude_adjustment ?? 'N/A'
+    const harm = breakdown.harm_multiplier ?? 'N/A'
+    return `Evidence: ${evidence} | Transfer: ${transfer} | Magnitude: ${magnitude} | Harm: ${harm}`
   }, [])
 
   const sortIssueInterventions = useCallback((interventions: IssueInterventionTheme[]) => {
     return [...interventions].sort((a, b) => {
       switch (sortBy) {
         case 'impact':
-          return (b.avg_impact_score || 0) - (a.avg_impact_score || 0)
+          return (b.impact_score ?? b.avg_impact_score ?? 0) - (a.impact_score ?? a.avg_impact_score ?? 0)
         case 'evidence':
           return (b.issue_stars ?? 0) - (a.issue_stars ?? 0)
         case 'frequency':
@@ -451,9 +455,9 @@ export function InterventionsNavigator({
     return [...interventions].sort((a, b) => {
       switch (sortBy) {
         case 'impact':
-          return (b.avg_impact_score || 0) - (a.avg_impact_score || 0)
+          return (b.impact_score ?? b.avg_impact_score ?? 0) - (a.impact_score ?? a.avg_impact_score ?? 0)
         case 'evidence':
-          return (b.stars ?? 0) - (a.stars ?? 0)
+          return (b.stars ?? b.avg_evidence_score ?? 0) - (a.stars ?? a.avg_evidence_score ?? 0)
         case 'frequency':
         default:
           return (b.frequency || 0) - (a.frequency || 0)
@@ -865,19 +869,27 @@ export function InterventionsNavigator({
                         <div className="flex items-start gap-4 ml-4">
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Evidence:</div>
-                            {intervention.stars !== undefined ? (
-                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.display_evidence_mix, intervention.cap_message)}>
-                                <div className="flex items-center cursor-help">
-                                  {renderStars(intervention.stars, false)}
-                                </div>
-                              </Tooltip>
-                            ) : (
-                              renderStars(undefined, false)
+                            {renderStars(
+                              intervention.stars ?? intervention.avg_evidence_score,
+                              intervention.stars !== undefined
+                                ? getEvidenceScoreExplanation(
+                                  intervention.stars,
+                                  intervention.display_evidence_mix,
+                                  intervention.cap_message
+                                )
+                                : intervention.avg_evidence_score != null
+                                  ? 'Average evidence strength across documents'
+                                  : undefined,
+                              true
                             )}
                           </div>
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Impact:</div>
-                            {renderStars(intervention.avg_impact_score, true)}
+                            {renderStars(
+                              intervention.impact_score ?? intervention.avg_impact_score,
+                              formatImpactBreakdown(intervention.impact_score_breakdown),
+                              true
+                            )}
                           </div>
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Frequency:</div>
@@ -1065,19 +1077,27 @@ export function InterventionsNavigator({
                                 <div className="flex items-start gap-4 ml-4">
                                   <div className="text-right">
                                     <div className="text-xs text-slate-500">Evidence:</div>
-                                    {intervention.issue_stars !== undefined ? (
-                                      <Tooltip content={getEvidenceScoreExplanation(intervention.issue_stars, intervention.issue_display_evidence_mix, intervention.issue_cap_message)}>
-                                        <div className="flex items-center cursor-help">
-                                          {renderStars(intervention.issue_stars, false)}
-                                        </div>
-                                      </Tooltip>
-                                    ) : (
-                                      renderStars(undefined, false)
+                                    {renderStars(
+                                      intervention.issue_stars ?? intervention.avg_evidence_score,
+                                      intervention.issue_stars !== undefined
+                                        ? getEvidenceScoreExplanation(
+                                          intervention.issue_stars,
+                                          intervention.issue_display_evidence_mix,
+                                          intervention.issue_cap_message
+                                        )
+                                        : intervention.avg_evidence_score != null
+                                          ? 'Average evidence strength across documents'
+                                          : undefined,
+                                      true
                                     )}
                                   </div>
                                   <div className="text-right">
                                     <div className="text-xs text-slate-500">Impact:</div>
-                                    {renderStars(intervention.avg_impact_score, true)}
+                                    {renderStars(
+                                      intervention.impact_score ?? intervention.avg_impact_score,
+                                      formatImpactBreakdown(intervention.impact_score_breakdown),
+                                      true
+                                    )}
                                   </div>
                                   <div className="text-right">
                                     <div className="text-xs text-slate-500">Frequency:</div>

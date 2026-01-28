@@ -88,7 +88,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     docs_res = (
         supabase.table("analysis_documents")
         .select(
-            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, top_line, is_relevant"
+            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, top_line, is_relevant, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown"
         )
         .eq("analysis_project_id", project_id)
         .execute()
@@ -124,7 +124,13 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
 
         doc_scores[doc_uuid] = {
             "evidence_score": evidence_info["stars"],  # 0-5 with sample size penalty
-            "impact_score": predicted_impact.get("stars"),  # 1-5 or None
+            "impact_score": doc.get("impact_score")
+            if doc.get("impact_score") is not None
+            else predicted_impact.get("stars"),
+            "impact_score_label": doc.get("impact_score_label"),
+            "impact_score_breakdown": doc.get("impact_score_breakdown"),
+            "transferability_score": doc.get("transferability_score"),
+            "transferability_breakdown": doc.get("transferability_breakdown"),
             "evidence_category": doc.get("evidence_category"),
             "evidence_justification": evidence_info["justification"],
             "impact_justification": predicted_impact.get("justification", ""),

@@ -2113,12 +2113,11 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                 extraction_results = doc.get("extraction_results", {})
                 conclusion = extraction_results.get("conclusion", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
-                stored_evidence = conclusion.get("evidence_strength", {}) or {}
-                evidence_info = get_or_calculate_document_evidence(doc)
-                evidence_score = evidence_info["stars"]
-                if not stored_evidence and evidence_score is not None:
-                    evidence_score = evidence_score if evidence_score > 0 else None
-                impact_score = predicted_impact.get("stars")
+
+                impact_score = doc.get("impact_score")
+                if impact_score is None:
+                    impact_score = predicted_impact.get("stars")
+                evidence_score = evidence_strength.get("stars")
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])

@@ -52,8 +52,13 @@ export interface SearchParams {
     // Evidence assessment fields
     evidence_strength?: number  // 1-5 star rating for evidence quality
     evidence_strength_justification?: string
-    predicted_impact?: number  // 1-5 star rating for predicted impact
-    predicted_impact_justification?: string
+  predicted_impact?: number  // 1-5 star rating for impact
+  predicted_impact_justification?: string
+  impact_score?: number
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown>
+  transferability_score?: number
+  transferability_breakdown?: Record<string, unknown>
     // Extracted fields (dynamically added based on extraction_fields parameter)
     [key: string]: string | number | boolean | string[] | undefined
   }
