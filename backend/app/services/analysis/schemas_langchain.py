@@ -42,10 +42,6 @@ class InterventionItem(BaseModel):
     sample_size: Optional[str] = None  # Total sample size for this intervention
     # NEW: Comparator/control condition (useful for both RCT and SR)
     comparator: Optional[str] = None
-    # NEW: Semantic type distinguishing intervention nature across workflows
-    intervention_semantic_type: Optional[
-        Literal["trial_intervention", "intervention_category", "policy_measure"]
-    ] = None
     supporting_quote: str
 
 

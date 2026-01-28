@@ -21,6 +21,37 @@ from ..schemas_langchain import (
 logger = logging.getLogger(__name__)
 
 
+async def _validate_intervention_variant_belongs(
+    intervention_name: str, stratum_value: str, model: str
+) -> bool:
+    """Use an LLM to check if an 'intervention variant' stratum genuinely
+    belongs under the given parent intervention.
+
+    Returns True if the stratum belongs, False if it's misattributed.
+    """
+    from langchain_openai import ChatOpenAI
+
+    llm = ChatOpenAI(model=model, temperature=0.0, max_tokens=10)
+    prompt = (
+        "You are a research validation assistant. A systematic review has an "
+        "intervention category and a result row tagged as an 'intervention variant' "
+        "stratum.\n\n"
+        f'Parent intervention: "{intervention_name}"\n'
+        f'Intervention variant stratum value: "{stratum_value}"\n\n'
+        "Does this variant genuinely belong as a sub-variation of the parent "
+        "intervention? Or does it describe a fundamentally different or contradictory "
+        "intervention?\n\n"
+        "Answer ONLY 'yes' (it belongs) or 'no' (it does not belong)."
+    )
+    try:
+        response = await llm.ainvoke(prompt)
+        answer = response.content.strip().lower()
+        return answer.startswith("yes")
+    except Exception as e:
+        logger.warning(f"[SR] Intervention variant validation failed: {e}")
+        return True  # Default to keeping the result on error
+
+
 class SRExtractionWorkflow(BaseExtractionWorkflow):
     """Workflow for Systematic Reviews and Meta-Analyses."""
 
@@ -54,8 +85,6 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                 extra={"paper_id": paper_id},
             )
             extraction = InterventionsExtraction(**result)
-            for intervention in extraction.interventions:
-                intervention.intervention_semantic_type = "intervention_category"
             logger.info(
                 f"[SR] Extracted {len(extraction.interventions)} intervention categories"
             )
@@ -117,10 +146,29 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                         },
                     )
                     extraction = ResultsExtraction(**result)
+                    filtered_results = []
                     for res in extraction.results:
                         res.intervention_idx = intervention.idx
                         res.estimate_level = "pooled"
-                    all_results.extend(extraction.results)
+                        # Validate intervention-related strata belong to parent
+                        if (
+                            res.stratum_type
+                            and "intervention" in res.stratum_type.lower()
+                            and res.stratum_value
+                        ):
+                            belongs = await _validate_intervention_variant_belongs(
+                                intervention.name,
+                                res.stratum_value,
+                                self.model_name,
+                            )
+                            if not belongs:
+                                logger.info(
+                                    f"[SR] Filtered misattributed result: stratum_value='{res.stratum_value}' "
+                                    f"does not belong under intervention '{intervention.name}'"
+                                )
+                                continue
+                        filtered_results.append(res)
+                    all_results.extend(filtered_results)
                 except Exception as e:
                     logger.warning(
                         f"[SR] Results failed for intervention {intervention.idx}: {e}"

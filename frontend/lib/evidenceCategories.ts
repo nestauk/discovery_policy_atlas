@@ -237,26 +237,4 @@ export function getDisplayableCategories(): EvidenceCategory[] {
   return getEvidenceCategories().filter(c => c.key !== 'other')
 }
 
-// Legacy exports for backward compatibility (derived from categories)
-// Now returns raw hex values for inline styles
-export const EVIDENCE_CATEGORY_COLORS: Record<string, EvidenceCategoryColors> = Object.fromEntries(
-  FALLBACK_CATEGORIES.map(c => [c.name, {
-    bg: c.bg_color,
-    text: c.text_color,
-  }])
-)
-
-export const EVIDENCE_CATEGORY_SHORT_NAMES: Record<string, string> = Object.fromEntries(
-  FALLBACK_CATEGORIES.map(c => [c.name, c.short_name])
-)
-
-export const EVIDENCE_TYPE_SHORT_NAMES: Record<string, string> = {
-  'systematic_review': 'SR/MA',
-  'rct': 'RCT',
-  'observational': 'Observational',
-  'modelling': 'Modelling',
-  'policy': 'Policy',
-  'qualitative': 'Qualitative',
-  'opinion': 'Opinion',
-  'unknown': 'Unknown',
-}
+// Legacy exports removed (unused)

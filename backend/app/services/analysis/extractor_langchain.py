@@ -488,9 +488,6 @@ class LangChainExtractorService:
                         "population_demographics": item.get("population_demographics"),
                         "sample_size": item.get("sample_size"),
                         "comparator": item.get("comparator"),
-                        "intervention_semantic_type": item.get(
-                            "intervention_semantic_type"
-                        ),
                         "supporting_quote": item.get("supporting_quote"),
                         "source": m.get("source"),
                         "year": m.get("year"),
@@ -598,7 +595,6 @@ class LangChainExtractorService:
                     "population_demographics",
                     "sample_size",
                     "comparator",
-                    "intervention_semantic_type",
                     "supporting_quote",
                     "source",
                     "year",
