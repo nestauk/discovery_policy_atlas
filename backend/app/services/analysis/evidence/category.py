@@ -176,9 +176,15 @@ def get_evidence_categories_for_api() -> list[dict]:
             "bg_color": bg_color,
             "text_color": text_color,
         }
-        for rank, (name, key, score, short_name, bg_color, text_color) in enumerate(
-            _EVIDENCE_CATEGORY_DATA, start=1
-        )
+        for rank, (
+            name,
+            key,
+            score,
+            short_name,
+            bg_color,
+            text_color,
+            _explanation,
+        ) in enumerate(_EVIDENCE_CATEGORY_DATA, start=1)
     ]
 
 

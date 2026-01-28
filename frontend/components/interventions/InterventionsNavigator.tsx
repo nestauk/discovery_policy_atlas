@@ -548,7 +548,7 @@ export function InterventionsNavigator({
       entry.results_summary.push(...mappedResults)
       outcomeGroup.results.push(...mappedResults)
 
-      const docSampleSize = parseSampleSize(sourceDoc?.sample_size)
+      const docSampleSize = parseSampleSize(detail.sample_size) || parseSampleSize(sourceDoc?.sample_size)
       if (docSampleSize > 0) {
         entry.total_sample_size = entry.total_sample_size === null
           ? docSampleSize

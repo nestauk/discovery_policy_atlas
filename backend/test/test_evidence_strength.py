@@ -3,7 +3,10 @@
 import asyncio
 import logging
 
-from app.services.analysis.evidence.strength import calculate_evidence_strength
+from app.services.analysis.evidence.strength import (
+    build_evidence_info_from_detailed_interventions,
+    calculate_evidence_strength,
+)
 from app.services.analysis.schemas_langchain import ConclusionItem, ImpactRating
 from app.services.analysis.workflows.base import BaseExtractionWorkflow
 
@@ -315,6 +318,32 @@ class TestEvidenceStrengthPersistence:
         assert sr_result["base_rating"] == 5
         assert rct_result["base_rating"] == 4
         assert obs_result["base_rating"] == 3
+
+
+class TestDetailedInterventionSampleSize:
+    """Tests for sample size selection in detailed intervention evidence info."""
+
+    def test_prefers_detail_sample_size(self):
+        """Use detailed intervention sample size when present, falling back to source."""
+        detailed = [
+            {
+                "sample_size": "50",
+                "source_documents": [
+                    {
+                        "doc_id": "doc-1",
+                        "evidence_category": "Observational Research Studies",
+                        "evidence_confidence": 1.0,
+                        "sample_size": "136,339",
+                    }
+                ],
+            }
+        ]
+
+        docs_with_evidence = build_evidence_info_from_detailed_interventions(detailed)
+
+        assert len(docs_with_evidence) == 1
+        assert docs_with_evidence[0]["doc_id"] == "doc-1"
+        assert docs_with_evidence[0]["sample_size"] == 50
 
 
 class TestCapStacking:

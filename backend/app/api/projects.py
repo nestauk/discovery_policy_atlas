@@ -1230,7 +1230,7 @@ async def get_thematic_group_items(
     project_id: str,
     theme_id: str,
     item_type: str = Query(
-        ..., description="Type of items", regex="^(intervention|issue)$"
+        ..., description="Type of items", pattern="^(intervention|issue)$"
     ),
     current_user: CurrentUser = Depends(get_current_user),
 ):

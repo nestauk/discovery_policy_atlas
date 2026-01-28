@@ -216,11 +216,15 @@ def build_evidence_info_from_detailed_interventions(
         doc_id = source_doc.get("doc_id")
 
         if doc_id and doc_id not in docs_by_id:
+            detail_sample_size = parse_sample_size(detail.get("sample_size"))
+            source_sample_size = parse_sample_size(source_doc.get("sample_size"))
             docs_by_id[doc_id] = {
                 "doc_id": doc_id,
                 "evidence_category": source_doc.get("evidence_category"),
                 "evidence_confidence": source_doc.get("evidence_confidence", 1.0),
-                "sample_size": detail.get("sample_size"),
+                "sample_size": detail_sample_size
+                if detail_sample_size is not None
+                else source_sample_size,
             }
 
     return list(docs_by_id.values())

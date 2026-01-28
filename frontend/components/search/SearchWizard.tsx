@@ -394,9 +394,8 @@ function ScreenPopulation() {
           
           {/* Custom added options */}
           {customOptions.map((pop) => (
-            <button
+            <div
               key={pop}
-              type="button"
               className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
             >
               <span>{pop}</span>
@@ -410,7 +409,7 @@ function ScreenPopulation() {
               >
                 ×
               </button>
-            </button>
+            </div>
           ))}
         </div>
 
@@ -501,9 +500,8 @@ function ScreenOutcome() {
           
           {/* Custom added options */}
           {customOptions.map((outcome) => (
-            <button
+            <div
               key={outcome}
-              type="button"
               className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
             >
               <span>{outcome}</span>
@@ -517,7 +515,7 @@ function ScreenOutcome() {
               >
                 ×
               </button>
-            </button>
+            </div>
           ))}
         </div>
 
@@ -639,9 +637,8 @@ function ScreenParameters() {
             {/* Selected options */}
             <div className="flex flex-col gap-3">
               {s.parameters.geography.map((geo) => (
-                <button
+                <div
                   key={geo}
-                  type="button"
                   className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
                 >
                   <span>{GEO_LABELS[geo] || geo}</span>
@@ -655,7 +652,7 @@ function ScreenParameters() {
                   >
                     ×
                   </button>
-                </button>
+                </div>
               ))}
             </div>
 
@@ -760,9 +757,8 @@ function ScreenScreening() {
         {s.screeningFactors.length > 0 && (
           <div>
             {s.screeningFactors.map((factor) => (
-              <button
+              <div
                 key={factor}
-                type="button"
                 className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between mb-3"
               >
                 <span>{factor}</span>
@@ -776,7 +772,7 @@ function ScreenScreening() {
                 >
                   ×
                 </button>
-              </button>
+              </div>
             ))}
           </div>
         )}
@@ -845,10 +841,17 @@ function ScreenAdditionalQuestions() {
             {allAvailableQuestions.map((q) => {
               const isSelected = s.additionalQuestions.includes(q);
               return (
-                <button
+                <div
                   key={q}
-                  type="button"
                   onClick={() => toggleQuestion(q)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggleQuestion(q);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
                   className={cx(
                     "w-full text-left px-4 py-4 rounded-xl flex items-center justify-between mb-3",
                     isSelected
@@ -869,7 +872,7 @@ function ScreenAdditionalQuestions() {
                       ×
                     </button>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
