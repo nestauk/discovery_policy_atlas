@@ -30,6 +30,7 @@ import { InterventionsNavigator } from '@/components/interventions/Interventions
 import type { InterventionData } from '@/components/interventions/InterventionsTable'
 import { PapersTable } from '@/components/documents/PapersTable'
 import { SearchPlanModal } from '@/components/results/SearchPlanModal'
+import { getEvidenceCategoryRank } from '@/lib/evidenceCategories'
 
 interface AnalysisDocument {
   id: string
@@ -50,6 +51,7 @@ interface AnalysisDocument {
   landing_page_url?: string
   // Evidence categorisation fields
   evidence_category?: string
+  evidence_category_rank?: number
   evidence_confidence?: number
   evidence_category_reasoning?: string
   full_text_available?: boolean
@@ -819,6 +821,7 @@ export default function ProjectResultsPage() {
         predicted_impact_justification: doc.predicted_impact_justification,
         // Evidence categorisation fields
         evidence_category: doc.evidence_category,
+        evidence_category_rank: doc.evidence_category ? getEvidenceCategoryRank(doc.evidence_category) : 999,
         evidence_confidence: doc.evidence_confidence,
         evidence_category_reasoning: doc.evidence_category_reasoning
       }
