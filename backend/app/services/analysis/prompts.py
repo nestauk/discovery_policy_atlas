@@ -260,10 +260,10 @@ CONCLUSIONS_PROMPT = ChatPromptTemplate.from_messages(
         ("system", EXTRACTION_SYSTEM_PROMPT),
         (
             "human",
-            """Task: Extract the KEY CONCLUSION of this study AND assess the predicted impact.
+            """Task: Extract the KEY CONCLUSION of this study AND assess the evidence strength and predicted impact.
 
 Schema:
-{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","predicted_impact":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}}}}}}
+{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","evidence_strength":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}},"predicted_impact":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}}}}}}
 
 Rules for Conclusion:
 - top_line_summary: ONE direct sentence stating the main conclusion (e.g., "The intervention significantly reduced behavioral problems in children").
@@ -271,13 +271,19 @@ Rules for Conclusion:
 - Focus on the OVERALL STUDY CONCLUSION, not individual result details.
 - Base the conclusion on what the authors explicitly state as their main finding/conclusion.
 
+Rules for Evidence Strength Assessment (methodological quality, reliability, robustness):
+- ⭐⭐⭐⭐⭐ (5): RCT or strong quasi-experimental, large sample, validated measures, sufficient mitigation of confounders, strong statistical significance, large effect size.
+- ⭐⭐⭐⭐ (4): RCT/quasi, moderate/large sample, partial mitigation of confounders, validated methods, medium or smaller effect sizes.
+- ⭐⭐⭐ (3): RCT/quasi with moderate sample, partial mitigation, methods not fully validated; or small sample but some strong controls.
+- ⭐⭐ (2): Weak quasi-experimental or small RCT, limited controls, unvalidated methods, limited statistical power.
+- ⭐ (1): Anecdotal evidence, uncontrolled pre–post, insufficient mitigation, small/biased sample, no statistical significance despite correlation.
+
 Rules for Predicted Impact Assessment (likelihood of scaling outcomes beyond study context):
 - ⭐⭐⭐⭐⭐ (5): Strong causal evidence, large effects, replicated or validated, generalisable to population, mitigation of confounders, strong evidence of external validity.
 - ⭐⭐⭐⭐ (4): Adequate causal link, medium effect size, good but partial mitigation, some generalisability concerns, but broadly reliable.
 - ⭐⭐⭐ (3): Smaller effect size or more context-limited, moderate sample, some threats to generalisability, still a plausible impact.
 - ⭐⭐ (2): Uncertain or inconsistent evidence, weak causal link, effects fragile or highly context-specific.
 - ⭐ (1): Anecdotal or speculative impact only, with minimal empirical support.
- - Use the provided evidence strength context to calibrate your rating.
 
 Assessment Rules:
 - Begin at 5 stars and discount by 1 for each unmet major criterion (down to 1).
@@ -289,10 +295,7 @@ Paper text:
 {full_text}
 
 Interventions context (if available):
-{interventions_json}
-
-{evidence_strength_context}
-""",
+{interventions_json}""",
         ),
     ]
 )

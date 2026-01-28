@@ -13,7 +13,7 @@ import pandas as pd
 
 from app.core.config import settings
 from .scrape import async_fetch_html
-from .utils.paths import sanitize_id_to_filename
+from .utils_paths import sanitize_id_to_filename
 
 
 logger = logging.getLogger(__name__)

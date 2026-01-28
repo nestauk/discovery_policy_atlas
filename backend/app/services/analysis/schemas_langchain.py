@@ -131,8 +131,8 @@ class ResultsExtraction(BaseModel):
     results: List[ResultItem]
 
 
-class ImpactRating(BaseModel):
-    """Predicted impact rating with justification."""
+class EvidenceRating(BaseModel):
+    """Evidence strength or impact rating with justification."""
 
     stars: Optional[int] = None  # 1-5 star rating, null if insufficient evidence
     justification: str  # 2-4 sentences explaining rating and discounting logic
@@ -145,8 +145,10 @@ class ConclusionItem(BaseModel):
     top_line_summary: str  # One direct sentence summarizing the main conclusion
     detailed_explanation: str  # Paragraph explaining key reasons for the conclusion
     supporting_quote: str
-    evidence_strength: Optional[ImpactRating] = None  # Computed evidence strength
-    predicted_impact: Optional[ImpactRating] = None  # Predicted scalability and impact
+    evidence_strength: Optional[EvidenceRating] = None  # Overall study evidence quality
+    predicted_impact: Optional[
+        EvidenceRating
+    ] = None  # Predicted scalability and impact
 
 
 class ConclusionsExtraction(BaseModel):

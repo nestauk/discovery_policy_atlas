@@ -30,7 +30,6 @@ import { InterventionsNavigator } from '@/components/interventions/Interventions
 import type { InterventionData } from '@/components/interventions/InterventionsTable'
 import { PapersTable } from '@/components/documents/PapersTable'
 import { SearchPlanModal } from '@/components/results/SearchPlanModal'
-import { getEvidenceCategoryRank } from '@/lib/evidenceCategories'
 
 interface AnalysisDocument {
   id: string
@@ -51,7 +50,6 @@ interface AnalysisDocument {
   landing_page_url?: string
   // Evidence categorisation fields
   evidence_category?: string
-  evidence_category_rank?: number
   evidence_confidence?: number
   evidence_category_reasoning?: string
   full_text_available?: boolean
@@ -60,11 +58,6 @@ interface AnalysisDocument {
   study_strength?: string
   sample_size?: number
   cited_by_count?: number
-  // Top-level evidence/impact fields (surfaced by API)
-  evidence_strength?: number
-  evidence_strength_justification?: string
-  predicted_impact?: number
-  predicted_impact_justification?: string
   extraction_results?: {
     conclusion?: {
       top_line_summary?: string
@@ -793,6 +786,10 @@ export default function ProjectResultsPage() {
   // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
+      const conclusion = doc.extraction_results?.conclusion
+      const evidenceStrength = conclusion?.evidence_strength
+      const predictedImpact = conclusion?.predicted_impact
+      
       return {
         id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
         title: String(doc.title || 'Untitled'),
@@ -815,13 +812,12 @@ export default function ProjectResultsPage() {
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
-        evidence_strength: doc.evidence_strength || undefined,
-        evidence_strength_justification: doc.evidence_strength_justification,
-        predicted_impact: doc.predicted_impact || undefined,
-        predicted_impact_justification: doc.predicted_impact_justification,
+        evidence_strength: evidenceStrength?.stars || undefined,
+        evidence_strength_justification: evidenceStrength?.justification,
+        predicted_impact: predictedImpact?.stars || undefined,
+        predicted_impact_justification: predictedImpact?.justification,
         // Evidence categorisation fields
         evidence_category: doc.evidence_category,
-        evidence_category_rank: doc.evidence_category ? getEvidenceCategoryRank(doc.evidence_category) : 999,
         evidence_confidence: doc.evidence_confidence,
         evidence_category_reasoning: doc.evidence_category_reasoning
       }
