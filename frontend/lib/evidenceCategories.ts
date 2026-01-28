@@ -101,12 +101,122 @@ export function getEvidenceCategoryColors(category: string): EvidenceCategoryCol
 }
 
 /**
+ * Get colors for an evidence mix key (derived from category colors).
+ * Returns raw hex values for use with inline styles.
+ */
+export function getEvidenceMixColors(key: string): EvidenceCategoryColors {
+  const categories = getEvidenceCategories()
+  const found = categories.find(c => c.key === key)
+  if (found) {
+    return {
+      bg: found.bg_color,
+      text: found.text_color,
+    }
+  }
+  return { bg: '#F3F4F6', text: '#374151' }  // gray-100, gray-700
+}
+
+/**
  * Get short display name for an evidence category, with fallback to full name.
  */
 export function getEvidenceCategoryShortName(category: string): string {
   const categories = getEvidenceCategories()
   const found = categories.find(c => c.name === category)
   return found?.short_name || category
+}
+
+/**
+ * Get display name for an evidence mix key.
+ */
+export function getEvidenceMixDisplayName(key: string): string {
+  // Short names for evidence mix display
+  const shortNames: Record<string, string> = {
+    'systematic_review': 'SR/MA',
+    'rct': 'RCT',
+    'observational': 'Observational',
+    'modelling': 'Modelling',
+    'policy': 'Policy',
+    'qualitative': 'Qualitative',
+    'opinion': 'Opinion',
+    'unknown': 'Unknown',
+  }
+  return shortNames[key] || key
+}
+
+/**
+ * Full names for evidence types (used in explanations).
+ */
+const EVIDENCE_TYPE_FULL_NAMES: Record<string, string> = {
+  'systematic_review': 'systematic reviews/meta-analyses',
+  'rct': 'RCTs/quasi-experimental studies',
+  'observational': 'observational studies',
+  'modelling': 'modelling/simulation studies',
+  'policy': 'policy syntheses',
+  'qualitative': 'qualitative evidence',
+  'opinion': 'expert opinion',
+  'unknown': 'unclassified evidence',
+}
+
+/**
+ * Get evidence type keys in order of strength (strongest first).
+ * Derived from backend categories, excluding 'other' and 'unknown'.
+ */
+function getEvidenceTypeOrder(): string[] {
+  return getEvidenceCategories()
+    .filter(c => c.key !== 'other' && c.key !== 'unknown')
+    .map(c => c.key)
+}
+
+/**
+ * Generate an explanation for an intervention theme's evidence score.
+ * DATA-DRIVEN: Only mentions evidence types actually present in the mix.
+ */
+export function getEvidenceScoreExplanation(
+  stars: number,
+  evidenceMix?: Record<string, number>,
+  capMessage?: string | null,
+): string {
+  const parts: string[] = []
+
+  // Build explanation based on ACTUAL evidence present, not star level
+  if (evidenceMix && Object.keys(evidenceMix).length > 0) {
+    const presentTypes = getEvidenceTypeOrder()
+      .filter(key => evidenceMix[key] && evidenceMix[key] > 0)
+      .map(key => EVIDENCE_TYPE_FULL_NAMES[key])
+
+    if (presentTypes.length > 0) {
+      parts.push(`Evidence includes ${presentTypes.join(', ')}`)
+    }
+  } else if (stars === 0) {
+    parts.push('No qualifying evidence')
+  }
+
+  // Add cap explanation if present
+  if (capMessage) {
+    parts.push(capMessage)
+  }
+
+  // Add the explicit aggregation rule disclaimer
+  parts.push('Rating reflects highest causal evidence present, not an average')
+
+  return parts.join('. ') + '.'
+}
+
+/**
+ * Format evidence mix for compact display (e.g., "1 SR/MA, 3 RCT, 2 Policy").
+ */
+export function formatEvidenceMixCompact(evidenceMix?: Record<string, number>): string {
+  if (!evidenceMix || Object.keys(evidenceMix).length === 0) {
+    return ''
+  }
+
+  // Order by evidence strength (highest first), including 'unknown' at the end
+  const orderWithUnknown = [...getEvidenceTypeOrder(), 'unknown']
+
+  return orderWithUnknown
+    .filter(key => evidenceMix[key] && evidenceMix[key] > 0)
+    .map(key => `${evidenceMix[key]} ${getEvidenceMixDisplayName(key)}`)
+    .join(', ')
 }
 
 /**
@@ -127,33 +237,4 @@ export function getDisplayableCategories(): EvidenceCategory[] {
   return getEvidenceCategories().filter(c => c.key !== 'other')
 }
 
-// Legacy exports for backward compatibility
-export const EVIDENCE_CATEGORY_SHORT_NAMES: Record<string, string> = Object.fromEntries(
-  FALLBACK_CATEGORIES.map(c => [c.name, c.short_name])
-)
-
-/**
- * Color mapping using Tailwind classes (legacy).
- * Prefer getEvidenceCategoryColors() for new code.
- */
-export const EVIDENCE_CATEGORY_COLORS: Record<string, EvidenceCategoryColors> = Object.fromEntries(
-  FALLBACK_CATEGORIES.map(c => [c.name, { bg: `bg-[${c.bg_color}]`, text: c.text_color === '#FFFFFF' ? 'text-white' : 'text-gray-900' }])
-)
-
-/**
- * Get evidence mix display utilities.
- */
-export function getEvidenceMixColors(key: string): EvidenceCategoryColors {
-  const categories = getEvidenceCategories()
-  const found = categories.find(c => c.key === key)
-  if (found) {
-    return { bg: found.bg_color, text: found.text_color }
-  }
-  return { bg: '#F3F4F6', text: '#374151' }
-}
-
-export function getEvidenceMixDisplayName(key: string): string {
-  const categories = getEvidenceCategories()
-  const found = categories.find(c => c.key === key)
-  return found?.short_name || key
-}
+// Legacy exports removed (unused)

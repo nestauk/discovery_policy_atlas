@@ -32,7 +32,26 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
-from app.services.analysis.evidence_category import EVIDENCE_CATEGORIES
+from app.services.analysis.evidence.category import (
+    EVIDENCE_CATEGORIES,
+    EVIDENCE_CATEGORY_RANKS,
+    NON_EVIDENCE_CATEGORY,
+    is_non_evidence_document,
+)
+from app.services.analysis.evidence.strength import (
+    UNKNOWN_RANK,
+    parse_sample_size,
+    calculate_evidence_strength,
+    get_document_max_sample_size,
+    get_or_calculate_document_evidence,
+    build_document_evidence_info,
+)
+from app.services.analysis.utils.navigator import (
+    compute_shared_docs_mappings,
+    build_doc_scores_and_mappings,
+    build_related_interventions,
+    aggregate_all_interventions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -945,7 +964,7 @@ async def get_project_documents(
 
         for doc in docs_result.data:
             # Filter out "Other (Non-evidence documents)" - these shouldn't reach the UI
-            if doc.get("evidence_category") == "Other (Non-evidence documents)":
+            if is_non_evidence_document(doc):
                 filtered_other_count += 1
                 continue
 
@@ -953,6 +972,25 @@ async def get_project_documents(
             # Map citation_count (database) to cited_by_count (frontend)
             if "citation_count" in doc_copy:
                 doc_copy["cited_by_count"] = doc_copy["citation_count"]
+            evidence_category = doc_copy.get("evidence_category")
+            doc_copy["evidence_category_rank"] = EVIDENCE_CATEGORY_RANKS.get(
+                evidence_category, UNKNOWN_RANK
+            )
+            evidence_info = get_or_calculate_document_evidence(doc)
+            conclusion = (doc.get("extraction_results") or {}).get("conclusion") or {}
+            doc_copy["evidence_strength"] = evidence_info["stars"]
+            if evidence_info["justification"]:
+                doc_copy["evidence_strength_justification"] = evidence_info[
+                    "justification"
+                ]
+            # Always include sample_size (may be None)
+            doc_copy["sample_size"] = evidence_info["sample_size"]
+            # Extract predicted impact from extraction results
+            predicted_impact = conclusion.get("predicted_impact") or {}
+            doc_copy["predicted_impact"] = predicted_impact.get("stars")
+            doc_copy["predicted_impact_justification"] = predicted_impact.get(
+                "justification"
+            )
             documents.append(doc_copy)
 
         if filtered_other_count > 0:
@@ -1072,7 +1110,7 @@ async def get_project_charts_data(
             # Count by evidence category (track but don't include "Other" in results)
             evidence_category = doc.get("evidence_category")
             if evidence_category and evidence_category.strip():
-                if evidence_category == "Other (Non-evidence documents)":
+                if evidence_category == NON_EVIDENCE_CATEGORY:
                     filtered_other_count += 1
                 evidence_category_counts[evidence_category] = (
                     evidence_category_counts.get(evidence_category, 0) + 1
@@ -1101,9 +1139,7 @@ async def get_project_charts_data(
         # Sort evidence categories by strength (predefined order)
         # Exclude "Other (Non-evidence documents)" - these are filtered out during acquisition
         evidence_category_order = [
-            cat
-            for cat in EVIDENCE_CATEGORIES
-            if cat != "Other (Non-evidence documents)"
+            cat for cat in EVIDENCE_CATEGORIES if cat != NON_EVIDENCE_CATEGORY
         ]
 
         documents_by_evidence_category = []
@@ -1194,7 +1230,7 @@ async def get_thematic_group_items(
     project_id: str,
     theme_id: str,
     item_type: str = Query(
-        ..., description="Type of items", regex="^(intervention|issue)$"
+        ..., description="Type of items", pattern="^(intervention|issue)$"
     ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -1236,27 +1272,13 @@ async def get_project_interventions(
         if not docs_result.data:
             return {"interventions": [], "total": 0}
 
+        # Total documents for density calculation
+        project_total_docs = len(docs_result.data)
+
         # Process interventions from all documents
-        aggregated_interventions = {}
-
-        def get_evidence_category_rank(evidence_category: str | None) -> int:
-            """Convert evidence category to numeric rank for sorting (lower = better).
-            Based on evidence hierarchy: SR > RCT > Observational > etc."""
-            if not evidence_category:
-                return 999  # Unknown/missing goes to the end
-
-            category_ranks = {
-                "Systematic Review and Meta-Analysis": 1,
-                "RCTs and Quasi-Experimental Studies": 2,
-                "Observational Research Studies": 3,
-                "Modelling & Simulation": 4,
-                "Policy Syntheses & Guidance Documents": 5,
-                "Qualitative & Contextual Evidence": 6,
-                "Expert Opinion and Commentary": 7,
-                "Other (Non-evidence documents)": 8,
-                "Unknown / Insufficient information": 9,
-            }
-            return category_ranks.get(evidence_category, 999)
+        aggregated_interventions: dict[str, dict] = {}
+        # Separate accumulator for temporary data (sample_sizes, seen_doc_ids, docs_with_evidence)
+        accumulator: dict[str, dict] = {}
 
         for document in docs_result.data:
             extraction_results = document.get("extraction_results", {})
@@ -1281,7 +1303,7 @@ async def get_project_interventions(
                 intervention_key = f"{intervention_name}_{intervention.get('type', '')}_{intervention.get('country', '')}"
 
                 if intervention_key not in aggregated_interventions:
-                    # Initialize intervention data
+                    # Initialize intervention data (final output fields only)
                     evidence_cat = document.get("evidence_category")
                     aggregated_interventions[intervention_key] = {
                         "name": intervention_name,
@@ -1289,15 +1311,22 @@ async def get_project_interventions(
                         "country": intervention.get("country", "Unknown"),
                         "description": intervention.get("description", ""),
                         "evidence_category": evidence_cat,
-                        "evidence_category_rank": get_evidence_category_rank(
-                            evidence_cat
-                        ),
+                        "evidence_category_rank": EVIDENCE_CATEGORY_RANKS.get(
+                            evidence_cat, UNKNOWN_RANK
+                        )
+                        if evidence_cat
+                        else UNKNOWN_RANK,
                         "is_systematic_review": evidence_cat
                         == "Systematic Review and Meta-Analysis",
-                        "sample_sizes": [],
                         "result_count": 0,
                         "results_summary": [],
                         "documents": [],
+                    }
+                    # Initialize accumulator for temporary tracking data
+                    accumulator[intervention_key] = {
+                        "sample_sizes": [],
+                        "seen_doc_ids": set(),
+                        "documents_with_evidence": [],
                     }
 
                 # Add document info
@@ -1310,15 +1339,25 @@ async def get_project_interventions(
                     }
                 )
 
-                # Add sample size if available
-                sample_size = intervention.get("sample_size")
-                if sample_size:
-                    try:
-                        aggregated_interventions[intervention_key][
-                            "sample_sizes"
-                        ].append(int(sample_size))
-                    except (ValueError, TypeError):
-                        pass  # Skip non-numeric sample sizes
+                # Get sample size for this intervention (for aggregate stats display)
+                sample_size_int = parse_sample_size(intervention.get("sample_size"))
+
+                # Add sample size to list if available (for aggregate stats)
+                if sample_size_int is not None:
+                    accumulator[intervention_key]["sample_sizes"].append(
+                        sample_size_int
+                    )
+
+                # Track evidence info for strength calculation (one entry per document)
+                # Use document-level max sample size for penalty calculation
+                doc_id = document.get("doc_id")
+                if doc_id not in accumulator[intervention_key]["seen_doc_ids"]:
+                    accumulator[intervention_key]["seen_doc_ids"].add(doc_id)
+
+                    max_sample_size = get_document_max_sample_size(interventions)
+                    accumulator[intervention_key]["documents_with_evidence"].append(
+                        build_document_evidence_info(document, max_sample_size, doc_id)
+                    )
 
                 # Add result count and summaries for this intervention
                 intervention_results = results_by_intervention.get(intervention_idx, [])
@@ -1361,9 +1400,12 @@ async def get_project_interventions(
 
         # Convert to list and add computed fields
         interventions_list = []
-        for key, intervention_data in aggregated_interventions.items():
+        for intervention_key, intervention_data in aggregated_interventions.items():
+            # Get temporary data from accumulator
+            acc = accumulator[intervention_key]
+            sample_sizes = acc["sample_sizes"]
+
             # Calculate aggregate sample size
-            sample_sizes = intervention_data["sample_sizes"]
             if sample_sizes:
                 intervention_data["total_sample_size"] = sum(sample_sizes)
                 intervention_data["avg_sample_size"] = sum(sample_sizes) / len(
@@ -1413,14 +1455,22 @@ async def get_project_interventions(
 
             intervention_data["results_summary"] = unique_results
 
-            # Clean up temporary fields
-            del intervention_data["sample_sizes"]
+            # Calculate evidence strength using new methodology
+            evidence_strength = calculate_evidence_strength(
+                acc["documents_with_evidence"],
+                project_total_docs,
+            )
+            intervention_data["stars"] = evidence_strength["stars"]
+            intervention_data["base_rating"] = evidence_strength["base_rating"]
+            intervention_data["cap_applied"] = evidence_strength["cap_applied"]
+            intervention_data["cap_message"] = evidence_strength["cap_message"]
+            intervention_data["evidence_mix"] = evidence_strength["evidence_mix"]
 
             interventions_list.append(intervention_data)
 
-        # Sort by evidence category rank (best first), then by result count
+        # Sort by stars (highest first), then by evidence category rank, then by result count
         interventions_list.sort(
-            key=lambda x: (x["evidence_category_rank"], -x["result_count"])
+            key=lambda x: (-x["stars"], x["evidence_category_rank"], -x["result_count"])
         )
 
         return {"interventions": interventions_list, "total": len(interventions_list)}
@@ -1677,298 +1727,43 @@ async def get_issue_intervention_navigator(
 
         documents = docs_result.data or []
         docs_by_id = {str(d["id"]): d for d in documents if d and d.get("id")}
+        docs_by_doc_id = {
+            d.get("doc_id"): d for d in documents if d and d.get("doc_id")
+        }
 
-        # Build document-level issue-intervention mappings from extraction results
-        doc_mappings = {}  # doc_id -> [(issue_extraction_id, intervention_extraction_id)]
-        doc_scores = {}  # doc_id -> {impact_score, evidence_score}
+        # Build document scores and issue-intervention mappings
+        doc_scores, doc_mappings = build_doc_scores_and_mappings(documents, extractions)
 
-        for document in documents:
-            if not document:
-                continue
-            doc_id = document.get("doc_id")
-            analysis_doc_id = document.get("id")
-            if not analysis_doc_id:
-                continue
-            analysis_doc_id = str(analysis_doc_id)
-            extraction_results = document.get("extraction_results", {})
+        # Pre-compute shared document mappings
+        issue_intervention_shared_docs = compute_shared_docs_mappings(
+            issue_themes,
+            intervention_themes,
+            theme_to_extractions,
+            doc_mappings,
+        )
 
-            if not extraction_results or not doc_id:
-                continue
-
-            # Get conclusion scores
-            conclusion = extraction_results.get("conclusion", {}) or {}
-            evidence_strength = conclusion.get("evidence_strength", {}) or {}
-            predicted_impact = conclusion.get("predicted_impact", {}) or {}
-
-            doc_scores[doc_id] = {
-                "impact_score": predicted_impact.get("stars"),
-                "evidence_score": evidence_strength.get("stars"),
-                "impact_justification": predicted_impact.get("justification", ""),
-                "evidence_justification": evidence_strength.get("justification", ""),
-            }
-
-            # Get mappings from extraction results
-            # Note: issues, interventions, and mappings are available but not currently used
-            # in this simplified implementation that relies on theme assignments
-            # issues = extraction_results.get("issues", [])
-            # interventions = extraction_results.get("interventions", [])
-            # mappings = extraction_results.get("mappings", [])
-
-            # Find corresponding extraction IDs for issues and interventions in this document
-            doc_issue_extractions = []
-            doc_intervention_extractions = []
-
-            for extraction in extractions:
-                if str(extraction.get("analysis_document_id")) == analysis_doc_id:
-                    if extraction.get("extraction_type") == "issue":
-                        doc_issue_extractions.append(extraction["id"])
-                    elif extraction.get("extraction_type") == "intervention":
-                        doc_intervention_extractions.append(extraction["id"])
-
-            # For now, create all possible combinations of issue-intervention pairs from this document
-            # (This is a simplification - in reality we'd want to use the specific mappings)
-            doc_mapping_pairs = []
-            for issue_ext_id in doc_issue_extractions:
-                for intervention_ext_id in doc_intervention_extractions:
-                    doc_mapping_pairs.append((issue_ext_id, intervention_ext_id))
-
-            if doc_mapping_pairs:
-                doc_mappings[doc_id] = doc_mapping_pairs
-
-        # Now build the navigator structure
+        # Build navigator structure using helper functions
         navigator_issue_themes = []
 
         for issue_theme in issue_themes:
-            theme_id = issue_theme["id"]
             theme_name = issue_theme["theme_name"]
             theme_description = issue_theme.get("summary_description", "")
             frequency = issue_theme.get("frequency", 0)
 
             logger.info(f"Processing issue theme: {theme_name} (freq: {frequency})")
 
-            # Get extractions assigned to this issue theme
-            issue_extraction_ids = theme_to_extractions.get(theme_id, [])
+            related_interventions = build_related_interventions(
+                issue_theme,
+                intervention_themes,
+                theme_to_extractions,
+                issue_intervention_shared_docs,
+                extractions_by_id,
+                docs_by_id,
+                docs_by_doc_id,
+                doc_scores,
+                len(documents),
+            )
 
-            # Find related intervention themes based on document co-occurrence
-            related_interventions = []
-
-            for intervention_theme in intervention_themes:
-                intervention_theme_id = intervention_theme["id"]
-                intervention_theme_name = intervention_theme["theme_name"]
-                intervention_description = intervention_theme.get(
-                    "summary_description", ""
-                )
-
-                # Get extractions assigned to this intervention theme
-                intervention_extraction_ids = theme_to_extractions.get(
-                    intervention_theme_id, []
-                )
-
-                # Find documents that have both issue and intervention extractions
-                shared_docs = []
-                impact_scores = []
-                evidence_scores = []
-
-                for doc_id, mapping_pairs in doc_mappings.items():
-                    doc_has_issue = any(
-                        issue_ext_id in issue_extraction_ids
-                        for issue_ext_id, _ in mapping_pairs
-                    )
-                    doc_has_intervention = any(
-                        intervention_ext_id in intervention_extraction_ids
-                        for _, intervention_ext_id in mapping_pairs
-                    )
-
-                    if doc_has_issue and doc_has_intervention:
-                        shared_docs.append(doc_id)
-                        scores = doc_scores.get(doc_id, {})
-                        if scores.get("impact_score") is not None:
-                            impact_scores.append(scores["impact_score"])
-                        if scores.get("evidence_score") is not None:
-                            evidence_scores.append(scores["evidence_score"])
-
-                # Only include intervention themes that have actual connections
-                if shared_docs:
-                    # Calculate average scores
-                    avg_impact_score = (
-                        sum(impact_scores) / len(impact_scores)
-                        if impact_scores
-                        else None
-                    )
-                    avg_evidence_score = (
-                        sum(evidence_scores) / len(evidence_scores)
-                        if evidence_scores
-                        else None
-                    )
-
-                    # Build detailed interventions from the extractions
-                    detailed_interventions = []
-                    for ext_id in intervention_extraction_ids:
-                        extraction = extractions_by_id.get(str(ext_id))
-                        if extraction and extraction.get("analysis_document_id"):
-                            doc = docs_by_id.get(
-                                str(extraction["analysis_document_id"])
-                            )
-                            if doc and doc.get("doc_id") in shared_docs:
-                                raw_data = extraction.get("raw_data", {})
-
-                                # Extract results from document's extraction_results
-                                extraction_results = doc.get("extraction_results", {})
-                                interventions_data = extraction_results.get(
-                                    "interventions", []
-                                )
-                                results_data = extraction_results.get("results", [])
-
-                                # Find matching intervention and its results
-                                intervention_results = []
-                                intervention_name = extraction.get(
-                                    "label", raw_data.get("name", "")
-                                )
-
-                                # Match by intervention name/label
-                                for i, intervention_data in enumerate(
-                                    interventions_data
-                                ):
-                                    if (
-                                        intervention_data.get("name")
-                                        == intervention_name
-                                        or intervention_data.get("label")
-                                        == intervention_name
-                                    ):
-                                        # Find results for this intervention by idx
-                                        for result in results_data:
-                                            if result.get("intervention_idx") == i:
-                                                intervention_results.append(
-                                                    {
-                                                        "outcome_variable": result.get(
-                                                            "outcome_variable"
-                                                        ),
-                                                        # Support both 'direction' (new) and 'effect_direction' (legacy)
-                                                        "effect_direction": result.get(
-                                                            "direction"
-                                                        )
-                                                        or result.get(
-                                                            "effect_direction"
-                                                        ),
-                                                        "effect_size": result.get(
-                                                            "effect_size"
-                                                        ),
-                                                        "effect_size_type": result.get(
-                                                            "effect_size_type"
-                                                        ),
-                                                        "p_value": result.get(
-                                                            "p_value"
-                                                        ),
-                                                        "uncertainty": result.get(
-                                                            "uncertainty"
-                                                        ),
-                                                        "result_text": result.get(
-                                                            "result_text"
-                                                        ),
-                                                        "population_measured": result.get(
-                                                            "population_measured"
-                                                        ),
-                                                        "subgroup_or_dose": result.get(
-                                                            "subgroup_or_dose"
-                                                        ),
-                                                        "n_studies": result.get(
-                                                            "n_studies"
-                                                        ),
-                                                        "sample_size": result.get(
-                                                            "sample_size"
-                                                        ),
-                                                        "stratum_type": result.get(
-                                                            "stratum_type"
-                                                        ),
-                                                        "stratum_value": result.get(
-                                                            "stratum_value"
-                                                        ),
-                                                        # SR-specific fields for meta-analysis results
-                                                        "heterogeneity_I2": result.get(
-                                                            "heterogeneity_I2"
-                                                        ),
-                                                        "tau2": result.get("tau2"),
-                                                        "summary_statistic": result.get(
-                                                            "summary_statistic"
-                                                        ),
-                                                        "estimate_level": result.get(
-                                                            "estimate_level"
-                                                        ),
-                                                    }
-                                                )
-                                        break
-
-                                evidence_cat = doc.get("evidence_category")
-                                detailed_interventions.append(
-                                    {
-                                        "name": intervention_name,
-                                        "description": extraction.get(
-                                            "description",
-                                            raw_data.get("description", ""),
-                                        ),
-                                        "type": raw_data.get("type", "Unknown"),
-                                        "country": raw_data.get("country"),
-                                        "evidence_category": evidence_cat,
-                                        "is_systematic_review": evidence_cat
-                                        == "Systematic Review and Meta-Analysis",
-                                        "sample_size": raw_data.get("sample_size"),
-                                        "impact_score": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("impact_score"),
-                                        "evidence_score": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("evidence_score"),
-                                        "impact_justification": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("impact_justification", ""),
-                                        "evidence_justification": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("evidence_justification", ""),
-                                        "results": intervention_results,
-                                        "source_documents": [
-                                            {
-                                                "doc_id": doc.get("doc_id"),
-                                                "title": doc.get("title"),
-                                                "source": doc.get("source"),
-                                                "landing_page_url": doc.get(
-                                                    "landing_page_url"
-                                                ),
-                                            }
-                                        ],
-                                    }
-                                )
-
-                    # Deduplicate by name
-                    unique_interventions = {}
-                    for detail in detailed_interventions:
-                        name = detail.get("name", "")
-                        if name and name not in unique_interventions:
-                            unique_interventions[name] = detail
-
-                    related_interventions.append(
-                        {
-                            "theme_name": intervention_theme_name,
-                            "description": intervention_description,
-                            "impact_summary": intervention_theme.get(
-                                "impact_summary", ""
-                            ),
-                            "frequency": len(shared_docs),
-                            "avg_impact_score": round(avg_impact_score, 1)
-                            if avg_impact_score
-                            else None,
-                            "avg_evidence_score": round(avg_evidence_score, 1)
-                            if avg_evidence_score
-                            else None,
-                            "detailed_interventions": list(
-                                unique_interventions.values()
-                            ),
-                        }
-                    )
-
-            # Sort interventions by frequency of connection
-            related_interventions.sort(key=lambda x: x["frequency"], reverse=True)
-
-            # Only include issue themes that have related interventions
             if related_interventions:
                 navigator_issue_themes.append(
                     {
@@ -1982,9 +1777,17 @@ async def get_issue_intervention_navigator(
         # Sort issue themes by frequency
         navigator_issue_themes.sort(key=lambda x: x["frequency"], reverse=True)
 
+        # Aggregate interventions across all issues
+        all_interventions = aggregate_all_interventions(
+            navigator_issue_themes, docs_by_doc_id, len(documents)
+        )
+
         logger.info(f"Returning {len(navigator_issue_themes)} issue themes")
 
-        return {"issue_themes": navigator_issue_themes}
+        return {
+            "issue_themes": navigator_issue_themes,
+            "all_interventions": all_interventions,
+        }
 
     except Exception as e:
         logger.error(
@@ -2208,14 +2011,15 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 raw_data = extraction.get("raw_data", {})
 
-                # Get scores from document conclusion
                 extraction_results = doc.get("extraction_results", {})
                 conclusion = extraction_results.get("conclusion", {}) or {}
-                evidence_strength = conclusion.get("evidence_strength", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
-
-                impact_score = evidence_strength.get("stars")
-                evidence_score = predicted_impact.get("stars")
+                stored_evidence = conclusion.get("evidence_strength", {}) or {}
+                evidence_info = get_or_calculate_document_evidence(doc)
+                evidence_score = evidence_info["stars"]
+                if not stored_evidence and evidence_score is not None:
+                    evidence_score = evidence_score if evidence_score > 0 else None
+                impact_score = predicted_impact.get("stars")
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
@@ -2311,11 +2115,12 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     logger.warning(f"Skipping None document at index {i}")
                     continue
 
-                # Extract evidence assessment from conclusion if available
                 extraction_results = doc.get("extraction_results", {}) or {}
                 conclusion = extraction_results.get("conclusion", {}) or {}
-                evidence_strength = conclusion.get("evidence_strength", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
+                evidence_category = doc.get("evidence_category", "")
+                evidence_info = get_or_calculate_document_evidence(doc)
+                evidence_score = evidence_info["stars"] if evidence_category else ""
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])
@@ -2335,10 +2140,8 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                         "Relevance": "Yes" if doc.get("is_relevant", False) else "No",
                         "Relevance Reason": doc.get("relevance_reason", ""),
                         "Confidence": doc.get("relevance_confidence", ""),
-                        "Evidence Score": evidence_strength.get("stars", ""),
-                        "Evidence Justification": evidence_strength.get(
-                            "justification", ""
-                        ),
+                        "Evidence Category": evidence_category,
+                        "Evidence Score": evidence_score,
                         "Impact Score": predicted_impact.get("stars", ""),
                         "Impact Justification": predicted_impact.get(
                             "justification", ""

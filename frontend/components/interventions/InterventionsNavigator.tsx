@@ -12,22 +12,39 @@ import { Switch } from '@/components/ui/switch'
 import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Star, Download } from 'lucide-react'
 import { NavigatorInterventionsTable } from '@/components/interventions/NavigatorInterventionsTable'
 import { type InterventionData } from '@/components/interventions/InterventionsTable'
+import { getEvidenceScoreExplanation, formatEvidenceMixCompact, getEvidenceCategories } from '@/lib/evidenceCategories'
+import { Tooltip } from '@/components/ui/tooltip'
 
 interface IssueTheme {
   theme_name: string
   description: string
   frequency: number
-  related_interventions: InterventionTheme[]
+  related_interventions: IssueInterventionTheme[]
 }
 
-interface InterventionTheme {
+interface BaseInterventionTheme {
   theme_name: string
   description: string
   impact_summary?: string
   frequency: number
   avg_impact_score?: number
-  avg_evidence_score?: number
   detailed_interventions?: DetailedIntervention[]
+}
+
+interface IssueInterventionTheme extends BaseInterventionTheme {
+  issue_display_evidence_mix?: Record<string, number>
+  issue_stars?: number
+  issue_base_rating?: number
+  issue_cap_applied?: string | null
+  issue_cap_message?: string | null
+}
+
+interface AllInterventionTheme extends BaseInterventionTheme {
+  stars?: number
+  base_rating?: number
+  cap_applied?: string | null
+  cap_message?: string | null
+  display_evidence_mix?: Record<string, number>
 }
 
 interface DetailedIntervention {
@@ -49,6 +66,7 @@ interface DetailedIntervention {
     direction?: string
     effect_direction?: string
     effect_size?: string
+    effect_size_type?: string
     p_value?: string
     uncertainty?: string
     result_text?: string
@@ -71,11 +89,105 @@ interface DetailedIntervention {
     title?: string
     source?: string
     landing_page_url?: string
+    evidence_category?: string
+    evidence_confidence?: number
+    sample_size?: number
   }>
+}
+
+interface AggregatedInterventionRow {
+  name: string
+  type: string
+  country: string
+  description: string
+  evidence_category?: string
+  evidence_categories?: string[]
+  is_systematic_review?: boolean
+  result_count: number
+  results_summary: Array<{
+    outcome: string
+    direction: string
+    effect_size?: string
+    effect_size_type?: string
+    p_value?: string
+    uncertainty?: string
+    result_text?: string
+    supporting_quote?: string
+    population_measured?: string
+    subgroup_or_dose?: string
+    heterogeneity_I2?: string
+    tau2?: string
+    summary_statistic?: string
+    estimate_level?: string
+    n_studies?: number
+    sample_size?: number
+    stratum_type?: string
+    stratum_value?: string
+    evidence_category?: string
+    is_systematic_review?: boolean
+  }>
+  outcome_groups?: Array<{
+    document: {
+      doc_id: string
+      title: string
+      source: string
+      landing_page_url?: string
+      evidence_category?: string
+      reported_sample_size?: number
+    }
+    results: AggregatedInterventionRow['results_summary']
+  }>
+  total_sample_size: number | null
+  documents: Array<{
+    doc_id: string
+    title: string
+    source: string
+    landing_page_url?: string
+  }>
+  impact_score?: number
+  evidence_score?: number
+  impact_justification?: string
+  evidence_justification?: string
 }
 
 interface NavigatorData {
   issue_themes: IssueTheme[]
+  all_interventions?: AllInterventionTheme[]
+}
+
+// Type for result summary entries
+type ResultSummary = AggregatedInterventionRow['results_summary'][number]
+
+// Type for input results (from DetailedIntervention)
+type ResultInput = DetailedIntervention['results'][number]
+
+/**
+ * Maps a raw result object to the standardized ResultSummary format.
+ * Consolidates duplicated mapping logic.
+ */
+function mapResultToSummary(result: ResultInput, evidenceCategory?: string): ResultSummary {
+  return {
+    outcome: result.outcome_variable || 'Outcome',
+    direction: result.direction || result.effect_direction || 'unknown',
+    effect_size: result.effect_size,
+    effect_size_type: result.effect_size_type,
+    p_value: result.p_value,
+    uncertainty: result.uncertainty,
+    result_text: result.result_text,
+    supporting_quote: undefined,
+    population_measured: result.population_measured,
+    subgroup_or_dose: result.subgroup_or_dose,
+    heterogeneity_I2: result.heterogeneity_I2,
+    tau2: result.tau2,
+    summary_statistic: result.summary_statistic,
+    estimate_level: result.estimate_level,
+    n_studies: result.n_studies,
+    sample_size: result.sample_size,
+    stratum_type: result.stratum_type,
+    stratum_value: result.stratum_value,
+    evidence_category: evidenceCategory,
+    is_systematic_review: evidenceCategory === 'Systematic Review and Meta-Analysis',
+  }
 }
 
 interface InterventionsNavigatorProps {
@@ -113,7 +225,7 @@ export function InterventionsNavigator({
   
   // Use external state if provided, otherwise use internal state
   const [internalViewMode, setInternalViewMode] = useState<'grouped' | 'all'>('all')
-  const [internalSortBy, setInternalSortBy] = useState<'frequency' | 'impact' | 'evidence'>('impact')
+  const [internalSortBy, setInternalSortBy] = useState<'frequency' | 'impact' | 'evidence'>('evidence')
   const [internalIsPreparingDownload, setInternalIsPreparingDownload] = useState(false)
   
   const viewMode = externalViewMode ?? internalViewMode
@@ -249,8 +361,25 @@ export function InterventionsNavigator({
     }
   }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken, onDownload])
 
-  const renderStars = useCallback((score?: number) => {
-    if (!score) return null
+  const renderStars = useCallback((score?: number, showDecimal: boolean = true, noDataTooltip?: string) => {
+    // Show greyed stars with tooltip when no score
+    if (score === undefined || score === null || score === 0) {
+      return (
+        <Tooltip content={noDataTooltip || "Not enough data"}>
+          <div className="flex items-center gap-1 cursor-help">
+            <div className="flex">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Star
+                  key={i}
+                  className="h-3 w-3 fill-gray-200 text-gray-200"
+                />
+              ))}
+            </div>
+            {showDecimal && <span className="text-xs text-slate-400">N/A</span>}
+          </div>
+        </Tooltip>
+      )
+    }
     return (
       <div className="flex items-center gap-1">
         <div className="flex">
@@ -263,123 +392,246 @@ export function InterventionsNavigator({
             />
           ))}
         </div>
-        <span className="text-xs text-slate-600">{score.toFixed(1)}</span>
+        {showDecimal && <span className="text-xs text-slate-600">{score.toFixed(1)}</span>}
       </div>
     )
   }, [])
 
-  const sortInterventions = useCallback((interventions: InterventionTheme[]) => {
+  const sortIssueInterventions = useCallback((interventions: IssueInterventionTheme[]) => {
     return [...interventions].sort((a, b) => {
       switch (sortBy) {
         case 'impact':
           return (b.avg_impact_score || 0) - (a.avg_impact_score || 0)
         case 'evidence':
-          return (b.avg_evidence_score || 0) - (a.avg_evidence_score || 0)
+          return (b.issue_stars ?? 0) - (a.issue_stars ?? 0)
         case 'frequency':
         default:
-          return (b.detailed_interventions?.length || 0) - (a.detailed_interventions?.length || 0)
+          return (b.frequency || 0) - (a.frequency || 0)
+      }
+    })
+  }, [sortBy])
+
+  const sortAllInterventions = useCallback((interventions: AllInterventionTheme[]) => {
+    return [...interventions].sort((a, b) => {
+      switch (sortBy) {
+        case 'impact':
+          return (b.avg_impact_score || 0) - (a.avg_impact_score || 0)
+        case 'evidence':
+          return (b.stars ?? 0) - (a.stars ?? 0)
+        case 'frequency':
+        default:
+          return (b.frequency || 0) - (a.frequency || 0)
       }
     })
   }, [sortBy])
 
   const getAllInterventions = useMemo(() => {
-    if (!data) return []
-    
-    const interventionsMap = new Map()
-    
-    data.issue_themes.forEach(issue => {
-      issue.related_interventions.forEach(intervention => {
-        const key = intervention.theme_name
-        if (interventionsMap.has(key)) {
-          const existing = interventionsMap.get(key)
-          existing.frequency += intervention.frequency
-          if (intervention.avg_impact_score) {
-            existing.impact_scores.push(intervention.avg_impact_score)
-          }
-          if (intervention.avg_evidence_score) {
-            existing.evidence_scores.push(intervention.avg_evidence_score)
-          }
-          // Keep the first impact_summary we encounter (if current doesn't have one)
-          if (!existing.impact_summary && intervention.impact_summary) {
-            existing.impact_summary = intervention.impact_summary
-          }
-          // Deduplicate detailed interventions by name
-          const newDetails = intervention.detailed_interventions || []
-          newDetails.forEach(detail => {
-            const exists = existing.detailed_interventions.some((d: DetailedIntervention) => d.name === detail.name)
-            if (!exists) {
-              existing.detailed_interventions.push(detail)
-            }
-          })
+    if (!data?.all_interventions) return []
+    return sortAllInterventions(data.all_interventions)
+  }, [data, sortAllInterventions])
+
+  const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
+    if (!detailedInterventions || detailedInterventions.length === 0) {
+      return []
+    }
+
+    const categories = getEvidenceCategories()
+    const categoryRank = new Map(categories.map(category => [category.name, category.rank]))
+
+    const aggregated = new Map<string, {
+      name: string
+      types: Set<string>
+      countries: Set<string>
+      description: string
+      evidence_categories: Set<string>
+      has_sr: boolean
+      has_non_sr: boolean
+      result_count: number
+      results_summary: AggregatedInterventionRow['results_summary']
+      outcome_groups: Map<string, {
+        document: NonNullable<AggregatedInterventionRow['outcome_groups']>[number]['document']
+        results: AggregatedInterventionRow['results_summary']
+      }>
+      total_sample_size: number | null
+      documents: Map<string, AggregatedInterventionRow['documents'][number]>
+      evidence_scores: Array<{ score: number; justification?: string }>
+      impact_justifications: Array<{ score: number; justification?: string }>
+    }>()
+
+    const getDisplayValue = (value?: string) => {
+      if (!value) return null
+      const trimmed = value.trim()
+      return trimmed && trimmed !== 'Unknown' ? trimmed : null
+    }
+
+    let unknownDocumentCounter = 0
+
+    detailedInterventions.forEach((detail) => {
+      const name = detail.name?.trim()
+      if (!name) return
+
+      if (!aggregated.has(name)) {
+        aggregated.set(name, {
+          name,
+          types: new Set(),
+          countries: new Set(),
+          description: '',
+          evidence_categories: new Set(),
+          has_sr: false,
+          has_non_sr: false,
+          result_count: 0,
+          results_summary: [],
+          outcome_groups: new Map(),
+          total_sample_size: null,
+          documents: new Map(),
+          evidence_scores: [],
+          impact_justifications: [],
+        })
+      }
+
+      const entry = aggregated.get(name)!
+      const typeValue = getDisplayValue(detail.type)
+      if (typeValue) entry.types.add(typeValue)
+      const countryValue = getDisplayValue(detail.country)
+      if (countryValue) entry.countries.add(countryValue)
+
+      if (detail.description) {
+        if (!entry.description || detail.description.length > entry.description.length) {
+          entry.description = detail.description
+        }
+      }
+
+      if (detail.evidence_category) {
+        entry.evidence_categories.add(detail.evidence_category)
+        if (detail.evidence_category === 'Systematic Review and Meta-Analysis') {
+          entry.has_sr = true
         } else {
-          interventionsMap.set(key, {
-            ...intervention,
-            impact_scores: intervention.avg_impact_score ? [intervention.avg_impact_score] : [],
-            evidence_scores: intervention.avg_evidence_score ? [intervention.avg_evidence_score] : [],
-            detailed_interventions: [...(intervention.detailed_interventions || [])]
+          entry.has_non_sr = true
+        }
+      }
+
+      const results = detail.results || []
+      const sourceDoc = detail.source_documents?.[0]
+      const docKey = sourceDoc?.doc_id
+        || sourceDoc?.landing_page_url
+        || sourceDoc?.title
+        || `${name}-unknown-${unknownDocumentCounter++}`
+      const parseSampleSize = (value: unknown) => {
+        if (typeof value === 'number' && value > 0) return value
+        if (typeof value === 'string') {
+          const cleaned = value.replace(/,/g, '').trim()
+          const parsed = Number(cleaned)
+          if (!Number.isNaN(parsed) && parsed > 0) return parsed
+        }
+        return 0
+      }
+
+      const reportedSampleSize = Math.max(
+        parseSampleSize(detail.sample_size),
+        ...results.map(result => result.sample_size || 0)
+      )
+      const document = {
+        doc_id: sourceDoc?.doc_id || '',
+        title: sourceDoc?.title || 'Unknown',
+        source: sourceDoc?.source || 'Unknown',
+        landing_page_url: sourceDoc?.landing_page_url || detail.document_url,
+        evidence_category: sourceDoc?.evidence_category,
+        reported_sample_size: reportedSampleSize > 0 ? reportedSampleSize : undefined,
+      }
+
+      if (!entry.outcome_groups.has(docKey)) {
+        entry.outcome_groups.set(docKey, { document, results: [] })
+      }
+      const outcomeGroup = entry.outcome_groups.get(docKey)!
+
+      entry.result_count += results.length
+      const mappedResults = results.map(result => mapResultToSummary(result, detail.evidence_category))
+      entry.results_summary.push(...mappedResults)
+      outcomeGroup.results.push(...mappedResults)
+
+      const docSampleSize = parseSampleSize(detail.sample_size) || parseSampleSize(sourceDoc?.sample_size)
+      if (docSampleSize > 0) {
+        entry.total_sample_size = entry.total_sample_size === null
+          ? docSampleSize
+          : Math.max(entry.total_sample_size, docSampleSize)
+      }
+
+      detail.source_documents?.forEach(doc => {
+        const docId = doc.doc_id || ''
+        if (!docId) return
+        if (!entry.documents.has(docId)) {
+          entry.documents.set(docId, {
+            doc_id: docId,
+            title: doc.title || 'Unknown',
+            source: doc.source || 'Unknown',
+            landing_page_url: doc.landing_page_url || detail.document_url,
           })
         }
       })
-    })
-    
-    const interventions = Array.from(interventionsMap.values()).map(intervention => ({
-      ...intervention,
-      avg_impact_score: intervention.impact_scores.length > 0 
-        ? intervention.impact_scores.reduce((a: number, b: number) => a + b, 0) / intervention.impact_scores.length 
-        : undefined,
-      avg_evidence_score: intervention.evidence_scores.length > 0
-        ? intervention.evidence_scores.reduce((a: number, b: number) => a + b, 0) / intervention.evidence_scores.length
-        : undefined
-    }))
-    
-    return sortInterventions(interventions)
-  }, [data, sortInterventions])
 
-  const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
-    return detailedInterventions.map((detail) => ({
-      name: detail.name,
-      type: detail.type || 'Unknown',
-      country: detail.country || 'Unknown',
-      description: detail.description,
-      evidence_category: detail.evidence_category,
-      is_systematic_review: detail.is_systematic_review,
-      result_count: detail.results?.length || 0,
-      results_summary: (detail.results || []).map(result => ({
-        outcome: result.outcome_variable || 'Outcome',
-        // Support both 'direction' (new schema) and 'effect_direction' (legacy)
-        direction: result.direction || result.effect_direction || 'unknown',
-        effect_size: result.effect_size,
-        effect_size_type: result.effect_size_type,
-        p_value: result.p_value,
-        uncertainty: result.uncertainty,
-        result_text: result.result_text,
-        supporting_quote: undefined,
-        population_measured: result.population_measured,
-        subgroup_or_dose: result.subgroup_or_dose,
-        // SR-specific fields for meta-analysis results
-        heterogeneity_I2: result.heterogeneity_I2,
-        tau2: result.tau2,
-        summary_statistic: result.summary_statistic,
-        estimate_level: result.estimate_level,
-        // Sample size fields
-        n_studies: result.n_studies,
-        sample_size: result.sample_size,
-        // Stratum fields
-        stratum_type: result.stratum_type,
-        stratum_value: result.stratum_value,
-      })),
-      total_sample_size: detail.sample_size || null,
-      documents: detail.source_documents?.map(doc => ({
-        doc_id: doc.doc_id || '',
-        title: doc.title || 'Unknown',
-        source: doc.source || 'Unknown',
-        landing_page_url: doc.landing_page_url || detail.document_url,
-      })) || [],
-      impact_score: detail.impact_score,
-      evidence_score: detail.evidence_score,
-      impact_justification: detail.impact_justification,
-      evidence_justification: detail.evidence_justification,
-    }))
+      if (typeof detail.impact_score === 'number') {
+        entry.impact_justifications.push({
+          score: detail.impact_score,
+          justification: detail.impact_justification,
+        })
+      }
+
+      if (typeof detail.evidence_score === 'number') {
+        entry.evidence_scores.push({
+          score: detail.evidence_score,
+          justification: detail.evidence_justification,
+        })
+      }
+    })
+
+    return Array.from(aggregated.values()).map((entry) => {
+      const evidenceCategories = Array.from(entry.evidence_categories).sort((a, b) => {
+        const rankA = categoryRank.get(a) ?? 999
+        const rankB = categoryRank.get(b) ?? 999
+        return rankA - rankB
+      })
+      const primaryCategory = evidenceCategories[0]
+      const isSystematicReview = entry.has_sr && !entry.has_non_sr
+
+      const evidenceScoreEntry = entry.evidence_scores.reduce<{ score?: number; justification?: string }>(
+        (best, current) => {
+          if (best.score === undefined || current.score > best.score) {
+            return { score: current.score, justification: current.justification }
+          }
+          return best
+        },
+        {}
+      )
+
+      const impactScoreEntry = entry.impact_justifications.reduce<{ score?: number; justification?: string }>(
+        (best, current) => {
+          if (best.score === undefined || current.score > best.score) {
+            return { score: current.score, justification: current.justification }
+          }
+          return best
+        },
+        {}
+      )
+
+      return {
+        name: entry.name,
+        type: entry.types.size > 0 ? Array.from(entry.types).join(', ') : 'Unknown',
+        country: entry.countries.size > 0 ? Array.from(entry.countries).join(', ') : 'Unknown',
+        description: entry.description,
+        evidence_category: primaryCategory,
+        evidence_categories: evidenceCategories.length > 0 ? evidenceCategories : undefined,
+        is_systematic_review: isSystematicReview,
+        result_count: entry.result_count,
+        results_summary: entry.results_summary,
+        outcome_groups: Array.from(entry.outcome_groups.values()),
+        total_sample_size: entry.total_sample_size,
+        documents: Array.from(entry.documents.values()),
+        impact_score: impactScoreEntry.score,
+        evidence_score: evidenceScoreEntry.score,
+        impact_justification: impactScoreEntry.justification,
+        evidence_justification: evidenceScoreEntry.justification,
+      }
+    })
   }, [])
   
   // Convert fallback interventions to navigator format
@@ -401,6 +653,18 @@ export function InterventionsNavigator({
       impact_justification: undefined,
       evidence_justification: undefined,
     }))
+  }, [])
+
+  // Render evidence mix summary from backend-provided display mix
+  const renderEvidenceMix = useCallback((evidenceMix: Record<string, number> | undefined) => {
+    const mixText = formatEvidenceMixCompact(evidenceMix)
+    if (!mixText) return null
+    return (
+      <p className="text-sm text-slate-600">
+        <span className="font-semibold">Evidence Mix: </span>
+        {mixText}
+      </p>
+    )
   }, [])
 
   if (!activeProject) {
@@ -557,27 +821,32 @@ export function InterventionsNavigator({
                                   {intervention.impact_summary}
                                 </p>
                               )}
+                              {renderEvidenceMix(intervention.display_evidence_mix)}
                             </div>
                           )}
                         </div>
-                        
+
                         <div className="flex items-start gap-4 ml-4">
-                          {intervention.avg_impact_score && (
-                            <div className="text-right">
-                              <div className="text-xs text-slate-500">Impact:</div>
-                              {renderStars(intervention.avg_impact_score)}
-                            </div>
-                          )}
-                          {intervention.avg_evidence_score && (
-                            <div className="text-right">
-                              <div className="text-xs text-slate-500">Evidence:</div>
-                              {renderStars(intervention.avg_evidence_score)}
-                            </div>
-                          )}
+                          <div className="text-right">
+                            <div className="text-xs text-slate-500">Evidence:</div>
+                            {intervention.stars !== undefined ? (
+                              <Tooltip content={getEvidenceScoreExplanation(intervention.stars, intervention.display_evidence_mix, intervention.cap_message)}>
+                                <div className="flex items-center cursor-help">
+                                  {renderStars(intervention.stars, false)}
+                                </div>
+                              </Tooltip>
+                            ) : (
+                              renderStars(undefined, false)
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs text-slate-500">Impact:</div>
+                            {renderStars(intervention.avg_impact_score, true)}
+                          </div>
                           <div className="text-right">
                             <div className="text-xs text-slate-500">Frequency:</div>
                             <div className="flex items-center gap-1 justify-end">
-                              <span className="text-xs text-slate-600 text-right">{intervention.detailed_interventions?.length || 0}</span>
+                              <span className="text-xs text-slate-600 text-right">{intervention.frequency}</span>
                             </div>
                           </div>
                           <div className="ml-2">
@@ -593,18 +862,21 @@ export function InterventionsNavigator({
 
                     {expandedInterventions.has(`all-${intervention.theme_name}`) && (
                       <CardContent className="pt-0">
-                        {intervention.detailed_interventions?.length ? (
-                          <div className="space-y-3">
-                            <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                            <NavigatorInterventionsTable 
-                              interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                            />
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-600">
-                            <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
-                          </div>
-                        )}
+                        <div className="space-y-3">
+                          {/* Detailed Interventions */}
+                          {intervention.detailed_interventions?.length ? (
+                            <div>
+                              <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
+                              <NavigatorInterventionsTable
+                                interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
+                              />
+                            </div>
+                          ) : (
+                            <div className="text-sm text-slate-600">
+                              <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
+                            </div>
+                          )}
+                        </div>
                       </CardContent>
                     )}
                   </Card>
@@ -644,7 +916,7 @@ export function InterventionsNavigator({
                           Interventions:
                         </h4>
                         
-                        {sortInterventions(issue.related_interventions).map((intervention) => (
+                        {sortIssueInterventions(issue.related_interventions).map((intervention) => (
                           <Card key={intervention.theme_name} className="ml-6">
                             <CardHeader className="pb-2">
                               <div 
@@ -664,27 +936,32 @@ export function InterventionsNavigator({
                                           {intervention.impact_summary}
                                         </p>
                                       )}
+                                      {renderEvidenceMix(intervention.issue_display_evidence_mix)}
                                     </div>
                                   )}
                                 </div>
-                                
+
                                 <div className="flex items-start gap-4 ml-4">
-                                  {intervention.avg_impact_score && (
-                                    <div className="text-right">
-                                      <div className="text-xs text-slate-500">Impact:</div>
-                                      {renderStars(intervention.avg_impact_score)}
-                                    </div>
-                                  )}
-                                  {intervention.avg_evidence_score && (
-                                    <div className="text-right">
-                                      <div className="text-xs text-slate-500">Evidence:</div>
-                                      {renderStars(intervention.avg_evidence_score)}
-                                    </div>
-                                  )}
+                                  <div className="text-right">
+                                    <div className="text-xs text-slate-500">Evidence:</div>
+                                    {intervention.issue_stars !== undefined ? (
+                                      <Tooltip content={getEvidenceScoreExplanation(intervention.issue_stars, intervention.issue_display_evidence_mix, intervention.issue_cap_message)}>
+                                        <div className="flex items-center cursor-help">
+                                          {renderStars(intervention.issue_stars, false)}
+                                        </div>
+                                      </Tooltip>
+                                    ) : (
+                                      renderStars(undefined, false)
+                                    )}
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xs text-slate-500">Impact:</div>
+                                    {renderStars(intervention.avg_impact_score, true)}
+                                  </div>
                                   <div className="text-right">
                                     <div className="text-xs text-slate-500">Frequency:</div>
                                     <div className="flex items-center gap-1">
-                                      <span className="text-xs text-slate-600">{intervention.detailed_interventions?.length || 0}</span>
+                                      <span className="text-xs text-slate-600">{intervention.frequency}</span>
                                     </div>
                                   </div>
                                   <div className="ml-2">
@@ -700,18 +977,21 @@ export function InterventionsNavigator({
 
                             {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
                               <CardContent className="pt-0">
-                                {intervention.detailed_interventions?.length ? (
-                                  <div className="space-y-3">
-                                    <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
-                                    <NavigatorInterventionsTable 
-                                      interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                                    />
-                                  </div>
-                                ) : (
-                                  <div className="text-sm text-slate-600">
-                                    <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents.</p>
-                                  </div>
-                                )}
+                                <div className="space-y-3">
+                                  {/* Detailed Interventions */}
+                                  {intervention.detailed_interventions?.length ? (
+                                    <div>
+                                      <h6 className="text-sm font-medium text-slate-700">Detailed Interventions:</h6>
+                                      <NavigatorInterventionsTable
+                                        interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm text-slate-600">
+                                      <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents.</p>
+                                    </div>
+                                  )}
+                                </div>
                               </CardContent>
                             )}
                           </Card>

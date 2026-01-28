@@ -22,6 +22,7 @@ from app.utils.llm.llm_utils import (
     build_langfuse_metadata,
     resolve_langfuse_session_id,
 )
+from ..prompts import CONCLUSIONS_PROMPT
 from ..schemas_langchain import (
     DocumentExtractionBundle,
     IssueItem,
@@ -29,7 +30,11 @@ from ..schemas_langchain import (
     MappingItem,
     ResultItem,
     ConclusionItem,
+    ConclusionsExtraction,
+    ImpactRating,
 )
+from ..evidence.category import EVIDENCE_CATEGORY_EXPLANATIONS
+from ..evidence.strength import calculate_document_evidence_score
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +131,48 @@ class BaseExtractionWorkflow(ABC):
 
         return workflow.compile()
 
+    def _build_evidence_strength_context(self, state: WorkflowState) -> str:
+        """Build a compact evidence-strength context string for prompts."""
+        category = (
+            state.get("evidence_category") or "Unknown / Insufficient information"
+        )
+        confidence = state.get("evidence_confidence")
+
+        interventions = state.get("interventions") or []
+        extraction_results = {
+            "interventions": [
+                intervention.model_dump() for intervention in interventions
+            ]
+        }
+        doc_stub = {
+            "evidence_category": category,
+            "extraction_results": extraction_results,
+        }
+
+        evidence_result = calculate_document_evidence_score(doc_stub)
+        sample_size = evidence_result.get("sample_size")
+        base_score = evidence_result.get("base_score")
+        final_score = evidence_result.get("score")
+        penalty_applied = evidence_result.get("penalty_applied")
+
+        penalty_note = ""
+        if penalty_applied:
+            penalty_note = " (penalized for small sample size < 100)"
+
+        confidence_text = (
+            f"{confidence:.2f}" if isinstance(confidence, (int, float)) else "unknown"
+        )
+        sample_text = str(sample_size) if sample_size is not None else "unknown"
+
+        return (
+            "Evidence strength context (computed):\n"
+            f"- Evidence category: {category}\n"
+            f"  Meaning: {EVIDENCE_CATEGORY_EXPLANATIONS.get(category, 'No description available.')}\n"
+            f"- Evidence confidence: {confidence_text}\n"
+            f"- Document evidence strength: {final_score}/5 (base {base_score}/5){penalty_note}\n"
+            f"- Sample size (N): {sample_text}\n"
+        )
+
     @abstractmethod
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         """Extract issues from the document. Implemented by subclasses."""
@@ -146,10 +193,41 @@ class BaseExtractionWorkflow(ABC):
         """Extract results for each intervention. Implemented by subclasses."""
         pass
 
-    @abstractmethod
     async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
-        """Extract conclusions from the document. Implemented by subclasses."""
-        pass
+        """Default conclusions extraction using the standard prompt."""
+        try:
+            paper_id = state["paper_id"]
+            interventions_json = (
+                json.dumps(
+                    [
+                        intervention.model_dump()
+                        for intervention in state["interventions"]
+                    ],
+                    indent=2,
+                )
+                if state["interventions"]
+                else "No interventions"
+            )
+
+            result = await self._run_prompt_stage(
+                CONCLUSIONS_PROMPT,
+                {
+                    "full_text": state["full_text"],
+                    "interventions_json": interventions_json,
+                    "evidence_strength_context": self._build_evidence_strength_context(
+                        state
+                    ),
+                },
+                self._get_stage_tags("conclusions", paper_id),
+                self._get_run_name("conclusions"),
+                extra={"paper_id": paper_id},
+            )
+            extraction = ConclusionsExtraction(**result)
+            logger.info(f"[{self.workflow_type.upper()}] Extracted conclusion")
+            return {"conclusion": extraction.conclusion}
+        except Exception as e:
+            logger.error(f"[{self.workflow_type.upper()}] Conclusions failed: {e}")
+            return {"conclusion": None, "error": str(e)}
 
     async def run(
         self,
@@ -187,6 +265,28 @@ class BaseExtractionWorkflow(ABC):
                 logger.error(f"Workflow error for {paper_id}: {final_state['error']}")
                 return self._empty_bundle(paper_id)
 
+            conclusion = final_state.get("conclusion")
+            if conclusion:
+                interventions = final_state.get("interventions") or []
+                extraction_results = {
+                    "interventions": [
+                        intervention.model_dump() for intervention in interventions
+                    ]
+                }
+                doc_stub = {
+                    "evidence_category": evidence_category,
+                    "extraction_results": extraction_results,
+                }
+                evidence_result = calculate_document_evidence_score(doc_stub)
+                evidence_strength = ImpactRating(
+                    stars=evidence_result["score"],
+                    justification=evidence_result.get("justification", ""),
+                    evidence_gap=None,
+                )
+                conclusion = conclusion.model_copy(
+                    update={"evidence_strength": evidence_strength}
+                )
+
             return DocumentExtractionBundle(
                 paper_id=paper_id,
                 workflow_used=self.workflow_type,
@@ -195,7 +295,7 @@ class BaseExtractionWorkflow(ABC):
                 interventions=final_state["interventions"],
                 mappings=final_state["mappings"],
                 results=final_state["results"],
-                conclusion=final_state.get("conclusion"),
+                conclusion=conclusion,
                 n_studies_included=final_state.get("n_studies_included"),
                 sr_completeness_flag=final_state.get("sr_completeness_flag"),
             )

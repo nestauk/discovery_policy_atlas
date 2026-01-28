@@ -471,7 +471,8 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
           padding: 8,
           font: { size: 10 },
           generateLabels: (chart: unknown) => {
-            const chartData = (chart as { data: typeof evidenceCategoryChartData }).data
+            const chartData = (chart as { data: typeof evidenceCategoryChartData | null }).data
+            if (!chartData) return []
             return chartData.datasets.map((dataset, i) => ({
               text: `${dataset.label} (${dataset.data[0]})`,
               fillStyle: dataset.backgroundColor as string,

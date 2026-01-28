@@ -12,9 +12,10 @@ import { pingBackend } from '@/lib/api'
 import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
+import { fetchEvidenceCategories } from '@/lib/evidenceCategories'
 import { OrganizationManager } from '@/components/OrganizationManager'
 
-const getResultsHref = (activeProjectId?: string) => 
+const getResultsHref = (activeProjectId?: string) =>
   activeProjectId ? `/projects/${activeProjectId}` : '/projects'
 
 const sidebarItems = [
@@ -90,6 +91,11 @@ export default function AgentLayout({
       pingBackend()
     }
   }, [isSignedIn, isLoaded, router])
+
+  // Prime evidence categories cache from backend API
+  useEffect(() => {
+    fetchEvidenceCategories()
+  }, [])
 
   // Auto-expand test section if user is on a test page
   useEffect(() => {
