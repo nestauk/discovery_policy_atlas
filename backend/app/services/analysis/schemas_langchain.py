@@ -149,6 +149,7 @@ class ConclusionItem(BaseModel):
     top_line_summary: str  # One direct sentence summarizing the main conclusion
     detailed_explanation: str  # Paragraph explaining key reasons for the conclusion
     supporting_quote: str
+    evidence_strength: Optional[ImpactRating] = None  # Computed evidence strength
     predicted_impact: Optional[ImpactRating] = None  # Predicted scalability and impact
 
 

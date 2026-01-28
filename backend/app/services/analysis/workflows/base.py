@@ -29,6 +29,7 @@ from ..schemas_langchain import (
     MappingItem,
     ResultItem,
     ConclusionItem,
+    ImpactRating,
 )
 from ..evidence.category import EVIDENCE_CATEGORY_EXPLANATIONS
 from ..evidence.strength import calculate_document_evidence_score
@@ -231,6 +232,28 @@ class BaseExtractionWorkflow(ABC):
                 logger.error(f"Workflow error for {paper_id}: {final_state['error']}")
                 return self._empty_bundle(paper_id)
 
+            conclusion = final_state.get("conclusion")
+            if conclusion:
+                interventions = final_state.get("interventions") or []
+                extraction_results = {
+                    "interventions": [
+                        intervention.model_dump() for intervention in interventions
+                    ]
+                }
+                doc_stub = {
+                    "evidence_category": evidence_category,
+                    "extraction_results": extraction_results,
+                }
+                evidence_result = calculate_document_evidence_score(doc_stub)
+                evidence_strength = ImpactRating(
+                    stars=evidence_result["score"],
+                    justification=evidence_result.get("justification", ""),
+                    evidence_gap=None,
+                )
+                conclusion = conclusion.model_copy(
+                    update={"evidence_strength": evidence_strength}
+                )
+
             return DocumentExtractionBundle(
                 paper_id=paper_id,
                 workflow_used=self.workflow_type,
@@ -239,7 +262,7 @@ class BaseExtractionWorkflow(ABC):
                 interventions=final_state["interventions"],
                 mappings=final_state["mappings"],
                 results=final_state["results"],
-                conclusion=final_state.get("conclusion"),
+                conclusion=conclusion,
                 n_studies_included=final_state.get("n_studies_included"),
                 sr_completeness_flag=final_state.get("sr_completeness_flag"),
             )

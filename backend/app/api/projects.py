@@ -41,6 +41,7 @@ from app.services.analysis.evidence.strength import (
     _parse_sample_size,
     calculate_evidence_strength,
     calculate_document_evidence_score,
+    get_document_sample_size,
     get_document_max_sample_size,
     build_document_evidence_info,
     build_evidence_info_for_docs,
@@ -975,18 +976,25 @@ async def get_project_documents(
             doc_copy["evidence_category_rank"] = EVIDENCE_CATEGORY_RANKS.get(
                 evidence_category, UNKNOWN_RANK
             )
-            # Calculate evidence strength with sample size penalty
-            evidence_result = calculate_document_evidence_score(doc)
-            doc_copy["sample_size"] = evidence_result[
-                "sample_size"
-            ]  # Always include (may be None)
-            doc_copy["evidence_strength"] = evidence_result["score"]
-            if evidence_result["justification"]:
-                doc_copy["evidence_strength_justification"] = evidence_result[
-                    "justification"
-                ]
-            # Extract predicted impact from extraction results
+            # Compute sample size once; prefer stored evidence strength for stars/justification
+            doc_sample_size = get_document_sample_size(doc)
             conclusion = (doc.get("extraction_results") or {}).get("conclusion") or {}
+            stored_evidence = conclusion.get("evidence_strength") or {}
+            if stored_evidence:
+                doc_copy["evidence_strength"] = stored_evidence.get("stars")
+                doc_copy["evidence_strength_justification"] = stored_evidence.get(
+                    "justification"
+                )
+            else:
+                evidence_result = calculate_document_evidence_score(doc)
+                doc_copy["evidence_strength"] = evidence_result["score"]
+                if evidence_result["justification"]:
+                    doc_copy["evidence_strength_justification"] = evidence_result[
+                        "justification"
+                    ]
+            # Always include sample_size (may be None)
+            doc_copy["sample_size"] = doc_sample_size
+            # Extract predicted impact from extraction results
             predicted_impact = conclusion.get("predicted_impact") or {}
             doc_copy["predicted_impact"] = predicted_impact.get("stars")
             doc_copy["predicted_impact_justification"] = predicted_impact.get(
@@ -1759,16 +1767,26 @@ async def get_issue_intervention_navigator(
             # Get conclusion scores (impact only)
             conclusion = extraction_results.get("conclusion", {}) or {}
             predicted_impact = conclusion.get("predicted_impact", {}) or {}
+            stored_evidence = conclusion.get("evidence_strength", {}) or {}
+            extraction_results = document.get("extraction_results", {})
 
-            # Calculate evidence score with sample size penalty
-            evidence_result = calculate_document_evidence_score(document)
+            # Prefer stored evidence strength, fallback to recompute
+            if stored_evidence:
+                evidence_score = stored_evidence.get("stars")
+                evidence_justification = stored_evidence.get("justification", "")
+                evidence_sample_size = get_document_sample_size(document)
+            else:
+                evidence_result = calculate_document_evidence_score(document)
+                evidence_score = evidence_result["score"]
+                evidence_justification = evidence_result.get("justification", "")
+                evidence_sample_size = evidence_result.get("sample_size")
 
             doc_scores[doc_id] = {
                 "impact_score": predicted_impact.get("stars"),
-                "evidence_score": evidence_result["score"],
-                "sample_size": evidence_result["sample_size"],
+                "evidence_score": evidence_score,
+                "sample_size": evidence_sample_size,
                 "impact_justification": predicted_impact.get("justification", ""),
-                "evidence_justification": evidence_result["justification"],
+                "evidence_justification": evidence_justification,
             }
 
             # Get mappings from extraction results
@@ -2390,15 +2408,19 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 raw_data = extraction.get("raw_data", {})
 
-                # Get evidence score from category with sample size penalty
-                evidence_result = calculate_document_evidence_score(doc)
-                evidence_score = (
-                    evidence_result["score"] if evidence_result["score"] > 0 else None
-                )
-
                 extraction_results = doc.get("extraction_results", {})
                 conclusion = extraction_results.get("conclusion", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
+                stored_evidence = conclusion.get("evidence_strength", {}) or {}
+                if stored_evidence:
+                    evidence_score = stored_evidence.get("stars")
+                else:
+                    evidence_result = calculate_document_evidence_score(doc)
+                    evidence_score = (
+                        evidence_result["score"]
+                        if evidence_result["score"] > 0
+                        else None
+                    )
                 impact_score = predicted_impact.get("stars")
 
                 # Extract results from document's extraction_results
@@ -2495,14 +2517,18 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     logger.warning(f"Skipping None document at index {i}")
                     continue
 
-                # Get evidence score from category with sample size penalty
-                evidence_category = doc.get("evidence_category", "")
-                evidence_result = calculate_document_evidence_score(doc)
-                evidence_score = evidence_result["score"] if evidence_category else ""
-
                 extraction_results = doc.get("extraction_results", {}) or {}
                 conclusion = extraction_results.get("conclusion", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
+                stored_evidence = conclusion.get("evidence_strength", {}) or {}
+                evidence_category = doc.get("evidence_category", "")
+                if stored_evidence:
+                    evidence_score = stored_evidence.get("stars", "")
+                else:
+                    evidence_result = calculate_document_evidence_score(doc)
+                    evidence_score = (
+                        evidence_result["score"] if evidence_category else ""
+                    )
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])
