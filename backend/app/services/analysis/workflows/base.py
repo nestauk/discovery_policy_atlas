@@ -22,6 +22,7 @@ from app.utils.llm.llm_utils import (
     build_langfuse_metadata,
     resolve_langfuse_session_id,
 )
+from ..prompts import CONCLUSIONS_PROMPT
 from ..schemas_langchain import (
     DocumentExtractionBundle,
     IssueItem,
@@ -29,6 +30,7 @@ from ..schemas_langchain import (
     MappingItem,
     ResultItem,
     ConclusionItem,
+    ConclusionsExtraction,
     ImpactRating,
 )
 from ..evidence.category import EVIDENCE_CATEGORY_EXPLANATIONS
@@ -191,10 +193,41 @@ class BaseExtractionWorkflow(ABC):
         """Extract results for each intervention. Implemented by subclasses."""
         pass
 
-    @abstractmethod
     async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
-        """Extract conclusions from the document. Implemented by subclasses."""
-        pass
+        """Default conclusions extraction using the standard prompt."""
+        try:
+            paper_id = state["paper_id"]
+            interventions_json = (
+                json.dumps(
+                    [
+                        intervention.model_dump()
+                        for intervention in state["interventions"]
+                    ],
+                    indent=2,
+                )
+                if state["interventions"]
+                else "No interventions"
+            )
+
+            result = await self._run_prompt_stage(
+                CONCLUSIONS_PROMPT,
+                {
+                    "full_text": state["full_text"],
+                    "interventions_json": interventions_json,
+                    "evidence_strength_context": self._build_evidence_strength_context(
+                        state
+                    ),
+                },
+                self._get_stage_tags("conclusions", paper_id),
+                self._get_run_name("conclusions"),
+                extra={"paper_id": paper_id},
+            )
+            extraction = ConclusionsExtraction(**result)
+            logger.info(f"[{self.workflow_type.upper()}] Extracted conclusion")
+            return {"conclusion": extraction.conclusion}
+        except Exception as e:
+            logger.error(f"[{self.workflow_type.upper()}] Conclusions failed: {e}")
+            return {"conclusion": None, "error": str(e)}
 
     async def run(
         self,

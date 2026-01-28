@@ -10,14 +10,12 @@ from ..prompts import (
     SR_INTERVENTIONS_PROMPT,
     SR_RESULTS_PROMPT,
     MAPPING_PROMPT,
-    CONCLUSIONS_PROMPT,
 )
 from ..schemas_langchain import (
     IssuesExtraction,
     InterventionsExtraction,
     MappingsExtraction,
     ResultsExtraction,
-    ConclusionsExtraction,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,34 +131,6 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
         except Exception as e:
             logger.error(f"[SR] Results extraction failed: {e}")
             return {"results": [], "error": str(e)}
-
-    async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
-        try:
-            paper_id = state["paper_id"]
-            interventions_json = (
-                json.dumps([i.model_dump() for i in state["interventions"]], indent=2)
-                if state["interventions"]
-                else "No interventions"
-            )
-            result = await self._run_prompt_stage(
-                CONCLUSIONS_PROMPT,
-                {
-                    "full_text": state["full_text"],
-                    "interventions_json": interventions_json,
-                    "evidence_strength_context": self._build_evidence_strength_context(
-                        state
-                    ),
-                },
-                self._get_stage_tags("conclusions", paper_id),
-                self._get_run_name("conclusions"),
-                extra={"paper_id": paper_id},
-            )
-            extraction = ConclusionsExtraction(**result)
-            logger.info("[SR] Extracted conclusion")
-            return {"conclusion": extraction.conclusion}
-        except Exception as e:
-            logger.error(f"[SR] Conclusions failed: {e}")
-            return {"conclusion": None, "error": str(e)}
 
     async def _validate_and_filter(self, state: WorkflowState) -> Dict[str, Any]:
         """SR validation: base validation plus heterogeneity completeness check."""
