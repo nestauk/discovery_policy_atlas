@@ -59,7 +59,7 @@ class EvidenceStrengthResult(TypedDict):
     evidence_mix: dict[str, int]
 
 
-def _parse_sample_size(value: object) -> Optional[int]:
+def parse_sample_size(value: object) -> Optional[int]:
     """Parse sample size from various input formats.
 
     Args:
@@ -104,7 +104,7 @@ def get_document_sample_size(doc: dict) -> Optional[int]:
     primary = interventions[0]
     if not isinstance(primary, dict):
         return None
-    return _parse_sample_size(primary.get("sample_size"))
+    return parse_sample_size(primary.get("sample_size"))
 
 
 def get_document_max_sample_size(interventions: list[dict]) -> Optional[int]:
@@ -123,7 +123,7 @@ def get_document_max_sample_size(interventions: list[dict]) -> Optional[int]:
         return None
     sample_sizes = []
     for intervention in interventions:
-        parsed = _parse_sample_size(intervention.get("sample_size"))
+        parsed = parse_sample_size(intervention.get("sample_size"))
         if parsed is not None:
             sample_sizes.append(parsed)
     return max(sample_sizes) if sample_sizes else None
@@ -167,6 +167,30 @@ def build_evidence_info_for_docs(
         max_sample_size = get_document_max_sample_size(interventions)
         result.append(build_document_evidence_info(doc, max_sample_size, doc_id))
     return result
+
+
+def get_or_calculate_document_evidence(doc: dict) -> dict:
+    """Get stored evidence strength or calculate it.
+
+    Returns dict with 'stars', 'justification', 'sample_size' keys.
+    """
+    extraction_results = doc.get("extraction_results") or {}
+    conclusion = extraction_results.get("conclusion") or {}
+    stored = conclusion.get("evidence_strength") or {}
+
+    if stored:
+        return {
+            "stars": stored.get("stars"),
+            "justification": stored.get("justification", ""),
+            "sample_size": get_document_sample_size(doc),
+        }
+
+    result = calculate_document_evidence_score(doc)
+    return {
+        "stars": result["score"],
+        "justification": result.get("justification", ""),
+        "sample_size": result.get("sample_size"),
+    }
 
 
 def build_evidence_info_from_detailed_interventions(

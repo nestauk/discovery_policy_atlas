@@ -32,6 +32,14 @@ from ..prompts import EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
+# Category name used for documents excluded from evidence counts/UX.
+NON_EVIDENCE_CATEGORY = "Other (Non-evidence documents)"
+
+
+def is_non_evidence_document(doc: dict) -> bool:
+    """Return True when a document is flagged as non-evidence."""
+    return doc.get("evidence_category") == NON_EVIDENCE_CATEGORY
+
 
 # Single source of truth for evidence categories.
 # Each tuple: (full_name, key, score, short_name, bg_color, text_color)
