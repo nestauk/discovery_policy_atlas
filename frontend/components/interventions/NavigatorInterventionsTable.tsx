@@ -68,6 +68,7 @@ interface NavigatorInterventionData {
     title: string
     source: string
     landing_page_url?: string
+    evidence_category?: string
   }>
   impact_score?: number
   evidence_score?: number

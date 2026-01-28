@@ -58,6 +58,11 @@ interface AnalysisDocument {
   study_strength?: string
   sample_size?: number
   cited_by_count?: number
+  // Top-level evidence/impact fields (surfaced by API)
+  evidence_strength?: number
+  evidence_strength_justification?: string
+  predicted_impact?: number
+  predicted_impact_justification?: string
   extraction_results?: {
     conclusion?: {
       top_line_summary?: string

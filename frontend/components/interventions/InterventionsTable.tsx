@@ -25,6 +25,7 @@ export interface InterventionData {
   description: string
   evidence_category?: string
   is_systematic_review?: boolean
+  highest_study_type?: string
   result_count: number
   results_summary: Array<{
     outcome: string

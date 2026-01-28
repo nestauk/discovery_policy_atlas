@@ -91,6 +91,7 @@ interface DetailedIntervention {
     landing_page_url?: string
     evidence_category?: string
     evidence_confidence?: number
+    sample_size?: number
   }>
 }
 
@@ -448,7 +449,7 @@ export function InterventionsNavigator({
       result_count: number
       results_summary: AggregatedInterventionRow['results_summary']
       outcome_groups: Map<string, {
-        document: AggregatedInterventionRow['outcome_groups'][number]['document']
+        document: NonNullable<AggregatedInterventionRow['outcome_groups']>[number]['document']
         results: AggregatedInterventionRow['results_summary']
       }>
       total_sample_size: number | null
