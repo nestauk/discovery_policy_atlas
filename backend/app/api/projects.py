@@ -35,14 +35,15 @@ from app.services.analysis.schemas import (
 from app.services.analysis.evidence.category import (
     EVIDENCE_CATEGORIES,
     EVIDENCE_CATEGORY_RANKS,
+    NON_EVIDENCE_CATEGORY,
+    is_non_evidence_document,
 )
 from app.services.analysis.evidence.strength import (
     UNKNOWN_RANK,
-    _parse_sample_size,
+    parse_sample_size,
     calculate_evidence_strength,
-    calculate_document_evidence_score,
-    get_document_sample_size,
     get_document_max_sample_size,
+    get_or_calculate_document_evidence,
     build_document_evidence_info,
 )
 from app.services.analysis.utils.navigator import (
@@ -963,7 +964,7 @@ async def get_project_documents(
 
         for doc in docs_result.data:
             # Filter out "Other (Non-evidence documents)" - these shouldn't reach the UI
-            if doc.get("evidence_category") == "Other (Non-evidence documents)":
+            if is_non_evidence_document(doc):
                 filtered_other_count += 1
                 continue
 
@@ -975,24 +976,15 @@ async def get_project_documents(
             doc_copy["evidence_category_rank"] = EVIDENCE_CATEGORY_RANKS.get(
                 evidence_category, UNKNOWN_RANK
             )
-            # Compute sample size once; prefer stored evidence strength for stars/justification
-            doc_sample_size = get_document_sample_size(doc)
+            evidence_info = get_or_calculate_document_evidence(doc)
             conclusion = (doc.get("extraction_results") or {}).get("conclusion") or {}
-            stored_evidence = conclusion.get("evidence_strength") or {}
-            if stored_evidence:
-                doc_copy["evidence_strength"] = stored_evidence.get("stars")
-                doc_copy["evidence_strength_justification"] = stored_evidence.get(
+            doc_copy["evidence_strength"] = evidence_info["stars"]
+            if evidence_info["justification"]:
+                doc_copy["evidence_strength_justification"] = evidence_info[
                     "justification"
-                )
-            else:
-                evidence_result = calculate_document_evidence_score(doc)
-                doc_copy["evidence_strength"] = evidence_result["score"]
-                if evidence_result["justification"]:
-                    doc_copy["evidence_strength_justification"] = evidence_result[
-                        "justification"
-                    ]
+                ]
             # Always include sample_size (may be None)
-            doc_copy["sample_size"] = doc_sample_size
+            doc_copy["sample_size"] = evidence_info["sample_size"]
             # Extract predicted impact from extraction results
             predicted_impact = conclusion.get("predicted_impact") or {}
             doc_copy["predicted_impact"] = predicted_impact.get("stars")
@@ -1118,7 +1110,7 @@ async def get_project_charts_data(
             # Count by evidence category (track but don't include "Other" in results)
             evidence_category = doc.get("evidence_category")
             if evidence_category and evidence_category.strip():
-                if evidence_category == "Other (Non-evidence documents)":
+                if evidence_category == NON_EVIDENCE_CATEGORY:
                     filtered_other_count += 1
                 evidence_category_counts[evidence_category] = (
                     evidence_category_counts.get(evidence_category, 0) + 1
@@ -1147,9 +1139,7 @@ async def get_project_charts_data(
         # Sort evidence categories by strength (predefined order)
         # Exclude "Other (Non-evidence documents)" - these are filtered out during acquisition
         evidence_category_order = [
-            cat
-            for cat in EVIDENCE_CATEGORIES
-            if cat != "Other (Non-evidence documents)"
+            cat for cat in EVIDENCE_CATEGORIES if cat != NON_EVIDENCE_CATEGORY
         ]
 
         documents_by_evidence_category = []
@@ -1290,14 +1280,6 @@ async def get_project_interventions(
         # Separate accumulator for temporary data (sample_sizes, seen_doc_ids, docs_with_evidence)
         accumulator: dict[str, dict] = {}
 
-        def get_evidence_category_rank(evidence_category: str | None) -> int:
-            """Convert evidence category to numeric rank for sorting (lower = better).
-            Based on evidence hierarchy: SR > RCT > Observational > etc."""
-            if not evidence_category:
-                return UNKNOWN_RANK  # Unknown/missing goes to the end
-
-            return EVIDENCE_CATEGORY_RANKS.get(evidence_category, UNKNOWN_RANK)
-
         for document in docs_result.data:
             extraction_results = document.get("extraction_results", {})
             interventions = extraction_results.get("interventions", [])
@@ -1329,9 +1311,11 @@ async def get_project_interventions(
                         "country": intervention.get("country", "Unknown"),
                         "description": intervention.get("description", ""),
                         "evidence_category": evidence_cat,
-                        "evidence_category_rank": get_evidence_category_rank(
-                            evidence_cat
-                        ),
+                        "evidence_category_rank": EVIDENCE_CATEGORY_RANKS.get(
+                            evidence_cat, UNKNOWN_RANK
+                        )
+                        if evidence_cat
+                        else UNKNOWN_RANK,
                         "is_systematic_review": evidence_cat
                         == "Systematic Review and Meta-Analysis",
                         "result_count": 0,
@@ -1356,7 +1340,7 @@ async def get_project_interventions(
                 )
 
                 # Get sample size for this intervention (for aggregate stats display)
-                sample_size_int = _parse_sample_size(intervention.get("sample_size"))
+                sample_size_int = parse_sample_size(intervention.get("sample_size"))
 
                 # Add sample size to list if available (for aggregate stats)
                 if sample_size_int is not None:
@@ -2031,15 +2015,10 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                 conclusion = extraction_results.get("conclusion", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
                 stored_evidence = conclusion.get("evidence_strength", {}) or {}
-                if stored_evidence:
-                    evidence_score = stored_evidence.get("stars")
-                else:
-                    evidence_result = calculate_document_evidence_score(doc)
-                    evidence_score = (
-                        evidence_result["score"]
-                        if evidence_result["score"] > 0
-                        else None
-                    )
+                evidence_info = get_or_calculate_document_evidence(doc)
+                evidence_score = evidence_info["stars"]
+                if not stored_evidence and evidence_score is not None:
+                    evidence_score = evidence_score if evidence_score > 0 else None
                 impact_score = predicted_impact.get("stars")
 
                 # Extract results from document's extraction_results
@@ -2139,15 +2118,9 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                 extraction_results = doc.get("extraction_results", {}) or {}
                 conclusion = extraction_results.get("conclusion", {}) or {}
                 predicted_impact = conclusion.get("predicted_impact", {}) or {}
-                stored_evidence = conclusion.get("evidence_strength", {}) or {}
                 evidence_category = doc.get("evidence_category", "")
-                if stored_evidence:
-                    evidence_score = stored_evidence.get("stars", "")
-                else:
-                    evidence_result = calculate_document_evidence_score(doc)
-                    evidence_score = (
-                        evidence_result["score"] if evidence_category else ""
-                    )
+                evidence_info = get_or_calculate_document_evidence(doc)
+                evidence_score = evidence_info["stars"] if evidence_category else ""
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])

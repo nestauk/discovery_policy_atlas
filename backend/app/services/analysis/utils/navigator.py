@@ -10,7 +10,7 @@ from app.services.analysis.evidence.strength import (
     build_evidence_info_from_detailed_interventions,
     compute_display_evidence_mix_from_detailed,
     deduplicate_interventions,
-    _parse_sample_size,
+    parse_sample_size,
 )
 
 logger = logging.getLogger(__name__)
@@ -229,7 +229,7 @@ def build_detailed_intervention(
         "country": raw_data.get("country"),
         "evidence_category": evidence_cat,
         "is_systematic_review": evidence_cat == "Systematic Review and Meta-Analysis",
-        "sample_size": _parse_sample_size(raw_data.get("sample_size")),
+        "sample_size": parse_sample_size(raw_data.get("sample_size")),
         "impact_score": scores.get("impact_score"),
         "evidence_score": scores.get("evidence_score"),
         "impact_justification": scores.get("impact_justification", ""),
