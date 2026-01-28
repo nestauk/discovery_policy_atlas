@@ -11,7 +11,7 @@ from datetime import datetime
 from .schemas import RunConfig, RunResult
 from .references import ReferencesService
 from .relevance import RelevanceService
-from .evidence_category import EvidenceCategoryService
+from .evidence.category import EvidenceCategoryService
 from .acquire import AcquisitionService
 from .parse import ParsingService
 from .normalize import normalize_text
@@ -210,7 +210,7 @@ class AnalysisService:
                     parsed_count += 1
                     norm_text = normalize_text(parsed.text)
                     # Use sanitized filename for normalized output as well
-                    from .utils_paths import sanitize_id_to_filename
+                    from .utils.paths import sanitize_id_to_filename
 
                     # Match normalized filename to raw base name
                     raw_path = (

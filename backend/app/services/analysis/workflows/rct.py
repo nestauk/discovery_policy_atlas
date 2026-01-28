@@ -14,14 +14,12 @@ from ..prompts import (
     INTERVENTIONS_PROMPT,
     MAPPING_PROMPT,
     RESULTS_PROMPT,
-    CONCLUSIONS_PROMPT,
 )
 from ..schemas_langchain import (
     IssuesExtraction,
     InterventionsExtraction,
     MappingsExtraction,
     ResultsExtraction,
-    ConclusionsExtraction,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,40 +165,4 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
             logger.error(f"[RCT] Results extraction failed: {e}")
             return {"results": [], "error": f"Results extraction failed: {e}"}
 
-    async def _extract_conclusions(self, state: WorkflowState) -> Dict[str, Any]:
-        """Stage E: Extract study conclusions with evidence strength assessment."""
-        try:
-            paper_id = state["paper_id"]
-            interventions_json = (
-                json.dumps(
-                    [
-                        intervention.model_dump()
-                        for intervention in state["interventions"]
-                    ],
-                    indent=2,
-                )
-                if state["interventions"]
-                else "No interventions extracted"
-            )
-
-            result = await self._run_prompt_stage(
-                CONCLUSIONS_PROMPT,
-                {
-                    "full_text": state["full_text"],
-                    "interventions_json": interventions_json,
-                },
-                self._get_stage_tags("conclusions", paper_id),
-                self._get_run_name("conclusions"),
-                extra={"paper_id": paper_id},
-            )
-
-            extraction = ConclusionsExtraction(**result)
-            logger.info("[RCT] Extracted study conclusion with evidence assessment")
-
-            return {"conclusion": extraction.conclusion}
-
-        except Exception as e:
-            logger.error(f"[RCT] Conclusions extraction failed: {e}")
-            return {"conclusion": None, "error": f"Conclusions extraction failed: {e}"}
-
-    # Uses base class _validate_and_filter - no RCT-specific validation needed
+    # Uses base class _extract_conclusions and _validate_and_filter

@@ -28,15 +28,24 @@ import pandas as pd
 
 from app.core.config import settings
 from app.utils.llm import batch_check
-from .prompts import EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT
+from ..prompts import EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+# Category name used for documents excluded from evidence counts/UX.
+NON_EVIDENCE_CATEGORY = "Other (Non-evidence documents)"
+
+
+def is_non_evidence_document(doc: dict) -> bool:
+    """Return True when a document is flagged as non-evidence."""
+    return doc.get("evidence_category") == NON_EVIDENCE_CATEGORY
 
 
 # Single source of truth for evidence categories.
 # Each tuple: (full_name, key, score, short_name, bg_color, text_color)
 # Rank is derived from list order (1-indexed).
 _EVIDENCE_CATEGORY_DATA = [
+    # (name, key, score, short_name, bg_color, text_color, explanation)
     (
         "Systematic Review and Meta-Analysis",
         "systematic_review",
@@ -44,6 +53,7 @@ _EVIDENCE_CATEGORY_DATA = [
         "Systematic Review",
         "#0F294A",
         "#FFFFFF",
+        "Synthesizes multiple studies to provide the strongest evidence tier.",
     ),
     (
         "RCTs and Quasi-Experimental Studies",
@@ -52,6 +62,7 @@ _EVIDENCE_CATEGORY_DATA = [
         "RCT/Quasi-Exp",
         "#9A1BBE",
         "#FFFFFF",
+        "Causal designs with controls; strongest primary-study evidence.",
     ),
     (
         "Observational Research Studies",
@@ -60,8 +71,17 @@ _EVIDENCE_CATEGORY_DATA = [
         "Observational",
         "#0000FF",
         "#FFFFFF",
+        "Non-randomized evidence showing associations; weaker causal certainty.",
     ),
-    ("Modelling & Simulation", "modelling", 2, "Modelling", "#18A48C", "#FFFFFF"),
+    (
+        "Modelling & Simulation",
+        "modelling",
+        2,
+        "Modelling",
+        "#18A48C",
+        "#FFFFFF",
+        "Modelled or simulated evidence, not direct empirical outcomes.",
+    ),
     (
         "Policy Syntheses & Guidance Documents",
         "policy",
@@ -69,6 +89,7 @@ _EVIDENCE_CATEGORY_DATA = [
         "Policy Guidance",
         "#97D9E3",
         "#111827",
+        "Policy-focused synthesis or guidance rather than primary evidence.",
     ),
     (
         "Qualitative & Contextual Evidence",
@@ -77,6 +98,7 @@ _EVIDENCE_CATEGORY_DATA = [
         "Qualitative",
         "#A59BEE",
         "#111827",
+        "Interview/qualitative/contextual evidence; rich but not causal.",
     ),
     (
         "Expert Opinion and Commentary",
@@ -85,8 +107,17 @@ _EVIDENCE_CATEGORY_DATA = [
         "Expert Opinion",
         "#F6A4B7",
         "#111827",
+        "Expert commentary without primary empirical testing.",
     ),
-    ("Other (Non-evidence documents)", "other", 0, "Other", "#F8F5F4", "#374151"),
+    (
+        "Other (Non-evidence documents)",
+        "other",
+        0,
+        "Other",
+        "#F8F5F4",
+        "#374151",
+        "Not research evidence.",
+    ),
     (
         "Unknown / Insufficient information",
         "unknown",
@@ -94,8 +125,10 @@ _EVIDENCE_CATEGORY_DATA = [
         "Unknown",
         "#F8F5F4",
         "#374151",
+        "Insufficient information to classify evidence quality.",
     ),
 ]
+
 
 # Derived mappings (generated once at module load)
 EVIDENCE_CATEGORIES = [row[0] for row in _EVIDENCE_CATEGORY_DATA]
@@ -105,6 +138,26 @@ EVIDENCE_CATEGORY_RANKS = {
     row[0]: rank for rank, row in enumerate(_EVIDENCE_CATEGORY_DATA, start=1)
 }
 EVIDENCE_CATEGORY_TO_KEY = {row[0]: row[1] for row in _EVIDENCE_CATEGORY_DATA}
+EVIDENCE_CATEGORY_EXPLANATIONS = {row[0]: row[6] for row in _EVIDENCE_CATEGORY_DATA}
+
+# Thresholds for evidence strength calculations
+EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
+DENSITY_THRESHOLD = 0.025  # 2.5%
+SMALL_SAMPLE_THRESHOLD = 100  # N < 100 triggers penalty for causal evidence
+
+CAP_MESSAGES = {
+    "single_srma": "Limited by single systematic review",
+    "single_rct": "Limited by single experimental study",
+    "single_obs": "Limited by single observational study",
+    "density": "Limited by small evidence base",
+    "small_sample": "All studies have sample sizes under 100, limiting statistical power",
+}
+
+# Evidence categories where sample size matters for causal inference
+CAUSAL_EVIDENCE_CATEGORIES = {
+    "RCTs and Quasi-Experimental Studies",
+    "Observational Research Studies",
+}
 
 
 def get_evidence_categories_for_api() -> list[dict]:
@@ -123,9 +176,15 @@ def get_evidence_categories_for_api() -> list[dict]:
             "bg_color": bg_color,
             "text_color": text_color,
         }
-        for rank, (name, key, score, short_name, bg_color, text_color) in enumerate(
-            _EVIDENCE_CATEGORY_DATA, start=1
-        )
+        for rank, (
+            name,
+            key,
+            score,
+            short_name,
+            bg_color,
+            text_color,
+            _explanation,
+        ) in enumerate(_EVIDENCE_CATEGORY_DATA, start=1)
     ]
 
 

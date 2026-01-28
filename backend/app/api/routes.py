@@ -4,7 +4,7 @@ import io
 from datetime import datetime
 from app.core.auth import get_current_user, CurrentUser
 from app.services.download import download_service
-from app.services.analysis.evidence_category import get_evidence_categories_for_api
+from app.services.analysis.evidence.category import get_evidence_categories_for_api
 import logging
 
 router = APIRouter()
