@@ -786,10 +786,6 @@ export default function ProjectResultsPage() {
   // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
-      const conclusion = doc.extraction_results?.conclusion
-      const evidenceStrength = conclusion?.evidence_strength
-      const predictedImpact = conclusion?.predicted_impact
-      
       return {
         id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
         title: String(doc.title || 'Untitled'),
@@ -812,10 +808,10 @@ export default function ProjectResultsPage() {
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
-        evidence_strength: evidenceStrength?.stars || undefined,
-        evidence_strength_justification: evidenceStrength?.justification,
-        predicted_impact: predictedImpact?.stars || undefined,
-        predicted_impact_justification: predictedImpact?.justification,
+        evidence_strength: doc.evidence_strength || undefined,
+        evidence_strength_justification: doc.evidence_strength_justification,
+        predicted_impact: doc.predicted_impact || undefined,
+        predicted_impact_justification: doc.predicted_impact_justification,
         // Evidence categorisation fields
         evidence_category: doc.evidence_category,
         evidence_confidence: doc.evidence_confidence,
