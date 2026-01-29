@@ -11,7 +11,7 @@ from typing import Dict, List
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState, Concept
 from app.services.synthesis.utils import normalize_study_type
-from app.services.analysis.evidence.strength import calculate_document_evidence_score
+from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
 
 
 async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
@@ -88,18 +88,17 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             "evidence_category": doc.get("evidence_category"),
         }
 
-        # Get evidence score (with sample size penalty) and impact score from conclusion
-        evidence_result = calculate_document_evidence_score(doc)
-
+        # Get evidence and impact scores from conclusion (prefer stored, fallback to recompute)
         extraction_results = doc.get("extraction_results") or {}
         conclusion = extraction_results.get("conclusion") or {}
         predicted_impact = conclusion.get("predicted_impact") or {}
+        evidence_info = get_or_calculate_document_evidence(doc)
 
         doc_scores[doc_uuid] = {
-            "evidence_score": evidence_result["score"],  # 0-5 with sample size penalty
+            "evidence_score": evidence_info["stars"],  # 0-5 with sample size penalty
             "impact_score": predicted_impact.get("stars"),  # 1-5 or None
             "evidence_category": doc.get("evidence_category"),
-            "evidence_justification": evidence_result["justification"],
+            "evidence_justification": evidence_info["justification"],
             "impact_justification": predicted_impact.get("justification", ""),
         }
 
