@@ -71,7 +71,7 @@ def compute_shared_docs_mappings(
     return issue_intervention_shared_docs
 
 
-def build_result_detail(result: dict) -> dict:
+def _build_result_detail(result: dict) -> dict:
     """Build standardized result detail dict from an extraction result.
 
     This handles both legacy field names (effect_direction) and new names (direction).
@@ -184,7 +184,7 @@ def build_doc_scores_and_mappings(
     return doc_scores, doc_mappings
 
 
-def build_detailed_intervention(
+def _build_detailed_intervention(
     extraction: dict,
     doc: dict,
     doc_scores: dict[str, dict],
@@ -219,7 +219,7 @@ def build_detailed_intervention(
             # Find results for this intervention by idx
             for result in results_data:
                 if result.get("intervention_idx") == i:
-                    intervention_results.append(build_result_detail(result))
+                    intervention_results.append(_build_result_detail(result))
             break
 
     return {
@@ -321,7 +321,7 @@ def build_related_interventions(
 
             extraction_results = doc.get("extraction_results", {})
             detailed_interventions.append(
-                build_detailed_intervention(
+                _build_detailed_intervention(
                     extraction,
                     doc,
                     doc_scores,
