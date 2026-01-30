@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { ChevronDown, ChevronRight, HelpCircle, Star } from 'lucide-react'
+import { fetchEvidenceCategories, getEvidenceCategories, type EvidenceCategory } from '@/lib/evidenceCategories'
 
 interface FAQItem {
   id: string
@@ -22,61 +23,111 @@ const StarRating = ({ rating }: { rating: number }) => (
   </div>
 )
 
-const EvidenceStrengthFAQ = () => (
-  <div className="space-y-4">
-    <p className="text-slate-700 leading-relaxed">
-      Evidence strength is rated by a large language model on a 5-star scale based on methodological quality, reliability, and robustness. 
-      We begin at 5 stars and discount by 1 for each unmet major criterion. If the description of the study is not clear, we set the rating to 0
-      and add an evidence gap explanation.
-      <br />
-      <br />
-      The approach is still in development and we are working to improve it.
-    </p>
-    
-    <div className="space-y-3">
-      <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
-        <StarRating rating={5} />
-        <div className="flex-1">
-          <p className="font-medium text-slate-900 mb-1">RCT or strong quasi-experimental design</p>
-          <p className="text-sm text-slate-600">Large sample, validated measures, sufficient mitigation of confounders, strong statistical significance, large effect size</p>
-        </div>
-      </div>
-      
-      <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
-        <StarRating rating={4} />
-        <div className="flex-1">
-          <p className="font-medium text-slate-900 mb-1">RCT/quasi with moderate/large sample</p>
-          <p className="text-sm text-slate-600">Partial mitigation of confounders, validated methods, medium or smaller effect sizes</p>
-        </div>
-      </div>
-      
-      <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
-        <StarRating rating={3} />
-        <div className="flex-1">
-          <p className="font-medium text-slate-900 mb-1">RCT/quasi with moderate sample</p>
-          <p className="text-sm text-slate-600">Partial mitigation, methods not fully validated; or small sample but some strong controls</p>
-        </div>
-      </div>
-      
-      <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
-        <StarRating rating={2} />
-        <div className="flex-1">
-          <p className="font-medium text-slate-900 mb-1">Weak quasi-experimental or small RCT</p>
-          <p className="text-sm text-slate-600">Limited controls, unvalidated methods, limited statistical power</p>
-        </div>
-      </div>
-      
-      <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
-        <StarRating rating={1} />
-        <div className="flex-1">
-          <p className="font-medium text-slate-900 mb-1">Anecdotal evidence or uncontrolled pre-post</p>
-          <p className="text-sm text-slate-600">Insufficient mitigation, small/biased sample, no statistical significance despite correlation</p>
-        </div>
-      </div>
-    </div>
+// Definitions and examples for each evidence category (FAQ-specific content)
+const CATEGORY_DETAILS: Record<string, { definition: string; examples: string | null }> = {
+  'systematic_review': {
+    definition: "A systematic review collects all available studies on a topic, evaluates their quality, and synthesises results. This is often through statistical meta-analysis. This provides the most robust evidence by combining findings across multiple studies.",
+    examples: "Cochrane reviews, PRISMA compliant analyses, pooled effect estimates across RCTs",
+  },
+  'rct': {
+    definition: "Randomised controlled trials (RCTs) minimise bias through random assignment to treatment and control groups. Quasi-experimental designs estimate causal impact without full randomisation, using methods like difference-in-differences or regression discontinuity.",
+    examples: "Clinical trials with treatment/control arms, natural experiments, propensity score matching studies",
+  },
+  'observational': {
+    definition: "Observational studies draw inferences without researcher control over treatment assignment. They can identify associations but have weaker causal certainty due to potential confounding.",
+    examples: "Cohort studies, case-control studies, cross-sectional surveys, longitudinal analyses",
+  },
+  'modelling': {
+    definition: "Uses mathematical or computational models to simulate outcomes, forecast impacts, or explore scenarios. Valuable for projections but does not provide direct empirical evidence.",
+    examples: "Economic models, scenario analyses, forecasting studies, agent-based simulations",
+  },
+  'policy': {
+    definition: "Documents that aggregate and interpret existing evidence into actionable insights for policymakers or practitioners. They synthesise rather than generate primary evidence.",
+    examples: "Government white papers, think tank policy briefs, sectoral guidance documents",
+  },
+  'qualitative': {
+    definition: "Research gathering non-numerical data to understand attitudes, beliefs, and real-world implementation. Rich in context but not designed to establish causal relationships.",
+    examples: "Interview studies, focus groups, case studies, thematic analyses, lived experience reports",
+  },
+  'opinion': {
+    definition: "Publications where experts provide interpretation or guidance based on professional experience rather than new empirical data. May reference literature but lacks systematic methodology.",
+    examples: "Editorials, thought leadership pieces, consultation responses, viewpoint essays",
+  },
+}
 
-  </div>
-)
+const EvidenceCategoryCard = ({ category }: { category: EvidenceCategory }) => {
+  const details = CATEGORY_DETAILS[category.key]
+  if (!details) return null
+
+  return (
+    <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+      <div className="flex items-center gap-3 mb-2">
+        <span
+          className="px-3 py-1 rounded-full text-sm font-medium"
+          style={{ backgroundColor: category.bg_color, color: category.text_color }}
+        >
+          {category.short_name}
+        </span>
+        <span className="text-sm font-medium text-slate-500">Score: {category.score}/5</span>
+      </div>
+      <p className="text-sm text-slate-700 mb-2">{details.definition}</p>
+      {details.examples && (
+        <p className="text-xs text-slate-500"><span className="font-medium">Examples:</span> {details.examples}</p>
+      )}
+    </div>
+  )
+}
+
+const EvidenceStrengthFAQ = () => {
+  const [categories, setCategories] = useState<EvidenceCategory[]>(getEvidenceCategories())
+  const [showDefinitions, setShowDefinitions] = useState(false)
+
+  useEffect(() => {
+    fetchEvidenceCategories().then(setCategories)
+  }, [])
+
+  // Filter to only show categories that have definitions (excludes any missing)
+  const displayCategories = categories.filter(c => CATEGORY_DETAILS[c.key])
+
+  return (
+    <div className="space-y-6">
+      <p className="text-slate-700 leading-relaxed">
+        Documents are classified by study design into categories following a standard evidence hierarchy.
+These categories form the basis for a score (1–5) reflecting evidence strength for establishing causality.
+      </p>
+
+      {/* Evidence Pyramid Image */}
+      <div className="flex justify-center py-4">
+        <img
+          src="/images/evidence-pyramid.png"
+          alt="Evidence hierarchy pyramid showing study types ranked by methodological strength"
+          className="max-w-md w-full rounded-lg border border-slate-200"
+        />
+      </div>
+
+      {/* Collapsible Category Definitions */}
+      <button
+        onClick={() => setShowDefinitions(!showDefinitions)}
+        className="flex items-center gap-2 text-slate-700 hover:text-slate-900 transition-colors"
+      >
+        {showDefinitions ? (
+          <ChevronDown className="h-5 w-5" />
+        ) : (
+          <ChevronRight className="h-5 w-5" />
+        )}
+        <span className="text-lg font-semibold">Category Definitions</span>
+      </button>
+
+      {showDefinitions && (
+        <div className="space-y-3">
+          {displayCategories.map((category) => (
+            <EvidenceCategoryCard key={category.key} category={category} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 const ImpactAssessmentFAQ = () => (
   <div className="space-y-4">
