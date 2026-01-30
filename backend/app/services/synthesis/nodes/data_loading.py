@@ -113,7 +113,10 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             "url": doc.get("landing_page_url") or doc.get("pdf_url"),
             "source": doc.get("source"),
             "document_type": doc.get("document_type"),
-            "evidence_category": doc.get("evidence_category"),
+            "source_country": clean_null_string(doc.get("source_country")),
+            "is_relevant": bool(doc.get("is_relevant"))
+            if doc.get("is_relevant") is not None
+            else None,
         }
 
         # Get evidence and impact scores from conclusion (prefer stored, fallback to recompute)

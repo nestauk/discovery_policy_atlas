@@ -384,12 +384,12 @@ class EvidenceCoverageSnapshot(BaseModel):
 
 
 VerdictType = Literal[
-    "well_evidenced_increase",
-    "well_evidenced_decrease",
-    "evidenced_increase",
-    "evidenced_decrease",
-    "suggested_increase",
-    "suggested_decrease",
+    "well_evidenced_positive",
+    "well_evidenced_negative",
+    "evidenced_positive",
+    "evidenced_negative",
+    "suggested_positive",
+    "suggested_negative",
     "contested",
     "no_effect",
     "insufficient_evidence",

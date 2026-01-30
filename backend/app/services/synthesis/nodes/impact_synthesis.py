@@ -215,6 +215,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             target_geography,
             implementation_constraints,
             doc_scores,
+            doc_metadata,
             transferability_llm,
         )
         outcome_list = outcomes_by_intervention.get(intervention.intervention_name, [])
@@ -324,7 +325,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
 
 WELL_EVIDENCED_THRESHOLD = 15
 EVIDENCED_THRESHOLD = 8
-MINIMUM_THRESHOLD = 5
+MINIMUM_THRESHOLD = 3
 DISCORD_RATIO = 0.4
 
 
@@ -352,18 +353,18 @@ def determine_verdict(
         verdict: VerdictType = "no_effect"
     elif pos_weight > neg_weight:
         if pos_weight > WELL_EVIDENCED_THRESHOLD:
-            verdict = "well_evidenced_increase"
+            verdict = "well_evidenced_positive"
         elif pos_weight > EVIDENCED_THRESHOLD:
-            verdict = "evidenced_increase"
+            verdict = "evidenced_positive"
         else:
-            verdict = "suggested_increase"
+            verdict = "suggested_positive"
     elif neg_weight > pos_weight:
         if neg_weight > WELL_EVIDENCED_THRESHOLD:
-            verdict = "well_evidenced_decrease"
+            verdict = "well_evidenced_negative"
         elif neg_weight > EVIDENCED_THRESHOLD:
-            verdict = "evidenced_decrease"
+            verdict = "evidenced_negative"
         else:
-            verdict = "suggested_decrease"
+            verdict = "suggested_negative"
     else:
         verdict = "insufficient_evidence"
 
@@ -770,6 +771,7 @@ async def compute_transferability(
     target_geography: List[str],
     implementation_constraints: Optional[Dict[str, Optional[str]]],
     doc_scores: Dict[str, Dict],
+    doc_metadata: Dict[str, Dict],
     llm,
 ) -> Tuple[str, str, TransferabilityBreakdown]:
     """Compute transferability across context and implementation dimensions.
@@ -783,6 +785,7 @@ async def compute_transferability(
         target_geography: Target geography values.
         implementation_constraints: Optional user-specified implementation constraints.
         doc_scores: Document score metadata.
+        doc_metadata: Document metadata, including source_country.
         llm: LLM client to use for semantic similarity.
 
     Returns:
@@ -819,6 +822,17 @@ async def compute_transferability(
     inner_setting_values = [e.get("inner_setting") for e in relevant_extractions]
     population_values = [e.get("population_intervened") for e in relevant_extractions]
     geography_values = [e.get("country") for e in relevant_extractions]
+    for ext in relevant_extractions:
+        if ext.get("country"):
+            continue
+        doc_uuid = ext.get("doc_uuid")
+        source_country = (doc_metadata.get(doc_uuid, {}) or {}).get("source_country")
+        if not source_country:
+            continue
+        for country in str(source_country).split(","):
+            cleaned = country.strip()
+            if cleaned and cleaned.lower() != "null":
+                geography_values.append(cleaned)
 
     cost_levels = [
         e.get("cost_level") or e.get("resource_intensity") for e in relevant_extractions
@@ -1279,18 +1293,18 @@ def resolve_level_dimension(target: str, evidence_values: List[Optional[str]]) -
 
 def generate_verdict_description(verdict: VerdictType, outcome: OutcomeTheme) -> str:
     """Generate a concise verdict description."""
-    if verdict == "well_evidenced_increase":
-        return "Evidence strongly supports an upward effect on this outcome."
-    if verdict == "well_evidenced_decrease":
-        return "Evidence strongly supports a downward effect on this outcome."
-    if verdict == "evidenced_increase":
-        return "Evidence supports an upward effect on this outcome."
-    if verdict == "evidenced_decrease":
-        return "Evidence supports a downward effect on this outcome."
-    if verdict == "suggested_increase":
-        return "Limited evidence suggests an upward effect on this outcome."
-    if verdict == "suggested_decrease":
-        return "Limited evidence suggests a downward effect on this outcome."
+    if verdict == "well_evidenced_positive":
+        return "Evidence strongly supports a beneficial effect on this outcome."
+    if verdict == "well_evidenced_negative":
+        return "Evidence strongly supports a harmful effect on this outcome."
+    if verdict == "evidenced_positive":
+        return "Evidence supports a beneficial effect on this outcome."
+    if verdict == "evidenced_negative":
+        return "Evidence supports a harmful effect on this outcome."
+    if verdict == "suggested_positive":
+        return "Limited evidence suggests a beneficial effect on this outcome."
+    if verdict == "suggested_negative":
+        return "Limited evidence suggests a harmful effect on this outcome."
     if verdict == "contested":
         return "Evidence is split between upward and downward effects."
     if verdict == "no_effect":
