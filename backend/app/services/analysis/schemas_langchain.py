@@ -7,7 +7,17 @@ and workflow-specific nullable fields.
 """
 
 from typing import List, Optional, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+# Extended effect direction (backward compatible - adds 2 new values)
+EffectDirectionType = Literal["increase", "decrease", "null", "mixed", "inconclusive"]
+
+# New Impact Assessment types (spec v2.2)
+SemanticMagnitudeType = Literal[
+    "transformational", "substantial", "moderate", "marginal", "unknown"
+]
+CausalityClaimType = Literal["attribution", "contribution", "correlation"]
 
 
 class IssueItem(BaseModel):
@@ -43,6 +53,14 @@ class InterventionItem(BaseModel):
     # NEW: Comparator/control condition (useful for both RCT and SR)
     comparator: Optional[str] = None
     supporting_quote: str
+    # NEW fields (v2.2 CFIR-inspired Implementation Profile)
+    inner_setting: Optional[str] = None
+    cost_level: Optional[str] = None
+    cost_justification: Optional[str] = None
+    staffing_level: Optional[str] = None
+    staffing_justification: Optional[str] = None
+    implementation_complexity_level: Optional[str] = None
+    implementation_complexity_justification: Optional[str] = None
 
 
 class MappingItem(BaseModel):
@@ -63,12 +81,11 @@ class ResultItem(BaseModel):
 
     intervention_idx: int
     outcome_variable: str
-    # RENAMED: direction (was effect_direction), added mixed_or_unclear
-    direction: Literal["increase", "decrease", "null", "mixed_or_unclear"]
     # NEW: Distinguishes study-level (RCT), pooled (SR), or claim (Policy) estimates
     estimate_level: Optional[Literal["study", "pooled", "claim"]] = None
 
     # RCT/SR empirical fields (nullable)
+    effect_direction: EffectDirectionType
     effect_size_type: Optional[str] = None
     effect_size: Optional[str] = None
     uncertainty: Optional[str] = None
@@ -102,6 +119,9 @@ class ResultItem(BaseModel):
     subgroup_or_dose: Optional[str] = None
     result_text: str
     supporting_quote: str
+    # NEW fields (v2.2 Impact Assessment)
+    causality_claim: Optional[CausalityClaimType] = None
+    negative_impact_flag: Optional[bool] = None
 
 
 # Intermediate extraction models for each stage
@@ -139,14 +159,32 @@ class ImpactRating(BaseModel):
     evidence_gap: Optional[str] = None  # explanation if stars is null
 
 
+class ImpactPrediction(BaseModel):
+    """Document-level impact prediction vector (replaces legacy EvidenceRating)."""
+
+    # Magnitude estimate (semantic bucket from spec section 2.1B)
+    magnitude_estimate: Optional[SemanticMagnitudeType] = None
+    magnitude_justification: Optional[str] = None
+    # Causal reliability (from spec section 2.1C)
+    causal_reliability: Optional[CausalityClaimType] = None
+    causal_justification: Optional[str] = None
+    # Transferability notes (qualitative assessment for Tier 1)
+    transferability_notes: Optional[str] = None
+    # Risk assessment (from spec section 2.2)
+    risks_identified: List[str] = Field(default_factory=list)
+    unintended_consequences_detected: bool = False
+
+
 class ConclusionItem(BaseModel):
     """Study conclusions and key takeaways."""
 
     top_line_summary: str  # One direct sentence summarizing the main conclusion
     detailed_explanation: str  # Paragraph explaining key reasons for the conclusion
     supporting_quote: str
-    evidence_strength: Optional[ImpactRating] = None  # Computed evidence strength
-    predicted_impact: Optional[ImpactRating] = None  # Predicted scalability and impact
+    evidence_strength: Optional[ImpactRating] = None  # Overall study evidence quality
+    predicted_impact: Optional[
+        ImpactPrediction
+    ] = None  # Predicted scalability and impact
 
 
 class ConclusionsExtraction(BaseModel):
@@ -179,3 +217,32 @@ class DocumentExtractionBundle(BaseModel):
     # SR document-level fields
     n_studies_included: Optional[int] = None  # Aggregate study count for SR
     sr_completeness_flag: Optional[str] = None  # "complete", "incomplete_heterogeneity"
+
+
+def migrate_legacy_predicted_impact(
+    legacy: Optional[dict],
+) -> Optional[ImpactPrediction]:
+    """Convert legacy EvidenceRating format to new ImpactPrediction format."""
+    if legacy is None:
+        return None
+
+    # Map 1-5 stars to magnitude estimate
+    stars = legacy.get("stars")
+    magnitude_map = {
+        5: "transformational",
+        4: "substantial",
+        3: "moderate",
+        2: "marginal",
+        1: "marginal",
+    }
+
+    return ImpactPrediction(
+        magnitude_estimate=magnitude_map.get(stars, "unknown") if stars else "unknown",
+        magnitude_justification=legacy.get("justification"),
+        transferability_notes=legacy.get("evidence_gap"),
+        # Cannot infer these from legacy data
+        causal_reliability=None,
+        causal_justification=None,
+        risks_identified=[],
+        unintended_consequences_detected=False,
+    )

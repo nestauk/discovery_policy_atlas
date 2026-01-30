@@ -383,6 +383,80 @@ class EvidenceCoverageSnapshot(BaseModel):
 # =============================================================================
 
 
+VerdictType = Literal[
+    "well_evidenced_increase",
+    "well_evidenced_decrease",
+    "evidenced_increase",
+    "evidenced_decrease",
+    "suggested_increase",
+    "suggested_decrease",
+    "contested",
+    "no_effect",
+    "insufficient_evidence",
+    "probable_contribution",
+]
+
+
+SemanticMagnitudeType = Literal[
+    "transformational",
+    "substantial",
+    "moderate",
+    "marginal",
+    "unknown",
+]
+
+
+CausalityClaimType = Literal["attribution", "contribution", "correlation"]
+
+
+class TransferabilityBreakdown(BaseModel):
+    """Per-dimension transferability scores."""
+
+    inner_setting: str
+    population: str
+    geography: str
+    notes: Dict[str, str] = Field(default_factory=dict)
+    data_availability: Dict[str, str] = Field(default_factory=dict)
+    context_fit_rating: Optional[str] = None
+    implementation_requirements_rating: Optional[str] = None
+    implementation_constraints_specified: bool = False
+    implementation_evidence: Dict[str, str] = Field(default_factory=dict)
+    implementation_constraints: Dict[str, str] = Field(default_factory=dict)
+    implementation_exceeds_tolerance: Dict[str, bool] = Field(default_factory=dict)
+
+
+class MagnitudeDetail(BaseModel):
+    """Structured magnitude breakdown for tooltips."""
+
+    direction: Literal["increase", "decrease", "contested"]
+    bucket_counts: Dict[str, int] = Field(default_factory=dict)
+    source_count: int
+    total_sources: int
+    measurement_count: int
+    dominant_scale: Optional[str] = None
+    thresholds: str
+
+
+class CausalityDetail(BaseModel):
+    """Structured causal mechanism counts for tooltips."""
+
+    attribution: int = 0
+    contribution: int = 0
+    correlation: int = 0
+
+
+class RiskTheme(BaseModel):
+    """LLM-clustered risk theme (stored in synthesis_themes with type='risk')."""
+
+    theme_name: str
+    summary_description: str
+    frequency: int
+    source_doc_ids: List[str] = Field(default_factory=list)
+    has_harm_warning: bool = False
+    linked_intervention_theme_id: Optional[str] = None
+    linked_interventions: List[Dict[str, str]] = Field(default_factory=list)
+
+
 class OutcomeTheme(BaseModel):
     """Clustered outcome theme with aggregated effect data."""
 
@@ -397,6 +471,15 @@ class OutcomeTheme(BaseModel):
     sample_effect_sizes: List[str] = Field(default_factory=list)
     frequency: int = Field(0)
     source_doc_ids: List[str] = Field(default_factory=list)
+    verdict_label: Optional[VerdictType] = Field(None)
+    verdict_description: Optional[str] = Field(None)
+    discord_flag: bool = Field(False)
+    discord_reason: Optional[str] = Field(None)
+    predicted_magnitude: Optional[SemanticMagnitudeType] = Field(None)
+    magnitude_detail: Optional[MagnitudeDetail] = Field(None)
+    intervention_theme_id: Optional[str] = Field(None)
+    primary_causal_mechanism: Optional[CausalityClaimType] = Field(None)
+    causal_mechanism_detail: Optional[CausalityDetail] = Field(None)
 
 
 class InterventionDetails(BaseModel):
@@ -453,6 +536,9 @@ class PolicyIntervention(BaseModel):
     countries: List[str] = Field(default_factory=list)
     study_types: Dict[str, int] = Field(default_factory=dict)
     related_outcomes: List[str] = Field(default_factory=list)
+    transferability_rating: Optional[str] = Field(None)
+    transferability_note: Optional[str] = Field(None)
+    transferability_breakdown: Optional[TransferabilityBreakdown] = Field(None)
 
 
 class SynthesisSummary(BaseModel):
@@ -463,6 +549,7 @@ class SynthesisSummary(BaseModel):
     key_issues: List[KeyIssue] = Field(default_factory=list)
     interventions: List[PolicyIntervention] = Field(default_factory=list)
     outcome_themes: List[OutcomeTheme] = Field(default_factory=list)
+    risk_themes: List[RiskTheme] = Field(default_factory=list)
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = Field(None)
     citation_map: Dict[str, CitationInfo] = Field(default_factory=dict)
 

@@ -65,6 +65,7 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                 {"full_text": state["full_text"]},
                 self._get_stage_tags("issues", paper_id),
                 self._get_run_name("issues"),
+                stage_name="issues",
                 extra={"paper_id": paper_id},
             )
             extraction = IssuesExtraction(**result)
@@ -82,6 +83,7 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                 {"full_text": state["full_text"]},
                 self._get_stage_tags("interventions", paper_id),
                 self._get_run_name("interventions"),
+                stage_name="interventions",
                 extra={"paper_id": paper_id},
             )
             extraction = InterventionsExtraction(**result)
@@ -111,6 +113,7 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                 },
                 self._get_stage_tags("mappings", paper_id),
                 self._get_run_name("mappings"),
+                stage_name="mappings",
                 extra={"paper_id": paper_id},
             )
             extraction = MappingsExtraction(**result)
@@ -140,6 +143,7 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                         },
                         tags,
                         self._get_run_name("results"),
+                        stage_name="results",
                         extra={
                             "paper_id": paper_id,
                             "intervention_idx": intervention.idx,
@@ -159,7 +163,7 @@ class SRExtractionWorkflow(BaseExtractionWorkflow):
                             belongs = await _validate_intervention_variant_belongs(
                                 intervention.name,
                                 res.stratum_value,
-                                self.model_name,
+                                self._model_for_stage("results"),
                             )
                             if not belongs:
                                 logger.info(

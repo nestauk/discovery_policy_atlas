@@ -25,8 +25,10 @@ from app.services.synthesis.nodes import (
     process_issue_themes,
     process_intervention_themes,
     process_outcome_themes,
+    process_risk_themes,
     compute_evidence_coverage,
     build_aggregated_tables,
+    compute_impact_syntheses,
     retrieve_evidence_for_themes,
     retrieve_evidence_for_issues,
     retrieve_evidence_for_outcomes,
@@ -62,10 +64,12 @@ def create_synthesis_workflow():
     workflow.add_node("process_issue_themes", process_issue_themes)
     workflow.add_node("process_intervention_themes", process_intervention_themes)
     workflow.add_node("process_outcome_themes", process_outcome_themes)
+    workflow.add_node("process_risk_themes", process_risk_themes)
 
     # Phase 3: Aggregation
     workflow.add_node("compute_evidence_coverage", compute_evidence_coverage)
     workflow.add_node("build_aggregated_tables", build_aggregated_tables)
+    workflow.add_node("compute_impact_syntheses", compute_impact_syntheses)
 
     # Phase 4: RAG Retrieval
     workflow.add_node("retrieve_evidence_for_themes", retrieve_evidence_for_themes)
@@ -88,15 +92,18 @@ def create_synthesis_workflow():
     workflow.add_edge("create_canonical_concepts", "process_issue_themes")
     workflow.add_edge("create_canonical_concepts", "process_intervention_themes")
     workflow.add_edge("create_canonical_concepts", "process_outcome_themes")
+    workflow.add_edge("create_canonical_concepts", "process_risk_themes")
 
     # Converge to aggregation (fan-in)
     workflow.add_edge("process_issue_themes", "compute_evidence_coverage")
     workflow.add_edge("process_intervention_themes", "compute_evidence_coverage")
     workflow.add_edge("process_outcome_themes", "compute_evidence_coverage")
+    workflow.add_edge("process_risk_themes", "compute_evidence_coverage")
 
     # Sequential processing: Aggregation -> RAG -> RCS -> Briefing
     workflow.add_edge("compute_evidence_coverage", "build_aggregated_tables")
-    workflow.add_edge("build_aggregated_tables", "retrieve_evidence_for_themes")
+    workflow.add_edge("build_aggregated_tables", "compute_impact_syntheses")
+    workflow.add_edge("compute_impact_syntheses", "retrieve_evidence_for_themes")
     workflow.add_edge("retrieve_evidence_for_themes", "retrieve_evidence_for_issues")
 
     # RCS processing after RAG retrieval

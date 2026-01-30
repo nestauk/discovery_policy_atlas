@@ -178,7 +178,7 @@ INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
             """Task: Extract 2–6 ACTIVE INTERVENTIONS/PROGRAMS evaluated or proposed, that are the main focus of the study.
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","study_type":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"...","inner_setting":"...|null","cost_level":"...|null","cost_justification":"...|null","staffing_level":"...|null","staffing_justification":"...|null","implementation_complexity_level":"...|null","implementation_complexity_justification":"...|null"}}], "coverage_note":"string"}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
@@ -195,6 +195,30 @@ Population Fields:
 - population_demographics: Secondary characteristics (e.g., "18-25 years old, 60% female, undergraduate students")
 - sample_size: Total number of participants in the intervention group (e.g., "153", "50 participants")
 - country: Where the intervention was carried out or recommended
+
+Implementation Profile Fields:
+- inner_setting: Where the intervention is delivered (e.g., School, Clinical/Hospital, Prison, Workplace, Community Centre, Home, Online/Digital)
+
+- cost_level: Budget and financial requirements. Infer from context if not explicit.
+  - High: significant capital investment, high ongoing operational costs, specialist equipment
+  - Moderate: structured programme costs, ongoing consumables, facility requirements
+  - Low: minimal financial outlay, uses existing resources, low-cost materials
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
+- cost_justification: 1-2 sentences explaining the cost assessment based on evidence in the paper.
+
+- staffing_level: Human capital and staffing requirements. Infer from context if not explicit.
+  - High: specialist professionals required, intensive staffing ratios, extensive expertise needed
+  - Moderate: trained staff required, dedicated personnel, some specialist knowledge
+  - Low: minimal staffing, can be delivered by generalists, self-service possible
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
+- staffing_justification: 1-2 sentences explaining the staffing assessment based on evidence in the paper.
+
+- implementation_complexity_level: Implementation and coordination difficulty. Infer from context if not explicit.
+  - High: legislative/systemic change, multi-agency coordination, significant training required
+  - Moderate: cross-team coordination, staff training, ongoing monitoring systems
+  - Low: plug-and-play materials, single-session delivery, minimal coordination
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
+- implementation_complexity_justification: 1-2 sentences explaining the complexity assessment based on evidence in the paper.
 
 Paper text:
 {full_text}""",
@@ -237,15 +261,22 @@ Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"..."}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"...","causality_claim":"attribution|contribution|correlation","negative_impact_flag":false}}]}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
 - Focus on PRIMARY RESULTS for this intervention (effects compared to control/baseline).
 - DO NOT extract control group results or "no change" findings unless they are the main finding.
 - Prefer explicit statistics (e.g., t, β, OR, CI, effect sizes). If absent, keep qualitative result with quote.
-- Include direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect, "mixed_or_unclear" for conflicting or ambiguous results.
+- Include effect direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect, "mixed" for divergent subgroup results, "inconclusive" for insufficient data.
 - population_measured: Who was measured for this specific result (may be subset of intervention population).
+
+causality_claim Guide:
+  - attribution: Author claims intervention CAUSED the result (counterfactual/experimental logic, RCT)
+  - contribution: Author claims intervention HELPED or was a necessary factor (theory-based logic)
+  - correlation: Author notes association only, no causal claim
+
+negative_impact_flag: Set to true if this result indicates harm, adverse effects, or negative consequences
 
 Paper text:
 {full_text}""",
@@ -263,7 +294,7 @@ CONCLUSIONS_PROMPT = ChatPromptTemplate.from_messages(
             """Task: Extract the KEY CONCLUSION of this study AND assess the predicted impact.
 
 Schema:
-{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","predicted_impact":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}}}}}}
+{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","evidence_strength":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}},"predicted_impact":{{"magnitude_estimate":"transformational|substantial|moderate|marginal|unknown","magnitude_justification":"2-3 sentences explaining the predicted scale of real-world impact","causal_reliability":"attribution|contribution|correlation","causal_justification":"1-2 sentences on strength of causal evidence in this study","transferability_notes":"Notes on how generalisable the findings are to other contexts/populations","risks_identified":["Risk 1","Risk 2"],"unintended_consequences_detected":true|false}}}}}}
 
 Rules for Conclusion:
 - top_line_summary: ONE direct sentence stating the main conclusion (e.g., "The intervention significantly reduced behavioral problems in children").
@@ -271,19 +302,25 @@ Rules for Conclusion:
 - Focus on the OVERALL STUDY CONCLUSION, not individual result details.
 - Base the conclusion on what the authors explicitly state as their main finding/conclusion.
 
-Rules for Predicted Impact Assessment (likelihood of scaling outcomes beyond study context):
-- ⭐⭐⭐⭐⭐ (5): Strong causal evidence, large effects, replicated or validated, generalisable to population, mitigation of confounders, strong evidence of external validity.
-- ⭐⭐⭐⭐ (4): Adequate causal link, medium effect size, good but partial mitigation, some generalisability concerns, but broadly reliable.
-- ⭐⭐⭐ (3): Smaller effect size or more context-limited, moderate sample, some threats to generalisability, still a plausible impact.
-- ⭐⭐ (2): Uncertain or inconsistent evidence, weak causal link, effects fragile or highly context-specific.
-- ⭐ (1): Anecdotal or speculative impact only, with minimal empirical support.
- - Use the provided evidence strength context to calibrate your rating.
-
-Assessment Rules:
-- Begin at 5 stars and discount by 1 for each unmet major criterion (down to 1).
-- If evidence is insufficient for assessment, set "stars": null and add "evidence_gap" explanation.
-- Focus on the MAIN intervention studied in the paper, not secondary or control conditions.
-- justification: 2-4 sentences explaining rating and discounting logic based on aggregate assessment of the study's evidence.
+Rules for Predicted Impact Assessment:
+- magnitude_estimate: Preliminary assessment of real-world impact size (relative framing)
+  - transformational: Effect exceptional/paradigm-shifting for this field
+  - substantial: Effect considered clinically/policy-significant for this field 
+  - moderate: Meaningful practical implications, statistically significant
+  - marginal: Minimal practical significance despite statistical significance
+  - unknown: Cannot assess from available data
+  NOTE: This is a preliminary per-document assessment. Final calibrated bucketing happens during synthesis.
+- causal_reliability: How strongly does this study support a causal claim?
+- transferability_notes: Consider: geography, population, resource requirements, complexity
+- risks_identified: List potential harms, adverse effects, or implementation challenges FROM THE INTERVENTION ITSELF.
+  - Include: adverse outcomes, cost/feasibility barriers, equity concerns, sustainability challenges, unintended side effects.
+  - Do NOT include: the underlying problem being addressed, prevalence/scale of the issue, or background harms unrelated to the intervention.
+  - Examples:
+    - ✅ "Implementation requires specialist staffing and training, creating feasibility risks"
+    - ✅ "Sustained funding requirements may limit long-term viability"
+    - ❌ "The problem is widespread and worsening"
+    - ❌ "The issue causes major societal harm"
+- unintended_consequences_detected: True if paper mentions unintended negative effects
 
 Paper text:
 {full_text}
@@ -438,6 +475,19 @@ Each outcome option should:
 
 Return ONLY a JSON array of strings, ordered from broad to narrow. Example format:
 ["Social well-being", "Better health outcomes", "Reduced healthcare costs"]"""
+
+
+INNER_SETTING_OPTIONS_SYSTEM_PROMPT = """You are a research assistant identifying relevant implementation settings for policy interventions.
+
+Given a research question about interventions, generate 3-5 setting options where such interventions are typically delivered. Order from MOST COMMON to LEAST COMMON for this type of intervention.
+
+Each setting should be:
+1. A clear, concise description (e.g., "Schools", "Primary care clinics", "Community centres", "Workplaces", "Online/digital platforms")
+2. Relevant to typical intervention delivery for this topic
+3. A setting where policy evidence is likely to exist
+
+Return ONLY a JSON array of strings. Example:
+["Schools", "Primary care clinics", "Community centres"]"""
 
 
 # =============================================================================

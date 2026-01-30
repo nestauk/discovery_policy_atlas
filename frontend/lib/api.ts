@@ -209,10 +209,18 @@ export function useAPI() {
     });
   };
 
+  const generateInnerSettingOptions = async (researchQuestion: string): Promise<{ research_question: string; inner_setting_options: string[] }> => {
+    return fetchWithAuth('api/analysis-projects/generate-inner-setting-options', {
+      method: 'POST',
+      body: JSON.stringify({ research_question: researchQuestion, max_options: 5 }),
+    });
+  };
+
   return { 
     fetchWithAuth, 
     generatePopulationOptions,
     generateOutcomeOptions,
+    generateInnerSettingOptions,
     // Analysis projects
     getAnalysisProjects,
     createAnalysisProject,

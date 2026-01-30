@@ -25,7 +25,7 @@ from app.services.synthesis.schemas import (
 )
 
 
-ThemeBranch = Literal["issue", "intervention", "outcome"]
+ThemeBranch = Literal["issue", "intervention", "outcome", "risk"]
 
 
 class Concept(BaseModel):
@@ -71,6 +71,8 @@ class SynthesisState(TypedDict, total=False):
     # User intent (captured at search time; used to tailor synthesis)
     target_population: List[str]  # e.g., ["Children"]
     target_outcomes: List[str]  # e.g., ["body weight/size reduction"]
+    target_geography: List[str]  # e.g., ["UK"]
+    target_inner_setting: List[str]  # e.g., ["Schools"]
 
     # Raw data
     raw_extractions: List[Dict]
@@ -82,16 +84,19 @@ class SynthesisState(TypedDict, total=False):
     issue_concepts: List[Concept]
     intervention_concepts: List[Concept]
     outcome_concepts: List[Concept]
+    risk_concepts: List[Concept]
 
     # Discovered themes by branch (from LLM)
     discovered_issue_themes: List[DiscoveredTheme]
     discovered_intervention_themes: List[DiscoveredTheme]
     discovered_outcome_themes: List[DiscoveredTheme]
+    discovered_risk_themes: List[DiscoveredTheme]
 
     # Final themes with mapped concepts
     final_issue_themes: List[FinalTheme]
     final_intervention_themes: List[FinalTheme]
     final_outcome_themes: List[FinalTheme]
+    final_risk_themes: List[FinalTheme]
 
     # Evidence coverage statistics
     evidence_coverage: EvidenceCoverageSnapshot
@@ -107,6 +112,10 @@ class SynthesisState(TypedDict, total=False):
 
     # Theme to document mappings (for constrained RAG)
     theme_to_doc_uuids: Dict[str, List[str]]  # theme_name -> [doc_uuid, ...]
+    theme_to_extraction_ids: Dict[str, List[str]]  # theme_name -> [extraction_id, ...]
+    db_theme_to_extraction_ids: Dict[
+        str, List[str]
+    ]  # theme_name -> [extraction_id, ...]
 
     # RAG retrieval results (legacy - kept for backward compatibility)
     theme_evidence: Dict[str, List[RetrievedChunk]]

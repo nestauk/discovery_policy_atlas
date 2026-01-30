@@ -34,7 +34,7 @@ const Chip = ({ active, children, onClick }: { active?: boolean; children: React
 );
 
 // ---------------- TYPES & CONSTANTS ----------------
-type Step = "ASK" | "POPULATION" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
+type Step = "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
 type TimePreset = "LAST_YEAR" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
 const SOURCE_LABELS: Record<"openalex" | "overton", string> = {
@@ -54,6 +54,14 @@ const FALLBACK_OUTCOME_EXAMPLES = [
   "Social well-being",
   "Better health outcomes",
   "Improved outcomes"
+] as const;
+
+const FALLBACK_INNER_SETTING_EXAMPLES = [
+  "Schools",
+  "Healthcare facilities",
+  "Community centres",
+  "Workplaces",
+  "Online or digital platforms"
 ] as const;
 
 
@@ -91,9 +99,15 @@ export type SearchContext = {
     selected: string[]; // Selected population options (examples + custom)
     keepBroad: boolean; // "Keep it broad" option
   };
+  innerSetting: string[];
   outcome: {
     selected: string[]; // Selected outcome options (examples + custom)
     keepBroad: boolean; // "Keep it broad" option
+  };
+  implementationConstraints: {
+    cost: string;
+    staffing: string;
+    implementationComplexity: string;
   };
   parameters: {
     sources: ("openalex" | "overton")[];
@@ -113,8 +127,15 @@ interface WizardState {
   step: Step;
   researchQuestion: string;
   population: { selected: string[]; keepBroad: boolean };
+  innerSetting: { selected: string[]; noPreference: boolean };
   outcome: { selected: string[]; keepBroad: boolean };
+  implementationConstraints: {
+    cost: string;
+    staffing: string;
+    implementationComplexity: string;
+  };
   generatedPopulationOptions: string[];
+  generatedInnerSettingOptions: string[];
   generatedOutcomeOptions: string[];
   generatedAdditionalQuestions: string[];
   isGeneratingOptions: boolean;
@@ -139,8 +160,15 @@ export const useWizard = create<WizardState>((set, get) => ({
   step: "ASK",
   researchQuestion: "",
   population: { selected: [], keepBroad: false },
+  innerSetting: { selected: [], noPreference: true },
   outcome: { selected: [], keepBroad: false },
+  implementationConstraints: {
+    cost: "Any",
+    staffing: "Any",
+    implementationComplexity: "Any",
+  },
   generatedPopulationOptions: [],
+  generatedInnerSettingOptions: [],
   generatedOutcomeOptions: [],
   generatedAdditionalQuestions: [],
   isGeneratingOptions: false,
@@ -159,7 +187,7 @@ export const useWizard = create<WizardState>((set, get) => ({
   next: () => {
     const s = get();
     // Skip ADDITIONAL_QUESTIONS step - go directly from SCREENING to SUMMARY
-    const steps: Step[] = ["ASK", "POPULATION", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
     const currentIdx = steps.indexOf(s.step);
     if (currentIdx < steps.length - 1) {
       const nextStep = steps[currentIdx + 1];
@@ -174,7 +202,7 @@ export const useWizard = create<WizardState>((set, get) => ({
   back: () => {
     const s = get();
     // Skip ADDITIONAL_QUESTIONS step - go directly from SUMMARY to SCREENING
-    const steps: Step[] = ["ASK", "POPULATION", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
     const currentIdx = steps.indexOf(s.step);
     if (currentIdx > 0) {
       const prevStep = steps[currentIdx - 1];
@@ -191,7 +219,9 @@ export const useWizard = create<WizardState>((set, get) => ({
     return {
       researchQuestion: s.researchQuestion,
       population: s.population,
+      innerSetting: s.innerSetting.noPreference ? [] : s.innerSetting.selected,
       outcome: s.outcome,
+      implementationConstraints: s.implementationConstraints,
       parameters: s.parameters,
       screeningFactors: s.screeningFactors,
       additionalQuestions: s.additionalQuestions,
@@ -203,7 +233,7 @@ export const useWizard = create<WizardState>((set, get) => ({
 // ---------------- HELPERS ----------------
 function ProgressBar({ step }: { step: Step }) {
   // Skip ADDITIONAL_QUESTIONS in progress calculation
-  const steps: Step[] = ["ASK", "POPULATION", "OUTCOME", "PARAMETERS", "SCREENING", "SUMMARY"];
+  const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "PARAMETERS", "SCREENING", "SUMMARY"];
   const currentIdx = steps.indexOf(step);
   const pct = Math.round(((currentIdx + 1) / steps.length) * 100);
   return (
@@ -250,7 +280,7 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
 // ---------------- SCREENS ----------------
 function ScreenAsk() {
   const s = useWizard();
-  const { generatePopulationOptions, generateOutcomeOptions } = useAPI();
+  const { generatePopulationOptions, generateOutcomeOptions, generateInnerSettingOptions } = useAPI();
 
   const handleNext = async () => {
     const researchQuestion = s.researchQuestion.trim();
@@ -261,14 +291,16 @@ function ScreenAsk() {
     
     try {
       // Generate both in parallel
-      const [populationResponse, outcomeResponse] = await Promise.all([
+      const [populationResponse, outcomeResponse, innerSettingResponse] = await Promise.all([
         generatePopulationOptions(researchQuestion).catch(() => ({ population_options: [] })),
         generateOutcomeOptions(researchQuestion).catch(() => ({ outcome_options: [] })),
+        generateInnerSettingOptions(researchQuestion).catch(() => ({ inner_setting_options: [] })),
       ]);
 
       s.set({ 
         generatedPopulationOptions: populationResponse?.population_options || [],
         generatedOutcomeOptions: outcomeResponse?.outcome_options || [],
+        generatedInnerSettingOptions: innerSettingResponse?.inner_setting_options || [],
         step: "POPULATION"
       });
     } catch (error) {
@@ -277,6 +309,7 @@ function ScreenAsk() {
       s.set({ 
         generatedPopulationOptions: [],
         generatedOutcomeOptions: [],
+        generatedInnerSettingOptions: [],
         step: "POPULATION" 
       });
     } finally {
@@ -428,6 +461,151 @@ function ScreenPopulation() {
   );
 }
 
+function ScreenInnerSetting() {
+  const s = useWizard();
+  const [customInput, setCustomInput] = useState("");
+
+  const toggleSetting = (setting: string) => {
+    const current = s.innerSetting.selected;
+    if (s.innerSetting.noPreference) {
+      s.set({ innerSetting: { selected: [setting], noPreference: false } });
+      return;
+    }
+    if (current.includes(setting)) {
+      const next = current.filter((item) => item !== setting);
+      s.set({
+        innerSetting: {
+          selected: next,
+          noPreference: next.length === 0,
+        },
+      });
+    } else {
+      s.set({
+        innerSetting: {
+          selected: [...current, setting],
+          noPreference: false,
+        },
+      });
+    }
+  };
+
+  const selectNoPreference = () => {
+    s.set({ innerSetting: { selected: [], noPreference: true } });
+  };
+
+  const addCustom = () => {
+    const trimmed = customInput.trim();
+    if (!trimmed) return;
+    if (!s.innerSetting.selected.includes(trimmed)) {
+      s.set({
+        innerSetting: {
+          selected: [...s.innerSetting.selected, trimmed],
+          noPreference: false,
+        },
+      });
+    }
+    setCustomInput("");
+  };
+
+  const removeCustom = (setting: string) => {
+    const next = s.innerSetting.selected.filter((item) => item !== setting);
+    s.set({
+      innerSetting: {
+        selected: next,
+        noPreference: next.length === 0,
+      },
+    });
+  };
+
+  const exampleOptions = s.generatedInnerSettingOptions.length > 0
+    ? s.generatedInnerSettingOptions
+    : [...FALLBACK_INNER_SETTING_EXAMPLES];
+  const customOptions = s.innerSetting.selected.filter(
+    (setting) => !exampleOptions.includes(setting)
+  );
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+      <div className="flex justify-between items-center">
+        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+        <Button onClick={() => s.next()}>Next</Button>
+      </div>
+
+      <div className="text-center space-y-3">
+        <h2 className="text-2xl font-semibold">Are you interested in particular settings?</h2>
+        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information and assess transferability.</p>
+      </div>
+
+      <div className="space-y-6 max-w-2xl mx-auto">
+        <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={selectNoPreference}
+            className={cx(
+              "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
+              s.innerSetting.noPreference
+                ? "bg-blue-600 !text-white ring-blue-600"
+                : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+            )}
+          >
+            No preference
+          </button>
+
+          {exampleOptions.map((setting) => {
+            const isSelected = s.innerSetting.selected.includes(setting);
+            return (
+              <button
+                key={setting}
+                type="button"
+                onClick={() => toggleSetting(setting)}
+                className={cx(
+                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
+                  isSelected
+                    ? "bg-blue-600 !text-white ring-blue-600"
+                    : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+                )}
+              >
+                {setting}
+              </button>
+            );
+          })}
+
+          {customOptions.map((setting) => (
+            <div
+              key={setting}
+              role="group"
+              className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
+            >
+              <span>{setting}</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeCustom(setting);
+                }}
+                className="ml-2 text-white hover:text-blue-100"
+                aria-label="Remove"
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-3">
+          <Input
+            value={customInput}
+            placeholder="Add a custom setting"
+            onChange={(e) => setCustomInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addCustom()}
+          />
+          <Button onClick={addCustom}>+ Add</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ScreenOutcome() {
   const s = useWizard();
   const [customInput, setCustomInput] = useState("");
@@ -537,6 +715,7 @@ function ScreenOutcome() {
 function ScreenParameters() {
   const s = useWizard();
   const [selectedCountry, setSelectedCountry] = useState("");
+  const constraintOptions = ["Any", "Low", "Moderate", "High"];
 
   const toggleAccess = (k: keyof Access) => {
     s.set({ parameters: { ...s.parameters, access: { ...s.parameters.access, [k]: !s.parameters.access[k] } } });
@@ -639,6 +818,7 @@ function ScreenParameters() {
               {s.parameters.geography.map((geo) => (
                 <div
                   key={geo}
+                  role="group"
                   className="w-full text-left px-4 py-4 rounded-xl bg-blue-600 !text-white ring-1 ring-blue-600 flex items-center justify-between whitespace-normal break-words"
                 >
                   <span>{GEO_LABELS[geo] || geo}</span>
@@ -649,6 +829,7 @@ function ScreenParameters() {
                     }}
                     className="ml-2 text-white hover:text-blue-100"
                     aria-label="Remove"
+                    type="button"
                   >
                     ×
                   </button>
@@ -682,6 +863,86 @@ function ScreenParameters() {
             </div>
           </div>
         </div>
+
+        {/* Implementation constraints (optional) */}
+        <div className="max-w-2xl">
+          <details className="rounded-xl border border-gray-200 bg-gray-50/40 p-4">
+            <summary className="cursor-pointer text-sm font-medium text-gray-800">
+              Implementation constraints (optional)
+            </summary>
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-gray-600">
+                Share resource or complexity limits if relevant. Leave as “Any” to skip matching.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-500">Cost tolerance</div>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    value={s.implementationConstraints.cost}
+                    onChange={(e) =>
+                      s.set({
+                        implementationConstraints: {
+                          ...s.implementationConstraints,
+                          cost: e.target.value,
+                        },
+                      })
+                    }
+                  >
+                    {constraintOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-500">Staffing capacity</div>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    value={s.implementationConstraints.staffing}
+                    onChange={(e) =>
+                      s.set({
+                        implementationConstraints: {
+                          ...s.implementationConstraints,
+                          staffing: e.target.value,
+                        },
+                      })
+                    }
+                  >
+                    {constraintOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs text-gray-500">Complexity tolerance</div>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    value={s.implementationConstraints.implementationComplexity}
+                    onChange={(e) =>
+                      s.set({
+                        implementationConstraints: {
+                          ...s.implementationConstraints,
+                          implementationComplexity: e.target.value,
+                        },
+                      })
+                    }
+                  >
+                    {constraintOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+
       </div>
     </div>
   );
@@ -897,6 +1158,11 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
   const s = useWizard();
   const context = s.buildContext();
   const impliedQuestion = generateImpliedResearchQuestion(context);
+  const hasImplementationConstraints = [
+    context.implementationConstraints.cost,
+    context.implementationConstraints.staffing,
+    context.implementationConstraints.implementationComplexity,
+  ].some((value) => value && value !== "Any");
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
@@ -956,6 +1222,18 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
               <span>{context.parameters.geography.join(", ")}</span>
             </div>
           )}
+          <div>
+            <span className="font-medium">Implementation constraints: </span>
+            {hasImplementationConstraints ? (
+              <span>
+                Cost: {context.implementationConstraints.cost}, Staffing:{" "}
+                {context.implementationConstraints.staffing}, Complexity:{" "}
+                {context.implementationConstraints.implementationComplexity}
+              </span>
+            ) : (
+              <span className="text-gray-500">Not specified</span>
+            )}
+          </div>
           <div>
             <span className="font-medium">Time window: </span>
             <span>{context.parameters.timePreset.replaceAll("_", " ")}</span>
@@ -1018,6 +1296,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
       <ProgressBar step={s.step} />
       {s.step === "ASK" && <ScreenAsk />}
       {s.step === "POPULATION" && <ScreenPopulation />}
+      {s.step === "INNER_SETTING" && <ScreenInnerSetting />}
       {s.step === "OUTCOME" && <ScreenOutcome />}
       {s.step === "PARAMETERS" && <ScreenParameters />}
       {s.step === "SCREENING" && <ScreenScreening />}

@@ -8,7 +8,9 @@ from themes.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Dict, List
+import math
+from typing import Dict, List, Tuple
+import re
 
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState
@@ -19,6 +21,29 @@ from app.services.synthesis.schemas import (
     PolicyIntervention,
     OutcomeTheme,
 )
+
+
+def select_representative_effect_sizes(
+    candidates: List[Tuple[str, int, bool]], max_samples: int = 5
+) -> List[str]:
+    """Select representative effect sizes prioritising quality and numeric values."""
+    if not candidates:
+        return []
+
+    sorted_candidates = sorted(candidates, key=lambda x: (x[1], x[2]), reverse=True)
+    selected: List[str] = []
+    seen_prefixes = set()
+
+    for text, _quality, _has_number in sorted_candidates:
+        if len(selected) >= max_samples:
+            break
+        prefix = text[:30].lower()
+        if prefix in seen_prefixes:
+            continue
+        selected.append(text)
+        seen_prefixes.add(prefix)
+
+    return selected
 
 
 async def compute_evidence_coverage(state: SynthesisState) -> SynthesisState:
@@ -127,6 +152,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     final_intervention_themes = state.get("final_intervention_themes") or []
     final_outcome_themes = state.get("final_outcome_themes") or []
     raw_extractions = state.get("raw_extractions") or []
+    doc_scores = state.get("doc_scores") or {}
 
     project_id = state.get("project_id", "")
     supabase = vectorization_service.supabase
@@ -149,8 +175,8 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             str(d["id"]): str(d.get("doc_id") or "") for d in (docs_res.data or [])
         }
 
-        for i in range(0, len(all_ex_ids), 500):
-            chunk = all_ex_ids[i : i + 500]
+        for i in range(0, len(all_ex_ids), 100):
+            chunk = all_ex_ids[i : i + 100]
             exts_res = (
                 supabase.table("analysis_extractions")
                 .select("id, analysis_document_id, raw_data")
@@ -166,6 +192,19 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 }
 
     raw_ext_by_id = {str(e["id"]): e for e in raw_extractions}
+    intervention_theme_by_extraction_id: Dict[str, str] = {}
+    for t in final_intervention_themes:
+        for c in t.concepts:
+            intervention_theme_by_extraction_id[str(c.id)] = t.name
+
+    intervention_extraction_by_doc_idx: Dict[Tuple[str, int], str] = {}
+    for ext in raw_extractions:
+        if ext.get("type") != "intervention":
+            continue
+        doc_uuid = ext.get("doc_uuid")
+        idx = ext.get("intervention_idx")
+        if doc_uuid and idx is not None:
+            intervention_extraction_by_doc_idx[(doc_uuid, idx)] = str(ext["id"])
 
     # Build doc_uuid -> result extractions mapping (for effect data)
     doc_to_results: Dict[str, List[Dict]] = {}
@@ -227,10 +266,12 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 ] += 1
 
         # Aggregate effect counts and sizes from result extractions
-        pos, neg, null = 0, 0, 0
-        effect_sizes: List[str] = []
+        pos, neg, null = 0.0, 0.0, 0.0
+        effect_size_candidates: List[Tuple[str, int, bool]] = []
         related_outcomes: List[str] = []
         for doc_uuid in doc_uuids:
+            raw_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
+            weight = raw_score / 5.0
             for result_ext in doc_to_results.get(doc_uuid, []):
                 # Support both 'direction' (new schema) and 'effect_direction' (legacy)
                 effect_dir = (
@@ -238,14 +279,17 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                     or result_ext.get("effect_direction", "")
                 ).lower()
                 if effect_dir in ("increase", "positive"):
-                    pos += 1
+                    pos += weight
                 elif effect_dir in ("decrease", "negative"):
-                    neg += 1
+                    neg += weight
                 elif effect_dir in ("null", "none", "no effect"):
-                    null += 1
+                    null += weight
                 effect_size = result_ext.get("effect_size", "")
                 if effect_size and len(effect_size) > 2:
-                    effect_sizes.append(effect_size[:100])
+                    has_number = bool(re.search(r"\d", effect_size))
+                    effect_size_candidates.append(
+                        (effect_size[:100], raw_score, has_number)
+                    )
                 outcome_var = result_ext.get("outcome_variable", "")
                 if outcome_var and outcome_var not in related_outcomes:
                     related_outcomes.append(outcome_var)
@@ -253,6 +297,9 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         if not doc_ids:
             continue
 
+        pos = math.ceil(pos)
+        neg = math.ceil(neg)
+        null = math.ceil(null)
         total = pos + neg + null
         if total == 0:
             consensus = "insufficient"
@@ -276,7 +323,9 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 positive_count=pos,
                 negative_count=neg,
                 null_count=null,
-                sample_effect_sizes=effect_sizes[:5],
+                sample_effect_sizes=select_representative_effect_sizes(
+                    effect_size_candidates
+                ),
                 countries=sorted(countries_set),
                 study_types=dict(study_types_counter),
                 related_outcomes=related_outcomes[:10],
@@ -288,59 +337,102 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     outcome_doc_effects: Dict[str, Dict[str, List[str]]] = {}
 
     for t in final_outcome_themes:
-        doc_ids = set()
-        pos, neg, null = 0, 0, 0
-        doc_effect_list: Dict[str, List[str]] = {}
+        per_intervention: Dict[str, Dict] = {}
 
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             raw_ext = raw_ext_by_id.get(c.id, {})
+            if raw_ext.get("type") != "result":
+                continue
+            doc_uuid = meta.get("doc_uuid", "")
             doc_id = meta.get("doc_id")
-            if doc_id:
-                doc_ids.add(doc_id)
-            # Support both 'direction' (new schema) and 'effect_direction' (legacy)
-            effect_dir = raw_ext.get("direction") or raw_ext.get("effect_direction")
-            if effect_dir == "increase":
-                pos += 1
-                if doc_id:
-                    doc_effect_list.setdefault(doc_id, []).append("positive")
-            elif effect_dir == "decrease":
-                neg += 1
-                if doc_id:
-                    doc_effect_list.setdefault(doc_id, []).append("negative")
-            elif effect_dir == "null":
-                null += 1
-                if doc_id:
-                    doc_effect_list.setdefault(doc_id, []).append("null")
+            intervention_idx = raw_ext.get("intervention_idx")
+            if not doc_uuid or intervention_idx is None:
+                continue
 
-        if not doc_ids:
-            continue
-
-        total = pos + neg + null
-        if total == 0:
-            consensus = "insufficient"
-        elif pos > neg * 2:
-            consensus = "increase"
-        elif neg > pos * 2:
-            consensus = "decrease"
-        elif null > pos and null > neg:
-            consensus = "no change"
-        else:
-            consensus = "mixed"
-
-        outcomes.append(
-            OutcomeTheme(
-                outcome_name=t.name,
-                outcome_description=t.description,
-                effect_consensus=consensus,
-                positive_count=pos,
-                negative_count=neg,
-                null_count=null,
-                frequency=len(doc_ids),
-                source_doc_ids=sorted(doc_ids),
+            intervention_extraction_id = intervention_extraction_by_doc_idx.get(
+                (doc_uuid, intervention_idx)
             )
-        )
-        outcome_doc_effects[t.name] = doc_effect_list
+            intervention_theme_name = intervention_theme_by_extraction_id.get(
+                intervention_extraction_id or ""
+            )
+            if not intervention_theme_name:
+                continue
+
+            group = per_intervention.setdefault(
+                intervention_theme_name,
+                {
+                    "doc_ids": set(),
+                    "pos": 0.0,
+                    "neg": 0.0,
+                    "null": 0.0,
+                    "effect_sizes": [],
+                    "doc_effects": {},
+                },
+            )
+            if doc_id:
+                group["doc_ids"].add(doc_id)
+
+            effect_dir = raw_ext.get("effect_direction")
+            raw_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
+            weight = raw_score / 5.0
+            if effect_dir == "increase":
+                group["pos"] += weight
+                if doc_id:
+                    group["doc_effects"].setdefault(doc_id, []).append("positive")
+            elif effect_dir == "decrease":
+                group["neg"] += weight
+                if doc_id:
+                    group["doc_effects"].setdefault(doc_id, []).append("negative")
+            elif effect_dir == "null":
+                group["null"] += weight
+                if doc_id:
+                    group["doc_effects"].setdefault(doc_id, []).append("null")
+
+            effect_size = raw_ext.get("effect_size", "")
+            if effect_size and len(effect_size) > 2:
+                has_number = bool(re.search(r"\d", effect_size))
+                group["effect_sizes"].append((effect_size[:100], raw_score, has_number))
+
+        for intervention_theme_name, group in per_intervention.items():
+            doc_ids = group["doc_ids"]
+            if not doc_ids:
+                continue
+            pos = math.ceil(group["pos"])
+            neg = math.ceil(group["neg"])
+            null = math.ceil(group["null"])
+
+            total = pos + neg + null
+            if total == 0:
+                consensus = "insufficient"
+            elif pos > neg * 2:
+                consensus = "increase"
+            elif neg > pos * 2:
+                consensus = "decrease"
+            elif null > pos and null > neg:
+                consensus = "no change"
+            else:
+                consensus = "mixed"
+
+            outcomes.append(
+                OutcomeTheme(
+                    outcome_name=t.name,
+                    outcome_description=t.description,
+                    effect_consensus=consensus,
+                    positive_count=pos,
+                    negative_count=neg,
+                    null_count=null,
+                    frequency=len(doc_ids),
+                    source_doc_ids=sorted(doc_ids),
+                    sample_effect_sizes=select_representative_effect_sizes(
+                        group["effect_sizes"]
+                    ),
+                    intervention_theme_id=intervention_theme_name,
+                )
+            )
+            outcome_doc_effects[f"{t.name}::{intervention_theme_name}"] = group[
+                "doc_effects"
+            ]
 
     # Build extraction quotes mapping
     extraction_quotes: Dict[str, List[str]] = {}
@@ -353,32 +445,42 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 extraction_quotes[doc_uuid] = []
             extraction_quotes[doc_uuid].append(quote)
 
-    # Build theme -> doc_uuid mapping for constrained RAG retrieval
+    # Build theme -> doc_uuid and extraction_id mappings for constrained retrieval
     theme_to_doc_uuids: Dict[str, List[str]] = {}
+    theme_to_extraction_ids: Dict[str, List[str]] = {}
 
     for t in final_intervention_themes:
         uuids = []
+        extraction_ids = []
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             if meta.get("doc_uuid"):
                 uuids.append(meta["doc_uuid"])
+            extraction_ids.append(str(c.id))
         theme_to_doc_uuids[t.name] = list(set(uuids))
+        theme_to_extraction_ids[t.name] = list(set(extraction_ids))
 
     for t in final_issue_themes:
         uuids = []
+        extraction_ids = []
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             if meta.get("doc_uuid"):
                 uuids.append(meta["doc_uuid"])
+            extraction_ids.append(str(c.id))
         theme_to_doc_uuids[t.name] = list(set(uuids))
+        theme_to_extraction_ids[t.name] = list(set(extraction_ids))
 
     for t in final_outcome_themes:
         uuids = []
+        extraction_ids = []
         for c in t.concepts:
             meta = ex_metadata.get(c.id, {})
             if meta.get("doc_uuid"):
                 uuids.append(meta["doc_uuid"])
+            extraction_ids.append(str(c.id))
         theme_to_doc_uuids[t.name] = list(set(uuids))
+        theme_to_extraction_ids[t.name] = list(set(extraction_ids))
 
     print(
         f"Built {len(issues)} issues, {len(interventions)} interventions, {len(outcomes)} outcomes"
@@ -392,4 +494,5 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         "extraction_quotes": extraction_quotes,
         "outcome_doc_effects": outcome_doc_effects,
         "theme_to_doc_uuids": theme_to_doc_uuids,
+        "theme_to_extraction_ids": theme_to_extraction_ids,
     }

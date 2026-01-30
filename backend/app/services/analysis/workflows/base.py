@@ -10,6 +10,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 from langchain_core.output_parsers import JsonOutputParser
@@ -37,6 +38,17 @@ from ..evidence.category import EVIDENCE_CATEGORY_EXPLANATIONS
 from ..evidence.strength import calculate_document_evidence_score
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StageModelConfig:
+    """Per-stage model configuration for extraction workflows."""
+
+    issues: Optional[str] = "gpt-4o-mini"
+    interventions: Optional[str] = "gpt-4o-mini"
+    mappings: Optional[str] = "gpt-4o-mini"
+    results: Optional[str] = "gpt-4o-mini"
+    conclusions: Optional[str] = "gpt-5-mini"
 
 
 class WorkflowState(TypedDict):
@@ -80,6 +92,7 @@ class BaseExtractionWorkflow(ABC):
     def __init__(
         self,
         model: str = "gpt-5-mini",
+        stage_models: Optional[StageModelConfig] = None,
         temperature: float = 0.0,
         *,
         policy_project_id: Optional[str] = None,
@@ -88,13 +101,23 @@ class BaseExtractionWorkflow(ABC):
         if not settings.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY is required for extraction workflows")
 
+        self.model_name = model
+        self.stage_models = stage_models
+        self._llms: Dict[str, ChatOpenAI] = {}
+        for stage in ["issues", "interventions", "mappings", "results", "conclusions"]:
+            stage_model = self._model_for_stage(stage)
+            self._llms[stage] = ChatOpenAI(
+                model=stage_model,
+                temperature=temperature,
+                openai_api_key=settings.OPENAI_API_KEY,
+                request_timeout=120.0,
+            )
         self.llm = ChatOpenAI(
             model=model,
             temperature=temperature,
             openai_api_key=settings.OPENAI_API_KEY,
             request_timeout=120.0,
         )
-        self.model_name = model
         self.json_parser = JsonOutputParser()
         self.policy_project_id = policy_project_id
         self.policy_user_id = policy_user_id
@@ -173,6 +196,12 @@ class BaseExtractionWorkflow(ABC):
             f"- Sample size (N): {sample_text}\n"
         )
 
+    def _model_for_stage(self, stage: str) -> str:
+        if not self.stage_models:
+            return self.model_name
+        stage_model = getattr(self.stage_models, stage, None)
+        return stage_model or self.model_name
+
     @abstractmethod
     async def _extract_issues(self, state: WorkflowState) -> Dict[str, Any]:
         """Extract issues from the document. Implemented by subclasses."""
@@ -220,6 +249,7 @@ class BaseExtractionWorkflow(ABC):
                 },
                 self._get_stage_tags("conclusions", paper_id),
                 self._get_run_name("conclusions"),
+                stage_name="conclusions",
                 extra={"paper_id": paper_id},
             )
             extraction = ConclusionsExtraction(**result)
@@ -339,12 +369,13 @@ class BaseExtractionWorkflow(ABC):
         Returns:
             List of tags for Langfuse tracing
         """
+        model_name = self._model_for_stage(stage_name)
         return [
             "component:extraction",
             f"component:extraction.{stage_name}",
             f"workflow:{self.workflow_type}",
             f"paper:{paper_id}",
-            f"model:{self.model_name}",
+            f"model:{model_name}",
         ]
 
     def _get_run_name(self, stage_name: str) -> str:
@@ -370,10 +401,12 @@ class BaseExtractionWorkflow(ABC):
         payload: Dict[str, Any],
         tags: List[str],
         run_name: str,
+        stage_name: str,
         extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Run a prompt stage with standard callbacks, tags, and metadata."""
-        chain = prompt | self.llm | self.json_parser
+        llm = self._llms.get(stage_name, self.llm)
+        chain = prompt | llm | self.json_parser
         return await chain.ainvoke(
             payload,
             config={

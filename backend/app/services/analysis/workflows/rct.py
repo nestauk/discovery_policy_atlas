@@ -39,6 +39,7 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 {"full_text": state["full_text"]},
                 self._get_stage_tags("issues", paper_id),
                 self._get_run_name("issues"),
+                stage_name="issues",
                 extra={"paper_id": paper_id},
             )
 
@@ -60,6 +61,7 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 {"full_text": state["full_text"]},
                 self._get_stage_tags("interventions", paper_id),
                 self._get_run_name("interventions"),
+                stage_name="interventions",
                 extra={"paper_id": paper_id},
             )
 
@@ -99,6 +101,7 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                 },
                 self._get_stage_tags("mappings", paper_id),
                 self._get_run_name("mappings"),
+                stage_name="mappings",
                 extra={"paper_id": paper_id},
             )
 
@@ -134,6 +137,7 @@ class RCTExtractionWorkflow(BaseExtractionWorkflow):
                         },
                         tags,
                         self._get_run_name("results"),
+                        stage_name="results",
                         extra={
                             "paper_id": paper_id,
                             "intervention_idx": intervention.idx,

@@ -67,7 +67,69 @@ export interface SearchParams {
   }
 
   // Synthesis summary types (Enhanced)
-  // Synthesis summary types (Enhanced)
+  export type VerdictType = 
+    | 'well_evidenced_increase'
+    | 'well_evidenced_decrease'
+    | 'evidenced_increase'
+    | 'evidenced_decrease'
+    | 'suggested_increase'
+    | 'suggested_decrease'
+    | 'contested'
+    | 'no_effect'
+    | 'insufficient_evidence'
+    | 'probable_contribution';
+
+  export type SemanticMagnitudeType =
+    | 'transformational'
+    | 'substantial'
+    | 'moderate'
+    | 'marginal'
+    | 'unknown';
+
+  export type CausalityClaimType = 'attribution' | 'contribution' | 'correlation';
+
+export interface MagnitudeDetail {
+  direction: 'increase' | 'decrease' | 'contested';
+  bucket_counts: Record<string, number>;
+  source_count: number;
+  total_sources: number;
+  measurement_count: number;
+  dominant_scale: string;
+  thresholds: string;
+}
+
+export interface CausalityDetail {
+  attribution: number;
+  contribution: number;
+  correlation: number;
+}
+
+  export interface TransferabilityBreakdown {
+    inner_setting: string;
+    population: string;
+    geography: string;
+    notes?: Record<string, string>;
+    data_availability?: Record<string, string>;
+    context_fit_rating?: string;
+  implementation_requirements_rating?: 'Low' | 'Medium' | 'High' | 'Unknown';
+    implementation_constraints_specified?: boolean;
+    implementation_evidence?: Record<string, string>;
+    implementation_constraints?: Record<string, string>;
+  implementation_exceeds_tolerance?: Record<string, boolean>;
+  }
+
+  export interface RiskTheme {
+    theme_name: string;
+    summary_description: string;
+    frequency: number;
+    source_doc_ids: string[];
+    has_harm_warning: boolean;
+    linked_intervention_theme_id?: string;
+    linked_interventions?: Array<{
+      intervention_theme_id: string;
+      link_strength: string;
+    }>;
+  }
   export interface KeyIssue {
     issue_theme: string
     summary_description: string
@@ -89,6 +151,9 @@ export interface SearchParams {
     countries?: string[]
     study_types?: Record<string, number>
     related_outcomes?: string[]
+    transferability_rating?: string
+    transferability_note?: string
+    transferability_breakdown?: TransferabilityBreakdown
   }
 
   export interface CitationInfo {
@@ -126,6 +191,15 @@ export interface SearchParams {
     sample_effect_sizes: string[]
     frequency: number
     source_doc_ids: string[]
+    verdict_label?: VerdictType
+    verdict_description?: string
+    discord_flag?: boolean
+    discord_reason?: string
+    predicted_magnitude?: SemanticMagnitudeType
+  magnitude_detail?: MagnitudeDetail
+    intervention_theme_id?: string
+  primary_causal_mechanism?: CausalityClaimType
+  causal_mechanism_detail?: CausalityDetail
   }
 
   // Structured briefing types for frontend rendering
@@ -211,6 +285,7 @@ export interface SynthesisSection {
     outcome_themes?: OutcomeTheme[]
     evidence_coverage?: EvidenceCoverageSnapshot
     citation_map?: Record<string, CitationInfo>
+    risk_themes?: RiskTheme[]
   }
 
   // Drill-down finding interface (matches backend endpoint shape)

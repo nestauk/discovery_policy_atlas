@@ -6,7 +6,7 @@ Replaces the old OpenAI-based extractor with a more structured workflow.
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -15,7 +15,7 @@ import pandas as pd
 import tiktoken
 
 from app.core.config import settings
-from .workflows import create_workflow
+from .workflows import StageModelConfig, create_workflow
 from .storage import AnalysisStorageService
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class LangChainExtractionConfig:
     export_dir: str
     use_abstracts_only: bool = False
     model: str = settings.LLM_MODEL
+    stage_models: StageModelConfig = field(default_factory=StageModelConfig)
     temperature: float = 0.0
     concurrency: int = 3
     project_id: Optional[str] = None  # For interim storage
@@ -195,6 +196,7 @@ class LangChainExtractorService:
                     evidence_category=evidence_category,
                     confidence=float(evidence_confidence),
                     model=self.config.model,
+                    stage_models=self.config.stage_models,
                     policy_project_id=self.config.project_id,
                     policy_user_id=self.config.user_id,
                 )

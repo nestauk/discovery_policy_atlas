@@ -1,12 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
+import asyncio
+from datetime import datetime
+import json
 import logging
 import os
-from datetime import datetime
+from typing import Optional, List, Dict
 import uuid
-from typing import Optional, List
 import pandas as pd
-import asyncio
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.search_wizard import SearchWizardService
@@ -29,6 +30,8 @@ from app.services.analysis.schemas import (
     PopulationOptionsResponse,
     OutcomeOptionsRequest,
     OutcomeOptionsResponse,
+    InnerSettingOptionsRequest,
+    InnerSettingOptionsResponse,
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
@@ -54,6 +57,21 @@ from app.services.analysis.utils.navigator import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
+    """Parse a JSON field that may be stored as text."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return None
+
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 
@@ -1679,10 +1697,68 @@ async def get_issue_intervention_navigator(
         themes = themes_res.data
         issue_themes = [t for t in themes if t["theme_type"] == "issue"]
         intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
+        risk_theme_rows = [t for t in themes if t["theme_type"] == "risk"]
+        intervention_themes_by_id = {
+            t.get("id"): t for t in intervention_themes if t.get("id")
+        }
 
         logger.info(
             f"Found {len(issue_themes)} issue themes and {len(intervention_themes)} intervention themes"
         )
+
+        # Get outcome themes for impact profile display
+        outcome_themes_res = (
+            vectorization_service.supabase.table("synthesis_outcome_themes")
+            .select("*")
+            .eq("synthesis_run_id", run_id)
+            .execute()
+        )
+        outcome_themes = outcome_themes_res.data or []
+        for outcome in outcome_themes:
+            outcome["magnitude_detail"] = _parse_json_field(
+                outcome.get("magnitude_detail")
+            )
+            outcome["causal_mechanism_detail"] = _parse_json_field(
+                outcome.get("causal_mechanism_detail")
+            )
+
+        outcomes_by_intervention: Dict[str, List[Dict]] = {}
+        for outcome in outcome_themes:
+            intervention_id = outcome.get("intervention_theme_id")
+            if intervention_id:
+                outcomes_by_intervention.setdefault(intervention_id, []).append(outcome)
+
+        risks_by_intervention: Dict[str, List[Dict]] = {}
+        risk_theme_ids = [t.get("id") for t in risk_theme_rows if t.get("id")]
+        links_by_theme: Dict[str, List[Dict]] = {}
+        if risk_theme_ids:
+            links_res = (
+                vectorization_service.supabase.table("theme_intervention_links")
+                .select("theme_id, intervention_theme_id, link_strength")
+                .in_("theme_id", risk_theme_ids)
+                .execute()
+            )
+            for link in links_res.data or []:
+                links_by_theme.setdefault(link["theme_id"], []).append(
+                    {
+                        "intervention_theme_id": link["intervention_theme_id"],
+                        "link_strength": link["link_strength"],
+                    }
+                )
+
+        for risk_theme in risk_theme_rows:
+            linked_interventions = links_by_theme.get(risk_theme.get("id"), [])
+            if linked_interventions:
+                risk_theme["linked_interventions"] = linked_interventions
+                for linked in linked_interventions:
+                    risks_by_intervention.setdefault(
+                        linked["intervention_theme_id"], []
+                    ).append(risk_theme)
+                continue
+
+            linked_id = risk_theme.get("linked_intervention_theme_id")
+            if linked_id:
+                risks_by_intervention.setdefault(linked_id, []).append(risk_theme)
 
         # Get theme assignments to link themes to extractions
         assignments_res = (
@@ -1764,6 +1840,29 @@ async def get_issue_intervention_navigator(
                 len(documents),
             )
 
+            for intervention in related_interventions:
+                theme_id = intervention.get("theme_id")
+                if not theme_id:
+                    continue
+
+                theme = intervention_themes_by_id.get(theme_id)
+                if theme:
+                    intervention["transferability_rating"] = theme.get(
+                        "transferability_rating"
+                    )
+                    intervention["transferability_note"] = theme.get(
+                        "transferability_note"
+                    )
+                    intervention["transferability_breakdown"] = theme.get(
+                        "transferability_breakdown"
+                    )
+
+                intervention["outcome_themes"] = outcomes_by_intervention.get(
+                    theme_id, []
+                )
+                intervention["risk_themes"] = risks_by_intervention.get(theme_id, [])
+
+            # Only include issue themes that have related interventions
             if related_interventions:
                 navigator_issue_themes.append(
                     {
@@ -2397,6 +2496,32 @@ async def generate_outcome_options(
 
     return OutcomeOptionsResponse(
         research_question=request.research_question, outcome_options=outcome_options
+    )
+
+
+@router.post(
+    "/generate-inner-setting-options", response_model=InnerSettingOptionsResponse
+)
+async def generate_inner_setting_options(
+    request: InnerSettingOptionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate inner setting options for a research question using AI"""
+    service = SearchWizardService()
+    inner_setting_options = await service.generate_inner_setting_options(
+        research_question=request.research_question,
+        max_options=request.max_options,
+        user_id=current_user.user_id,
+    )
+
+    if not inner_setting_options:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate inner setting options"
+        )
+
+    return InnerSettingOptionsResponse(
+        research_question=request.research_question,
+        inner_setting_options=inner_setting_options,
     )
 
 

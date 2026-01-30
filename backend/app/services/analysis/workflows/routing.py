@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Optional
 
-from .base import BaseExtractionWorkflow
+from .base import BaseExtractionWorkflow, StageModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ def create_workflow(
     evidence_category: str,
     confidence: float = 1.0,
     model: str = "gpt-5-mini",
+    stage_models: Optional[StageModelConfig] = None,
     policy_project_id: Optional[str] = None,
     policy_user_id: Optional[str] = None,
 ) -> BaseExtractionWorkflow:
@@ -42,6 +43,7 @@ def create_workflow(
         evidence_category: The document's evidence category classification
         confidence: Confidence score of the classification (0.0-1.0)
         model: LLM model to use for extraction
+        stage_models: Optional per-stage model configuration
         policy_project_id: Project ID for Langfuse tracking
         policy_user_id: User ID for Langfuse tracking
 
@@ -64,6 +66,7 @@ def create_workflow(
 
     kwargs = {
         "model": model,
+        "stage_models": stage_models,
         "policy_project_id": policy_project_id,
         "policy_user_id": policy_user_id,
     }
