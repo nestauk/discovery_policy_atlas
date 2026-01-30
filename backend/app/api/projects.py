@@ -1698,6 +1698,9 @@ async def get_issue_intervention_navigator(
         issue_themes = [t for t in themes if t["theme_type"] == "issue"]
         intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
         risk_theme_rows = [t for t in themes if t["theme_type"] == "risk"]
+        intervention_themes_by_id = {
+            t.get("id"): t for t in intervention_themes if t.get("id")
+        }
 
         logger.info(
             f"Found {len(issue_themes)} issue themes and {len(intervention_themes)} intervention themes"
@@ -1825,210 +1828,39 @@ async def get_issue_intervention_navigator(
 
             logger.info(f"Processing issue theme: {theme_name} (freq: {frequency})")
 
-            # Get extractions assigned to this issue theme
-            issue_extraction_ids = theme_to_extractions.get(theme_id, [])
+            related_interventions = build_related_interventions(
+                issue_theme,
+                intervention_themes,
+                theme_to_extractions,
+                issue_intervention_shared_docs,
+                extractions_by_id,
+                docs_by_id,
+                docs_by_doc_id,
+                doc_scores,
+                len(documents),
+            )
 
-            # Find related intervention themes based on document co-occurrence
-            related_interventions = []
+            for intervention in related_interventions:
+                theme_id = intervention.get("theme_id")
+                if not theme_id:
+                    continue
 
-            for intervention_theme in intervention_themes:
-                intervention_theme_id = intervention_theme["id"]
-                intervention_theme_name = intervention_theme["theme_name"]
-                intervention_description = intervention_theme.get(
-                    "summary_description", ""
+                theme = intervention_themes_by_id.get(theme_id)
+                if theme:
+                    intervention["transferability_rating"] = theme.get(
+                        "transferability_rating"
+                    )
+                    intervention["transferability_note"] = theme.get(
+                        "transferability_note"
+                    )
+                    intervention["transferability_breakdown"] = theme.get(
+                        "transferability_breakdown"
+                    )
+
+                intervention["outcome_themes"] = outcomes_by_intervention.get(
+                    theme_id, []
                 )
-
-                # Get extractions assigned to this intervention theme
-                intervention_extraction_ids = theme_to_extractions.get(
-                    intervention_theme_id, []
-                )
-
-                # Find documents that have both issue and intervention extractions
-                shared_docs = []
-                impact_scores = []
-                evidence_scores = []
-
-                for doc_id, mapping_pairs in doc_mappings.items():
-                    doc_has_issue = any(
-                        issue_ext_id in issue_extraction_ids
-                        for issue_ext_id, _ in mapping_pairs
-                    )
-                    doc_has_intervention = any(
-                        intervention_ext_id in intervention_extraction_ids
-                        for _, intervention_ext_id in mapping_pairs
-                    )
-
-                    if doc_has_issue and doc_has_intervention:
-                        shared_docs.append(doc_id)
-                        scores = doc_scores.get(doc_id, {})
-                        if scores.get("impact_score") is not None:
-                            impact_scores.append(scores["impact_score"])
-                        if scores.get("evidence_score") is not None:
-                            evidence_scores.append(scores["evidence_score"])
-
-                # Only include intervention themes that have actual connections
-                if shared_docs:
-                    # Calculate average scores
-                    avg_impact_score = (
-                        sum(impact_scores) / len(impact_scores)
-                        if impact_scores
-                        else None
-                    )
-                    avg_evidence_score = (
-                        sum(evidence_scores) / len(evidence_scores)
-                        if evidence_scores
-                        else None
-                    )
-
-                    # Build detailed interventions from the extractions
-                    detailed_interventions = []
-                    for ext_id in intervention_extraction_ids:
-                        extraction = extractions_by_id.get(str(ext_id))
-                        if extraction and extraction.get("analysis_document_id"):
-                            doc = docs_by_id.get(
-                                str(extraction["analysis_document_id"])
-                            )
-                            if doc and doc.get("doc_id") in shared_docs:
-                                raw_data = extraction.get("raw_data", {})
-
-                                # Extract results from document's extraction_results
-                                extraction_results = doc.get("extraction_results", {})
-                                interventions_data = extraction_results.get(
-                                    "interventions", []
-                                )
-                                results_data = extraction_results.get("results", [])
-
-                                # Find matching intervention and its results
-                                intervention_results = []
-                                intervention_name = extraction.get(
-                                    "label", raw_data.get("name", "")
-                                )
-
-                                # Match by intervention name/label
-                                for i, intervention_data in enumerate(
-                                    interventions_data
-                                ):
-                                    if (
-                                        intervention_data.get("name")
-                                        == intervention_name
-                                        or intervention_data.get("label")
-                                        == intervention_name
-                                    ):
-                                        # Find results for this intervention by idx
-                                        for result in results_data:
-                                            if result.get("intervention_idx") == i:
-                                                intervention_results.append(
-                                                    {
-                                                        "outcome_variable": result.get(
-                                                            "outcome_variable"
-                                                        ),
-                                                        "effect_direction": result.get(
-                                                            "effect_direction"
-                                                        ),
-                                                        "effect_size": result.get(
-                                                            "effect_size"
-                                                        ),
-                                                        "p_value": result.get(
-                                                            "p_value"
-                                                        ),
-                                                        "uncertainty": result.get(
-                                                            "uncertainty"
-                                                        ),
-                                                        "result_text": result.get(
-                                                            "result_text"
-                                                        ),
-                                                        "population_measured": result.get(
-                                                            "population_measured"
-                                                        ),
-                                                        "subgroup_or_dose": result.get(
-                                                            "subgroup_or_dose"
-                                                        ),
-                                                    }
-                                                )
-                                        break
-
-                                detailed_interventions.append(
-                                    {
-                                        "name": intervention_name,
-                                        "description": extraction.get(
-                                            "description",
-                                            raw_data.get("description", ""),
-                                        ),
-                                        "type": raw_data.get("type", "Unknown"),
-                                        "country": raw_data.get("country"),
-                                        "study_type": raw_data.get("study_type"),
-                                        "sample_size": raw_data.get("sample_size"),
-                                        "impact_score": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("impact_score"),
-                                        "evidence_score": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("evidence_score"),
-                                        "impact_justification": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("impact_justification", ""),
-                                        "evidence_justification": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("evidence_justification", ""),
-                                        "results": intervention_results,
-                                        "source_documents": [
-                                            {
-                                                "doc_id": doc.get("doc_id"),
-                                                "title": doc.get("title"),
-                                                "source": doc.get("source"),
-                                                "landing_page_url": doc.get(
-                                                    "landing_page_url"
-                                                ),
-                                            }
-                                        ],
-                                    }
-                                )
-
-                    # Deduplicate by name
-                    unique_interventions = {}
-                    for detail in detailed_interventions:
-                        name = detail.get("name", "")
-                        if name and name not in unique_interventions:
-                            unique_interventions[name] = detail
-
-                    related_interventions.append(
-                        {
-                            "theme_id": intervention_theme_id,
-                            "theme_name": intervention_theme_name,
-                            "description": intervention_description,
-                            "impact_summary": intervention_theme.get(
-                                "impact_summary", ""
-                            ),
-                            "transferability_rating": intervention_theme.get(
-                                "transferability_rating"
-                            ),
-                            "transferability_note": intervention_theme.get(
-                                "transferability_note"
-                            ),
-                            "transferability_breakdown": intervention_theme.get(
-                                "transferability_breakdown"
-                            ),
-                            "outcome_themes": outcomes_by_intervention.get(
-                                intervention_theme_id, []
-                            ),
-                            "risk_themes": risks_by_intervention.get(
-                                intervention_theme_id, []
-                            ),
-                            "frequency": len(shared_docs),
-                            "avg_impact_score": round(avg_impact_score, 1)
-                            if avg_impact_score
-                            else None,
-                            "avg_evidence_score": round(avg_evidence_score, 1)
-                            if avg_evidence_score
-                            else None,
-                            "detailed_interventions": list(
-                                unique_interventions.values()
-                            ),
-                        }
-                    )
-
-            # Sort interventions by frequency of connection
-            related_interventions.sort(key=lambda x: x["frequency"], reverse=True)
+                intervention["risk_themes"] = risks_by_intervention.get(theme_id, [])
 
             # Only include issue themes that have related interventions
             if related_interventions:

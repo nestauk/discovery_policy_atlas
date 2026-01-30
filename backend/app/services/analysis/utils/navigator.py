@@ -354,6 +354,7 @@ def build_related_interventions(
 
         related_interventions.append(
             {
+                "theme_id": intervention_theme_id,
                 "theme_name": intervention_theme_name,
                 "description": intervention_description,
                 "impact_summary": intervention_theme.get("impact_summary", ""),
@@ -399,8 +400,18 @@ def aggregate_all_interventions(
             if theme_name not in all_interventions_map:
                 all_interventions_map[theme_name] = {
                     "theme_name": theme_name,
+                    "theme_id": intervention.get("theme_id"),
                     "description": intervention.get("description", ""),
                     "impact_summary": intervention.get("impact_summary", ""),
+                    "transferability_rating": intervention.get(
+                        "transferability_rating"
+                    ),
+                    "transferability_note": intervention.get("transferability_note"),
+                    "transferability_breakdown": intervention.get(
+                        "transferability_breakdown"
+                    ),
+                    "outcome_themes": intervention.get("outcome_themes", []),
+                    "risk_themes": intervention.get("risk_themes", []),
                     "frequency": 0,
                     "detailed_interventions_by_doc": {},
                     "impact_scores": [],
@@ -414,6 +425,22 @@ def aggregate_all_interventions(
 
             if not entry["impact_summary"] and intervention.get("impact_summary"):
                 entry["impact_summary"] = intervention["impact_summary"]
+            if not entry.get("theme_id") and intervention.get("theme_id"):
+                entry["theme_id"] = intervention.get("theme_id")
+            if not entry.get("transferability_rating") and intervention.get(
+                "transferability_rating"
+            ):
+                entry["transferability_rating"] = intervention.get(
+                    "transferability_rating"
+                )
+                entry["transferability_note"] = intervention.get("transferability_note")
+                entry["transferability_breakdown"] = intervention.get(
+                    "transferability_breakdown"
+                )
+            if not entry.get("outcome_themes") and intervention.get("outcome_themes"):
+                entry["outcome_themes"] = intervention.get("outcome_themes", [])
+            if not entry.get("risk_themes") and intervention.get("risk_themes"):
+                entry["risk_themes"] = intervention.get("risk_themes", [])
 
             # Deduplicate detailed_interventions by doc_id
             for detail in intervention.get("detailed_interventions", []):
@@ -443,9 +470,15 @@ def aggregate_all_interventions(
         all_interventions.append(
             {
                 "theme_name": theme_name,
+                "theme_id": entry.get("theme_id"),
                 "description": entry["description"],
                 "impact_summary": entry["impact_summary"],
                 "frequency": entry["frequency"],
+                "transferability_rating": entry.get("transferability_rating"),
+                "transferability_note": entry.get("transferability_note"),
+                "transferability_breakdown": entry.get("transferability_breakdown"),
+                "outcome_themes": entry.get("outcome_themes", []),
+                "risk_themes": entry.get("risk_themes", []),
                 "avg_impact_score": round(avg_impact, 1)
                 if avg_impact is not None
                 else None,
