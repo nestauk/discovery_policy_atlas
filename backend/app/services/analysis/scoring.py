@@ -359,7 +359,7 @@ async def compute_document_impact_score(
         Tuple[Optional[float], str, Dict[str, object]]: Score, label, and breakdown.
     """
     if not outcomes:
-        return (1.0, "No Outcomes", {"note": "no extractable outcomes"})
+        return (None, "N/A", {"note": "no extractable outcomes"})
 
     primary = [outcome for outcome in outcomes if outcome.is_primary]
     if not primary:
