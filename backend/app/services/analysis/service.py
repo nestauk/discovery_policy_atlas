@@ -197,16 +197,31 @@ class AnalysisService:
             with StageTimer(monitor, "parsing"):
                 parser = ParsingService(export_dir=str(run_export_dir))
                 parsed_count = 0
+                skipped_count = 0
 
                 for item in acquired:
                     if not item or item.get("status") != "ok":
                         continue
+                    doc_id = item["doc_id"]
                     # Use async parsing with guardrails
-                    parsed = await parser.parse_saved_file(
-                        item["doc_id"], item["file_path"]
-                    )
-                    if not parsed or not parsed.text:
+                    parsed = await parser.parse_saved_file(doc_id, item["file_path"])
+                    if not parsed:
+                        logger.warning(
+                            "[PARSING] No parsed result for %s (file=%s)",
+                            doc_id,
+                            item["file_path"],
+                        )
+                        skipped_count += 1
                         continue
+                    if not parsed.text:
+                        logger.warning(
+                            "[PARSING] Empty text for %s (file=%s)",
+                            doc_id,
+                            item["file_path"],
+                        )
+                        skipped_count += 1
+                        continue
+
                     parsed_count += 1
                     norm_text = normalize_text(parsed.text)
                     # Use sanitized filename for normalized output as well
@@ -219,11 +234,23 @@ class AnalysisService:
                     if raw_path is not None:
                         base = raw_path.stem  # without extension
                     else:
-                        base = sanitize_id_to_filename(item["doc_id"])
+                        base = sanitize_id_to_filename(doc_id)
                     safe_name = f"{base}.txt"
                     out_path = parsed_dir / safe_name
                     out_path.write_text(norm_text, encoding="utf-8")
+                    logger.info(
+                        "[PARSING] Created normalized file for %s: %s (%d chars)",
+                        doc_id,
+                        safe_name,
+                        len(norm_text),
+                    )
 
+                logger.info(
+                    "[PARSING] Complete: %d parsed, %d skipped out of %d acquired",
+                    parsed_count,
+                    skipped_count,
+                    len(acquired),
+                )
                 monitor.record_metric("parsed_count", parsed_count)
 
         # Step 4: extraction using LangChain workflow

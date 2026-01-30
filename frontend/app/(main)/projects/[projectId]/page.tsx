@@ -75,18 +75,13 @@ interface AnalysisDocument {
         justification: string
         evidence_gap?: string | null
       }
-      predicted_impact?: {
-        stars: number | null
-        justification: string
-        evidence_gap?: string | null
-      }
     }
     issues?: unknown[]
     interventions?: unknown[]
     mappings?: unknown[]
     results?: unknown[]
   }
-  impact_score?: number
+  impact_score?: number | null
   impact_score_label?: string
   impact_score_breakdown?: Record<string, unknown>
   transferability_score?: number
@@ -800,19 +795,6 @@ export default function ProjectResultsPage() {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
       const conclusion = doc.extraction_results?.conclusion
       const evidenceStrength = conclusion?.evidence_strength
-      const predictedImpact = conclusion?.predicted_impact
-      const impactScore = doc.impact_score ?? predictedImpact?.stars ?? undefined
-      const impactBreakdown = doc.impact_score_breakdown
-
-      const impactTooltip = impactBreakdown
-        ? [
-            `Evidence: ${impactBreakdown.evidence_strength ?? 'N/A'}`,
-            `Transferability: ${impactBreakdown.transferability ?? 'N/A'}`,
-            `Magnitude: ${impactBreakdown.magnitude_adjustment ?? 'N/A'}`,
-            `Harm: ${impactBreakdown.harm_multiplier ?? 'N/A'}`
-          ].join(' | ')
-        : predictedImpact?.justification
-      
       return {
         id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
         title: String(doc.title || 'Untitled'),
@@ -837,8 +819,6 @@ export default function ProjectResultsPage() {
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
         evidence_strength: evidenceStrength?.stars || undefined,
         evidence_strength_justification: evidenceStrength?.justification,
-        predicted_impact: impactScore,
-        predicted_impact_justification: impactTooltip,
         impact_score: doc.impact_score,
         impact_score_label: doc.impact_score_label,
         impact_score_breakdown: doc.impact_score_breakdown,

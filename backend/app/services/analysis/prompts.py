@@ -187,6 +187,11 @@ Rules:
 - Include attention control arms only if they involve active components (e.g., alternative treatments).
 - description must paraphrase only what is contained in the quote.
 - DO NOT include interventions that were not studied in the document, are not the main focus and just mentioned in passing.
+- If the document is purely descriptive (e.g., prevalence statistics, correlational analysis, epidemiological data)
+  with NO intervention being actively evaluated or proposed, return an EMPTY interventions array:
+  {{"interventions": [], "coverage_note": "No intervention evaluated - purely descriptive study"}}.
+- Only extract interventions that the study actively evaluates, tests, or proposes. Do NOT invent interventions from
+  background context, policy goals, or passing mentions.
 - If information is missing for a field, return "null" for the field.
 
 
@@ -197,7 +202,10 @@ Population Fields:
 - country: Where the intervention was carried out or recommended
 
 Implementation Profile Fields:
-- inner_setting: Where the intervention is delivered (e.g., School, Clinical/Hospital, Prison, Workplace, Community Centre, Home, Online/Digital)
+- inner_setting: The organisational context where the intervention is DELIVERED TO the target population.
+  Examples: School, Hospital/Clinic, Prison, Workplace, Community Centre, Home, Online/Digital, Primary Care, Government Department, Parliament, Local Council.
+  Important: Use the setting where recipients experience the intervention, not the institution that created or mandated it.
+  Example: If a parliament passes a school nutrition policy, the inner_setting is "School", not "Parliament".
 
 - cost_level: Budget and financial requirements. Infer from context if not explicit.
   - High: significant capital investment, high ongoing operational costs, specialist equipment
@@ -261,7 +269,7 @@ Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"...","causality_claim":"attribution|contribution|correlation","negative_impact_flag":false}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"...","causality_claim":"attribution|contribution|correlation","negative_impact_flag":false,"is_primary":true|false,"is_beneficial":true|false,"magnitude_estimate":"substantial|large|moderate|marginal|unknown"}}]}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
@@ -278,6 +286,13 @@ causality_claim Guide:
 
 negative_impact_flag: Set to true if this result indicates harm, adverse effects, or negative consequences
 
+is_primary: Set to true if this outcome is a primary outcome the study was designed to measure
+
+is_beneficial: Set to true if the outcome change is beneficial for the target population
+  - Example: BMI decrease is beneficial, anxiety increase is harmful
+
+magnitude_estimate: Semantic effect size bucket for this result
+
 Paper text:
 {full_text}""",
         ),
@@ -291,10 +306,10 @@ CONCLUSIONS_PROMPT = ChatPromptTemplate.from_messages(
         ("system", EXTRACTION_SYSTEM_PROMPT),
         (
             "human",
-            """Task: Extract the KEY CONCLUSION of this study AND assess the predicted impact.
+            """Task: Extract the KEY CONCLUSION of this study AND assess evidence strength, risk assessment, and study context.
 
 Schema:
-{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","evidence_strength":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}},"predicted_impact":{{"magnitude_estimate":"transformational|substantial|moderate|marginal|unknown","magnitude_justification":"2-3 sentences explaining the predicted scale of real-world impact","causal_reliability":"attribution|contribution|correlation","causal_justification":"1-2 sentences on strength of causal evidence in this study","transferability_notes":"Notes on how generalisable the findings are to other contexts/populations","risks_identified":["Risk 1","Risk 2"],"unintended_consequences_detected":true|false}}}}}}
+{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","evidence_strength":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}},"risk_assessment":{{"risks_identified":["Risk 1","Risk 2"],"unintended_consequences_detected":true|false}},"study_context":{{"country":"...|null","population":"...|null","inner_setting":"...|null","cost_level":"High|Moderate|Low|null","staffing_level":"High|Moderate|Low|null","implementation_complexity_level":"High|Moderate|Low|null"}}}}}}
 
 Rules for Conclusion:
 - top_line_summary: ONE direct sentence stating the main conclusion (e.g., "The intervention significantly reduced behavioral problems in children").
@@ -302,16 +317,7 @@ Rules for Conclusion:
 - Focus on the OVERALL STUDY CONCLUSION, not individual result details.
 - Base the conclusion on what the authors explicitly state as their main finding/conclusion.
 
-Rules for Predicted Impact Assessment:
-- magnitude_estimate: Preliminary assessment of real-world impact size (relative framing)
-  - transformational: Effect exceptional/paradigm-shifting for this field
-  - substantial: Effect considered clinically/policy-significant for this field 
-  - moderate: Meaningful practical implications, statistically significant
-  - marginal: Minimal practical significance despite statistical significance
-  - unknown: Cannot assess from available data
-  NOTE: This is a preliminary per-document assessment. Final calibrated bucketing happens during synthesis.
-- causal_reliability: How strongly does this study support a causal claim?
-- transferability_notes: Consider: geography, population, resource requirements, complexity
+Rules for Risk Assessment:
 - risks_identified: List potential harms, adverse effects, or implementation challenges FROM THE INTERVENTION ITSELF.
   - Include: adverse outcomes, cost/feasibility barriers, equity concerns, sustainability challenges, unintended side effects.
   - Do NOT include: the underlying problem being addressed, prevalence/scale of the issue, or background harms unrelated to the intervention.
@@ -321,6 +327,15 @@ Rules for Predicted Impact Assessment:
     - ❌ "The problem is widespread and worsening"
     - ❌ "The issue causes major societal harm"
 - unintended_consequences_detected: True if paper mentions unintended negative effects
+
+Rules for Study Context (document-level fallback for transferability scoring):
+- country: The main study country/region for the document overall (not necessarily each intervention).
+- population: The main population studied/targeted (broad description).
+- inner_setting: The organisational context where the intervention(s) are delivered to recipients.
+  Use the recipient-facing setting, not the policy-making body.
+  Example: a council mandates school meals -> inner_setting is "School", not "Council".
+- cost_level/staffing_level/implementation_complexity_level: Coarse requirements for implementing the intervention(s) as described overall in the document.
+  Use High/Moderate/Low if inferable; otherwise null. Prefer the dominant or typical level if multiple interventions differ.
 
 Paper text:
 {full_text}

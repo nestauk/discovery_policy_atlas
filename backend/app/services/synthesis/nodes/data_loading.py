@@ -88,7 +88,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     docs_res = (
         supabase.table("analysis_documents")
         .select(
-            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, top_line, is_relevant, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown"
+            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, top_line, is_relevant, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, has_harm_warning, harm_warning_reason"
         )
         .eq("analysis_project_id", project_id)
         .execute()
@@ -119,21 +119,20 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         # Get evidence and impact scores from conclusion (prefer stored, fallback to recompute)
         extraction_results = doc.get("extraction_results") or {}
         conclusion = extraction_results.get("conclusion") or {}
-        predicted_impact = conclusion.get("predicted_impact") or {}
         evidence_info = get_or_calculate_document_evidence(doc)
 
         doc_scores[doc_uuid] = {
             "evidence_score": evidence_info["stars"],  # 0-5 with sample size penalty
-            "impact_score": doc.get("impact_score")
-            if doc.get("impact_score") is not None
-            else predicted_impact.get("stars"),
+            "impact_score": doc.get("impact_score"),
             "impact_score_label": doc.get("impact_score_label"),
             "impact_score_breakdown": doc.get("impact_score_breakdown"),
             "transferability_score": doc.get("transferability_score"),
             "transferability_breakdown": doc.get("transferability_breakdown"),
             "evidence_category": doc.get("evidence_category"),
             "evidence_justification": evidence_info["justification"],
-            "impact_justification": predicted_impact.get("justification", ""),
+            "impact_justification": "",
+            "has_harm_warning": bool(doc.get("has_harm_warning")),
+            "harm_warning_reason": doc.get("harm_warning_reason"),
         }
 
     # Fetch extractions
@@ -240,7 +239,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             return {
                 **base,
                 "type": "conclusion",
-                "predicted_impact": raw.get("predicted_impact") or {},
+                "risk_assessment": raw.get("risk_assessment") or {},
                 "evidence_strength": raw.get("evidence_strength") or {},
                 "supporting_quote": clean_null_string(raw.get("supporting_quote")),
             }
@@ -363,8 +362,8 @@ async def create_canonical_concepts(state: SynthesisState) -> SynthesisState:
             desc = f"Outcome: {ext.get('outcome_variable', '')}. Effect: {effect_dir}"
             outcome_concepts.append(Concept(id=ext["id"], canonical_description=desc))
         if ext.get("type") == "conclusion":
-            predicted_impact = ext.get("predicted_impact") or {}
-            risks = predicted_impact.get("risks_identified") or []
+            risk_assessment = ext.get("risk_assessment") or {}
+            risks = risk_assessment.get("risks_identified") or []
             for i, risk in enumerate(risks):
                 if risk and isinstance(risk, str):
                     risk_concepts.append(

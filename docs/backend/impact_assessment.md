@@ -83,20 +83,15 @@ Tier 1 extracts the intervention plus CFIR-inspired delivery characteristics:
 - **implementation_complexity_level** + justification
 - supporting quote(s)
 
-### Conclusions (document-level impact vector)
+### Conclusions (document-level risk assessment)
 
 Conclusions include:
 
 - **evidence_strength** (methodological quality rating)
-- **predicted_impact** evolved into a structured **ImpactPrediction** vector:
-  - magnitude estimate + justification (preliminary)
-  - causal reliability + justification (document-level, if available)
-  - transferability notes
+- **risk_assessment**:
   - risks identified + unintended consequences flag
     - risks are **intervention-related** (harms, adverse effects, implementation challenges)
     - do **not** include the underlying problem the intervention is trying to solve
-
-Backwards compatibility: older scalar `predicted_impact` shapes should be migrated into the new structure via a helper (Tier 1 plan).
 
 ## Tier 2 (“Judge”): cross-document synthesis
 
@@ -109,8 +104,8 @@ Tier 2 consumes Tier 1 extractions and produces theme-level synthesis with evide
 
 2. **Canonical concept creation**
    - Create canonical concepts for clustering.
-   - Extract **risk concepts** from:
-     - conclusion predicted impact risks (`risks_identified`)
+  - Extract **risk concepts** from:
+    - conclusion risk assessment (`risks_identified`)
      - results marked with `negative_impact_flag=true`
    - Load **target context** (inner setting / population) from project `search_query`.
    - Transferability geography is evaluated against a fixed UK target context.

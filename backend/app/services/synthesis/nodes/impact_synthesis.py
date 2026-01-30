@@ -12,12 +12,6 @@ from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
 from app.services.synthesis.state import SynthesisState, FinalTheme
-from app.services.analysis.scoring import (
-    compute_document_impact_score,
-    compute_harm_multiplier,
-    compute_intervention_impact_score,
-    compute_magnitude_adjustment,
-)
 from app.services.synthesis.schemas import (
     OutcomeTheme,
     PolicyIntervention,
@@ -29,8 +23,8 @@ from app.services.synthesis.schemas import (
     MagnitudeDetail,
     CausalityDetail,
 )
+from app.services.analysis.scoring import compute_intervention_impact_score
 from app.utils.llm.llm_utils import get_llm
-from app.services.vectorization import vectorization_service
 
 
 EFFECT_SIZE_SCALES = {
@@ -111,11 +105,10 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     db_theme_to_extraction_ids = state.get("db_theme_to_extraction_ids") or {}
     doc_metadata = state.get("doc_metadata") or {}
     extraction_to_doc = state.get("extraction_to_doc") or {}
-    outcome_doc_effects = state.get("outcome_doc_effects") or {}
 
     target_inner_setting = state.get("target_inner_setting") or []
     target_population = state.get("target_population") or []
-    target_geography = state.get("target_geography") or DEFAULT_TARGET_GEOGRAPHY
+    target_geography = DEFAULT_TARGET_GEOGRAPHY
     target_outcomes = state.get("target_outcomes") or []
     implementation_constraints = state.get("implementation_constraints") or {}
 
@@ -135,106 +128,6 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
         for uuid, meta in doc_metadata.items()
         if meta.get("doc_id")
     }
-
-    # LLM clients
-    transferability_llm = get_llm(TRANSFERABILITY_MODEL, temperature=0.0)
-    impact_summary_llm = get_llm(IMPACT_SUMMARY_MODEL, temperature=0.2)
-
-    # Build per-document extraction maps
-    intervention_by_doc: Dict[str, List[Dict]] = {}
-    for ext in intervention_extractions:
-        doc_uuid = str(ext.get("doc_uuid") or "")
-        if not doc_uuid:
-            continue
-        intervention_by_doc.setdefault(doc_uuid, []).append(ext)
-
-    conclusion_by_doc: Dict[str, Dict] = {}
-    for ext in conclusion_extractions:
-        doc_uuid = str(ext.get("doc_uuid") or "")
-        if doc_uuid:
-            conclusion_by_doc[doc_uuid] = ext
-
-    negative_impact_by_doc: Dict[str, bool] = {}
-    for ext in result_extractions:
-        doc_uuid = str(ext.get("doc_uuid") or "")
-        if not doc_uuid:
-            continue
-        if ext.get("negative_impact_flag") is True:
-            negative_impact_by_doc[doc_uuid] = True
-
-    # Compute per-document transferability and impact scores
-    doc_uuids_for_scoring = set(doc_metadata.keys())
-    if theme_to_doc_uuids:
-        doc_uuids_for_scoring = {
-            uuid for uuids in theme_to_doc_uuids.values() for uuid in uuids
-        }
-
-    async def score_document(doc_uuid: str) -> None:
-        doc_interventions = intervention_by_doc.get(doc_uuid, [])
-        (
-            transferability_score,
-            transferability_breakdown,
-        ) = await compute_document_transferability(
-            doc_interventions,
-            target_inner_setting,
-            target_population,
-            target_geography,
-            implementation_constraints,
-            transferability_llm,
-        )
-
-        conclusion = conclusion_by_doc.get(doc_uuid, {})
-        predicted_impact = conclusion.get("predicted_impact") or {}
-        magnitude_estimate = compute_document_magnitude_from_effects(
-            doc_uuid, result_extractions, doc_scores
-        ) or predicted_impact.get("magnitude_estimate")
-        risks_identified = predicted_impact.get("risks_identified") or []
-        unintended = predicted_impact.get("unintended_consequences_detected") is True
-        has_negative_impact = negative_impact_by_doc.get(doc_uuid, False) or unintended
-
-        magnitude_adjustment = compute_magnitude_adjustment(magnitude_estimate)
-        harm_multiplier = compute_harm_multiplier(has_negative_impact, risks_identified)
-        evidence_score = doc_scores.get(doc_uuid, {}).get("evidence_score")
-        score, label, breakdown = compute_document_impact_score(
-            evidence_score,
-            transferability_score,
-            magnitude_adjustment,
-            harm_multiplier,
-        )
-
-        doc_scores.setdefault(doc_uuid, {})
-        doc_scores[doc_uuid].update(
-            {
-                "impact_score": score,
-                "impact_score_label": label,
-                "impact_score_breakdown": breakdown,
-                "transferability_score": transferability_score,
-                "transferability_breakdown": transferability_breakdown,
-            }
-        )
-
-    if doc_uuids_for_scoring:
-        await asyncio.gather(*(score_document(uuid) for uuid in doc_uuids_for_scoring))
-        updates = []
-        for doc_uuid in doc_uuids_for_scoring:
-            entry = doc_scores.get(doc_uuid) or {}
-            updates.append(
-                {
-                    "id": doc_uuid,
-                    "impact_score": entry.get("impact_score"),
-                    "impact_score_label": entry.get("impact_score_label"),
-                    "impact_score_breakdown": entry.get("impact_score_breakdown"),
-                    "transferability_score": entry.get("transferability_score"),
-                    "transferability_breakdown": entry.get("transferability_breakdown"),
-                }
-            )
-        if updates:
-            try:
-                vectorization_service.supabase.table("analysis_documents").upsert(
-                    updates
-                ).execute()
-            except Exception:
-                pass
 
     # Enrich outcomes with verdict and magnitude
     enriched_outcomes: List[OutcomeTheme] = []
@@ -299,6 +192,9 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             outcomes_by_intervention.setdefault(intervention_key, []).append(outcome)
 
     # Enrich interventions with transferability and causal mechanism
+    transferability_llm = get_llm(TRANSFERABILITY_MODEL, temperature=0.0)
+    impact_summary_llm = get_llm(IMPACT_SUMMARY_MODEL, temperature=0.2)
+
     async def build_intervention(
         intervention: PolicyIntervention,
     ) -> PolicyIntervention:
@@ -331,16 +227,42 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
                 state.get("research_question") or "Not specified",
                 impact_summary_llm,
             )
+        document_scores = []
+        for doc_uuid in doc_uuids:
+            score_entry = doc_scores.get(doc_uuid) or {}
+            score_value = score_entry.get("impact_score")
+            if score_value is None:
+                continue
+            evidence_score = score_entry.get("evidence_score") or 1
+            document_scores.append(
+                (
+                    float(score_value),
+                    str(score_entry.get("impact_score_label") or "Unknown"),
+                    score_entry.get("impact_score_breakdown") or {},
+                    float(evidence_score),
+                )
+            )
+        (
+            impact_score,
+            impact_score_label,
+            impact_score_breakdown,
+        ) = compute_intervention_impact_score(document_scores)
         return PolicyIntervention(
             **intervention.model_dump(
                 exclude={
                     "impact_summary",
+                    "impact_score",
+                    "impact_score_label",
+                    "impact_score_breakdown",
                     "transferability_rating",
                     "transferability_note",
                     "transferability_breakdown",
                 }
             ),
             impact_summary=impact_summary,
+            impact_score=impact_score,
+            impact_score_label=impact_score_label,
+            impact_score_breakdown=impact_score_breakdown,
             transferability_rating=rating,
             transferability_note=note,
             transferability_breakdown=breakdown,
@@ -393,80 +315,10 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             )
         )
 
-    def resolve_doc_effect_direction(effect_list: List[str]) -> str:
-        counts = {"positive": 0, "negative": 0, "null": 0}
-        for effect in effect_list:
-            if effect in counts:
-                counts[effect] += 1
-        if counts["positive"] > counts["negative"]:
-            return "increase"
-        if counts["negative"] > counts["positive"]:
-            return "decrease"
-        if counts["null"] > 0:
-            return "null"
-        return "mixed"
-
-    def build_doc_effect_map(intervention_name: str) -> Dict[str, str]:
-        doc_effect_map: Dict[str, List[str]] = {}
-        for key, doc_effects in outcome_doc_effects.items():
-            if not key.endswith(f"::{intervention_name}"):
-                continue
-            for doc_id, effects in (doc_effects or {}).items():
-                doc_uuid = doc_uuid_by_doc_id.get(str(doc_id))
-                if not doc_uuid:
-                    continue
-                doc_effect_map.setdefault(doc_uuid, []).extend(effects)
-        return {
-            doc_uuid: resolve_doc_effect_direction(effects)
-            for doc_uuid, effects in doc_effect_map.items()
-        }
-
-    enriched_with_scores: List[PolicyIntervention] = []
-    for intervention in enriched_interventions:
-        doc_uuids = theme_to_doc_uuids.get(intervention.intervention_name, [])
-        doc_effect_directions = build_doc_effect_map(intervention.intervention_name)
-        document_scores: List[Tuple[int, Dict[str, object], str]] = []
-        for doc_uuid in doc_uuids:
-            score_entry = doc_scores.get(doc_uuid, {}) or {}
-            impact_score = score_entry.get("impact_score")
-            breakdown = score_entry.get("impact_score_breakdown") or {}
-            if "evidence_strength" not in breakdown:
-                breakdown["evidence_strength"] = score_entry.get("evidence_score") or 1
-            if impact_score is None:
-                impact_score = 1
-            direction = doc_effect_directions.get(doc_uuid, "null")
-            document_scores.append((impact_score, breakdown, direction))
-
-        relevant_risks = [
-            r
-            for r in enriched_risk_themes
-            if r.linked_intervention_theme_id == intervention.intervention_name
-        ]
-        risk_dicts = [r.model_dump() for r in relevant_risks]
-        score, label, breakdown = compute_intervention_impact_score(
-            document_scores, risk_dicts
-        )
-
-        enriched_with_scores.append(
-            PolicyIntervention(
-                **intervention.model_dump(
-                    exclude={
-                        "impact_score",
-                        "impact_score_label",
-                        "impact_score_breakdown",
-                    }
-                ),
-                impact_score=score,
-                impact_score_label=label,
-                impact_score_breakdown=breakdown,
-            )
-        )
-
     return {
         "aggregated_outcomes": enriched_outcomes,
-        "aggregated_interventions": enriched_with_scores,
+        "aggregated_interventions": enriched_interventions,
         "final_risk_themes": enriched_risk_themes,
-        "doc_scores": doc_scores,
     }
 
 
@@ -707,20 +559,6 @@ def infer_evidence_level(levels: List[Optional[str]]) -> str:
     if not counts:
         return "unknown"
     return max(counts, key=counts.get)
-
-
-def compare_tolerance_level(
-    tolerance_level: Optional[str], evidence_level: Optional[str]
-) -> Optional[bool]:
-    """Return True if evidence exceeds tolerance, False if within, None if unknown."""
-    level_map = {"low": 1, "moderate": 2, "high": 3}
-    if not tolerance_level or not evidence_level:
-        return None
-    tolerance_val = level_map.get(tolerance_level)
-    evidence_val = level_map.get(evidence_level)
-    if tolerance_val is None or evidence_val is None:
-        return None
-    return evidence_val > tolerance_val
 
 
 def compute_implementation_requirements_rating(
@@ -1071,6 +909,18 @@ async def compute_transferability(
         compute_implementation_requirements_rating(evidence_levels)
     )
 
+    def compare_tolerance_level(
+        tolerance_level: Optional[str], evidence_level: Optional[str]
+    ) -> Optional[bool]:
+        level_map = {"low": 1, "moderate": 2, "high": 3}
+        if not tolerance_level or not evidence_level:
+            return None
+        tolerance_val = level_map.get(tolerance_level)
+        evidence_val = level_map.get(evidence_level)
+        if tolerance_val is None or evidence_val is None:
+            return None
+        return evidence_val > tolerance_val
+
     async def assess_or_infer_level(
         dimension: str,
         target_level: Optional[str],
@@ -1175,131 +1025,6 @@ async def compute_transferability(
     return (context_rating, context_note, breakdown)
 
 
-async def compute_document_transferability(
-    doc_interventions: List[Dict],
-    target_inner_setting: List[str],
-    target_population: List[str],
-    target_geography: List[str],
-    implementation_constraints: Optional[Dict[str, Optional[str]]],
-    llm,
-) -> Tuple[float, Dict[str, object]]:
-    """Compute transferability score (T) for a single document."""
-    evidence_values = {
-        "inner_setting": [e.get("inner_setting") for e in doc_interventions],
-        "population": [e.get("population_intervened") for e in doc_interventions],
-        "geography": [e.get("country") for e in doc_interventions],
-        "cost": [e.get("cost_level") for e in doc_interventions],
-        "staffing": [e.get("staffing_level") for e in doc_interventions],
-        "implementation_complexity": [
-            e.get("implementation_complexity_level") for e in doc_interventions
-        ],
-    }
-
-    if not doc_interventions:
-        return (
-            0.5,
-            {
-                "context_fit": 0.5,
-                "context_levels": {},
-                "constraint_penalty": 1.0,
-                "exceeds_constraints": {},
-                "evidence_levels": {},
-            },
-        )
-
-    (
-        (inner_setting_level, inner_setting_note),
-        (population_level, population_note),
-        (geography_level, geography_note),
-    ) = await asyncio.gather(
-        assess_transferability_dimension(
-            "inner_setting",
-            target_inner_setting,
-            evidence_values["inner_setting"],
-            llm,
-        ),
-        assess_transferability_dimension(
-            "population",
-            target_population,
-            evidence_values["population"],
-            llm,
-        ),
-        assess_transferability_dimension(
-            "geography",
-            target_geography,
-            evidence_values["geography"],
-            llm,
-        ),
-    )
-
-    match_scores = {
-        "match": 1.0,
-        "similar": 0.85,
-        "comparable": 0.7,
-        "partial": 0.4,
-        "mismatch": 0.15,
-        "unknown": None,
-        "not_compared": None,
-    }
-    context_scores = [
-        match_scores.get(inner_setting_level),
-        match_scores.get(population_level),
-        match_scores.get(geography_level),
-    ]
-    valid_scores = [score for score in context_scores if score is not None]
-    context_fit = (
-        0.5 if len(valid_scores) < 2 else sum(valid_scores) / len(valid_scores)
-    )
-
-    evidence_levels = {
-        "cost": infer_evidence_level(evidence_values["cost"]),
-        "staffing": infer_evidence_level(evidence_values["staffing"]),
-        "implementation_complexity": infer_evidence_level(
-            evidence_values["implementation_complexity"]
-        ),
-    }
-
-    constraint_penalty = 1.0
-    exceeds_constraints: Dict[str, bool] = {}
-    if implementation_constraints:
-        constraint_values = {
-            "cost": normalise_level(implementation_constraints.get("cost")),
-            "staffing": normalise_level(implementation_constraints.get("staffing")),
-            "implementation_complexity": normalise_level(
-                implementation_constraints.get("implementation_complexity")
-            ),
-        }
-        for key, tolerance_level in constraint_values.items():
-            evidence_level = evidence_levels.get(key)
-            exceeds = compare_tolerance_level(tolerance_level, evidence_level)
-            if exceeds is True:
-                exceeds_constraints[key] = True
-                constraint_penalty *= 0.5
-
-    transferability_score = context_fit * constraint_penalty
-    transferability_score = max(0.2, min(1.0, transferability_score))
-
-    return (
-        transferability_score,
-        {
-            "context_fit": round(context_fit, 2),
-            "context_levels": {
-                "inner_setting": inner_setting_level,
-                "population": population_level,
-                "geography": geography_level,
-            },
-            "context_notes": {
-                "inner_setting": inner_setting_note,
-                "population": population_note,
-                "geography": geography_note,
-            },
-            "evidence_levels": evidence_levels,
-            "constraint_penalty": round(constraint_penalty, 2),
-            "exceeds_constraints": exceeds_constraints,
-        },
-    )
-
-
 def compute_causal_mechanism(
     source_doc_ids: List[str],
     result_extractions: List[Dict],
@@ -1327,31 +1052,6 @@ def compute_causal_mechanism(
         correlation=weights.get("correlation", 0),
     )
     return (primary, detail)
-
-
-def compute_document_magnitude_from_effects(
-    doc_uuid: str,
-    result_extractions: List[Dict],
-    doc_scores: Dict[str, Dict],
-) -> Optional[SemanticMagnitudeType]:
-    """Compute per-document magnitude bucket from extracted effect sizes."""
-    magnitude_weights: Dict[str, float] = {}
-    for ext in result_extractions:
-        if str(ext.get("doc_uuid") or "") != doc_uuid:
-            continue
-        effect_size = ext.get("effect_size", "")
-        numeric_val = parse_effect_size_value(effect_size)
-        if numeric_val is None:
-            continue
-        effect_type = (ext.get("effect_size_type") or "").lower()
-        scale_type = detect_scale_type(effect_type, effect_size)
-        magnitude = apply_magnitude_thresholds(numeric_val, scale_type)
-        weight = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
-        magnitude_weights[magnitude] = magnitude_weights.get(magnitude, 0.0) + weight
-
-    if not magnitude_weights:
-        return None
-    return max(magnitude_weights, key=magnitude_weights.get)
 
 
 def resolve_effect_direction(direction_weights: Dict[str, int]) -> str:
@@ -1469,8 +1169,8 @@ def compute_harm_warning(
     for ext in conclusion_extractions:
         if ext.get("doc_id") not in high_quality_docs:
             continue
-        predicted_impact = ext.get("predicted_impact") or {}
-        if predicted_impact.get("unintended_consequences_detected") is True:
+        risk_assessment = ext.get("risk_assessment") or {}
+        if risk_assessment.get("unintended_consequences_detected") is True:
             unintended_count += 1
 
     return (unintended_count / len(high_quality_docs)) > 0.2

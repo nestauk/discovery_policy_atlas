@@ -139,7 +139,6 @@ def build_doc_scores_and_mappings(
 
         # Get conclusion scores
         conclusion = extraction_results.get("conclusion", {}) or {}
-        predicted_impact = conclusion.get("predicted_impact", {}) or {}
         stored_evidence = conclusion.get("evidence_strength", {}) or {}
 
         # Prefer stored evidence strength, fallback to recompute
@@ -154,10 +153,16 @@ def build_doc_scores_and_mappings(
             evidence_sample_size = evidence_result.get("sample_size")
 
         doc_scores[doc_id] = {
-            "impact_score": predicted_impact.get("stars"),
+            "impact_score": document.get("impact_score"),
+            "impact_score_label": document.get("impact_score_label"),
+            "impact_score_breakdown": document.get("impact_score_breakdown"),
+            "transferability_score": document.get("transferability_score"),
+            "transferability_breakdown": document.get("transferability_breakdown"),
+            "has_harm_warning": bool(document.get("has_harm_warning")),
+            "harm_warning_reason": document.get("harm_warning_reason"),
             "evidence_score": evidence_score,
             "sample_size": evidence_sample_size,
-            "impact_justification": predicted_impact.get("justification", ""),
+            "impact_justification": document.get("impact_score_label", "") or "",
             "evidence_justification": evidence_justification,
         }
 
@@ -231,9 +236,15 @@ def _build_detailed_intervention(
         "is_systematic_review": evidence_cat == "Systematic Review and Meta-Analysis",
         "sample_size": parse_sample_size(raw_data.get("sample_size")),
         "impact_score": scores.get("impact_score"),
+        "impact_score_label": scores.get("impact_score_label"),
+        "impact_score_breakdown": scores.get("impact_score_breakdown"),
+        "transferability_score": scores.get("transferability_score"),
+        "transferability_breakdown": scores.get("transferability_breakdown"),
         "evidence_score": scores.get("evidence_score"),
         "impact_justification": scores.get("impact_justification", ""),
         "evidence_justification": scores.get("evidence_justification", ""),
+        "has_harm_warning": scores.get("has_harm_warning", False),
+        "harm_warning_reason": scores.get("harm_warning_reason"),
         "results": intervention_results,
         "source_documents": [
             {

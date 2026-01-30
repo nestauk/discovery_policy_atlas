@@ -76,11 +76,6 @@ interface DocumentDetailResult {
         justification?: string
         evidence_gap?: string
       }
-      predicted_impact?: {
-        stars?: number | null
-        justification?: string
-        evidence_gap?: string
-      }
     }
     metadata?: Record<string, unknown>
   }
@@ -365,7 +360,7 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
                     </div>
                   )}
 
-                  {(conclusion.evidence_strength || conclusion.predicted_impact) && (
+                  {conclusion.evidence_strength && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {conclusion.evidence_strength && (
                         <div>
@@ -383,26 +378,6 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
                             )}
                             {conclusion.evidence_strength.stars == null && conclusion.evidence_strength.evidence_gap && (
                               <p className="text-xs text-gray-500 mt-1">Evidence gap: {conclusion.evidence_strength.evidence_gap}</p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {conclusion.predicted_impact && (
-                        <div>
-                          <h6 className="font-medium text-purple-900 text-sm mb-1">Predicted impact</h6>
-                          <div className="text-sm text-gray-700">
-                            {typeof conclusion.predicted_impact.stars === 'number' && (
-                              <div className="mb-1">
-                                <span className="font-medium">Stars: </span>
-                                {"★".repeat(Math.max(0, Math.min(5, conclusion.predicted_impact.stars)))}
-                                {"☆".repeat(Math.max(0, 5 - Math.max(0, Math.min(5, conclusion.predicted_impact.stars))))}
-                              </div>
-                            )}
-                            {conclusion.predicted_impact.justification && (
-                              <p className="text-sm text-gray-700">{conclusion.predicted_impact.justification}</p>
-                            )}
-                            {conclusion.predicted_impact.stars == null && conclusion.predicted_impact.evidence_gap && (
-                              <p className="text-xs text-gray-500 mt-1">Evidence gap: {conclusion.predicted_impact.evidence_gap}</p>
                             )}
                           </div>
                         </div>

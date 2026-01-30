@@ -8,14 +8,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import pandas as pd
 import math
+import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from supabase import create_client
 from app.core.config import settings
+from app.utils.llm.llm_utils import get_llm
 from .schemas import RunConfig, RunResult, UnifiedReference
-from .schemas_langchain import DocumentExtractionBundle
+from .schemas_langchain import DocumentExtractionBundle, ResultItem
+from .scoring import (
+    compute_document_impact_score,
+    compute_document_transferability,
+    compute_harm_warning,
+)
 from .chunking import chunk_document_text
 from ..vectorization import VectorizationService
 
@@ -28,6 +34,8 @@ class AnalysisStorageService:
     def __init__(self):
         self._supabase = None
         self._vectorization_service = None
+        self._scoring_llm = None
+        self._project_search_cache: Dict[str, Dict[str, Any]] = {}
         # Limit concurrent DB queries to prevent connection exhaustion
         # Generous limit of 50 concurrent queries
         self._db_semaphore = asyncio.Semaphore(50)
@@ -54,6 +62,12 @@ class AnalysisStorageService:
         if self._vectorization_service is None:
             self._vectorization_service = VectorizationService()
         return self._vectorization_service
+
+    def _get_scoring_llm(self):
+        """Return a cached LLM instance for scoring tasks."""
+        if self._scoring_llm is None:
+            self._scoring_llm = get_llm(settings.LLM_MODEL, temperature=0.0)
+        return self._scoring_llm
 
     async def _async_supabase_query(self, query_func):
         """
@@ -83,6 +97,221 @@ class AnalysisStorageService:
         if isinstance(data, dict):
             return {k: self._clean_data_for_json(v) for k, v in data.items()}
         return data
+
+    async def _get_project_search_query(self, project_id: str) -> Dict[str, Any]:
+        """Fetch cached search query context for the given project.
+
+        Args:
+            project_id (str): Analysis project UUID.
+
+        Returns:
+            Dict[str, Any]: Stored search query context (may be empty).
+        """
+        if project_id in self._project_search_cache:
+            return self._project_search_cache[project_id]
+
+        try:
+            response = await self._async_supabase_query(
+                lambda: self.supabase.table("analysis_projects")
+                .select("search_query")
+                .eq("id", project_id)
+                .execute()
+            )
+            search_query = {}
+            if response.data:
+                stored = response.data[0].get("search_query") or {}
+                if isinstance(stored, str):
+                    try:
+                        stored = json.loads(stored)
+                    except json.JSONDecodeError:
+                        stored = {}
+                if isinstance(stored, dict):
+                    search_query = stored
+            self._project_search_cache[project_id] = search_query
+            return search_query
+        except Exception as exc:
+            logger.warning(f"Failed to load search query context: {exc}")
+            return {}
+
+    def _normalise_context_list(self, value: Any) -> List[str]:
+        """Normalise context inputs into a list of strings."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item) for item in value if item]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
+
+    async def _compute_document_scoring_fields(
+        self,
+        project_id: Optional[str],
+        extraction_data: Dict[str, Any],
+        doc_source_country: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Compute document-level scores and harm warnings from extraction data.
+
+        Args:
+            project_id (Optional[str]): Analysis project UUID.
+            extraction_data (Dict[str, Any]): Extraction payload for the document.
+
+        Returns:
+            Dict[str, Any]: Fields for analysis_documents update.
+        """
+        try:
+
+            def _is_null_like(value: object) -> bool:
+                if value is None:
+                    return True
+                if isinstance(value, str):
+                    return value.strip().lower() in {"", "null", "none", "n/a", "na"}
+                return False
+
+            results = extraction_data.get("results", []) or []
+            outcomes = [ResultItem(**result) for result in results]
+
+            interventions = extraction_data.get("interventions", []) or []
+            countries = []
+            populations = []
+            settings = []
+            cost_levels = []
+            staffing_levels = []
+            complexity_levels = []
+
+            for intervention in interventions:
+                country = intervention.get("country")
+                if country and not _is_null_like(country):
+                    countries.append(country)
+
+                population = intervention.get("population_intervened")
+                if population and not _is_null_like(population):
+                    populations.append(population)
+
+                setting = intervention.get("inner_setting")
+                if setting and not _is_null_like(setting):
+                    settings.append(setting)
+
+                cost_level = intervention.get("cost_level")
+                if cost_level and not _is_null_like(cost_level):
+                    cost_levels.append(cost_level)
+
+                staffing_level = intervention.get("staffing_level")
+                if staffing_level and not _is_null_like(staffing_level):
+                    staffing_levels.append(staffing_level)
+
+                complexity_level = intervention.get("implementation_complexity_level")
+                if complexity_level and not _is_null_like(complexity_level):
+                    complexity_levels.append(complexity_level)
+
+            # Hybrid context fallback: if intervention-level context is missing/empty,
+            # fill gaps from document-level study_context (extracted once per document).
+            conclusion = extraction_data.get("conclusion")
+            if not isinstance(conclusion, dict):
+                conclusion = {}
+            study_context = conclusion.get("study_context") or {}
+
+            if not countries and not _is_null_like(study_context.get("country")):
+                countries.append(study_context.get("country"))
+            if not populations and not _is_null_like(study_context.get("population")):
+                populations.append(study_context.get("population"))
+            if not settings and not _is_null_like(study_context.get("inner_setting")):
+                settings.append(study_context.get("inner_setting"))
+
+            if not cost_levels and not _is_null_like(study_context.get("cost_level")):
+                cost_levels.append(study_context.get("cost_level"))
+            if not staffing_levels and not _is_null_like(
+                study_context.get("staffing_level")
+            ):
+                staffing_levels.append(study_context.get("staffing_level"))
+            if not complexity_levels and not _is_null_like(
+                study_context.get("implementation_complexity_level")
+            ):
+                complexity_levels.append(
+                    study_context.get("implementation_complexity_level")
+                )
+
+            if not countries and doc_source_country:
+                countries = [
+                    value.strip()
+                    for value in str(doc_source_country).split(",")
+                    if value.strip()
+                ]
+
+            doc_context = {
+                "country": countries,
+                "population_intervened": populations,
+                "inner_setting": settings,
+            }
+
+            implementation_evidence = {
+                "cost_level": cost_levels,
+                "staffing_level": staffing_levels,
+                "implementation_complexity_level": complexity_levels,
+            }
+
+            search_query = (
+                await self._get_project_search_query(project_id) if project_id else {}
+            )
+            # Policy Atlas users are UK-based; align document-level transferability
+            # with synthesis by defaulting geography to UK when not explicitly set.
+            default_geography = ["UK"]
+            target_geography = self._normalise_context_list(
+                search_query.get("geography")
+            )
+            if not target_geography:
+                target_geography = default_geography
+            target_context = {
+                "geography": target_geography,
+                "population": self._normalise_context_list(
+                    search_query.get("population")
+                ),
+                "setting": self._normalise_context_list(
+                    search_query.get("inner_setting")
+                ),
+            }
+            target_outcomes = self._normalise_context_list(search_query.get("outcome"))
+            user_constraints = search_query.get("implementation_constraints")
+
+            llm = self._get_scoring_llm()
+            (
+                transferability,
+                transferability_breakdown,
+            ) = await compute_document_transferability(
+                doc_context,
+                target_context,
+                implementation_evidence,
+                user_constraints,
+                llm,
+            )
+
+            score, label, breakdown = await compute_document_impact_score(
+                outcomes,
+                target_outcomes if target_outcomes else None,
+                transferability,
+                llm,
+            )
+
+            risk_assessment = conclusion.get("risk_assessment") or {}
+            risks_identified = risk_assessment.get("risks_identified", [])
+            has_negative_impact = any(
+                outcome.negative_impact_flag for outcome in outcomes
+            )
+            harm_flag, harm_reason = compute_harm_warning(
+                has_negative_impact, risks_identified
+            )
+
+            return {
+                "impact_score": score,
+                "impact_score_label": label,
+                "impact_score_breakdown": breakdown,
+                "transferability_score": transferability,
+                "transferability_breakdown": transferability_breakdown,
+                "has_harm_warning": harm_flag,
+                "harm_warning_reason": harm_reason,
+            }
+        except Exception as exc:
+            logger.warning(f"Document scoring failed: {exc}")
+            return {}
 
     async def store_initial_documents(
         self, project_id: str, references: List[UnifiedReference]
@@ -171,6 +400,25 @@ class AnalysisStorageService:
                 "extraction_status": "completed",
                 "upload_step": "extracted",
             }
+            source_country = None
+            try:
+                doc_meta = await self._async_supabase_query(
+                    lambda: self.supabase.table("analysis_documents")
+                    .select("source_country")
+                    .eq("analysis_project_id", project_id)
+                    .eq("doc_id", doc_id)
+                    .limit(1)
+                    .execute()
+                )
+                if doc_meta.data:
+                    source_country = doc_meta.data[0].get("source_country")
+            except Exception as exc:
+                logger.warning(f"Failed to load source_country for {doc_id}: {exc}")
+            doc_update.update(
+                await self._compute_document_scoring_fields(
+                    project_id, extraction_data, doc_source_country=source_country
+                )
+            )
 
             doc_response = await self._async_supabase_query(
                 lambda: self.supabase.table("analysis_documents")
@@ -388,15 +636,35 @@ class AnalysisStorageService:
 
         # Update documents with extraction results
         updates = []
+        doc_source_lookup: Dict[str, Optional[str]] = {}
+        try:
+            source_rows = await self._async_supabase_query(
+                lambda: self.supabase.table("analysis_documents")
+                .select("doc_id, source_country")
+                .eq("analysis_project_id", project_id)
+                .execute()
+            )
+            if source_rows.data:
+                doc_source_lookup = {
+                    row.get("doc_id"): row.get("source_country")
+                    for row in source_rows.data
+                }
+        except Exception as exc:
+            logger.warning(f"Failed to build source_country lookup: {exc}")
         for extraction in extractions_data.get("extractions", []):
             doc_id = extraction.get("paper_id")
             if doc_id:
+                source_country = doc_source_lookup.get(doc_id)
+                scoring_fields = await self._compute_document_scoring_fields(
+                    project_id, extraction, doc_source_country=source_country
+                )
                 updates.append(
                     {
                         "doc_id": doc_id,
                         "extraction_results": extraction,
                         "extraction_status": "completed",
                         "upload_step": "extracted",
+                        **scoring_fields,
                     }
                 )
 

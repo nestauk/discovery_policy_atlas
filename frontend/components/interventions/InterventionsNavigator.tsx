@@ -76,6 +76,8 @@ interface DetailedIntervention {
   transferability_breakdown?: Record<string, unknown> | null
   impact_justification?: string
   evidence_justification?: string
+  has_harm_warning?: boolean
+  harm_warning_reason?: string
   document_url?: string
   results: Array<{
     outcome_variable?: string
@@ -496,6 +498,8 @@ export function InterventionsNavigator({
       documents: Map<string, AggregatedInterventionRow['documents'][number]>
       evidence_scores: Array<{ score: number; justification?: string }>
       impact_justifications: Array<{ score: number; justification?: string }>
+      has_harm_warning: boolean
+      harm_warning_reasons: Set<string>
     }>()
 
     const getDisplayValue = (value?: string) => {
@@ -526,6 +530,8 @@ export function InterventionsNavigator({
           documents: new Map(),
           evidence_scores: [],
           impact_justifications: [],
+          has_harm_warning: false,
+          harm_warning_reasons: new Set(),
         })
       }
 
@@ -622,6 +628,13 @@ export function InterventionsNavigator({
           justification: detail.evidence_justification,
         })
       }
+
+      if (detail.has_harm_warning) {
+        entry.has_harm_warning = true
+        if (detail.harm_warning_reason) {
+          entry.harm_warning_reasons.add(detail.harm_warning_reason)
+        }
+      }
     })
 
     return Array.from(aggregated.values()).map((entry) => {
@@ -653,6 +666,10 @@ export function InterventionsNavigator({
         {}
       )
 
+      const harmWarningReason = entry.harm_warning_reasons.size > 0
+        ? Array.from(entry.harm_warning_reasons).join('; ')
+        : undefined
+
       return {
         name: entry.name,
         type: entry.types.size > 0 ? Array.from(entry.types).join(', ') : 'Unknown',
@@ -670,6 +687,8 @@ export function InterventionsNavigator({
         evidence_score: evidenceScoreEntry.score,
         impact_justification: impactScoreEntry.justification,
         evidence_justification: evidenceScoreEntry.justification,
+        has_harm_warning: entry.has_harm_warning,
+        harm_warning_reason: harmWarningReason,
       }
     })
   }, [])

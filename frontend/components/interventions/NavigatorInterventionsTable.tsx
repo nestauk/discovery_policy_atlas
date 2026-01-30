@@ -8,7 +8,8 @@ import { Tooltip } from '@/components/ui/tooltip'
 import {
   ChevronUp,
   ChevronDown,
-  Target
+  Target,
+  AlertTriangle,
 } from 'lucide-react'
 import {
   getEvidenceCategoryColors,
@@ -74,6 +75,8 @@ interface NavigatorInterventionData {
   evidence_score?: number
   impact_justification?: string
   evidence_justification?: string
+  has_harm_warning?: boolean
+  harm_warning_reason?: string
 }
 
 interface NavigatorInterventionsTableProps {
@@ -224,6 +227,16 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
         tooltip={justification || defaultTooltip}
         showGreyedStarsOnNull={true}
       />
+    )
+  }
+
+  const renderHarmWarning = (hasWarning?: boolean, reason?: string) => {
+    if (!hasWarning) return null
+    const tooltipText = reason || 'Potential harms or adverse outcomes reported'
+    return (
+      <Tooltip content={tooltipText}>
+        <AlertTriangle className="h-3 w-3 text-amber-600" />
+      </Tooltip>
     )
   }
 
@@ -384,11 +397,17 @@ export function NavigatorInterventionsTable({ interventions, loading = false }: 
                 </div>
 
                 <div className="col-span-1">
+                  <div className="flex items-center gap-1">
                   {renderRating(
                     intervention.impact_score,
                     intervention.impact_justification,
                     'Predicted impact of this intervention based on reported outcomes'
                   )}
+                    {renderHarmWarning(
+                      intervention.has_harm_warning,
+                      intervention.harm_warning_reason
+                    )}
+                  </div>
                 </div>
 
                 <div className="col-span-2 text-center">

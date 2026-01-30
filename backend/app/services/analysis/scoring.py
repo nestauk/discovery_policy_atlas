@@ -2,179 +2,569 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+import asyncio
+import json
+from typing import Dict, List, Optional, Tuple, Union
 
+from .schemas_langchain import ResultItem
 
-IMPACT_SCORE_WEIGHTS = {
-    "q": 0.4,
-    "t": 0.3,
-    "m": 0.2,
-    "r": 0.1,
+MATCH_SCORES = {
+    "match": 1.0,
+    "similar": 0.85,
+    "comparable": 0.7,
+    "partial": 0.4,
+    "mismatch": 0.15,
+    "unknown": 0.5,
+}
+
+MAGNITUDE_NORMALISED = {
+    "substantial": 1.0,
+    "large": 0.75,
+    "moderate": 0.5,
+    "marginal": 0.25,
+    "unknown": 0.25,
+    "transformational": 1.0,
+}
+
+CAUSAL_WEIGHTS = {
+    "attribution": 1.0,
+    "contribution": 0.9,
+    "correlation": 0.7,
+    # Missing/unknown should be neutral-ish (do not punish missingness heavily).
+    None: 0.9,
 }
 
 
-def get_impact_score_weights() -> Dict[str, float]:
-    """Return constant weights for impact scoring."""
-    return dict(IMPACT_SCORE_WEIGHTS)
+def _normalise_causality_claim(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        raw = value.strip().lower()
+        if not raw or raw == "null" or raw == "none":
+            return None
+        if raw in ("attribution", "contribution", "correlation"):
+            return raw
+        return None
+    return _normalise_causality_claim(str(value))
 
 
-def compute_magnitude_adjustment(magnitude_estimate: Optional[str]) -> float:
-    magnitude_values = {
-        "transformational": 0.5,
-        "substantial": 0.3,
-        "moderate": 0.15,
-        "marginal": 0.05,
-        "unknown": 0.1,
-    }
-    return magnitude_values.get((magnitude_estimate or "unknown").lower(), 0.1)
+def _causal_weight(value: object) -> float:
+    claim = _normalise_causality_claim(value)
+    return float(CAUSAL_WEIGHTS.get(claim, 0.9))
 
 
-def compute_harm_multiplier(
+def _normalise_requirement_level(value: object) -> Optional[str]:
+    """Normalise an extracted implementation requirement level.
+
+    The extraction sometimes returns:
+    - actual nulls
+    - the string "null"
+    - a pipe-delimited string like "Moderate|null"
+    - a list of any of the above (when aggregating across interventions)
+
+    Args:
+        value (object): Raw requirement level.
+
+    Returns:
+        Optional[str]: One of {"low", "moderate", "high"} or None if unavailable.
+    """
+    if value is None:
+        return None
+
+    if isinstance(value, list):
+        levels = [_normalise_requirement_level(item) for item in value]
+        levels = [level for level in levels if level]
+        if not levels:
+            return None
+        level_order = {"low": 1, "moderate": 2, "high": 3}
+        return max(levels, key=lambda level: level_order.get(level, 0))
+
+    if isinstance(value, str):
+        raw = value.strip().lower()
+        if not raw or raw == "null":
+            return None
+        tokens = [token.strip() for token in raw.split("|") if token.strip()]
+        for token in tokens:
+            if token in ("low", "moderate", "high"):
+                return token
+        return None
+
+    return _normalise_requirement_level(str(value))
+
+
+def compute_signed_magnitude(outcome: ResultItem) -> float:
+    """Return signed magnitude in the range -1.0 to +1.0.
+
+    Args:
+        outcome (ResultItem): Extracted outcome with direction and benefit flags.
+
+    Returns:
+        float: Signed magnitude (beneficial positive, harmful negative, null zero).
+    """
+    if outcome.effect_direction in ("null", "mixed", "inconclusive"):
+        return 0.0
+
+    magnitude_key = getattr(outcome, "magnitude_estimate", None) or "unknown"
+    magnitude = MAGNITUDE_NORMALISED.get(magnitude_key, 0.0)
+    return magnitude if outcome.is_beneficial else -magnitude
+
+
+def compute_harm_warning(
     has_negative_impact: bool,
     risks_identified: Optional[List[str]] = None,
-) -> float:
+) -> Tuple[bool, Optional[str]]:
+    """Return harm warning flag and reason.
+
+    Args:
+        has_negative_impact (bool): Whether adverse outcomes were found.
+        risks_identified (Optional[List[str]]): Extracted list of risks.
+
+    Returns:
+        Tuple[bool, Optional[str]]: Harm warning flag and reason.
+    """
     risks_identified = risks_identified or []
     if has_negative_impact:
-        return 0.5
+        return (True, "Study found adverse outcomes")
     if len(risks_identified) > 2:
-        return 0.8
-    if len(risks_identified) > 0:
-        return 0.9
-    return 1.0
+        return (True, f"{len(risks_identified)} risks identified")
+    return (False, None)
 
 
-def compute_document_impact_score(
-    evidence_strength: Optional[int],
-    transferability_score: Optional[float],
-    magnitude_adjustment: float,
-    harm_multiplier: float,
-) -> Tuple[int, str, Dict[str, object]]:
-    """Compute document impact score using weighted multiplicative formula."""
-    weights = get_impact_score_weights()
-    q_val = evidence_strength if evidence_strength is not None else 1
-    t_val = transferability_score if transferability_score is not None else 0.5
-    t_val = max(0.2, min(1.0, t_val))
-    m_val = max(0.0, min(0.5, magnitude_adjustment))
-    r_val = max(0.5, min(1.0, harm_multiplier))
+async def assess_dimension(
+    dimension_name: str,
+    target_value: Optional[Union[str, List[str]]],
+    evidence_value: Optional[Union[str, List[str]]],
+    llm,
+) -> str:
+    """Assess similarity for a transferability dimension.
 
-    raw = (
-        (q_val ** weights["q"])
-        * (t_val ** weights["t"])
-        * ((1 + m_val) ** weights["m"])
-        * (r_val ** weights["r"])
-    )
+    Args:
+        dimension_name (str): Dimension being assessed (e.g., geography).
+        target_value (Optional[Union[str, List[str]]]): Target context values from the user.
+        evidence_value (Optional[str]): Evidence context value from extraction.
+        llm (Any): LLM client with async invoke.
 
-    # Scale to 1-5 range based on theoretical min/max for current weights.
-    # Q in [1,5], T in [0.2,1.0], M in [0,0.5], R in [0.5,1.0]
-    min_raw = (
-        (1 ** weights["q"])
-        * (0.2 ** weights["t"])
-        * (1.0 ** weights["m"])
-        * (0.5 ** weights["r"])
-    )
-    max_raw = (
-        (5 ** weights["q"])
-        * (1.0 ** weights["t"])
-        * (1.5 ** weights["m"])
-        * (1.0 ** weights["r"])
-    )
-    if max_raw <= min_raw:
-        scaled = 1.0
+    Returns:
+        str: Match level in {match, similar, comparable, partial, mismatch, unknown}.
+    """
+    if not evidence_value or not target_value:
+        return "unknown"
+
+    if isinstance(target_value, list):
+        targets = [value for value in target_value if value]
+        if not targets:
+            return "unknown"
     else:
-        scaled = 1 + (raw - min_raw) * (4.0 / (max_raw - min_raw))
-    final_score = max(1, min(5, round(scaled)))
+        targets = [target_value]
 
-    labels = {5: "High Impact", 4: "Good Impact", 3: "Moderate", 2: "Limited", 1: "Low"}
+    if isinstance(evidence_value, list):
+        evidence_values = [value for value in evidence_value if value]
+        if not evidence_values:
+            return "unknown"
+    else:
+        evidence_values = [evidence_value]
+
+    evidence_norms = [str(value).strip().lower() for value in evidence_values]
+    for target in targets:
+        target_norm = str(target).strip().lower()
+        if target_norm in evidence_norms:
+            return "match"
+
+    target_text = "; ".join(str(value) for value in targets)
+    evidence_text = "; ".join(str(value) for value in evidence_values)
+
+    prompt = (
+        "You are assessing transferability of research evidence to a target context.\n\n"
+        f"Dimension: {dimension_name}\n"
+        f"Target options: {target_text}\n"
+        f"Evidence options: {evidence_text}\n\n"
+        "Select the best match against any of the target options.\n"
+        "Match levels:\n"
+        "- match: direct match\n"
+        "- similar: highly similar\n"
+        "- comparable: comparable context\n"
+        "- partial: some overlap\n"
+        "- mismatch: no meaningful overlap\n\n"
+        "Respond with JSON only:\n"
+        '{"match_level": "match|similar|comparable|partial|mismatch|unknown"}'
+    )
+
+    try:
+        response = await llm.ainvoke(prompt)
+        content = getattr(response, "content", None) or str(response)
+        data = json.loads(content.strip())
+        match_level = str(data.get("match_level", "unknown")).strip().lower()
+        return match_level if match_level in MATCH_SCORES else "unknown"
+    except Exception:
+        return "unknown"
+
+
+async def compute_document_transferability(
+    doc_context: Dict,
+    target_context: Dict,
+    implementation_evidence: Dict,
+    user_constraints: Optional[Dict],
+    llm,
+) -> Tuple[float, Dict[str, object]]:
+    """Compute document transferability with constraint veto.
+
+    Args:
+        doc_context (Dict): Document context (country, inner_setting, population_intervened).
+        target_context (Dict): User target context (geography, population, setting).
+        implementation_evidence (Dict): Evidence for implementation requirements.
+        user_constraints (Optional[Dict]): User tolerance limits for cost, staffing, complexity.
+        llm (Any): LLM client with async invoke.
+
+    Returns:
+        Tuple[float, Dict[str, object]]: Transferability score and breakdown.
+    """
+    geo_match, pop_match, set_match = await asyncio.gather(
+        assess_dimension(
+            "geography",
+            target_context.get("geography"),
+            doc_context.get("country"),
+            llm,
+        ),
+        assess_dimension(
+            "population",
+            target_context.get("population"),
+            doc_context.get("population_intervened"),
+            llm,
+        ),
+        assess_dimension(
+            "inner_setting",
+            target_context.get("setting"),
+            doc_context.get("inner_setting"),
+            llm,
+        ),
+    )
+
+    scores = [
+        MATCH_SCORES.get(geo_match),
+        MATCH_SCORES.get(pop_match),
+        MATCH_SCORES.get(set_match),
+    ]
+    valid = [score for score in scores if score is not None]
+    context_fit = sum(valid) / len(valid) if valid else 0.5
+
+    constraint_penalty = 1.0
+    exceeds: Dict[str, object] = {}
+    constraint_levels: Dict[str, Optional[str]] = {}
+    evidence_levels: Dict[str, Optional[str]] = {}
+    level_order = {"low": 1, "moderate": 2, "high": 3}
+    for dim in ["cost", "staffing", "implementation_complexity"]:
+        tolerance = (
+            _normalise_requirement_level(user_constraints.get(dim))
+            if user_constraints
+            else None
+        )
+        evidence = _normalise_requirement_level(
+            implementation_evidence.get(f"{dim}_level")
+        )
+        constraint_levels[dim] = tolerance
+        evidence_levels[dim] = evidence
+        if tolerance and evidence:
+            if level_order.get(evidence, 0) > level_order.get(tolerance, 3):
+                exceeds[dim] = True
+                constraint_penalty *= 0.5
+
+    transferability = max(0.2, min(1.0, context_fit * constraint_penalty))
+
+    return (
+        transferability,
+        {
+            "context_fit": round(context_fit, 2),
+            "geography": geo_match,
+            "population": pop_match,
+            "inner_setting": set_match,
+            "constraints_provided": bool(user_constraints),
+            "constraint_levels": constraint_levels if user_constraints else {},
+            "implementation_evidence": evidence_levels,
+            "extracted_context": {
+                "countries": doc_context.get("country"),
+                "populations": doc_context.get("population_intervened"),
+                "settings": doc_context.get("inner_setting"),
+            },
+            "exceeds_constraints": exceeds,
+        },
+    )
+
+
+async def compute_outcome_similarity(
+    outcome_variable: str,
+    target_outcomes: List[str],
+    llm,
+) -> Tuple[float, str]:
+    """Compute similarity between outcome and user's targets.
+
+    Args:
+        outcome_variable (str): Outcome label from extraction.
+        target_outcomes (List[str]): User-specified target outcomes.
+        llm (Any): LLM client with async invoke.
+
+    Returns:
+        Tuple[float, str]: Similarity score (0.0-1.0) and reasoning string.
+    """
+    prompt = f"""Rate how relevant this study outcome is to the user's target outcomes.
+
+Study outcome: "{outcome_variable}"
+User targets: {', '.join(f'"{target}"' for target in target_outcomes)}
+
+Scoring guide:
+- 1.0 = Directly measures the target outcome (exact match or validated measure of it)
+- 0.7 = Established proxy measure that directly quantifies the same construct
+- 0.4 = Contributing factor or intermediate outcome that influences but does not directly measure the target
+- 0.1 = Same broad domain but weak or indirect relationship
+- 0.0 = Unrelated
+
+Important distinction:
+- A PROXY directly measures the same underlying construct as the target (0.7)
+- A CONTRIBUTING FACTOR causes or influences the target but measures something different (0.4)
+
+Examples:
+- "test scores" is a proxy for "academic achievement" (0.7) - same construct
+- "study time" is a contributing factor to "academic achievement" (0.4) - different measure
+- "employee satisfaction" is a proxy for "workforce morale" (0.7) - same construct
+- "training hours" is a contributing factor to "workforce productivity" (0.4) - different measure
+
+Respond in JSON only:
+{{"score": <number>, "reason": "<brief explanation>"}}
+"""
+    try:
+        response = await llm.ainvoke(prompt)
+        content = getattr(response, "content", None) or str(response)
+        data = json.loads(content.strip())
+        score = float(data.get("score", 0.0))
+        reason = str(data.get("reason", "")).strip()
+        return (max(0.0, min(1.0, score)), reason)
+    except Exception:
+        return (0.0, "Similarity assessment failed")
+
+
+async def compute_document_impact_score(
+    outcomes: List[ResultItem],
+    target_outcomes: Optional[List[str]],
+    transferability: float,
+    llm,
+) -> Tuple[Optional[float], str, Dict[str, object]]:
+    """Compute document impact score using signed magnitude and similarity weighting.
+
+    Args:
+        outcomes (List[ResultItem]): Extracted outcomes for the document.
+        target_outcomes (Optional[List[str]]): User-selected target outcomes.
+        transferability (float): Transferability score (0.2 to 1.0).
+        llm (Any): LLM client with async invoke.
+
+    Returns:
+        Tuple[Optional[float], str, Dict[str, object]]: Score, label, and breakdown.
+    """
+    if not outcomes:
+        return (1.0, "No Outcomes", {"note": "no extractable outcomes"})
+
+    primary = [outcome for outcome in outcomes if outcome.is_primary]
+    if not primary:
+        return (
+            None,
+            "N/A",
+            {
+                "note": "no primary outcomes extracted",
+                "outcomes_available": len(outcomes),
+            },
+        )
+
+    selected = primary
+
+    weighted_sum = 0.0
+    weight_sum = 0.0
+    similarity_sum = 0.0
+    included_count = 0
+    breakdown: List[Dict[str, object]] = []
+
+    for outcome in selected:
+        signed_magnitude = compute_signed_magnitude(outcome)
+        magnitude_estimate = getattr(outcome, "magnitude_estimate", None)
+        causal_w = _causal_weight(getattr(outcome, "causality_claim", None))
+
+        if target_outcomes:
+            similarity, _reason = await compute_outcome_similarity(
+                outcome.outcome_variable, target_outcomes, llm
+            )
+        else:
+            similarity = 1.0
+
+        included = True
+        excluded_reason = None
+        if target_outcomes and similarity < 0.5:
+            included = False
+            excluded_reason = "low similarity"
+        combined_weight = similarity * causal_w
+        contribution = signed_magnitude * combined_weight
+        if included:
+            weighted_sum += contribution
+            weight_sum += combined_weight
+            similarity_sum += similarity
+            included_count += 1
+
+        breakdown.append(
+            {
+                "outcome": outcome.outcome_variable,
+                "is_primary": outcome.is_primary,
+                "is_beneficial": outcome.is_beneficial,
+                "magnitude": magnitude_estimate,
+                "signed_magnitude": round(signed_magnitude, 2),
+                "similarity": round(similarity, 2),
+                "causality_claim": getattr(outcome, "causality_claim", None),
+                "causal_weight": round(causal_w, 2),
+                "combined_weight": round(combined_weight, 3),
+                "contribution": round(contribution, 3),
+                "included_in_score": included,
+                "excluded_reason": excluded_reason,
+            }
+        )
+
+    if included_count == 0:
+        return (
+            1.0,
+            "No relevant outcomes",
+            {
+                "note": "no outcomes matched target similarity or had usable magnitude",
+                "outcomes_available": len(selected),
+                "outcomes_used": 0,
+                "primary_only": bool(primary),
+                "outcome_breakdown": breakdown,
+            },
+        )
+
+    net_magnitude = weighted_sum / weight_sum if weight_sum > 0 else 0.0
+    avg_causal_weight = (
+        (weight_sum / similarity_sum)
+        if similarity_sum > 0
+        else CAUSAL_WEIGHTS.get(None, 0.9)
+    )
+    base_score = 2.5 + (net_magnitude * 2.5)
+    dampened = base_score * (max(0.2, min(1.0, transferability)) ** 0.4)
+    final_score = round(max(1.0, min(5.0, dampened)), 1)
+
+    if final_score >= 4.5:
+        label = "High"
+    elif final_score >= 3.5:
+        label = "Good"
+    elif final_score >= 2.5:
+        label = "Moderate"
+    elif final_score >= 1.5:
+        label = "Limited"
+    else:
+        label = "Low"
 
     return (
         final_score,
-        labels[final_score],
+        label,
         {
-            "evidence_strength": q_val,
-            "transferability": round(t_val, 2),
-            "magnitude_adjustment": round(m_val, 2),
-            "harm_multiplier": round(r_val, 2),
-            "raw_score": round(raw, 3),
-            "min_raw": round(min_raw, 3),
-            "max_raw": round(max_raw, 3),
-            "weights": weights,
+            "outcomes_used": len(selected),
+            "primary_only": bool(primary),
+            "net_magnitude": round(net_magnitude, 3),
+            "base_score": round(base_score, 2),
+            "transferability": round(transferability, 2),
+            "avg_causal_weight": round(float(avg_causal_weight), 3),
+            "outcome_breakdown": breakdown,
         },
     )
 
 
 def compute_intervention_impact_score(
-    document_scores: List[Tuple[int, Dict[str, object], str]],
-    risk_themes: List[Dict[str, object]],
-) -> Tuple[int, str, Dict[str, object]]:
-    """Compute intervention impact score with effect-direction separation."""
+    document_scores: List[Tuple[float, str, Dict[str, object], float]],
+) -> Tuple[float, str, Dict[str, object]]:
+    """Aggregate document impact scores into an intervention score.
+
+    Args:
+        document_scores (List[Tuple[float, str, Dict[str, object], float]]):
+            Document scores with labels, breakdown (including net magnitude),
+            and evidence score weight.
+
+    Returns:
+        Tuple[float, str, Dict[str, object]]: Score, label, and breakdown.
+    """
+    excluded_labels = {"No Outcomes", "No relevant outcomes"}
     doc_count = len(document_scores)
-    if doc_count == 1:
-        return (2, "Single Source", {"doc_count": 1})
+    filtered = [item for item in document_scores if item[1] not in excluded_labels]
+    excluded_count = doc_count - len(filtered)
+    if not filtered:
+        return (
+            2.5,
+            "Insufficient Evidence",
+            {"doc_count": doc_count, "excluded_count": excluded_count},
+        )
 
-    pos_sum = neg_sum = null_sum = 0.0
-    pos_weight = neg_weight = null_weight = 0.0
+    pos_docs = 0
+    neg_docs = 0
+    for _, _, breakdown, _ in filtered:
+        net_magnitude = float(breakdown.get("net_magnitude", 0.0))
+        if net_magnitude > 0.1:
+            pos_docs += 1
+        elif net_magnitude < -0.1:
+            neg_docs += 1
+    discord_flag = pos_docs > 0 and neg_docs > 0
 
-    for score, breakdown, direction in document_scores:
-        weight = breakdown.get("evidence_strength", 1) or 1
-        weighted = score * weight
-        if direction in ("positive", "increase"):
-            pos_sum += weighted
-            pos_weight += weight
-        elif direction in ("negative", "decrease"):
-            neg_sum += weighted
-            neg_weight += weight
-        else:
-            null_sum += weighted
-            null_weight += weight
+    if len(filtered) == 1:
+        score, _, _, evidence = filtered[0]
+        weighted = score if evidence >= 4 else score * 0.85
+        final_score = round(max(1.0, min(5.0, weighted)), 1)
+        return (
+            final_score,
+            "Single Source",
+            {
+                "doc_count": doc_count,
+                "contributing_docs": 1,
+                "excluded_count": excluded_count,
+                "evidence_weight_total": float(evidence),
+                "discord_flag": discord_flag,
+            },
+        )
 
-    effective_weight = pos_weight + neg_weight + (null_weight * 0.5)
-    if effective_weight == 0:
-        return (2, "No Evidence", {"doc_count": doc_count})
+    weighted_sum = 0.0
+    weight_total = 0.0
+    for score, _, _, evidence in filtered:
+        weight = float(evidence) if evidence is not None else 1.0
+        weighted_sum += float(score) * weight
+        weight_total += weight
 
-    net_impact = (pos_sum - neg_sum - (null_sum * 0.5)) / effective_weight
+    if weight_total == 0:
+        return (
+            2.5,
+            "Insufficient Evidence",
+            {
+                "doc_count": doc_count,
+                "contributing_docs": len(filtered),
+                "excluded_count": excluded_count,
+                "discord_flag": discord_flag,
+            },
+        )
 
-    if effective_weight >= 15:
-        conf_mult = 1.15
-    elif effective_weight < 5:
-        conf_mult = 0.85
+    weighted_avg = weighted_sum / weight_total
+    final_score = round(max(1.0, min(5.0, weighted_avg)), 1)
+
+    if final_score >= 4.5:
+        label = "High"
+    elif final_score >= 3.5:
+        label = "Good"
+    elif final_score >= 2.5:
+        label = "Moderate"
+    elif final_score >= 1.5:
+        label = "Limited"
     else:
-        conf_mult = 1.0
-
-    is_contested = (
-        pos_weight > 3
-        and neg_weight > 3
-        and min(pos_weight, neg_weight) / max(pos_weight, neg_weight) > 0.4
-    )
-    discord_penalty = 0.5 if is_contested else 0.0
-
-    harm_count = sum(1 for r in risk_themes if r.get("has_harm_warning"))
-    harm_penalty = harm_count * 0.25
-
-    base = 3 + (net_impact * 0.4)
-    final_raw = (base * conf_mult) - discord_penalty - harm_penalty
-    final_score = max(1, min(5, round(final_raw)))
-
-    labels = {
-        5: "High Potential",
-        4: "Promising",
-        3: "Moderate",
-        2: "Limited",
-        1: "Low/Risky",
-    }
+        label = "Low"
 
     return (
         final_score,
-        labels[final_score],
+        label,
         {
             "doc_count": doc_count,
-            "positive_evidence": round(pos_weight, 1),
-            "negative_evidence": round(neg_weight, 1),
-            "null_evidence": round(null_weight, 1),
-            "net_impact": round(net_impact, 2),
-            "confidence": "High"
-            if conf_mult > 1
-            else ("Low" if conf_mult < 1 else "Moderate"),
-            "discord_detected": is_contested,
-            "harm_warnings": harm_count,
+            "contributing_docs": len(filtered),
+            "excluded_count": excluded_count,
+            "positive_docs": pos_docs,
+            "negative_docs": neg_docs,
+            "discord_flag": discord_flag,
+            "weighted_avg": round(weighted_avg, 3),
+            "evidence_weight_total": round(weight_total, 3),
         },
     )
