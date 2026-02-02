@@ -252,14 +252,7 @@ class AnalysisStorageService:
             search_query = (
                 await self._get_project_search_query(project_id) if project_id else {}
             )
-            # Policy Atlas users are UK-based; align document-level transferability
-            # with synthesis by defaulting geography to UK when not explicitly set.
-            default_geography = ["UK"]
-            target_geography = self._normalise_context_list(
-                search_query.get("geography")
-            )
-            if not target_geography:
-                target_geography = default_geography
+            target_geography = ["UK"]
             target_context = {
                 "geography": target_geography,
                 "population": self._normalise_context_list(

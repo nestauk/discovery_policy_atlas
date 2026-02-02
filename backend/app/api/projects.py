@@ -646,12 +646,14 @@ async def trigger_synthesis_for_project(
     try:
         logger.info(f"Starting synthesis for project {project_id}")
 
-        # Mark project as running (async to avoid blocking)
+        # Mark project as synthesising (async to avoid blocking).
+        # The analysis phase uses "running"; synthesis should be distinguished so
+        # the frontend can render the correct progress state.
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
             lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "running"})
+            .update({"status": "synthesising"})
             .eq("id", project_id)
             .execute(),
         )

@@ -823,11 +823,7 @@ export default function ProjectResultsPage() {
         impact_score_label: doc.impact_score_label,
         impact_score_breakdown: doc.impact_score_breakdown,
         transferability_score: doc.transferability_score,
-        transferability_breakdown: doc.transferability_breakdown
-        evidence_strength: doc.evidence_strength || undefined,
-        evidence_strength_justification: doc.evidence_strength_justification,
-        predicted_impact: doc.predicted_impact || undefined,
-        predicted_impact_justification: doc.predicted_impact_justification,
+        transferability_breakdown: doc.transferability_breakdown,
         // Evidence categorisation fields
         evidence_category: doc.evidence_category,
         evidence_category_rank: doc.evidence_category ? getEvidenceCategoryRank(doc.evidence_category) : 999,
