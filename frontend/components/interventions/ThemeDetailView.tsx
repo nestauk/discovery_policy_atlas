@@ -126,16 +126,16 @@ const requirementsStyles: Record<string, string> = {
   'Unknown': 'text-slate-600 bg-slate-50',
 }
 
-function ContextFitSection({ breakdown, rating, note }: { 
+interface ContextFitSectionProps {
   breakdown?: TransferabilityBreakdown | null
   rating?: string | null
-  note?: string | null 
-}) {
+  note?: string | null
+}
+
+function ContextFitCard({ breakdown, rating, note }: ContextFitSectionProps) {
   if (!breakdown && !rating) return null
 
   const contextRating = breakdown?.context_fit_rating || rating || 'Unknown'
-  const requirementsRating = breakdown?.implementation_requirements_rating || 'Unknown'
-  const hasAnyToleranceExceeded = Object.values(breakdown?.implementation_exceeds_tolerance || {}).some(Boolean)
 
   const contextDimensions = [
     { key: 'inner_setting', label: 'Setting', icon: Building2 },
@@ -143,98 +143,116 @@ function ContextFitSection({ breakdown, rating, note }: {
     { key: 'geography', label: 'Geography', icon: Globe },
   ] as const
 
+  const hasAnyContextInfo = breakdown && contextDimensions.some(({ key }) => 
+    breakdown?.[key] || breakdown?.notes?.[key]
+  )
+
+  if (!hasAnyContextInfo && !note) return null
+
+  return (
+    <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-3">
+          Context fit
+          <span className={`inline-flex items-center px-3 py-1 rounded-lg text-sm ${contextFitStyles[contextRating] || contextFitStyles.Unknown}`}>
+            {contextRating}
+          </span>
+        </h3>
+        {note && (
+          <p className="text-gray-700 leading-relaxed">{note}</p>
+        )}
+      </div>
+
+      {breakdown && (
+        <div className="space-y-4">
+          {contextDimensions.map(({ key, label, icon: Icon }) => {
+            const value = breakdown?.[key]
+            const dimensionNote = breakdown?.notes?.[key]
+            if (!value && !dimensionNote) return null
+            
+            return (
+              <div key={key}>
+                <div className="flex items-center gap-3 mb-2">
+                  <Icon className="h-4 w-4 text-gray-500" />
+                  <span className="font-medium text-gray-900">{label}</span>
+                  {value && (
+                    <Badge variant="outline" className="text-xs">
+                      {toLabel(value)}
+                    </Badge>
+                  )}
+                </div>
+                {dimensionNote && (
+                  <p className="text-gray-700 leading-relaxed ml-7">{dimensionNote}</p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ImplementationCard({ breakdown }: { breakdown?: TransferabilityBreakdown | null }) {
+  if (!breakdown) return null
+
+  const requirementsRating = breakdown?.implementation_requirements_rating || 'Unknown'
+  const hasAnyToleranceExceeded = Object.values(breakdown?.implementation_exceeds_tolerance || {}).some(Boolean)
+
   const implementationDimensions = [
     { key: 'cost', label: 'Cost', icon: DollarSign },
     { key: 'staffing', label: 'Staffing', icon: UserCheck },
     { key: 'implementation_complexity', label: 'Complexity', icon: Cog },
   ] as const
 
+  const hasAnyImplementationInfo = implementationDimensions.some(({ key }) => 
+    breakdown?.implementation_evidence?.[key] || breakdown?.notes?.[key]
+  )
+
+  if (!hasAnyImplementationInfo) return null
+
   return (
-    <div className="space-y-6">
-      {/* Summary badges */}
-      <div className="flex flex-wrap gap-3">
-        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${contextFitStyles[contextRating] || contextFitStyles.Unknown}`}>
-          <span className="font-medium">Context Fit:</span>
-          <span>{contextRating}</span>
-        </div>
-        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${requirementsStyles[requirementsRating] || requirementsStyles.Unknown}`}>
-          <span className="font-medium">Implementation Requirements:</span>
-          <span>{requirementsRating}{hasAnyToleranceExceeded ? ' ⚠️' : ''}</span>
-        </div>
+    <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-3">
+          Implementation Requirements
+          <span className={`inline-flex items-center px-3 py-1 rounded-lg text-sm ${requirementsStyles[requirementsRating] || requirementsStyles.Unknown}`}>
+            {requirementsRating}{hasAnyToleranceExceeded ? ' ⚠️' : ''}
+          </span>
+        </h3>
       </div>
 
-      {note && (
-        <p className="text-gray-700 leading-relaxed">{note}</p>
-      )}
-
-      {breakdown && (
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Context Fit Details */}
-          <div className="space-y-4">
-            <h4 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Context Fit</h4>
-            <div className="space-y-3">
-              {contextDimensions.map(({ key, label, icon: Icon }) => {
-                const value = breakdown?.[key]
-                const dimensionNote = breakdown?.notes?.[key]
-                if (!value && !dimensionNote) return null
-                
-                return (
-                  <div key={key} className="bg-gray-50 rounded-lg p-4">
-                    <div className="flex items-center gap-3 mb-2">
-                      <Icon className="h-4 w-4 text-gray-500" />
-                      <span className="font-medium text-gray-900">{label}</span>
-                      {value && (
-                        <Badge variant="outline" className="ml-auto text-xs">
-                          {toLabel(value)}
-                        </Badge>
-                      )}
-                    </div>
-                    {dimensionNote && (
-                      <p className="text-sm text-gray-600 leading-relaxed">{dimensionNote}</p>
-                    )}
-                  </div>
-                )
-              })}
+      <div className="space-y-4">
+        {implementationDimensions.map(({ key, label, icon: Icon }) => {
+          const evidenceValue = breakdown?.implementation_evidence?.[key]
+          const exceedsTolerance = breakdown?.implementation_exceeds_tolerance?.[key]
+          const dimensionNote = breakdown?.notes?.[key]
+          if (!evidenceValue && !dimensionNote) return null
+          
+          return (
+            <div key={key}>
+              <div className="flex items-center gap-3 mb-2">
+                <Icon className={`h-4 w-4 ${exceedsTolerance ? 'text-red-500' : 'text-gray-500'}`} />
+                <span className={`font-medium ${exceedsTolerance ? 'text-red-900' : 'text-gray-900'}`}>{label}</span>
+                {evidenceValue && (
+                  <Badge 
+                    variant="outline" 
+                    className={`text-xs ${exceedsTolerance ? 'border-red-200 text-red-700' : ''}`}
+                  >
+                    {toLabel(evidenceValue)}{exceedsTolerance ? ' ⚠️' : ''}
+                  </Badge>
+                )}
+              </div>
+              {dimensionNote && (
+                <p className={`leading-relaxed ml-7 ${exceedsTolerance ? 'text-red-700' : 'text-gray-700'}`}>
+                  {dimensionNote}
+                </p>
+              )}
             </div>
-          </div>
-
-          {/* Implementation Requirements Details */}
-          <div className="space-y-4">
-            <h4 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Implementation Requirements</h4>
-            <div className="space-y-3">
-              {implementationDimensions.map(({ key, label, icon: Icon }) => {
-                const evidenceValue = breakdown?.implementation_evidence?.[key]
-                const exceedsTolerance = breakdown?.implementation_exceeds_tolerance?.[key]
-                const dimensionNote = breakdown?.notes?.[key]
-                if (!evidenceValue && !dimensionNote) return null
-                
-                return (
-                  <div key={key} className={`rounded-lg p-4 ${exceedsTolerance ? 'bg-red-50 border border-red-100' : 'bg-gray-50'}`}>
-                    <div className="flex items-center gap-3 mb-2">
-                      <Icon className={`h-4 w-4 ${exceedsTolerance ? 'text-red-500' : 'text-gray-500'}`} />
-                      <span className={`font-medium ${exceedsTolerance ? 'text-red-900' : 'text-gray-900'}`}>{label}</span>
-                      {evidenceValue && (
-                        <Badge 
-                          variant="outline" 
-                          className={`ml-auto text-xs ${exceedsTolerance ? 'border-red-200 text-red-700' : ''}`}
-                        >
-                          {toLabel(evidenceValue)}{exceedsTolerance ? ' ⚠️' : ''}
-                        </Badge>
-                      )}
-                    </div>
-                    {dimensionNote && (
-                      <p className={`text-sm leading-relaxed ${exceedsTolerance ? 'text-red-700' : 'text-gray-600'}`}>
-                        {dimensionNote}
-                      </p>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -354,76 +372,66 @@ export function ThemeDetailView({
     ? getEvidenceScoreExplanation(evidenceStars, displayEvidenceMix, capMessage)
     : undefined
 
-  const hasContextFitInfo = transferabilityRating || transferabilityBreakdown
   const hasImpactProfile = primaryOutcomes.length > 0
   const hasRisks = riskThemes && riskThemes.length > 0
   
   return (
     <div className="space-y-6">
       {/* Back button */}
-      <button
-        className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors"
-        onClick={onBack}
-        type="button"
-      >
-        <ArrowLeft size={16} />
-        <span className="text-sm font-medium">Back to Themes</span>
-      </button>
-      
-      {/* Header with title and scores */}
-      <div className="pb-6 border-b border-gray-100">
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">{themeName}</h2>
-        <div className="flex items-center justify-between gap-6">
-          {themeDescription && (
-            <p className="text-gray-600 max-w-3xl">{themeDescription}</p>
-          )}
-          <div className="shrink-0 flex items-center gap-4">
-            {avgImpactScore != null && (
-              <TierBadge score={avgImpactScore} label="Impact" />
-            )}
-            {avgEvidenceScore != null && (
-              <TierBadge score={avgEvidenceScore} label="Evidence" />
-            )}
-          </div>
-        </div>
+      <div className="pb-1">
+        <button
+          className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors"
+          onClick={onBack}
+          type="button"
+        >
+          <ArrowLeft size={16} />
+          <span className="text-sm font-medium">Back to all interventions</span>
+        </button>
       </div>
-
-      {/* Section 1: What is this intervention about? */}
-      {(impactSummary || evidenceMixText) && (
-        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">What is this intervention?</h3>
-          
-          {impactSummary && (
-            <p className="text-gray-700 leading-relaxed">{impactSummary}</p>
+      
+      {/* Main card with title, description, and evidence base */}
+      <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
+        {/* Header with title */}
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-3">{themeName}</h2>
+          {themeDescription && (
+            <p className="text-gray-700 leading-relaxed">{themeDescription}</p>
           )}
-        </section>
-      )}
+        </div>
 
-      {/* Section 2: Evidence Base */}
-      {evidenceMixText && (
-        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">Evidence Base</h3>
-          <p className="text-sm text-gray-600">
-            The strength and composition of the research evidence supporting this intervention.
-          </p>
-          
-          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-            <div className="font-medium text-blue-900 mb-1">Evidence Mix</div>
-            <p className="text-blue-800">{evidenceMixText}</p>
+        {/* Impact overview with badge */}
+        {impactSummary && (
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-3">
+              Impact 
+              {avgImpactScore != null && (
+                <TierBadge score={avgImpactScore} showLabel={false} />
+              )}
+            </h3>
+            <p className="text-gray-700 leading-relaxed">{impactSummary}</p>
+          </div>
+        )}
+
+        {/* Evidence Base with badge */}
+        {evidenceMixText && (
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-3">
+              Evidence
+              {avgEvidenceScore != null && (
+                <TierBadge score={avgEvidenceScore} showLabel={false} />
+              )}
+            </h3>
             {evidenceExplanation && (
-              <p className="text-blue-700 text-sm mt-2">{evidenceExplanation}</p>
+              <p className="text-gray-700 leading-relaxed">{evidenceExplanation}</p>
             )}
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
-      {/* Section 3: Impact Profile (Outcomes) */}
+      {/* Section 3: Key Outcomes */}
       {hasImpactProfile && (
         <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">Impact Profile</h3>
-          <p className="text-sm text-gray-600">
-            Key outcomes measured across the evidence base, showing direction and strength of effects.
-          </p>
+          <h3 className="text-xl font-bold text-gray-900">Key outcomes</h3>
           
           <div className="grid gap-3">
             {primaryOutcomes.map((outcome) => (
@@ -467,40 +475,34 @@ export function ThemeDetailView({
         </section>
       )}
 
-      {/* Section 4: Risk Warnings */}
+      {/* Section 4: Context Fit */}
+      <ContextFitCard 
+        breakdown={transferabilityBreakdown}
+        rating={transferabilityRating}
+        note={transferabilityNote}
+      />
+
+      {/* Section 5: Implementation Requirements */}
+      <ImplementationCard breakdown={transferabilityBreakdown} />
+
+      {/* Section 6: Risk Warnings */}
       {hasRisks && (
-        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">Risks & Adverse Effects</h3>
-          <p className="text-sm text-gray-600">
-            Potential risks and adverse effects identified in the evidence.
-          </p>
+        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
+          <h3 className="text-lg font-semibold text-gray-900">Risk warnings</h3>
           <RiskWarnings risks={riskThemes!} />
         </section>
       )}
 
-      {/* Section 5: Context Fit & Implementation Requirements */}
-      {hasContextFitInfo && (
-        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
-          <h3 className="text-lg font-semibold text-gray-900">Context Fit & Implementation</h3>
-          <p className="text-sm text-gray-600">
-            Assessment of how well this intervention may transfer to your context and what resources are needed to implement it.
+      {/* Section 7: Detailed Studies */}
+      <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
+        <div>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">
+            Studies & Evidence ({groups.reduce((sum, g) => sum + g.items.length, 0)})
+          </h3>
+          <p className="text-gray-700 leading-relaxed">
+            Individual studies and interventions that contribute to this theme.
           </p>
-          <ContextFitSection 
-            breakdown={transferabilityBreakdown}
-            rating={transferabilityRating}
-            note={transferabilityNote}
-          />
-        </section>
-      )}
-
-      {/* Section 6: Detailed Studies */}
-      <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-gray-900">
-          Studies & Evidence ({groups.reduce((sum, g) => sum + g.items.length, 0)})
-        </h3>
-        <p className="text-sm text-gray-600">
-          Individual studies and interventions that contribute to this theme.
-        </p>
+        </div>
         
         <div className="space-y-3">
           {groups.map(group => {

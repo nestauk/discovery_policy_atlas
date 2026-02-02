@@ -15,23 +15,20 @@ export function RiskWarnings({ risks }: RiskWarningsProps) {
   const sortedRisks = [...risks].sort((a, b) => (b.frequency || 0) - (a.frequency || 0))
 
   return (
-    <div className="rounded border border-slate-200 bg-white p-3 space-y-3">
-      <div className="text-sm font-medium text-slate-900">Risk Warnings</div>
-      <div className="space-y-2">
-        {sortedRisks.map((risk, idx) => (
-          <div key={`${risk.theme_name}-${idx}`} className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-sm text-slate-800">{risk.theme_name}</div>
-              {risk.summary_description && (
-                <div className="text-xs text-slate-600 mt-1">{risk.summary_description}</div>
-              )}
-              <div className="text-xs text-slate-500 mt-1">
-                Frequency: {risk.frequency}
-              </div>
-            </div>
+    <div className="space-y-4">
+      {sortedRisks.map((risk, idx) => (
+        <div key={`${risk.theme_name}-${idx}`}>
+          <div className="flex items-center gap-3 mb-2">
+            <span className="font-medium text-gray-900">{risk.theme_name}</span>
+            {risk.frequency && (
+              <span className="text-sm text-gray-500">({risk.frequency} {risk.frequency === 1 ? 'source' : 'sources'})</span>
+            )}
           </div>
-        ))}
-      </div>
+          {risk.summary_description && (
+            <p className="text-gray-700 leading-relaxed">{risk.summary_description}</p>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
