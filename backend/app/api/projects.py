@@ -8,7 +8,8 @@ from typing import Optional, List
 import pandas as pd
 import asyncio
 
-from app.core.auth import get_current_user, CurrentUser
+from app.core.auth import get_current_user
+from app.core.models import CurrentUser
 from app.services.search_wizard import SearchWizardService
 from app.services.vectorization import vectorization_service
 from app.services.chatbot import ChatRequest, ChatResponse

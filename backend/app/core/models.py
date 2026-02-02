@@ -1,7 +1,16 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal, Dict, Any
 from datetime import date, datetime
 from app.core.config import settings
+
+
+class CurrentUser(BaseModel):
+    user_id: str
+    email: Optional[EmailStr] = None
+    name: Optional[str] = None
+    organization_id: Optional[str] = None
+    organization_slug: Optional[str] = None
+    organization_role: Optional[str] = None
 
 
 # Base search request with common parameters

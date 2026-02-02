@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 import io
 from datetime import datetime
-from app.core.auth import get_current_user, CurrentUser
+from app.core.auth import get_current_user
+from app.core.models import CurrentUser
 from app.services.download import download_service
 from app.services.analysis.evidence.category import get_evidence_categories_for_api
 import logging

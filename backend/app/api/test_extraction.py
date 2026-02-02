@@ -6,7 +6,8 @@ from pathlib import Path
 import uuid
 import json
 
-from app.core.auth import get_current_user, CurrentUser
+from app.core.auth import get_current_user
+from app.core.models import CurrentUser
 from app.services.analysis.parse import ParsingService, ParsingError
 from app.services.analysis.normalize import normalize_text
 from app.services.analysis.workflows import create_workflow
