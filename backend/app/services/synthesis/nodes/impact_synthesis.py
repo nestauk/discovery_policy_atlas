@@ -23,6 +23,7 @@ from app.services.synthesis.schemas import (
     MagnitudeDetail,
     CausalityDetail,
 )
+from app.services.analysis.scoring import compute_intervention_impact_score
 from app.utils.llm.llm_utils import get_llm
 
 
@@ -214,6 +215,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             target_geography,
             implementation_constraints,
             doc_scores,
+            doc_metadata,
             transferability_llm,
         )
         outcome_list = outcomes_by_intervention.get(intervention.intervention_name, [])
@@ -226,16 +228,42 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
                 state.get("research_question") or "Not specified",
                 impact_summary_llm,
             )
+        document_scores = []
+        for doc_uuid in doc_uuids:
+            score_entry = doc_scores.get(doc_uuid) or {}
+            score_value = score_entry.get("impact_score")
+            if score_value is None:
+                continue
+            evidence_score = score_entry.get("evidence_score") or 1
+            document_scores.append(
+                (
+                    float(score_value),
+                    str(score_entry.get("impact_score_label") or "Unknown"),
+                    score_entry.get("impact_score_breakdown") or {},
+                    float(evidence_score),
+                )
+            )
+        (
+            impact_score,
+            impact_score_label,
+            impact_score_breakdown,
+        ) = compute_intervention_impact_score(document_scores)
         return PolicyIntervention(
             **intervention.model_dump(
                 exclude={
                     "impact_summary",
+                    "impact_score",
+                    "impact_score_label",
+                    "impact_score_breakdown",
                     "transferability_rating",
                     "transferability_note",
                     "transferability_breakdown",
                 }
             ),
             impact_summary=impact_summary,
+            impact_score=impact_score,
+            impact_score_label=impact_score_label,
+            impact_score_breakdown=impact_score_breakdown,
             transferability_rating=rating,
             transferability_note=note,
             transferability_breakdown=breakdown,
@@ -297,7 +325,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
 
 WELL_EVIDENCED_THRESHOLD = 15
 EVIDENCED_THRESHOLD = 8
-MINIMUM_THRESHOLD = 5
+MINIMUM_THRESHOLD = 3
 DISCORD_RATIO = 0.4
 
 
@@ -325,18 +353,18 @@ def determine_verdict(
         verdict: VerdictType = "no_effect"
     elif pos_weight > neg_weight:
         if pos_weight > WELL_EVIDENCED_THRESHOLD:
-            verdict = "well_evidenced_increase"
+            verdict = "well_evidenced_positive"
         elif pos_weight > EVIDENCED_THRESHOLD:
-            verdict = "evidenced_increase"
+            verdict = "evidenced_positive"
         else:
-            verdict = "suggested_increase"
+            verdict = "suggested_positive"
     elif neg_weight > pos_weight:
         if neg_weight > WELL_EVIDENCED_THRESHOLD:
-            verdict = "well_evidenced_decrease"
+            verdict = "well_evidenced_negative"
         elif neg_weight > EVIDENCED_THRESHOLD:
-            verdict = "evidenced_decrease"
+            verdict = "evidenced_negative"
         else:
-            verdict = "suggested_decrease"
+            verdict = "suggested_negative"
     else:
         verdict = "insufficient_evidence"
 
@@ -595,15 +623,31 @@ async def assess_transferability_dimension(
         f"Evidence context: {evidence_values}\n\n"
         "The user is interested in any of the target context options. If the evidence "
         "matches one or more of the target options, that is a good match.\n\n"
+        "IMPORTANT aggregation rule (do not ignore):\n"
+        "- Evidence may include multiple contexts. Choose the BEST achievable match level against ANY "
+        "single evidence context item (best-case transferability), not the worst-case.\n"
+        "- Only return mismatch if NONE of the evidence context items has meaningful overlap with the target.\n\n"
         "Match levels:\n"
         "- match: Evidence matches at least one target option directly\n"
         "- similar: Evidence is highly similar to at least one target option\n"
-        "- comparable: Evidence is from a comparable context to at least one target option\n"
+        "- comparable: Evidence is from a broadly comparable context to at least one target option\n"
         "- partial: Some overlap with target options, but adaptation needed\n"
         "- mismatch: No meaningful overlap\n\n"
+        "Guidance:\n"
+        "- For geography, do NOT require the same country to avoid mismatch. Treat 'geography' here as "
+        "macro-context comparability (e.g., peer high-income democracies are usually at least comparable).\n"
+        "- Reserve 'mismatch' for clearly non-comparable macro-contexts (e.g., substantially different levels "
+        "of economic development, governance capacity, or health system maturity), not simply because it is a different country.\n"
+        "- If uncertain between 'partial' and 'mismatch', prefer 'partial' and state what would need adapting.\n"
+        "- Do not invent overly specific claims about policy/legal arrangements (e.g., Brexit implications) unless "
+        "they are unavoidable at this coarse level. Keep the explanation general and cautious.\n\n"
+        "Calibration examples (target is UK):\n"
+        "- Dimension=geography; Target=['UK']; Evidence=['Germany'] -> match_level should be similar or comparable (NOT mismatch)\n"
+        "- Dimension=geography; Target=['UK']; Evidence=['New Zealand'] -> match_level should be comparable (NOT mismatch)\n"
+        "- Dimension=geography; Target=['UK']; Evidence=['EU Member States'] -> match_level should be comparable or partial (NOT mismatch)\n"
+        "- Dimension=geography; Target=['UK']; Evidence=['Italy'] -> match_level should be comparable or partial (NOT match)\n\n"
         "Consider:\n"
-        "- For geography: socioeconomic development level, healthcare system similarity, "
-        "cultural context\n"
+        "- For geography: socioeconomic development level, healthcare system comparability, cultural/institutional similarity\n"
         "- For population: age group overlap, demographic similarity, vulnerability factors\n"
         "- For setting: delivery environment similarity, institutional context\n\n"
         "Respond with JSON:\n"
@@ -743,6 +787,7 @@ async def compute_transferability(
     target_geography: List[str],
     implementation_constraints: Optional[Dict[str, Optional[str]]],
     doc_scores: Dict[str, Dict],
+    doc_metadata: Dict[str, Dict],
     llm,
 ) -> Tuple[str, str, TransferabilityBreakdown]:
     """Compute transferability across context and implementation dimensions.
@@ -756,6 +801,7 @@ async def compute_transferability(
         target_geography: Target geography values.
         implementation_constraints: Optional user-specified implementation constraints.
         doc_scores: Document score metadata.
+        doc_metadata: Document metadata, including source_country.
         llm: LLM client to use for semantic similarity.
 
     Returns:
@@ -792,6 +838,17 @@ async def compute_transferability(
     inner_setting_values = [e.get("inner_setting") for e in relevant_extractions]
     population_values = [e.get("population_intervened") for e in relevant_extractions]
     geography_values = [e.get("country") for e in relevant_extractions]
+    for ext in relevant_extractions:
+        if ext.get("country"):
+            continue
+        doc_uuid = ext.get("doc_uuid")
+        source_country = (doc_metadata.get(doc_uuid, {}) or {}).get("source_country")
+        if not source_country:
+            continue
+        for country in str(source_country).split(","):
+            cleaned = country.strip()
+            if cleaned and cleaned.lower() != "null":
+                geography_values.append(cleaned)
 
     cost_levels = [
         e.get("cost_level") or e.get("resource_intensity") for e in relevant_extractions
@@ -1142,8 +1199,8 @@ def compute_harm_warning(
     for ext in conclusion_extractions:
         if ext.get("doc_id") not in high_quality_docs:
             continue
-        predicted_impact = ext.get("predicted_impact") or {}
-        if predicted_impact.get("unintended_consequences_detected") is True:
+        risk_assessment = ext.get("risk_assessment") or {}
+        if risk_assessment.get("unintended_consequences_detected") is True:
             unintended_count += 1
 
     return (unintended_count / len(high_quality_docs)) > 0.2
@@ -1252,18 +1309,18 @@ def resolve_level_dimension(target: str, evidence_values: List[Optional[str]]) -
 
 def generate_verdict_description(verdict: VerdictType, outcome: OutcomeTheme) -> str:
     """Generate a concise verdict description."""
-    if verdict == "well_evidenced_increase":
-        return "Evidence strongly supports an upward effect on this outcome."
-    if verdict == "well_evidenced_decrease":
-        return "Evidence strongly supports a downward effect on this outcome."
-    if verdict == "evidenced_increase":
-        return "Evidence supports an upward effect on this outcome."
-    if verdict == "evidenced_decrease":
-        return "Evidence supports a downward effect on this outcome."
-    if verdict == "suggested_increase":
-        return "Limited evidence suggests an upward effect on this outcome."
-    if verdict == "suggested_decrease":
-        return "Limited evidence suggests a downward effect on this outcome."
+    if verdict == "well_evidenced_positive":
+        return "Evidence strongly supports a beneficial effect on this outcome."
+    if verdict == "well_evidenced_negative":
+        return "Evidence strongly supports a harmful effect on this outcome."
+    if verdict == "evidenced_positive":
+        return "Evidence supports a beneficial effect on this outcome."
+    if verdict == "evidenced_negative":
+        return "Evidence supports a harmful effect on this outcome."
+    if verdict == "suggested_positive":
+        return "Limited evidence suggests a beneficial effect on this outcome."
+    if verdict == "suggested_negative":
+        return "Limited evidence suggests a harmful effect on this outcome."
     if verdict == "contested":
         return "Evidence is split between upward and downward effects."
     if verdict == "no_effect":

@@ -15,7 +15,12 @@ EffectDirectionType = Literal["increase", "decrease", "null", "mixed", "inconclu
 
 # New Impact Assessment types (spec v2.2)
 SemanticMagnitudeType = Literal[
-    "transformational", "substantial", "moderate", "marginal", "unknown"
+    "substantial",
+    "large",
+    "moderate",
+    "marginal",
+    "unknown",
+    "transformational",
 ]
 CausalityClaimType = Literal["attribution", "contribution", "correlation"]
 
@@ -122,6 +127,9 @@ class ResultItem(BaseModel):
     # NEW fields (v2.2 Impact Assessment)
     causality_claim: Optional[CausalityClaimType] = None
     negative_impact_flag: Optional[bool] = None
+    is_primary: bool = False
+    is_beneficial: bool = True
+    magnitude_estimate: Optional[SemanticMagnitudeType] = None
 
 
 # Intermediate extraction models for each stage
@@ -159,20 +167,27 @@ class ImpactRating(BaseModel):
     evidence_gap: Optional[str] = None  # explanation if stars is null
 
 
-class ImpactPrediction(BaseModel):
-    """Document-level impact prediction vector (replaces legacy EvidenceRating)."""
+class RiskAssessment(BaseModel):
+    """Document-level risk assessment for harm surfacing."""
 
-    # Magnitude estimate (semantic bucket from spec section 2.1B)
-    magnitude_estimate: Optional[SemanticMagnitudeType] = None
-    magnitude_justification: Optional[str] = None
-    # Causal reliability (from spec section 2.1C)
-    causal_reliability: Optional[CausalityClaimType] = None
-    causal_justification: Optional[str] = None
-    # Transferability notes (qualitative assessment for Tier 1)
-    transferability_notes: Optional[str] = None
-    # Risk assessment (from spec section 2.2)
     risks_identified: List[str] = Field(default_factory=list)
     unintended_consequences_detected: bool = False
+
+
+class StudyContext(BaseModel):
+    """Document-level study context used as a fallback when intervention context is missing.
+
+    This captures the overall study setting/population/geography and coarse implementation
+    requirements that often appear in methods/background sections, rather than being repeated
+    for each intervention entry.
+    """
+
+    country: Optional[str] = None
+    population: Optional[str] = None
+    inner_setting: Optional[str] = None
+    cost_level: Optional[str] = None
+    staffing_level: Optional[str] = None
+    implementation_complexity_level: Optional[str] = None
 
 
 class ConclusionItem(BaseModel):
@@ -182,9 +197,8 @@ class ConclusionItem(BaseModel):
     detailed_explanation: str  # Paragraph explaining key reasons for the conclusion
     supporting_quote: str
     evidence_strength: Optional[ImpactRating] = None  # Overall study evidence quality
-    predicted_impact: Optional[
-        ImpactPrediction
-    ] = None  # Predicted scalability and impact
+    risk_assessment: Optional[RiskAssessment] = None
+    study_context: Optional[StudyContext] = None  # Document-level context fallback
 
 
 class ConclusionsExtraction(BaseModel):
@@ -219,30 +233,3 @@ class DocumentExtractionBundle(BaseModel):
     sr_completeness_flag: Optional[str] = None  # "complete", "incomplete_heterogeneity"
 
 
-def migrate_legacy_predicted_impact(
-    legacy: Optional[dict],
-) -> Optional[ImpactPrediction]:
-    """Convert legacy EvidenceRating format to new ImpactPrediction format."""
-    if legacy is None:
-        return None
-
-    # Map 1-5 stars to magnitude estimate
-    stars = legacy.get("stars")
-    magnitude_map = {
-        5: "transformational",
-        4: "substantial",
-        3: "moderate",
-        2: "marginal",
-        1: "marginal",
-    }
-
-    return ImpactPrediction(
-        magnitude_estimate=magnitude_map.get(stars, "unknown") if stars else "unknown",
-        magnitude_justification=legacy.get("justification"),
-        transferability_notes=legacy.get("evidence_gap"),
-        # Cannot infer these from legacy data
-        causal_reliability=None,
-        causal_justification=None,
-        risks_identified=[],
-        unintended_consequences_detected=False,
-    )

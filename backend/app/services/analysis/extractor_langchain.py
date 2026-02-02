@@ -126,7 +126,7 @@ class LangChainExtractorService:
             """Process a single document row."""
             doc_id = row["doc_id"]
 
-            print(f"\n📄 Processing: {doc_id}")
+            logger.info("[EXTRACTION] Processing: %s", doc_id)
 
             # Find corresponding normalized text file
             norm_path = self._find_normalized_path(normalized_dir, doc_id)
@@ -134,15 +134,24 @@ class LangChainExtractorService:
                 # Fall back to abstract if allowed
                 text = (row.get("abstract_or_summary") or "").strip()
                 if not text:
-                    print(f"❌ No text found for {doc_id}")
+                    logger.warning("[EXTRACTION] No text found for %s", doc_id)
                     return None
                 doc_text = text
                 short_text_only = True
-                print(f"📝 Using abstract ({len(doc_text)} chars)")
+                logger.info(
+                    "[EXTRACTION] Using abstract for %s (%d chars) - no normalized file found",
+                    doc_id,
+                    len(doc_text),
+                )
             else:
                 doc_text = Path(norm_path).read_text(encoding="utf-8", errors="ignore")
                 short_text_only = False
-                print(f"📄 Using full text ({len(doc_text)} chars)")
+                logger.info(
+                    "[EXTRACTION] Using full text for %s (%d chars) from %s",
+                    doc_id,
+                    len(doc_text),
+                    norm_path,
+                )
 
             # Abstracts-only mode override
             if self.config.use_abstracts_only and row.get("abstract_or_summary"):
@@ -704,39 +713,64 @@ class LangChainExtractorService:
         """Find the normalized text file for a document ID."""
         ndir = Path(normalized_dir)
         if not ndir.exists():
+            logger.warning(
+                "[FILE_MATCH] Normalized dir does not exist: %s", normalized_dir
+            )
             return None
 
         candidates = list(ndir.glob("*.txt"))
 
         # Debug: show what we're trying to match
-        print(f"🔍 Looking for normalized file for doc_id: {doc_id}")
-        print(f"🔍 Available files: {[p.name for p in candidates]}")
+        logger.info(
+            "[FILE_MATCH] Looking for normalized file for doc_id=%s, available_files=%d",
+            doc_id,
+            len(candidates),
+        )
+        if len(candidates) <= 20:
+            logger.debug(
+                "[FILE_MATCH] Available files: %s", [p.name for p in candidates]
+            )
 
         # Try exact match first
         for p in candidates:
             if doc_id in p.stem:
-                print(f"✅ Found exact match: {p.name}")
+                logger.info("[FILE_MATCH] Found exact match for %s: %s", doc_id, p.name)
                 return str(p)
 
         # Try without protocol prefix (https://, http://)
         clean_doc_id = doc_id.replace("https://", "").replace("http://", "")
         for p in candidates:
             if clean_doc_id in p.stem:
-                print(f"✅ Found match without protocol: {p.name}")
+                logger.info(
+                    "[FILE_MATCH] Found match without protocol for %s: %s",
+                    doc_id,
+                    p.name,
+                )
                 return str(p)
 
         # Try with character normalization (/ -> _)
         normalized_doc_id = clean_doc_id.replace("/", "_")
         for p in candidates:
             if normalized_doc_id in p.stem or p.stem in normalized_doc_id:
-                print(f"✅ Found match with normalization: {p.name}")
+                logger.info(
+                    "[FILE_MATCH] Found match with normalization for %s: %s (normalized_doc_id=%s)",
+                    doc_id,
+                    p.name,
+                    normalized_doc_id,
+                )
                 return str(p)
 
         # Try reverse: check if filename (without extension) is in doc_id
         for p in candidates:
             if p.stem in doc_id:
-                print(f"✅ Found reverse match: {p.name}")
+                logger.info(
+                    "[FILE_MATCH] Found reverse match for %s: %s", doc_id, p.name
+                )
                 return str(p)
 
-        print(f"❌ No matching file found for {doc_id}")
+        logger.warning(
+            "[FILE_MATCH] No matching file found for %s (tried: exact, no_protocol, normalized=%s, reverse)",
+            doc_id,
+            normalized_doc_id,
+        )
         return None

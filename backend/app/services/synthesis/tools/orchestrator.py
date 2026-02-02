@@ -996,7 +996,7 @@ Additional guidance:
                             )
                             title = item.get("title", "Unknown")
                             evs = item.get("evidence_strength", "?")
-                            imp = item.get("predicted_impact", "?")
+                            imp = item.get("impact_score", "?")
                             rel = item.get("relevance_score", "?")
                             summary = (item.get("key_context_summary") or "")[:260]
                             prefix = f"[{cit}] " if cit else ""

@@ -273,17 +273,17 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             raw_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
             weight = raw_score / 5.0
             for result_ext in doc_to_results.get(doc_uuid, []):
-                # Support both 'direction' (new schema) and 'effect_direction' (legacy)
-                effect_dir = (
-                    result_ext.get("direction")
-                    or result_ext.get("effect_direction", "")
-                ).lower()
-                if effect_dir in ("increase", "positive"):
+                effect_dir = result_ext.get("effect_direction", "").lower()
+                if effect_dir in ("null", "none", "no effect"):
+                    null += weight
+                elif result_ext.get("is_beneficial") is True:
+                    pos += weight
+                elif result_ext.get("is_beneficial") is False:
+                    neg += weight
+                elif effect_dir in ("increase", "positive"):
                     pos += weight
                 elif effect_dir in ("decrease", "negative"):
                     neg += weight
-                elif effect_dir in ("null", "none", "no effect"):
-                    null += weight
                 effect_size = result_ext.get("effect_size", "")
                 if effect_size and len(effect_size) > 2:
                     has_number = bool(re.search(r"\d", effect_size))
@@ -373,10 +373,22 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
             if doc_id:
                 group["doc_ids"].add(doc_id)
 
-            effect_dir = raw_ext.get("effect_direction")
+            effect_dir = (raw_ext.get("effect_direction") or "").lower()
             raw_score = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
             weight = raw_score / 5.0
-            if effect_dir == "increase":
+            if effect_dir in ("null", "none", "no effect"):
+                group["null"] += weight
+                if doc_id:
+                    group["doc_effects"].setdefault(doc_id, []).append("null")
+            elif raw_ext.get("is_beneficial") is True:
+                group["pos"] += weight
+                if doc_id:
+                    group["doc_effects"].setdefault(doc_id, []).append("positive")
+            elif raw_ext.get("is_beneficial") is False:
+                group["neg"] += weight
+                if doc_id:
+                    group["doc_effects"].setdefault(doc_id, []).append("negative")
+            elif effect_dir == "increase":
                 group["pos"] += weight
                 if doc_id:
                     group["doc_effects"].setdefault(doc_id, []).append("positive")
@@ -384,10 +396,6 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
                 group["neg"] += weight
                 if doc_id:
                     group["doc_effects"].setdefault(doc_id, []).append("negative")
-            elif effect_dir == "null":
-                group["null"] += weight
-                if doc_id:
-                    group["doc_effects"].setdefault(doc_id, []).append("null")
 
             effect_size = raw_ext.get("effect_size", "")
             if effect_size and len(effect_size) > 2:

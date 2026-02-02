@@ -384,12 +384,12 @@ class EvidenceCoverageSnapshot(BaseModel):
 
 
 VerdictType = Literal[
-    "well_evidenced_increase",
-    "well_evidenced_decrease",
-    "evidenced_increase",
-    "evidenced_decrease",
-    "suggested_increase",
-    "suggested_decrease",
+    "well_evidenced_positive",
+    "well_evidenced_negative",
+    "evidenced_positive",
+    "evidenced_negative",
+    "suggested_positive",
+    "suggested_negative",
     "contested",
     "no_effect",
     "insufficient_evidence",
@@ -539,6 +539,9 @@ class PolicyIntervention(BaseModel):
     transferability_rating: Optional[str] = Field(None)
     transferability_note: Optional[str] = Field(None)
     transferability_breakdown: Optional[TransferabilityBreakdown] = Field(None)
+    impact_score: Optional[float] = Field(None)
+    impact_score_label: Optional[str] = Field(None)
+    impact_score_breakdown: Optional[Dict[str, object]] = Field(None)
 
 
 class SynthesisSummary(BaseModel):

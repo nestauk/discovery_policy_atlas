@@ -52,10 +52,17 @@ export interface SearchParams {
     // Evidence assessment fields
     evidence_strength?: number  // 1-5 star rating for evidence quality
     evidence_strength_justification?: string
-    predicted_impact?: number  // 1-5 star rating for predicted impact
-    predicted_impact_justification?: string
+  impact_score?: number | null // 1-5 impact score (document-level), null when unassessable
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown>
     // Extracted fields (dynamically added based on extraction_fields parameter)
-    [key: string]: string | number | boolean | string[] | undefined
+    [key: string]:
+      | string
+      | number
+      | boolean
+      | string[]
+      | Record<string, unknown>
+      | undefined
   }
   
   export interface SearchResult {
@@ -67,17 +74,17 @@ export interface SearchParams {
   }
 
   // Synthesis summary types (Enhanced)
-  export type VerdictType = 
-    | 'well_evidenced_increase'
-    | 'well_evidenced_decrease'
-    | 'evidenced_increase'
-    | 'evidenced_decrease'
-    | 'suggested_increase'
-    | 'suggested_decrease'
-    | 'contested'
-    | 'no_effect'
-    | 'insufficient_evidence'
-    | 'probable_contribution';
+export type VerdictType = 
+  | 'well_evidenced_positive'
+  | 'well_evidenced_negative'
+  | 'evidenced_positive'
+  | 'evidenced_negative'
+  | 'suggested_positive'
+  | 'suggested_negative'
+  | 'contested'
+  | 'no_effect'
+  | 'insufficient_evidence'
+  | 'probable_contribution';
 
   export type SemanticMagnitudeType =
     | 'transformational'

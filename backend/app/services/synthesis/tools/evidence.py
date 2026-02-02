@@ -847,7 +847,7 @@ class TopStudyItem(BaseModel):
         title: Document title.
         author_year: Short author/year string for display.
         evidence_strength: Evidence quality rating (1-5), if available.
-        predicted_impact: Predicted policy impact rating (1-5), if available.
+        impact_score: Document impact score (1-5), if available.
         study_type: Study type/category (if available from metadata).
         key_context_summary: Highest-relevance RCS summary for this document.
         relevance_score: RCS relevance score (0-10) for the selected context.
@@ -860,7 +860,7 @@ class TopStudyItem(BaseModel):
     title: str
     author_year: str = ""
     evidence_strength: Optional[int] = None
-    predicted_impact: Optional[int] = None
+    impact_score: Optional[float] = None
     study_type: Optional[str] = None
     key_context_summary: str = ""
     relevance_score: int = 0
@@ -882,7 +882,7 @@ class GetTopStudiesTool(BaseTool):
 
     Selects studies using deterministic doc quality signals from synthesis state:
     - evidence_score (1-5)
-    - impact_score (1-5) aka predicted impact
+    - impact_score (1-5)
 
     Returns 1-2 studies with their highest-relevance RCS context, enabling the
     generator to write a concrete 'Key Study' implementation description.
@@ -891,7 +891,7 @@ class GetTopStudiesTool(BaseTool):
     name = "get_top_studies"
     description = (
         "Get the top 1-2 studies supporting an intervention category, ranked by "
-        "evidence strength and predicted policy impact (doc_scores). "
+        "evidence strength and impact score (doc_scores). "
         "Returns study metadata plus the highest-relevance contextual summary and "
         "supporting text snippet to describe concrete implementation details."
     )
@@ -1183,7 +1183,7 @@ class GetTopStudiesTool(BaseTool):
                     title=meta.get("title") or "Unknown",
                     author_year=author_year,
                     evidence_strength=scores.get("evidence_score"),
-                    predicted_impact=scores.get("impact_score"),
+                    impact_score=scores.get("impact_score"),
                     study_type=meta.get("document_type"),
                     key_context_summary=(ctx.summary if ctx else ""),
                     relevance_score=(ctx.relevance_score if ctx else 0),

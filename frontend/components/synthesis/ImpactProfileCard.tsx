@@ -7,12 +7,12 @@ import { ConsensusMeter } from '@/components/synthesis/ConsensusMeter'
 import type { OutcomeTheme } from '@/types/search'
 
 const verdictStyles: Record<string, string> = {
-  well_evidenced_increase: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  well_evidenced_decrease: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  evidenced_increase: 'bg-green-50 text-green-700 border-green-200',
-  evidenced_decrease: 'bg-green-50 text-green-700 border-green-200',
-  suggested_increase: 'bg-lime-50 text-lime-700 border-lime-200',
-  suggested_decrease: 'bg-lime-50 text-lime-700 border-lime-200',
+  well_evidenced_positive: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  well_evidenced_negative: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  evidenced_positive: 'bg-green-50 text-green-700 border-green-200',
+  evidenced_negative: 'bg-green-50 text-green-700 border-green-200',
+  suggested_positive: 'bg-lime-50 text-lime-700 border-lime-200',
+  suggested_negative: 'bg-lime-50 text-lime-700 border-lime-200',
   contested: 'bg-yellow-50 text-yellow-700 border-yellow-200',
   no_effect: 'bg-slate-50 text-slate-700 border-slate-200',
   insufficient_evidence: 'bg-slate-50 text-slate-700 border-slate-200',
@@ -45,6 +45,9 @@ interface ImpactProfileCardProps {
 
 export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
   const verdictLabel = outcome.verdict_label
+  const verdictKey = verdictLabel
+    ? verdictLabel.replace('_increase', '_positive').replace('_decrease', '_negative')
+    : undefined
   const magnitudeLabel = outcome.predicted_magnitude
   const causalLabel = outcome.primary_causal_mechanism
   const magnitudeDetail = outcome.magnitude_detail
@@ -53,13 +56,13 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
     outcome.source_doc_ids?.length ?? outcome.frequency ?? undefined
 
   const verdictTooltips: Record<string, string> = {
-    well_evidenced_increase: 'Strong, consistent evidence supports an upward effect.',
-    well_evidenced_decrease: 'Strong, consistent evidence supports a downward effect.',
-    evidenced_increase: 'Moderate evidence supports an upward effect.',
-    evidenced_decrease: 'Moderate evidence supports a downward effect.',
-    suggested_increase: 'Limited evidence suggests an upward effect.',
-    suggested_decrease: 'Limited evidence suggests a downward effect.',
-    contested: 'Evidence is split between upward and downward effects.',
+    well_evidenced_positive: 'Strong, consistent evidence supports a beneficial effect.',
+    well_evidenced_negative: 'Strong, consistent evidence supports a harmful effect.',
+    evidenced_positive: 'Moderate evidence supports a beneficial effect.',
+    evidenced_negative: 'Moderate evidence supports a harmful effect.',
+    suggested_positive: 'Limited evidence suggests a beneficial effect.',
+    suggested_negative: 'Limited evidence suggests a harmful effect.',
+    contested: 'Evidence is split between beneficial and harmful effects.',
     no_effect: 'Evidence suggests no consistent effect.',
     insufficient_evidence: 'Too little evidence to determine effect direction.',
     probable_contribution: 'Evidence suggests contribution without strong attribution.'
@@ -136,13 +139,13 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
             </div>
           )}
         </div>
-        {verdictLabel && (
-          <Tooltip content={verdictTooltips[verdictLabel] || 'Impact verdict label'}>
+        {verdictKey && (
+          <Tooltip content={verdictTooltips[verdictKey] || 'Impact verdict label'}>
             <Badge
               variant="outline"
-              className={`text-xs ${verdictStyles[verdictLabel] || 'bg-slate-50 text-slate-700 border-slate-200'}`}
+              className={`text-xs ${verdictStyles[verdictKey] || 'bg-slate-50 text-slate-700 border-slate-200'}`}
             >
-              {toLabel(verdictLabel)}
+              {toLabel(verdictKey)}
             </Badge>
           </Tooltip>
         )}

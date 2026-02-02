@@ -29,7 +29,7 @@ class DocumentQualityInfo(BaseModel):
         title: Document title.
         evidence_strength: 1-5 star rating for evidence quality.
         evidence_justification: Why this rating was given.
-        predicted_impact: 1-5 star rating for predicted policy impact.
+        impact_score: 1-5 star rating for document impact.
         impact_justification: Why this rating was given.
         study_type: Type of study (e.g., "RCT", "Systematic Review").
         year: Publication year.
@@ -40,7 +40,7 @@ class DocumentQualityInfo(BaseModel):
     title: str
     evidence_strength: Optional[int] = None
     evidence_justification: str = ""
-    predicted_impact: Optional[int] = None
+    impact_score: Optional[float] = None
     impact_justification: str = ""
     study_type: Optional[str] = None
     year: Optional[int] = None
@@ -57,7 +57,7 @@ class GetDocumentQualityTool(BaseTool):
     description = (
         "Get quality assessment for a document by citation number. "
         "Use to verify a source is high-quality before citing. "
-        "Returns evidence strength (1-5 stars), predicted impact (1-5 stars), "
+        "Returns evidence strength (1-5 stars), impact score (1-5), "
         "study type, and justifications."
     )
     max_results = 1
@@ -104,7 +104,7 @@ class GetDocumentQualityTool(BaseTool):
             title=metadata.get("title") or target_citation.document_title or "Unknown",
             evidence_strength=scores.get("evidence_score"),
             evidence_justification=scores.get("evidence_justification", ""),
-            predicted_impact=scores.get("impact_score"),
+            impact_score=scores.get("impact_score"),
             impact_justification=scores.get("impact_justification", ""),
             study_type=metadata.get("document_type"),
             year=metadata.get("year"),
@@ -114,7 +114,7 @@ class GetDocumentQualityTool(BaseTool):
         logger.info(
             f"get_document_quality([{citation_number}]): "
             f"evidence={quality_info.evidence_strength}/5, "
-            f"impact={quality_info.predicted_impact}/5"
+            f"impact={quality_info.impact_score}/5"
         )
 
         return ToolResult.ok(quality_info.model_dump())

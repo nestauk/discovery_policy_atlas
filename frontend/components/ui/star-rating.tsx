@@ -10,7 +10,7 @@ interface StarRatingProps {
   maxStars?: number
   size?: 'sm' | 'md' | 'lg'
   className?: string
-  tooltip?: string
+  tooltip?: React.ReactNode
   /** Display mode: 'badge' for X/5 format, 'icons' for star icons only, 'icons-with-number' for both */
   mode?: DisplayMode
   /** Show greyed stars instead of "N/A" text when stars is null/undefined */

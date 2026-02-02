@@ -178,25 +178,54 @@ class ParsingService:
             doc.close()
 
     def _parse_html(self, doc_id: str, path: Path) -> ParsedText:
-        # Prefer Scrapling’s DOM extraction when available
+        file_size = path.stat().st_size
+        logger.info(
+            "[HTML_PARSE] Starting parse for %s (file_size=%d bytes)",
+            doc_id,
+            file_size,
+        )
+
+        scrapling_text = None
+        scrapling_error = None
+
+        # Prefer Scrapling's DOM extraction when available
         if Fetcher is not None:
             try:
                 # Some sites embed JSON-escaped strings; get cleaned text via Scrapling's methods
                 page = Fetcher.from_file(str(path))
-                text = page.get_all_text(
+                scrapling_text = page.get_all_text(
                     ignore_tags=("script", "style", "noscript", "meta", "link")
                 )
-                if text and len(text) > 0:
-                    page_spans = [{"page": 1, "char_start": 0, "char_end": len(text)}]
-                    return ParsedText(doc_id, text, page_spans)
-            except Exception:
-                pass
+                logger.info(
+                    "[HTML_PARSE] Scrapling result for %s: %d chars",
+                    doc_id,
+                    len(scrapling_text) if scrapling_text else 0,
+                )
+                if scrapling_text and len(scrapling_text) > 0:
+                    page_spans = [
+                        {"page": 1, "char_start": 0, "char_end": len(scrapling_text)}
+                    ]
+                    return ParsedText(doc_id, scrapling_text, page_spans)
+            except Exception as e:
+                scrapling_error = str(e)
+                logger.warning(
+                    "[HTML_PARSE] Scrapling failed for %s: %s",
+                    doc_id,
+                    scrapling_error,
+                )
+        else:
+            logger.info("[HTML_PARSE] Scrapling not available, using BeautifulSoup")
 
         # Fallback: BeautifulSoup readability approximation
+        logger.info("[HTML_PARSE] Using BeautifulSoup fallback for %s", doc_id)
         html = path.read_text(encoding="utf-8", errors="ignore")
+        logger.info("[HTML_PARSE] Raw HTML length for %s: %d chars", doc_id, len(html))
+
         soup = BeautifulSoup(html, "lxml")
+
         # Try to prioritize main content regions if present
         candidates = []
+        matched_selectors = []
         for selector in [
             "article",
             "main",
@@ -208,17 +237,48 @@ class ParsingService:
             found = soup.select(selector)
             if found:
                 candidates.extend(found)
+                matched_selectors.append(f"{selector}({len(found)})")
+
+        if matched_selectors:
+            logger.info(
+                "[HTML_PARSE] Matched selectors for %s: %s",
+                doc_id,
+                ", ".join(matched_selectors),
+            )
+        else:
+            logger.info(
+                "[HTML_PARSE] No content selectors matched for %s, using fallback elements",
+                doc_id,
+            )
+
         nodes = (
             candidates
             if candidates
             else soup.find_all(["article", "section", "div", "p", "h1", "h2", "h3"])
         )
 
+        logger.info("[HTML_PARSE] Found %d nodes for %s", len(nodes), doc_id)
+
         paragraphs = []
         for el in nodes:
             t = el.get_text(" ", strip=True)
             if t:
                 paragraphs.append(t)
+
         text = "\n".join(paragraphs)
         page_spans = [{"page": 1, "char_start": 0, "char_end": len(text)}]
+
+        logger.info(
+            "[HTML_PARSE] Final result for %s: %d chars from %d paragraphs (scrapling=%s, bs_selectors=%s)",
+            doc_id,
+            len(text),
+            len(paragraphs),
+            len(scrapling_text)
+            if scrapling_text
+            else "failed"
+            if scrapling_error
+            else "n/a",
+            ",".join(matched_selectors) if matched_selectors else "fallback",
+        )
+
         return ParsedText(doc_id, text, page_spans)

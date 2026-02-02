@@ -646,12 +646,14 @@ async def trigger_synthesis_for_project(
     try:
         logger.info(f"Starting synthesis for project {project_id}")
 
-        # Mark project as running (async to avoid blocking)
+        # Mark project as synthesising (async to avoid blocking).
+        # The analysis phase uses "running"; synthesis should be distinguished so
+        # the frontend can render the correct progress state.
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
             lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "running"})
+            .update({"status": "synthesising"})
             .eq("id", project_id)
             .execute(),
         )
@@ -836,7 +838,7 @@ async def run_analysis_for_project(
         await loop.run_in_executor(
             None,
             lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "running"})
+            .update({"status": "running", "search_query": search_query_data})
             .eq("id", project_id)
             .execute(),
         )
@@ -2112,13 +2114,10 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 extraction_results = doc.get("extraction_results", {})
                 conclusion = extraction_results.get("conclusion", {}) or {}
-                predicted_impact = conclusion.get("predicted_impact", {}) or {}
-                stored_evidence = conclusion.get("evidence_strength", {}) or {}
-                evidence_info = get_or_calculate_document_evidence(doc)
-                evidence_score = evidence_info["stars"]
-                if not stored_evidence and evidence_score is not None:
-                    evidence_score = evidence_score if evidence_score > 0 else None
-                impact_score = predicted_impact.get("stars")
+                evidence_strength = conclusion.get("evidence_strength", {}) or {}
+
+                impact_score = doc.get("impact_score")
+                evidence_score = evidence_strength.get("stars")
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
@@ -2216,10 +2215,14 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
 
                 extraction_results = doc.get("extraction_results", {}) or {}
                 conclusion = extraction_results.get("conclusion", {}) or {}
-                predicted_impact = conclusion.get("predicted_impact", {}) or {}
+                evidence_strength = conclusion.get("evidence_strength", {}) or {}
                 evidence_category = doc.get("evidence_category", "")
-                evidence_info = get_or_calculate_document_evidence(doc)
-                evidence_score = evidence_info["stars"] if evidence_category else ""
+                evidence_score = evidence_strength.get("stars")
+                evidence_justification = evidence_strength.get("justification", "")
+                if evidence_score is None and evidence_category:
+                    evidence_info = get_or_calculate_document_evidence(doc)
+                    evidence_score = evidence_info["stars"]
+                    evidence_justification = evidence_info.get("justification", "")
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])
@@ -2240,11 +2243,10 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                         "Relevance Reason": doc.get("relevance_reason", ""),
                         "Confidence": doc.get("relevance_confidence", ""),
                         "Evidence Category": evidence_category,
-                        "Evidence Score": evidence_score,
-                        "Impact Score": predicted_impact.get("stars", ""),
-                        "Impact Justification": predicted_impact.get(
-                            "justification", ""
-                        ),
+                        "Evidence Score": evidence_score or "",
+                        "Evidence Justification": evidence_justification,
+                        "Impact Score": doc.get("impact_score", ""),
+                        "Impact Justification": doc.get("impact_score_label", ""),
                         "Extraction Status": doc.get("extraction_status", ""),
                         "Text Source": doc.get("text_source", ""),
                         "Full Text Available": "Yes"
