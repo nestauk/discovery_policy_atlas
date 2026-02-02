@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
-import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, AlertTriangle, ChevronRight, Download } from "lucide-react";
+import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, ChevronRight, Download } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type {
   CitationInfo,
@@ -175,13 +175,6 @@ function CitationLink({ citationKey, citationNumber, citationInfo, onCitationCli
 // ============================================================================
 
 function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapshot }) {
-  const strengthColors: Record<string, string> = {
-    'High': 'bg-green-100 text-green-800 border-green-200',
-    'Moderate': 'bg-amber-100 text-amber-800 border-amber-200',
-    'Low': 'bg-red-100 text-red-800 border-red-200',
-    'Unknown': 'bg-slate-100 text-slate-800 border-slate-200',
-  };
-
   const evidenceCategorySummary = useMemo(() => {
     return Object.entries(coverage.evidence_categories || {})
       // Filter out "Other (Non-evidence documents)"
@@ -207,25 +200,11 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
     .map(([type, count]) => `${count} ${type}`)
     .join(', ') || 'Various';
 
-  const hasRCTs = Object.keys(coverage.evidence_categories || {}).some(t =>
-    t.includes('RCTs and Quasi-Experimental'));
-  const hasMetas = Object.keys(coverage.evidence_categories || {}).some(t =>
-    t.includes('Systematic Review and Meta-Analysis'));
-
-  const filteredGaps = (coverage.gaps || []).filter(gap => {
-    if (gap.toLowerCase().includes('no rcts') && hasRCTs) return false;
-    if (gap.toLowerCase().includes('no meta') && hasMetas) return false;
-    return true;
-  });
-
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
       <div className="flex items-center gap-2 mb-3">
         <BookOpen className="h-4 w-4 text-slate-500" />
         <span className="font-medium text-sm text-slate-700">Evidence Base</span>
-        <Badge className={`ml-auto ${strengthColors[coverage.overall_strength] || strengthColors['Unknown']}`}>
-          {coverage.overall_strength} Confidence
-        </Badge>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div>
@@ -250,15 +229,6 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
           <div className="text-slate-700">{countrySummary}</div>
         </div>
       </div>
-      {filteredGaps.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-slate-200">
-          <div className="text-xs text-amber-700 flex items-start gap-1">
-            <AlertTriangle className="h-3 w-3 mt-0.5 flex-shrink-0" />
-            <span className="font-medium">Evidence gaps:</span>
-            <span>{filteredGaps.slice(0, 2).join('; ')}</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

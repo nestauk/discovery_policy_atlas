@@ -14,7 +14,6 @@ from app.services.synthesis.utils import normalize_study_type
 from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
 
 
-
 def clean_null_string(value: object) -> str:
     """Normalise literal null strings to empty text.
 
@@ -113,6 +112,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             "url": doc.get("landing_page_url") or doc.get("pdf_url"),
             "source": doc.get("source"),
             "document_type": doc.get("document_type"),
+            "evidence_category": doc.get("evidence_category"),
             "source_country": clean_null_string(doc.get("source_country")),
             "is_relevant": bool(doc.get("is_relevant"))
             if doc.get("is_relevant") is not None
@@ -120,8 +120,6 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         }
 
         # Get evidence and impact scores from conclusion (prefer stored, fallback to recompute)
-        extraction_results = doc.get("extraction_results") or {}
-        conclusion = extraction_results.get("conclusion") or {}
         evidence_info = get_or_calculate_document_evidence(doc)
 
         doc_scores[doc_uuid] = {
