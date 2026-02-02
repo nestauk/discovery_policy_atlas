@@ -573,10 +573,10 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
               extracted: countries={JSON.stringify(extractedContext.countries ?? [])}, populations={JSON.stringify(extractedContext.populations ?? [])}, settings={JSON.stringify(extractedContext.settings ?? [])}
             </div>
             <div>
-              constraints: cost={constraintLevels.cost ?? 'n/a'}, staffing={constraintLevels.staffing ?? 'n/a'}, complexity={constraintLevels.implementation_complexity ?? 'n/a'}
+              {`constraints: cost=${String(constraintLevels?.cost ?? 'n/a')}, staffing=${String(constraintLevels?.staffing ?? 'n/a')}, complexity=${String(constraintLevels?.implementation_complexity ?? 'n/a')}`}
             </div>
             <div>
-              evidence: cost={implementationEvidence.cost ?? 'n/a'}, staffing={implementationEvidence.staffing ?? 'n/a'}, complexity={implementationEvidence.implementation_complexity ?? 'n/a'}
+              {`evidence: cost=${String(implementationEvidence?.cost ?? 'n/a')}, staffing=${String(implementationEvidence?.staffing ?? 'n/a')}, complexity=${String(implementationEvidence?.implementation_complexity ?? 'n/a')}`}
             </div>
             {showOutcomeMatch && bestMatch != null ? (
               <div>
