@@ -101,7 +101,7 @@ def RELEVANCE_SYSTEM_PROMPT(
 
     context_section = "\n".join(context_parts)
 
-    return f"""You are an expert research and policy analyst evaluating documents for relevance and classification.
+    return f"""You are an expert research and policy analyst evaluating documents for relevance.
 
 {context_section}
 
@@ -119,17 +119,11 @@ For each document, you will assess:
    - Consider different ways of expressing the same geography (e.g., "UK" and "United Kingdom" is equivalent, as is "England" part of the UK, etc)
    - However, DO NOT use any other geographical information (besides the explicitly specified geography parameter) provided in the other parameter fields (such as in the user question, population or outcomes) for screening purposes. This is to allow the user learning from examples across the world (unless they explicitly specify a specific evidence source geography with the geography parameter).
 
-2. DOCUMENT TYPE CLASSIFICATION:
-   - **research_paper**: Empirical studies, experiments, clinical trials, data analyses
-   - **reviews**: Reviews, meta-analyses, systematic reviews, and other literature reviews
-   - **policy_document**: Policy recommendations, guidelines, frameworks, position papers, government reports, policy briefs, regulatory documents
-   - **other**: News articles, announcements, transcripts, opinion pieces, editorials, non-peer reviewed content
-
-3. CONFIDENCE: Rate your confidence that the document is relevant (0.0 = not relevant, 1.0 = relevant). 
+2. CONFIDENCE: Rate your confidence that the document is relevant (0.0 = not relevant, 1.0 = relevant).
     Consider whether the document is relevant to the research question (+0.2), the population interests (+0.2), the outcome interests (+0.2), the screening factors (+0.2), and the geography alignment (+0.2).
     If some of these are not specified, do not penalize the confidence score, and instead use only the specified factors to calculate the confidence score.
 
-4. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, screening factors, and geography.
+3. REASONING: Provide clear, concise explanations for your assessments, including how the document relates (or doesn't relate) to the specified population interests, outcome interests, screening factors, and geography.
 
 Base your evaluation primarily on the title and abstract/summary provided. Be thorough but concise in your reasoning."""
 
@@ -184,7 +178,7 @@ INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
             """Task: Extract 2–6 ACTIVE INTERVENTIONS/PROGRAMS evaluated or proposed, that are the main focus of the study.
 
 Schema:
-{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","study_type":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","study_type":"...","country":"...","population_intervened":"...|null","population_demographics":"...","sample_size":"...","supporting_quote":"...","inner_setting":"...|null","cost_level":"...|null","cost_justification":"...|null","staffing_level":"...|null","staffing_justification":"...|null","implementation_complexity_level":"...|null","implementation_complexity_justification":"...|null"}}], "coverage_note":"string"}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
@@ -193,25 +187,46 @@ Rules:
 - Include attention control arms only if they involve active components (e.g., alternative treatments).
 - description must paraphrase only what is contained in the quote.
 - DO NOT include interventions that were not studied in the document, are not the main focus and just mentioned in passing.
+- If the document is purely descriptive (e.g., prevalence statistics, correlational analysis, epidemiological data)
+  with NO intervention being actively evaluated or proposed, return an EMPTY interventions array:
+  {{"interventions": [], "coverage_note": "No intervention evaluated - purely descriptive study"}}.
+- Only extract interventions that the study actively evaluates, tests, or proposes. Do NOT invent interventions from
+  background context, policy goals, or passing mentions.
 - If information is missing for a field, return "null" for the field.
 
-Study Type (Maryland Scientific Methods Scale - indicate only the letter):
-   a) purely cross-sectional study
-   b) Study measures outcome pre and post
-   c) purely cross-sectional study, uses control variables
-   d) Study measures outcome pre and post
-   e) Comparison of outcomes in treated group
-   f) Quasi-experimental study
-   g) Randomised controlled trial
-   h) Meta-analysis
-   i) Not a trial, but rather a policy recommendation paper or a theoretical modelling study
-   j) Not a scientific study, but a news article, opinion piece or government announcement
 
 Population Fields:
 - population_intervened: Who received the intervention (e.g., "college students", "adults with depression")
 - population_demographics: Secondary characteristics (e.g., "18-25 years old, 60% female, undergraduate students")
 - sample_size: Total number of participants in the intervention group (e.g., "153", "50 participants")
 - country: Where the intervention was carried out or recommended
+
+Implementation Profile Fields:
+- inner_setting: The organisational context where the intervention is DELIVERED TO the target population.
+  Examples: School, Hospital/Clinic, Prison, Workplace, Community Centre, Home, Online/Digital, Primary Care, Government Department, Parliament, Local Council.
+  Important: Use the setting where recipients experience the intervention, not the institution that created or mandated it.
+  Example: If a parliament passes a school nutrition policy, the inner_setting is "School", not "Parliament".
+
+- cost_level: Budget and financial requirements. Infer from context if not explicit.
+  - High: significant capital investment, high ongoing operational costs, specialist equipment
+  - Moderate: structured programme costs, ongoing consumables, facility requirements
+  - Low: minimal financial outlay, uses existing resources, low-cost materials
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
+- cost_justification: 1-2 sentences explaining the cost assessment based on evidence in the paper.
+
+- staffing_level: Human capital and staffing requirements. Infer from context if not explicit.
+  - High: specialist professionals required, intensive staffing ratios, extensive expertise needed
+  - Moderate: trained staff required, dedicated personnel, some specialist knowledge
+  - Low: minimal staffing, can be delivered by generalists, self-service possible
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
+- staffing_justification: 1-2 sentences explaining the staffing assessment based on evidence in the paper.
+
+- implementation_complexity_level: Implementation and coordination difficulty. Infer from context if not explicit.
+  - High: legislative/systemic change, multi-agency coordination, significant training required
+  - Moderate: cross-team coordination, staff training, ongoing monitoring systems
+  - Low: plug-and-play materials, single-session delivery, minimal coordination
+  Return one of: High | Moderate | Low | null (only if truly unknowable)
+- implementation_complexity_justification: 1-2 sentences explaining the complexity assessment based on evidence in the paper.
 
 Paper text:
 {full_text}""",
@@ -254,15 +269,29 @@ Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"..."}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"...","causality_claim":"attribution|contribution|correlation","negative_impact_flag":false,"is_primary":true|false,"is_beneficial":true|false,"magnitude_estimate":"substantial|large|moderate|marginal|unknown"}}]}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
 - Focus on PRIMARY RESULTS for this intervention (effects compared to control/baseline).
 - DO NOT extract control group results or "no change" findings unless they are the main finding.
 - Prefer explicit statistics (e.g., t, β, OR, CI, effect sizes). If absent, keep qualitative result with quote.
-- Include effect direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect.
+- Include effect direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect, "mixed" for divergent subgroup results, "inconclusive" for insufficient data.
 - population_measured: Who was measured for this specific result (may be subset of intervention population).
+
+causality_claim Guide:
+  - attribution: Author claims intervention CAUSED the result (counterfactual/experimental logic, RCT)
+  - contribution: Author claims intervention HELPED or was a necessary factor (theory-based logic)
+  - correlation: Author notes association only, no causal claim
+
+negative_impact_flag: Set to true if this result indicates harm, adverse effects, or negative consequences
+
+is_primary: Set to true if this outcome is a primary outcome the study was designed to measure
+
+is_beneficial: Set to true if the outcome change is beneficial for the target population
+  - Example: BMI decrease is beneficial, anxiety increase is harmful
+
+magnitude_estimate: Semantic effect size bucket for this result
 
 Paper text:
 {full_text}""",
@@ -277,10 +306,10 @@ CONCLUSIONS_PROMPT = ChatPromptTemplate.from_messages(
         ("system", EXTRACTION_SYSTEM_PROMPT),
         (
             "human",
-            """Task: Extract the KEY CONCLUSION of this study AND assess the evidence strength and predicted impact.
+            """Task: Extract the KEY CONCLUSION of this study AND assess evidence strength, risk assessment, and study context.
 
 Schema:
-{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","evidence_strength":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}},"predicted_impact":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}}}}}}
+{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","evidence_strength":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}},"risk_assessment":{{"risks_identified":["Risk 1","Risk 2"],"unintended_consequences_detected":true|false}},"study_context":{{"country":"...|null","population":"...|null","inner_setting":"...|null","cost_level":"High|Moderate|Low|null","staffing_level":"High|Moderate|Low|null","implementation_complexity_level":"High|Moderate|Low|null"}}}}}}
 
 Rules for Conclusion:
 - top_line_summary: ONE direct sentence stating the main conclusion (e.g., "The intervention significantly reduced behavioral problems in children").
@@ -288,31 +317,144 @@ Rules for Conclusion:
 - Focus on the OVERALL STUDY CONCLUSION, not individual result details.
 - Base the conclusion on what the authors explicitly state as their main finding/conclusion.
 
-Rules for Evidence Strength Assessment (methodological quality, reliability, robustness):
-- ⭐⭐⭐⭐⭐ (5): RCT or strong quasi-experimental, large sample, validated measures, sufficient mitigation of confounders, strong statistical significance, large effect size.
-- ⭐⭐⭐⭐ (4): RCT/quasi, moderate/large sample, partial mitigation of confounders, validated methods, medium or smaller effect sizes.
-- ⭐⭐⭐ (3): RCT/quasi with moderate sample, partial mitigation, methods not fully validated; or small sample but some strong controls.
-- ⭐⭐ (2): Weak quasi-experimental or small RCT, limited controls, unvalidated methods, limited statistical power.
-- ⭐ (1): Anecdotal evidence, uncontrolled pre–post, insufficient mitigation, small/biased sample, no statistical significance despite correlation.
+Rules for Risk Assessment:
+- risks_identified: List potential harms, adverse effects, or implementation challenges FROM THE INTERVENTION ITSELF.
+  - Include: adverse outcomes, cost/feasibility barriers, equity concerns, sustainability challenges, unintended side effects.
+  - Do NOT include: the underlying problem being addressed, prevalence/scale of the issue, or background harms unrelated to the intervention.
+  - Examples:
+    - ✅ "Implementation requires specialist staffing and training, creating feasibility risks"
+    - ✅ "Sustained funding requirements may limit long-term viability"
+    - ❌ "The problem is widespread and worsening"
+    - ❌ "The issue causes major societal harm"
+- unintended_consequences_detected: True if paper mentions unintended negative effects
 
-Rules for Predicted Impact Assessment (likelihood of scaling outcomes beyond study context):
-- ⭐⭐⭐⭐⭐ (5): Strong causal evidence, large effects, replicated or validated, generalisable to population, mitigation of confounders, strong evidence of external validity.
-- ⭐⭐⭐⭐ (4): Adequate causal link, medium effect size, good but partial mitigation, some generalisability concerns, but broadly reliable.
-- ⭐⭐⭐ (3): Smaller effect size or more context-limited, moderate sample, some threats to generalisability, still a plausible impact.
-- ⭐⭐ (2): Uncertain or inconsistent evidence, weak causal link, effects fragile or highly context-specific.
-- ⭐ (1): Anecdotal or speculative impact only, with minimal empirical support.
-
-Assessment Rules:
-- Begin at 5 stars and discount by 1 for each unmet major criterion (down to 1).
-- If evidence is insufficient for assessment, set "stars": null and add "evidence_gap" explanation.
-- Focus on the MAIN intervention studied in the paper, not secondary or control conditions.
-- justification: 2-4 sentences explaining rating and discounting logic based on aggregate assessment of the study's evidence.
+Rules for Study Context (document-level fallback for transferability scoring):
+- country: The main study country/region for the document overall (not necessarily each intervention).
+- population: The main population studied/targeted (broad description).
+- inner_setting: The organisational context where the intervention(s) are delivered to recipients.
+  Use the recipient-facing setting, not the policy-making body.
+  Example: a council mandates school meals -> inner_setting is "School", not "Council".
+- cost_level/staffing_level/implementation_complexity_level: Coarse requirements for implementing the intervention(s) as described overall in the document.
+  Use High/Moderate/Low if inferable; otherwise null. Prefer the dominant or typical level if multiple interventions differ.
 
 Paper text:
 {full_text}
 
 Interventions context (if available):
-{interventions_json}""",
+{interventions_json}
+
+{evidence_strength_context}
+""",
+        ),
+    ]
+)
+
+
+# =============================================================================
+# SR (SYSTEMATIC REVIEW) EXTRACTION PROMPTS
+# =============================================================================
+
+SR_ISSUES_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACTION_SYSTEM_PROMPT),
+        (
+            "human",
+            """Extract 1–3 PROBLEM STATEMENTS/ISSUES from this systematic review.
+
+Schema:
+{{"issues":[{{"idx":0,"label":"...","explanation":"...","supporting_quote":"..."}}], "coverage_note":"string|null"}}
+
+Rules:
+- MECE: Merge overlaps; avoid duplicates; prefer concise scientific labels.
+- Focus on BROADER PROBLEMS that motivated the research (e.g., "high autism rates", "lack of early interventions", "poor treatment outcomes").
+- DO NOT include study-specific findings or results (e.g., "this study found no effect") - those belong in results.
+- AVOID generic research gaps like "need for more research" - focus on real-world problems.
+- explanation: Provide 1-2 sentences contextualizing the issue beyond the quote (based on the information in the systematic review).
+- Keep only concrete issues explicitly supported by the text.
+
+Paper text:
+{full_text}""",
+        ),
+    ]
+)
+
+SR_INTERVENTIONS_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACTION_SYSTEM_PROMPT),
+        (
+            "human",
+            """Extract 2–6 INTERVENTION CATEGORIES that are reviewed and form the main focus of this systematic review..
+
+Schema:
+{{"interventions":[{{"idx":0,"name":"...","type":"...","description":"...","geographic_scope":"...","population_intervened":"...|null","evidence_volume":"...","supporting_quote":"..."}}], "coverage_note":"string"}}
+
+Rules:
+- MECE: mutually exclusive and collectively exhaustive, no overlapping entries; merge variants.
+- Focus exclusively on ACTIVE INTERVENTION CATEGORIES only (i.e. treatments, programmes, or policies under evaluation)
+- DO NOT include control groups, placebo groups, or "no intervention" conditions as interventions.
+- Include attention control arms only if they involve active components (e.g., alternative treatments).
+- Intervention descriptions must paraphrase only information explicitly stated in the supporting quote. Do not infer mechanisms, intensity, duration, or effectiveness.
+- Extract INTERVENTION CATEGORIES as grouped in the review (not individual studies).
+- DO NOT include interventions that are not evaluated, are not a primary focus, or are mentioned only in passing.
+- If required information for a field is not reported at the category level, return "null" for that field.
+
+Population Fields:
+- population_intervened: The population targeted across included studies within the intervention category (e.g. "adults with depression", "children and adolescents"). Use abstracted labels; do not infer specifics.
+- evidence_volume: The volume of evidence supporting the intervention category (e.g. "5 RCTs", "12 studies"), only if explicitly reported.
+
+Paper text:
+{full_text}""",
+        ),
+    ]
+)
+
+SR_RESULTS_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", EXTRACTION_SYSTEM_PROMPT),
+        (
+            "human",
+            """For ONLY the intervention category below, extract POOLED/META-ANALYTIC RESULTS.
+
+Intervention:
+{one_intervention_json}
+
+Schema:
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","n_studies":int|null,"sample_size":int|null,"stratum_type":"...|null","stratum_value":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"..."}}]}}
+
+Rules:
+- MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
+- Extract SEPARATE RESULT ROWS for each stratum (subgroup analysis, follow-up period, setting variant, etc.)
+- Focus on AGGREGATED REVIEW-LEVEL RESULTS for this intervention category, not per-study data
+- Each result row should correspond to a single pooled or aggregate effect estimate for ONE stratum
+
+IMPORTANT - Outcome Variable vs Stratum:
+- outcome_variable: The BASE outcome measure ONLY (e.g., "BMI", "weight", "blood pressure") - DO NOT include time points or subgroup info here
+- stratum_type + stratum_value: Captures the CONDITIONS under which the result applies (e.g., follow-up period, age group, setting)
+- WRONG: outcome_variable="BMI at 12 months"
+- CORRECT: outcome_variable="BMI", stratum_type="follow-up period", stratum_value="12 months"
+- WRONG: outcome_variable="BMI short term"
+- CORRECT: outcome_variable="BMI", stratum_type="follow-up period", stratum_value="short term"
+
+Sample Size Fields (IMPORTANT - extract these when mentioned in the text):
+- n_studies: Number of studies pooled for this result (k), as an INTEGER (e.g., 3, not "3 studies")
+- sample_size: Total participants across pooled studies (N), as an INTEGER (e.g., 605, not "605 participants")
+- Look for phrases like "X studies", "k=X", "N=X", "X participants", "sample of X"
+
+Stratum Fields (captures how results vary within an intervention):
+- stratum_type: The dimension of variation (e.g., "follow-up period", "age subgroup", "setting", "intervention variant", "dosage", "comparison type")
+- stratum_value: The specific value for this stratum (e.g., "12 months", "short term", "children 5-11 years", "school-based", "high dose")
+Effect Size Fields:
+- effect_size_type: Type of pooled estimate (e.g., "SMD", "pooled OR", "RR", "MD")
+- effect_size: The numeric value (e.g., "-0.11", "0.85")
+- uncertainty: Confidence interval (e.g., "95% CI -0.21 to -0.01")
+- heterogeneity_I2: I² statistic if reported (e.g., "45%")
+- tau2: τ² (between-study variance) if reported
+
+Direction:
+- "increase" for improvements/increases, "decrease" for reductions, "null" for no significant effect, "mixed_or_unclear" for conflicting results
+
+Paper text:
+{full_text}""",
         ),
     ]
 )
@@ -350,6 +492,19 @@ Return ONLY a JSON array of strings, ordered from broad to narrow. Example forma
 ["Social well-being", "Better health outcomes", "Reduced healthcare costs"]"""
 
 
+INNER_SETTING_OPTIONS_SYSTEM_PROMPT = """You are a research assistant identifying relevant implementation settings for policy interventions.
+
+Given a research question about interventions, generate 3-5 setting options where such interventions are typically delivered. Order from MOST COMMON to LEAST COMMON for this type of intervention.
+
+Each setting should be:
+1. A clear, concise description (e.g., "Schools", "Primary care clinics", "Community centres", "Workplaces", "Online/digital platforms")
+2. Relevant to typical intervention delivery for this topic
+3. A setting where policy evidence is likely to exist
+
+Return ONLY a JSON array of strings. Example:
+["Schools", "Primary care clinics", "Community centres"]"""
+
+
 # =============================================================================
 # ADDITIONAL QUESTIONS GENERATION
 # =============================================================================
@@ -370,3 +525,152 @@ Guidelines:
 
 Return ONLY a JSON array of 1-3 strings. Example format:
 ["What supporting factors are important for these interventions to work?", "What are the main barriers to implementing these interventions?"]"""
+
+
+# =============================================================================
+# EVIDENCE CATEGORISATION
+# =============================================================================
+
+EVIDENCE_CATEGORIES_DEFINITION = """
+# Evidence Categories (Hierarchical - Highest to Lowest Evidence Strength)
+
+## 1. Systematic Review and Meta-Analysis
+**Definition**: A systematic review collects all possible studies related to a given topic and design, and reviews and analyses their results. During the systematic review process, the quality of studies is evaluated, and a statistical meta-analysis of the study results is conducted on the basis of their quality. A meta-analysis is a valid, objective, and scientific method of analyzing and combining different results. Usually, in order to obtain more reliable results, a meta-analysis is mainly conducted on randomized controlled trials (RCTs), which have a high level of evidence.
+
+**Examples**:
+- Cochrane reviews summarizing dozens of trials
+- JAMA / The Lancet / BMJ meta-analyses
+- Papers with explicit PRISMA methodology
+
+**Keywords**: "systematic review", "meta-analysis", "Cochrane", "PRISMA", "pooled analysis"
+
+## 2. RCTs and Quasi-Experimental Studies
+**Definition**:
+- **RCT**: A randomised controlled trial is a type of scientific experiment designed to evaluate the efficacy or safety of an intervention by minimising bias through the random allocation of participants to one or more comparison groups.
+- **Quasi-experimental**: A research design used to estimate the causal impact of an intervention. Similar to RCTs but specifically lacks random assignment to treatment or control. Assignment to treatment condition proceeds as it would in the absence of an experiment.
+
+**Examples**:
+- Individual randomized controlled trials testing interventions
+- Studies with treatment and control groups (randomized or quasi-experimental)
+
+**Keywords**: "randomized controlled trial", "RCT", "randomisation", "treatment arm", "control group", "quasi-experimental", "difference in differences", "instrumental variables", "propensity score matching", "fixed effects", "synthetic control method", "regression discontinuity design"
+
+## 3. Observational Research Studies
+**Definition**: An observational study draws inferences from a sample to a population where the independent variable is not under the control of the researcher because of ethical concerns or logistical constraints. One common observational study is about the possible effect of a treatment on subjects, where the assignment of subjects into a treated group versus a control group is outside the control of the investigator.
+
+**Examples**:
+- Cohort studies
+- Case-control studies
+- Cross-sectional surveys
+
+**Keywords**: "cohort", "case-control", "cross-sectional", "observational", "longitudinal study"
+
+## 4. Modelling & Simulation
+**Definition**: Modeling and simulation is the use of models (e.g., physical, mathematical, behavioral, or logical representation of a system, entity, phenomenon, or process) as a basis for simulations to develop data utilized for managerial or technical decision making.
+
+**Examples**:
+- Journal articles in economic modelling
+- OECD modelling reports
+- Forecasting and projection studies
+
+**Keywords**: "simulation", "model", "forecast", "projection", "computational model", "scenario analysis"
+
+## 5. Policy Syntheses & Guidance Documents
+**Definition**: A policy synthesis or guidance document is a report whose primary aim is to aggregate, interpret, summarise, and translate existing evidence into actionable insights, guidance or recommendations for policymakers or practitioners, rather than to present new primary empirical findings.
+ 
+ Such documents typically:
+- Begin with a summary of the policy problem or question
+- Draw on evidence from multiple sources
+- Provide an integrated appraisal of that evidence
+- Offer guidance, recommendations, or conclusions targeted at policy audiences
+
+**Examples**:
+- Government white papers
+- Policy proposals
+- Think tank policy reports
+- Sectoral guidance documents for practitioners (e.g., "MCS Guidelines on Heat Pump Installation Standards")
+
+ **Exclusion**: Documents aimed mainly at informing individual consumers, rather than policymakers or practitioners, should instead go into the 'Other' category.
+
+**Keywords**: "policy brief", "white paper", "guidance", "recommendations", "policy framework"
+
+## 6. Qualitative & Contextual Evidence
+**Definition**:
+- **Qualitative Research**: Research that aims to gather and analyse non-numerical (descriptive) data to understand individuals' social reality, including attitudes, beliefs, and motivation. Typically involves in-depth interviews, focus groups, or field observations.
+- **Contextual evidence**: Insights drawn from non-research sources describing how policies work in real world settings. Includes implementation evaluations, lived experience reports, thematic inspections, case studies.
+
+**Examples**:
+- Qualitative studies from charities
+- Case studies
+- Thematic analysis of stakeholder interviews
+
+**Keywords**: "qualitative", "interview", "focus group", "case study", "thematic analysis", "lived experience"
+
+## 7. Expert Opinion and Commentary
+**Definition**: Publications in which individuals with recognised expertise provide interpretation, judgement, or guidance based on their professional knowledge and experience, rather than on new empirical data. These include essays, editorials, commentaries, viewpoint pieces, consensus statements, and theoretical arguments. They may draw on existing literature but do not follow systematic research methods.
+
+**Examples**:
+- Editorial pieces
+- Expert essays
+- Thought leadership articles
+- Anecdotal case reports
+- Consultation responses
+
+**Keywords**: "commentary", "editorial", "perspective", "opinion", "viewpoint", "essay"
+
+## 8. Other (Non-evidence documents)
+**Definition**: A catch-all category for documents that are not research evidence, do not synthesise or interpret evidence, and are not expert commentary. These documents will be filtered out of downstream evidence workflows.
+
+**Examples**:
+- ONS statistical releases reporting descriptive figures
+- Parliamentary bills, Acts, statutory instruments
+- Funding guidance, procurement specifications
+- Administrative or operational documents
+- Press releases, programme announcements
+
+**Keywords**: "bill", "guidance note", "statistical bulletin", "funding rules", "regulation", "press release"
+
+## 9. Unknown / Insufficient information
+**Definition**: Use this category when there is not enough information in the title, abstract/summary, and metadata to make a reasonable judgement about the document's evidence type. This typically occurs when the abstract is missing and the title is too vague to infer the methodology or document type.
+
+**Examples**:
+- Title only, with generic wording (e.g. "Childhood obesity in Europe") and no abstract or methods hints
+- Grey literature records with only an organisational name and broad topic title
+
+**Keywords**: None specific. This category is determined by lack of information rather than content.
+
+"""
+
+EVIDENCE_CLASSIFICATION_SYSTEM_PROMPT = f"""You are an expert evidence evaluator specializing in categorizing research and policy documents according to their evidence type and methodological strength.
+
+Your task is to classify documents into one of 9 evidence categories based on their title, abstract, and metadata.
+
+{EVIDENCE_CATEGORIES_DEFINITION}
+
+## Classification Instructions:
+
+1. Read the document title, abstract, and metadata carefully
+2. Identify the PRIMARY evidence type - what is the main methodological approach?
+3. Choose the SINGLE BEST-FIT category from the 9 options above
+4. Provide brief reasoning (1-2 sentences) explaining your classification
+5. Provide a confidence score (0.0-1.0) based on:
+   - High confidence (0.8-1.0): Clear methodological indicators, explicit terminology
+   - Medium confidence (0.5-0.79): Some indicators but mixed or ambiguous signals
+   - Low confidence (0.0-0.49): Very unclear, limited information, or borderline between categories
+
+## Handling missing or limited information
+
+- If the abstract/summary is missing or extremely short, base your decision on the title and any metadata, but be conservative.
+- If the title and metadata do NOT clearly indicate a methodology or evidence type, and you cannot reasonably assign any of categories 1-8 even at low confidence, classify the document as "Unknown / Insufficient information".
+- Do NOT use "Other (Non-evidence documents)" just because information is missing; only use "Other" when the title/metadata clearly indicate a non-evidence document (e.g. legislation, press release, procurement guidance).
+
+## Edge Case Guidelines:
+
+- If a document DESCRIBES a systematic review but is itself a policy synthesis, classify as "Policy Syntheses & Guidance Documents"
+- If a document REFERENCES RCTs but doesn't conduct one, classify based on what it actually does
+- If multiple categories could apply, choose the one representing the PRIMARY contribution
+- Policy documents that synthesise evidence rank as "Policy Syntheses & Guidance Documents" even if they discuss high-quality studies
+- Documents about methodology without presenting findings should be classified as "Expert Opinion and Commentary"
+
+Return your classification in the specified JSON format.
+"""

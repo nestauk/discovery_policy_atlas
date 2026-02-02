@@ -94,6 +94,31 @@ def _rerank_chunks_by_quality(
     return scored
 
 
+def _build_retrieval_context(
+    state: SynthesisState, *, reuse_existing: bool
+) -> RetrievalContext:
+    """Construct a RetrievalContext, optionally reusing prior citations."""
+    existing_grounded = state.get("grounded_citations") or []
+    existing_chunk_map = state.get("chunk_to_citation") or {}
+    existing_doc_map = state.get("doc_citation_map") or {}
+
+    grounded_citations = list(existing_grounded) if reuse_existing else []
+    chunk_to_citation = dict(existing_chunk_map) if reuse_existing else {}
+    doc_citation_map = dict(existing_doc_map)
+
+    return RetrievalContext(
+        project_id=state.get("project_id", ""),
+        doc_metadata=state.get("doc_metadata") or {},
+        doc_scores=state.get("doc_scores") or {},
+        extraction_quotes=state.get("extraction_quotes") or {},
+        theme_to_doc_uuids=state.get("theme_to_doc_uuids") or {},
+        grounded_citations=grounded_citations,
+        chunk_to_citation=chunk_to_citation,
+        doc_citation_map=doc_citation_map,
+        seen_chunks=set(chunk_to_citation.keys()) if reuse_existing else set(),
+    )
+
+
 async def _retrieve_for_theme(
     theme_id: str,
     query: str,
@@ -196,6 +221,38 @@ async def _retrieve_for_theme(
         return [], 0
 
 
+async def _retrieve_collection(
+    *,
+    state: SynthesisState,
+    items: List[Any],
+    name_attr: str,
+    desc_attr: str,
+    match_count: int,
+    max_results: int,
+    query_limit: int,
+    reuse_existing: bool,
+) -> Tuple[Dict[str, List[RetrievedChunk]], RetrievalContext, int]:
+    """Shared retrieval for themes/issues/outcomes."""
+    ctx = _build_retrieval_context(state, reuse_existing=reuse_existing)
+    evidence: Dict[str, List[RetrievedChunk]] = {}
+    total_constrained = 0
+
+    for item in items:
+        theme_id = getattr(item, name_attr, "") or ""
+        if not theme_id:
+            continue
+        description = getattr(item, desc_attr, "") or ""
+        query = f"{theme_id} {description}"[:query_limit]
+
+        chunks, constrained = await _retrieve_for_theme(
+            theme_id, query, ctx, match_count=match_count, max_results=max_results
+        )
+        evidence[theme_id] = chunks
+        total_constrained += constrained
+
+    return evidence, ctx, total_constrained
+
+
 async def retrieve_evidence_for_themes(state: SynthesisState) -> SynthesisState:
     """Retrieve document chunks for intervention themes using constrained RAG.
 
@@ -207,31 +264,17 @@ async def retrieve_evidence_for_themes(state: SynthesisState) -> SynthesisState:
     """
     print("--- RAG: Retrieving Evidence for Interventions (Constrained) ---")
 
-    ctx = RetrievalContext(
-        project_id=state.get("project_id", ""),
-        doc_metadata=state.get("doc_metadata") or {},
-        doc_scores=state.get("doc_scores") or {},
-        extraction_quotes=state.get("extraction_quotes") or {},
-        theme_to_doc_uuids=state.get("theme_to_doc_uuids") or {},
-        grounded_citations=[],
-        chunk_to_citation={},
-        doc_citation_map=dict(state.get("doc_citation_map") or {}),
-        seen_chunks=set(),
-    )
-
     interventions = state.get("aggregated_interventions") or []
-    theme_evidence: Dict[str, List[RetrievedChunk]] = {}
-    total_constrained = 0
-
-    for intervention in interventions:
-        theme_id = intervention.intervention_name
-        query = f"{theme_id} {intervention.brief_description or ''}"[:500]
-
-        chunks, constrained = await _retrieve_for_theme(
-            theme_id, query, ctx, match_count=30, max_results=8
-        )
-        theme_evidence[theme_id] = chunks
-        total_constrained += constrained
+    theme_evidence, ctx, total_constrained = await _retrieve_collection(
+        state=state,
+        items=interventions,
+        name_attr="intervention_name",
+        desc_attr="brief_description",
+        match_count=30,
+        max_results=8,
+        query_limit=500,
+        reuse_existing=False,
+    )
 
     print(
         f"Retrieved evidence for {len(theme_evidence)} themes, "
@@ -260,36 +303,55 @@ async def retrieve_evidence_for_issues(state: SynthesisState) -> SynthesisState:
     """
     print("--- RAG: Retrieving Evidence for Issues (Constrained) ---")
 
-    ctx = RetrievalContext(
-        project_id=state.get("project_id", ""),
-        doc_metadata=state.get("doc_metadata") or {},
-        doc_scores=state.get("doc_scores") or {},
-        extraction_quotes=state.get("extraction_quotes") or {},
-        theme_to_doc_uuids=state.get("theme_to_doc_uuids") or {},
-        grounded_citations=list(state.get("grounded_citations") or []),
-        chunk_to_citation=dict(state.get("chunk_to_citation") or {}),
-        doc_citation_map=dict(state.get("doc_citation_map") or {}),
-        seen_chunks=set(state.get("chunk_to_citation", {}).keys()),
-    )
-
     issues = state.get("aggregated_issues") or []
-    issue_evidence: Dict[str, List[RetrievedChunk]] = {}
-    total_constrained = 0
-
-    for issue in issues:
-        theme_id = issue.issue_theme
-        query = f"{theme_id} {issue.summary_description or ''}"[:400]
-
-        chunks, constrained = await _retrieve_for_theme(
-            theme_id, query, ctx, match_count=20, max_results=6
-        )
-        issue_evidence[theme_id] = chunks
-        total_constrained += constrained
+    issue_evidence, ctx, total_constrained = await _retrieve_collection(
+        state=state,
+        items=issues,
+        name_attr="issue_theme",
+        desc_attr="summary_description",
+        match_count=20,
+        max_results=6,
+        query_limit=400,
+        reuse_existing=True,
+    )
 
     print(f"Constrained issue retrieval: {total_constrained} chunks passed filter")
 
     return {
         "issue_evidence": issue_evidence,
+        "grounded_citations": ctx.grounded_citations,
+        "chunk_to_citation": ctx.chunk_to_citation,
+        "doc_citation_map": ctx.doc_citation_map,
+    }
+
+
+async def retrieve_evidence_for_outcomes(state: SynthesisState) -> SynthesisState:
+    """Retrieve document chunks for outcome themes using constrained RAG.
+
+    Args:
+        state: Current workflow state with aggregated_outcomes.
+
+    Returns:
+        State update with outcome_evidence and updated citations.
+    """
+    print("--- RAG: Retrieving Evidence for Outcomes (Constrained) ---")
+
+    outcomes = state.get("aggregated_outcomes") or []
+    outcome_evidence, ctx, total_constrained = await _retrieve_collection(
+        state=state,
+        items=outcomes,
+        name_attr="outcome_name",
+        desc_attr="outcome_description",
+        match_count=20,
+        max_results=6,
+        query_limit=400,
+        reuse_existing=True,
+    )
+
+    print(f"Constrained outcome retrieval: {total_constrained} chunks passed filter")
+
+    return {
+        "outcome_evidence": outcome_evidence,
         "grounded_citations": ctx.grounded_citations,
         "chunk_to_citation": ctx.chunk_to_citation,
         "doc_citation_map": ctx.doc_citation_map,

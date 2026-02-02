@@ -7,34 +7,55 @@ import { Button } from '@/components/ui/button'
 import { Loader2, Target, AlertTriangle } from 'lucide-react'
 import { ThemeList, type ThemeListItem } from './ThemeList'
 import { ThemeDetailView } from './ThemeDetailView'
+import type { OutcomeTheme, RiskTheme, TransferabilityBreakdown } from '@/types/search'
 
 interface DetailedIntervention {
   name: string
   description: string
   type?: string
   country?: string
-  study_type?: string
+  evidence_category?: string
+  is_systematic_review?: boolean
   sample_size?: number | null
   impact_score?: number
   evidence_score?: number
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown> | null
+  transferability_score?: number
+  transferability_breakdown?: Record<string, unknown> | null
   impact_justification?: string
   evidence_justification?: string
+  has_harm_warning?: boolean
+  harm_warning_reason?: string
   document_url?: string
   results: Array<{
     outcome_variable?: string
+    direction?: string
     effect_direction?: string
     effect_size?: string
+    effect_size_type?: string
     p_value?: string
     uncertainty?: string
     result_text?: string
     population_measured?: string
     subgroup_or_dose?: string
+    heterogeneity_I2?: string
+    tau2?: string
+    summary_statistic?: string
+    estimate_level?: string
+    n_studies?: number
+    sample_size?: number
+    stratum_type?: string
+    stratum_value?: string
   }>
   source_documents: Array<{
     doc_id?: string
     title?: string
     source?: string
     landing_page_url?: string
+    evidence_category?: string
+    evidence_confidence?: number
+    sample_size?: number
   }>
 }
 
@@ -43,9 +64,29 @@ interface InterventionTheme {
   description: string
   impact_summary?: string
   frequency: number
+  impact_score?: number
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown> | null
   avg_impact_score?: number
   avg_evidence_score?: number
   detailed_interventions?: DetailedIntervention[]
+  transferability_rating?: string | null
+  transferability_note?: string | null
+  transferability_breakdown?: TransferabilityBreakdown | null
+  outcome_themes?: OutcomeTheme[]
+  risk_themes?: RiskTheme[]
+  // Evidence mix fields
+  stars?: number
+  base_rating?: number
+  cap_applied?: string | null
+  cap_message?: string | null
+  display_evidence_mix?: Record<string, number>
+  // Issue-specific fields (when grouped by issue)
+  issue_display_evidence_mix?: Record<string, number>
+  issue_stars?: number
+  issue_base_rating?: number
+  issue_cap_applied?: string | null
+  issue_cap_message?: string | null
 }
 
 interface IssueTheme {
@@ -57,6 +98,7 @@ interface IssueTheme {
 
 interface NavigatorData {
   issue_themes: IssueTheme[]
+  all_interventions?: InterventionTheme[]
 }
 
 interface InterventionsNavigatorProps {
@@ -143,9 +185,68 @@ export function InterventionsNavigator({
     loadNavigatorData()
   }, [activeProject?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Aggregate all intervention themes across issues (or from all_interventions if available)
   const allInterventionThemes = useMemo(() => {
     if (!data) return []
     
+    // If backend provides all_interventions directly, use that
+    if (data.all_interventions && data.all_interventions.length > 0) {
+      // Apply issue theme filter if needed
+      if (issueThemeFilter === 'All') {
+        return data.all_interventions.map(intervention => ({
+          theme_name: intervention.theme_name,
+          description: intervention.description,
+          impact_summary: intervention.impact_summary,
+          frequency: intervention.frequency,
+          avg_impact_score: intervention.impact_score ?? intervention.avg_impact_score,
+          avg_evidence_score: intervention.stars ?? intervention.avg_evidence_score,
+          detailed_interventions: intervention.detailed_interventions,
+          // Pass through all the rich data
+          transferability_rating: intervention.transferability_rating,
+          transferability_note: intervention.transferability_note,
+          transferability_breakdown: intervention.transferability_breakdown,
+          outcome_themes: intervention.outcome_themes,
+          risk_themes: intervention.risk_themes,
+          display_evidence_mix: intervention.display_evidence_mix,
+          stars: intervention.stars,
+          cap_message: intervention.cap_message,
+          impact_score_breakdown: intervention.impact_score_breakdown,
+        }))
+      }
+      
+      // Filter by issue theme - need to aggregate from issue_themes
+      const filteredIssues = data.issue_themes.filter(t => t.theme_name === issueThemeFilter)
+      const interventionsMap = new Map<string, InterventionTheme>()
+      
+      filteredIssues.forEach(issue => {
+        issue.related_interventions.forEach(intervention => {
+          if (!interventionsMap.has(intervention.theme_name)) {
+            interventionsMap.set(intervention.theme_name, intervention)
+          }
+        })
+      })
+      
+      return Array.from(interventionsMap.values()).map(intervention => ({
+        theme_name: intervention.theme_name,
+        description: intervention.description,
+        impact_summary: intervention.impact_summary,
+        frequency: intervention.frequency,
+        avg_impact_score: intervention.impact_score ?? intervention.avg_impact_score,
+        avg_evidence_score: intervention.issue_stars ?? intervention.avg_evidence_score,
+        detailed_interventions: intervention.detailed_interventions,
+        transferability_rating: intervention.transferability_rating,
+        transferability_note: intervention.transferability_note,
+        transferability_breakdown: intervention.transferability_breakdown,
+        outcome_themes: intervention.outcome_themes,
+        risk_themes: intervention.risk_themes,
+        display_evidence_mix: intervention.issue_display_evidence_mix ?? intervention.display_evidence_mix,
+        stars: intervention.issue_stars ?? intervention.stars,
+        cap_message: intervention.issue_cap_message ?? intervention.cap_message,
+        impact_score_breakdown: intervention.impact_score_breakdown,
+      }))
+    }
+    
+    // Fallback: aggregate from issue_themes
     const interventionsMap = new Map<string, {
       theme_name: string
       description: string
@@ -154,6 +255,15 @@ export function InterventionsNavigator({
       impact_scores: number[]
       evidence_scores: number[]
       detailed_interventions: DetailedIntervention[]
+      transferability_rating?: string | null
+      transferability_note?: string | null
+      transferability_breakdown?: TransferabilityBreakdown | null
+      outcome_themes?: OutcomeTheme[]
+      risk_themes?: RiskTheme[]
+      display_evidence_mix?: Record<string, number>
+      stars?: number
+      cap_message?: string | null
+      impact_score_breakdown?: Record<string, unknown> | null
     }>()
     
     const filteredIssues = issueThemeFilter === 'All' 
@@ -176,6 +286,7 @@ export function InterventionsNavigator({
           if (!existing.impact_summary && intervention.impact_summary) {
             existing.impact_summary = intervention.impact_summary
           }
+          // Merge detailed interventions (dedupe by doc)
           const newDetails = intervention.detailed_interventions || []
           newDetails.forEach(detail => {
             const detailDocId = detail.source_documents?.[0]?.doc_id || ''
@@ -189,6 +300,18 @@ export function InterventionsNavigator({
               existing.detailed_interventions.push(detail)
             }
           })
+          // Merge outcome themes if not already set
+          if (!existing.outcome_themes && intervention.outcome_themes) {
+            existing.outcome_themes = intervention.outcome_themes
+          }
+          if (!existing.risk_themes && intervention.risk_themes) {
+            existing.risk_themes = intervention.risk_themes
+          }
+          if (!existing.transferability_breakdown && intervention.transferability_breakdown) {
+            existing.transferability_breakdown = intervention.transferability_breakdown
+            existing.transferability_rating = intervention.transferability_rating
+            existing.transferability_note = intervention.transferability_note
+          }
         } else {
           interventionsMap.set(key, {
             theme_name: intervention.theme_name,
@@ -197,7 +320,16 @@ export function InterventionsNavigator({
             frequency: intervention.frequency,
             impact_scores: intervention.avg_impact_score != null ? [intervention.avg_impact_score] : [],
             evidence_scores: intervention.avg_evidence_score != null ? [intervention.avg_evidence_score] : [],
-            detailed_interventions: [...(intervention.detailed_interventions || [])]
+            detailed_interventions: [...(intervention.detailed_interventions || [])],
+            transferability_rating: intervention.transferability_rating,
+            transferability_note: intervention.transferability_note,
+            transferability_breakdown: intervention.transferability_breakdown,
+            outcome_themes: intervention.outcome_themes,
+            risk_themes: intervention.risk_themes,
+            display_evidence_mix: intervention.issue_display_evidence_mix ?? intervention.display_evidence_mix,
+            stars: intervention.issue_stars ?? intervention.stars,
+            cap_message: intervention.issue_cap_message ?? intervention.cap_message,
+            impact_score_breakdown: intervention.impact_score_breakdown,
           })
         }
       })
@@ -214,10 +346,29 @@ export function InterventionsNavigator({
       avg_evidence_score: intervention.evidence_scores.length > 0
         ? intervention.evidence_scores.reduce((a, b) => a + b, 0) / intervention.evidence_scores.length
         : undefined,
-      detailed_interventions: intervention.detailed_interventions
+      detailed_interventions: intervention.detailed_interventions,
+      transferability_rating: intervention.transferability_rating,
+      transferability_note: intervention.transferability_note,
+      transferability_breakdown: intervention.transferability_breakdown,
+      outcome_themes: intervention.outcome_themes,
+      risk_themes: intervention.risk_themes,
+      display_evidence_mix: intervention.display_evidence_mix,
+      stars: intervention.stars,
+      cap_message: intervention.cap_message,
+      impact_score_breakdown: intervention.impact_score_breakdown,
     }))
   }, [data, issueThemeFilter])
 
+  // Get the full intervention data for the selected theme
+  const selectedThemeData = useMemo(() => {
+    if (!selectedTheme || !data) return null
+    
+    // Find the full intervention data with all the rich fields
+    const fullData = allInterventionThemes.find(t => t.theme_name === selectedTheme.theme_name)
+    return fullData || null
+  }, [selectedTheme, data, allInterventionThemes])
+
+  // Get interventions for the selected theme (for ThemeDetailView)
   const selectedThemeInterventions = useMemo(() => {
     if (!selectedTheme || !data) return []
     
@@ -248,18 +399,26 @@ export function InterventionsNavigator({
     )
   }
 
-  if (selectedTheme) {
-    const aggregated = allInterventionThemes.find(t => t.theme_name === selectedTheme.theme_name)
-    
+  if (selectedTheme && selectedThemeData) {
     return (
       <div className="flex flex-col h-full">
         <ThemeDetailView
           themeName={selectedTheme.theme_name}
-          themeDescription={aggregated?.description || selectedTheme.description}
-          avgImpactScore={aggregated?.avg_impact_score ?? selectedTheme.avg_impact_score ?? undefined}
-          avgEvidenceScore={aggregated?.avg_evidence_score ?? selectedTheme.avg_evidence_score ?? undefined}
+          themeDescription={selectedThemeData.description || selectedTheme.description}
+          avgImpactScore={selectedThemeData.avg_impact_score ?? selectedTheme.avg_impact_score ?? undefined}
+          avgEvidenceScore={selectedThemeData.avg_evidence_score ?? selectedTheme.avg_evidence_score ?? undefined}
           interventions={selectedThemeInterventions}
           onBack={() => setSelectedTheme(null)}
+          // Pass through all the rich data
+          impactSummary={selectedThemeData.impact_summary}
+          outcomeThemes={selectedThemeData.outcome_themes}
+          riskThemes={selectedThemeData.risk_themes}
+          transferabilityRating={selectedThemeData.transferability_rating}
+          transferabilityNote={selectedThemeData.transferability_note}
+          transferabilityBreakdown={selectedThemeData.transferability_breakdown}
+          displayEvidenceMix={selectedThemeData.display_evidence_mix}
+          evidenceStars={selectedThemeData.stars}
+          capMessage={selectedThemeData.cap_message}
         />
       </div>
     )

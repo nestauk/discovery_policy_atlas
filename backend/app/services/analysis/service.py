@@ -11,6 +11,7 @@ from datetime import datetime
 from .schemas import RunConfig, RunResult
 from .references import ReferencesService
 from .relevance import RelevanceService
+from .evidence.category import EvidenceCategoryService
 from .acquire import AcquisitionService
 from .parse import ParsingService
 from .normalize import normalize_text
@@ -28,8 +29,9 @@ class AnalysisService:
 
     Pipeline steps:
     1. References ingestion and normalization
-    1.5. Relevance checking and document type classification
-    2. Acquisition (download PDFs/HTML) - filtered to relevant documents only
+    1.5. Relevance checking
+    1.75. Evidence categorisation (9-category hierarchy)
+    2. Acquisition (download PDFs/HTML) - filtered to relevant evidence docs
     3. Parsing and normalization
     4. Extraction using LangChain workflow
 
@@ -154,6 +156,20 @@ class AnalysisService:
                 total_references,
             )
 
+            # Step 1.75: Evidence categorisation (only for relevant documents)
+            with StageTimer(monitor, "evidence_categorisation"):
+                logger.info("Run %s starting evidence categorisation", run_id)
+                evidence_service = EvidenceCategoryService(
+                    export_dir=str(run_export_dir),
+                    project_id=project_id,
+                    user_id=user_id,
+                    model=settings.EVIDENCE_CATEGORY_MODEL,
+                )
+                references_csv = await evidence_service.categorise_documents(
+                    str(references_csv)
+                )
+                logger.info("Run %s completed evidence categorisation", run_id)
+
             # STEPWISE UPLOAD: Store initial documents after screening
             if project_id:
                 await self._store_initial_documents(project_id, references_csv)
@@ -181,20 +197,35 @@ class AnalysisService:
             with StageTimer(monitor, "parsing"):
                 parser = ParsingService(export_dir=str(run_export_dir))
                 parsed_count = 0
+                skipped_count = 0
 
                 for item in acquired:
                     if not item or item.get("status") != "ok":
                         continue
+                    doc_id = item["doc_id"]
                     # Use async parsing with guardrails
-                    parsed = await parser.parse_saved_file(
-                        item["doc_id"], item["file_path"]
-                    )
-                    if not parsed or not parsed.text:
+                    parsed = await parser.parse_saved_file(doc_id, item["file_path"])
+                    if not parsed:
+                        logger.warning(
+                            "[PARSING] No parsed result for %s (file=%s)",
+                            doc_id,
+                            item["file_path"],
+                        )
+                        skipped_count += 1
                         continue
+                    if not parsed.text:
+                        logger.warning(
+                            "[PARSING] Empty text for %s (file=%s)",
+                            doc_id,
+                            item["file_path"],
+                        )
+                        skipped_count += 1
+                        continue
+
                     parsed_count += 1
                     norm_text = normalize_text(parsed.text)
                     # Use sanitized filename for normalized output as well
-                    from .utils_paths import sanitize_id_to_filename
+                    from .utils.paths import sanitize_id_to_filename
 
                     # Match normalized filename to raw base name
                     raw_path = (
@@ -203,11 +234,23 @@ class AnalysisService:
                     if raw_path is not None:
                         base = raw_path.stem  # without extension
                     else:
-                        base = sanitize_id_to_filename(item["doc_id"])
+                        base = sanitize_id_to_filename(doc_id)
                     safe_name = f"{base}.txt"
                     out_path = parsed_dir / safe_name
                     out_path.write_text(norm_text, encoding="utf-8")
+                    logger.info(
+                        "[PARSING] Created normalized file for %s: %s (%d chars)",
+                        doc_id,
+                        safe_name,
+                        len(norm_text),
+                    )
 
+                logger.info(
+                    "[PARSING] Complete: %d parsed, %d skipped out of %d acquired",
+                    parsed_count,
+                    skipped_count,
+                    len(acquired),
+                )
                 monitor.record_metric("parsed_count", parsed_count)
 
         # Step 4: extraction using LangChain workflow
@@ -421,6 +464,12 @@ class AnalysisService:
                 "top_line": self._safe_str(row.get("top_line")),
                 "document_type": self._safe_str(row.get("document_type")),
                 "document_type_reason": self._safe_str(row.get("document_type_reason")),
+                # Evidence categorisation fields
+                "evidence_category": self._safe_str(row.get("evidence_category")),
+                "evidence_confidence": self._safe_float(row.get("evidence_confidence")),
+                "evidence_category_reasoning": self._safe_str(
+                    row.get("evidence_category_reasoning")
+                ),
                 # Essential fields: citation count and source country
                 "cited_by_count": self._safe_int(row.get("cited_by_count")),
                 "source_country": self._safe_str(row.get("source_country")),

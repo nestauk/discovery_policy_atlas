@@ -23,7 +23,7 @@ from app.utils.llm.llm_utils import (
     get_langfuse_handler,
     build_langfuse_metadata,
 )
-from .utils_doc_ids import stable_doc_id
+from .utils.doc_ids import stable_doc_id
 
 
 logger = logging.getLogger(__name__)

@@ -69,13 +69,13 @@ class ChatbotService:
             )
 
     async def _search_relevant_chunks(
-        self, project_id: str, query: str, max_chunks: int = 5
+        self, project_id: str, query: str, max_chunks: int = 10
     ) -> List[Dict[str, Any]]:
         """Search for relevant chunks using vector similarity."""
         return await vectorization_service.search_similar_content(
             query=query,
             project_id=project_id,
-            match_threshold=0.7,
+            match_threshold=0.51,
             match_count=max_chunks,
         )
 

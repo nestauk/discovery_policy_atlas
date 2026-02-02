@@ -36,12 +36,13 @@ interface DocumentDetailResult {
       description?: string
       type?: string
       country?: string
-      study_type?: string
       sample_size?: string
       supporting_quote?: string
       addresses_issues?: number[]
       results?: Array<{
         outcome_variable?: string
+        // Support both 'direction' (new schema) and 'effect_direction' (legacy)
+        direction?: string
         effect_direction?: string
         effect_size_type?: string
         effect_size?: string
@@ -51,6 +52,18 @@ interface DocumentDetailResult {
         subgroup_or_dose?: string
         result_text?: string
         supporting_quote?: string
+        // SR-specific fields for meta-analysis results
+        heterogeneity_I2?: string
+        tau2?: string
+        summary_statistic?: string
+        estimate_level?: string
+        // SR sample size fields
+        n_studies?: number
+        sample_size?: number
+        // Stratum fields (for SR subgroup analyses)
+        stratum_type?: string
+        stratum_value?: string
+        is_primary_stratum?: boolean
       }>
     }>
     mappings?: unknown[]
@@ -63,11 +76,6 @@ interface DocumentDetailResult {
         justification?: string
         evidence_gap?: string
       }
-      predicted_impact?: {
-        stars?: number | null
-        justification?: string
-        evidence_gap?: string
-      }
     }
     metadata?: Record<string, unknown>
   }
@@ -75,9 +83,10 @@ interface DocumentDetailResult {
 
 interface DocumentDetailViewProps {
   extraction: DocumentDetailResult['extraction']
+  isSystematicReview?: boolean
 }
 
-export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
+export function DocumentDetailView({ extraction, isSystematicReview = false }: DocumentDetailViewProps) {
   const [openSections, setOpenSections] = useState({
     issues: true,
     interventions: true,
@@ -183,11 +192,6 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                               📍 {intervention.country}
                             </Badge>
                           )}
-                          {intervention.study_type && (
-                            <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700">
-                              Study: {intervention.study_type}
-                            </Badge>
-                          )}
                       {intervention.sample_size && intervention.sample_size !== 'null' && (
                         <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700">
                           Sample: {intervention.sample_size}
@@ -218,29 +222,72 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                         </h6>
                         <div className="space-y-2">
                           {intervention.results.map((result, resultIndex: number) => (
-                            <div key={resultIndex} className="bg-green-50 border-l-4 border-green-200 p-2 rounded">
-                              <div className="flex items-center gap-2 mb-1">
+                            <div
+                              key={resultIndex}
+                              className="bg-green-50 border-l-4 border-green-200 p-2 rounded"
+                            >
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
                                 <span className="font-medium text-green-900 text-sm">
                                   {result.outcome_variable}
                                 </span>
+                                {/* Stratum badge for subgroup analyses */}
+                                {result.stratum_type && result.stratum_value && (
+                                  <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200">
+                                    {result.stratum_type}: {result.stratum_value}
+                                  </Badge>
+                                )}
+                                {/* Support both 'direction' (new schema) and 'effect_direction' (legacy) */}
                                 <Badge variant="outline" className="text-xs bg-green-100 text-green-700">
-                                  {result.effect_direction}
+                                  {result.direction || result.effect_direction}
                                 </Badge>
                               </div>
-                              
-                              {/* Quantitative measures */}
-                              {((result.effect_size && result.effect_size !== 'null') || (result.p_value && result.p_value !== 'null') || (result.uncertainty && result.uncertainty !== 'null')) && (
-                                <div className="flex gap-3 text-xs text-green-800 mb-1">
-                                  {result.effect_size && result.effect_size !== 'null' && (
-                                    <span>Effect: {result.effect_size}</span>
+
+                              {/* Sample size info for SR */}
+                              {isSystematicReview && (result.n_studies || result.sample_size) && (
+                                <div className="flex gap-3 text-xs text-green-700 mb-1">
+                                  {result.n_studies && (
+                                    <span>k = {result.n_studies} studies</span>
                                   )}
-                                  {result.p_value && result.p_value !== 'null' && (
+                                  {result.sample_size && (
+                                    <span>N = {result.sample_size.toLocaleString()}</span>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Quantitative measures */}
+                              {((result.effect_size && result.effect_size !== 'null') || (result.p_value && result.p_value !== 'null') || (result.uncertainty && result.uncertainty !== 'null') || (result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null')) && (
+                                <div className="flex flex-wrap gap-3 text-xs text-green-800 mb-1">
+                                  {result.effect_size && result.effect_size !== 'null' && (
+                                    <span>
+                                      {isSystematicReview ? 'Aggregate Effect' : 'Effect'}{result.summary_statistic && result.summary_statistic !== 'null' ? ` (${result.summary_statistic})` : ''}: {result.effect_size}
+                                    </span>
+                                  )}
+                                  {/* Hide p-value for SRs */}
+                                  {!isSystematicReview && result.p_value && result.p_value !== 'null' && (
                                     <span>p = {result.p_value}</span>
                                   )}
                                   {result.uncertainty && result.uncertainty !== 'null' && (
-                                    <span>CI: {result.uncertainty}</span>
+                                    <span>{isSystematicReview ? 'Aggregate CI' : 'CI'}: {result.uncertainty}</span>
+                                  )}
+                                  {/* SR-specific: heterogeneity measures (always show for SRs) */}
+                                  {isSystematicReview && (
+                                    <>
+                                      <span>
+                                        I²: {result.heterogeneity_I2 && result.heterogeneity_I2 !== 'null' ? result.heterogeneity_I2 : <span className="text-green-600 italic">n/a</span>}
+                                      </span>
+                                      <span>
+                                        τ²: {result.tau2 && result.tau2 !== 'null' ? result.tau2 : <span className="text-green-600 italic">n/a</span>}
+                                      </span>
+                                    </>
                                   )}
                                 </div>
+                              )}
+
+                              {/* Population measured */}
+                              {result.population_measured && result.population_measured !== 'null' && (
+                                <p className="text-xs text-green-700 mb-1">
+                                  Population: {result.population_measured}
+                                </p>
                               )}
 
                               {result.result_text && (
@@ -313,7 +360,7 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                     </div>
                   )}
 
-                  {(conclusion.evidence_strength || conclusion.predicted_impact) && (
+                  {conclusion.evidence_strength && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {conclusion.evidence_strength && (
                         <div>
@@ -331,26 +378,6 @@ export function DocumentDetailView({ extraction }: DocumentDetailViewProps) {
                             )}
                             {conclusion.evidence_strength.stars == null && conclusion.evidence_strength.evidence_gap && (
                               <p className="text-xs text-gray-500 mt-1">Evidence gap: {conclusion.evidence_strength.evidence_gap}</p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {conclusion.predicted_impact && (
-                        <div>
-                          <h6 className="font-medium text-purple-900 text-sm mb-1">Predicted impact</h6>
-                          <div className="text-sm text-gray-700">
-                            {typeof conclusion.predicted_impact.stars === 'number' && (
-                              <div className="mb-1">
-                                <span className="font-medium">Stars: </span>
-                                {"★".repeat(Math.max(0, Math.min(5, conclusion.predicted_impact.stars)))}
-                                {"☆".repeat(Math.max(0, 5 - Math.max(0, Math.min(5, conclusion.predicted_impact.stars))))}
-                              </div>
-                            )}
-                            {conclusion.predicted_impact.justification && (
-                              <p className="text-sm text-gray-700">{conclusion.predicted_impact.justification}</p>
-                            )}
-                            {conclusion.predicted_impact.stars == null && conclusion.predicted_impact.evidence_gap && (
-                              <p className="text-xs text-gray-500 mt-1">Evidence gap: {conclusion.predicted_impact.evidence_gap}</p>
                             )}
                           </div>
                         </div>

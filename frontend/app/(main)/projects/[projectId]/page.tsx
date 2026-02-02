@@ -8,15 +8,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { 
-  FileText, 
+import {
+  FileText,
   Loader2,
   ArrowLeft,
   AlertCircle,
   BookOpen,
   Target,
   Bot,
-  Filter,
   Download
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
@@ -31,6 +30,7 @@ import { InterventionsNavigator } from '@/components/interventions/Interventions
 import type { InterventionData } from '@/components/interventions/InterventionsTable'
 import { PapersTable } from '@/components/documents/PapersTable'
 import { SearchPlanModal } from '@/components/results/SearchPlanModal'
+import { getEvidenceCategoryRank } from '@/lib/evidenceCategories'
 
 interface AnalysisDocument {
   id: string
@@ -49,12 +49,22 @@ interface AnalysisDocument {
   top_line?: string
   doi?: string
   landing_page_url?: string
+  // Evidence categorisation fields
+  evidence_category?: string
+  evidence_category_rank?: number
+  evidence_confidence?: number
+  evidence_category_reasoning?: string
   full_text_available?: boolean
   extraction_status?: string
   text_source?: string
   study_strength?: string
   sample_size?: number
   cited_by_count?: number
+  // Top-level evidence/impact fields (surfaced by API)
+  evidence_strength?: number
+  evidence_strength_justification?: string
+  predicted_impact?: number
+  predicted_impact_justification?: string
   extraction_results?: {
     conclusion?: {
       top_line_summary?: string
@@ -65,17 +75,17 @@ interface AnalysisDocument {
         justification: string
         evidence_gap?: string | null
       }
-      predicted_impact?: {
-        stars: number | null
-        justification: string
-        evidence_gap?: string | null
-      }
     }
     issues?: unknown[]
     interventions?: unknown[]
     mappings?: unknown[]
     results?: unknown[]
   }
+  impact_score?: number | null
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown>
+  transferability_score?: number
+  transferability_breakdown?: Record<string, unknown>
 }
 
 type TabType = 'summary' | 'evidence' | 'assistant'
@@ -85,6 +95,7 @@ export default function ProjectResultsPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
+  const showRerunButton = process.env.NEXT_PUBLIC_SHOW_SYNTHESIS_RERUN === 'true'
   
   // Get projectId from URL params
   const projectId = params.projectId as string
@@ -99,7 +110,6 @@ export default function ProjectResultsPage() {
   const urlSubTab: EvidenceSubTabType = validSubTabs.includes(subtabParam as EvidenceSubTabType) 
     ? (subtabParam as EvidenceSubTabType) 
     : 'interventions'
-  
   const [analysisComplete, setAnalysisComplete] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hasLoadedData, setHasLoadedData] = useState(false)
@@ -109,10 +119,7 @@ export default function ProjectResultsPage() {
   const lastRefreshTimeRef = useRef<number>(0)
   const [summaryData, setSummaryData] = useState<SynthesisSummary | null>(null)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
-  
-  // Relevance filtering state
-  const [showRelevantOnly, setShowRelevantOnly] = useState(true)
-  
+
   // Column visibility state
   const [showAdditionalColumns, setShowAdditionalColumns] = useState(false)
   
@@ -127,10 +134,13 @@ export default function ProjectResultsPage() {
   const [interventions, setInterventions] = useState<InterventionData[]>([])
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState<string | null>(null)
+  const [isRerunningSynthesis, setIsRerunningSynthesis] = useState(false)
+  const [rerunError, setRerunError] = useState<string | null>(null)
+
   const [projectLoading, setProjectLoading] = useState(false)
 
-  const { activeProject, setActiveProject } = useAnalysisProjectStore()
-  const { fetchWithAuth, getAnalysisProject, getProjectInterventions } = useAPI()
+  const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
+  const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
   const { getToken } = useAuth()
 
   // Update URL when tab changes (without full navigation)
@@ -269,6 +279,37 @@ export default function ProjectResultsPage() {
       setLoadingData(false)
     }
   }, [projectId, fetchWithAuth, getProjectInterventions, hasLoadedData])
+
+  const handleRerunSynthesis = useCallback(async () => {
+    if (!activeProject?.id || isRerunningSynthesis) return
+
+    const forceFlag = true
+    if (activeProject.status === 'running') {
+      const confirmed = window.confirm(
+        'Synthesis is currently running. Force rerun anyway? This will start a new synthesis run.'
+      )
+      if (!confirmed) return
+    }
+
+    setIsRerunningSynthesis(true)
+    setRerunError(null)
+
+    try {
+      await rerunSynthesisForProject(activeProject.id, {
+        force: forceFlag,
+        invalidate_previous: true,
+      })
+
+      const updated = { ...activeProject, status: 'running' as const }
+      setActiveProject(updated)
+      setProjects(projects.map((p) => (p.id === updated.id ? { ...p, status: updated.status } : p)))
+    } catch (error) {
+      console.error('Failed to rerun synthesis', error)
+      setRerunError('Failed to start synthesis rerun')
+    } finally {
+      setIsRerunningSynthesis(false)
+    }
+  }, [activeProject, isRerunningSynthesis, rerunSynthesisForProject, setActiveProject, setProjects, projects])
 
   const handleDownloadDocumentsCSV = useCallback(async () => {
     if (!projectId) return
@@ -752,8 +793,6 @@ export default function ProjectResultsPage() {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
       const conclusion = doc.extraction_results?.conclusion
       const evidenceStrength = conclusion?.evidence_strength
-      const predictedImpact = conclusion?.predicted_impact
-      
       return {
         id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
         title: String(doc.title || 'Untitled'),
@@ -778,19 +817,27 @@ export default function ProjectResultsPage() {
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
         evidence_strength: evidenceStrength?.stars || undefined,
         evidence_strength_justification: evidenceStrength?.justification,
-        predicted_impact: predictedImpact?.stars || undefined,
-        predicted_impact_justification: predictedImpact?.justification
+        impact_score: doc.impact_score,
+        impact_score_label: doc.impact_score_label,
+        impact_score_breakdown: doc.impact_score_breakdown,
+        transferability_score: doc.transferability_score,
+        transferability_breakdown: doc.transferability_breakdown,
+        // Evidence categorisation fields
+        evidence_category: doc.evidence_category,
+        evidence_category_rank: doc.evidence_category ? getEvidenceCategoryRank(doc.evidence_category) : 999,
+        evidence_confidence: doc.evidence_confidence,
+        evidence_category_reasoning: doc.evidence_category_reasoning
       }
     })
 
+    // Always filter to show only relevant documents
     const relevant = allTransformed.filter(doc => doc.is_relevant)
-    const filtered = showRelevantOnly ? relevant : allTransformed
-    
+
     return {
-      transformedPapers: filtered,
+      transformedPapers: relevant,
       relevantCount: relevant.length
     }
-  }, [documents, showRelevantOnly, studyStrengthMapping, sampleSizeMapping])
+  }, [documents, studyStrengthMapping, sampleSizeMapping])
 
   // Show loading state while fetching project
   if (projectLoading) {
@@ -965,6 +1012,13 @@ export default function ProjectResultsPage() {
                         structuredBriefing={summaryData.structured_briefing}
                         citationMap={summaryData.citation_map}
                         evidenceCoverage={summaryData.evidence_coverage}
+                        {...(showRerunButton
+                          ? {
+                              onRerunSynthesis: handleRerunSynthesis,
+                              isRerunningSynthesis,
+                              rerunError,
+                            }
+                          : {})}
                         onCitationClick={() => {
                           updateUrl('evidence', 'documents')
                         }}
@@ -1004,7 +1058,7 @@ export default function ProjectResultsPage() {
                           className="flex items-center gap-2"
                         >
                           <FileText className="h-3 w-3" />
-                          Documents ({showRelevantOnly ? relevantCount : documents.length})
+                          Documents ({relevantCount})
                         </Button>
                       </div>
 
@@ -1021,17 +1075,6 @@ export default function ProjectResultsPage() {
                               onCheckedChange={setShowAdditionalColumns}
                             />
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor="relevance-filter" className="text-sm text-slate-700">
-                              Relevant only
-                            </Label>
-                            <Switch
-                              id="relevance-filter"
-                              checked={showRelevantOnly}
-                              onCheckedChange={setShowRelevantOnly}
-                            />
-                          </div>
-                          
                           {/* Documents Download Button */}
                           <div className="flex items-center gap-2">
                             <Button
@@ -1088,19 +1131,11 @@ export default function ProjectResultsPage() {
                         </div>
                       ) : transformedPapers.length > 0 ? (
                         <PapersTable papers={transformedPapers} showAdditionalColumns={showAdditionalColumns} />
-                      ) : documents.length > 0 && showRelevantOnly ? (
+                      ) : documents.length > 0 ? (
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                           <h3 className="text-lg font-medium text-slate-900 mb-2">No Relevant Documents</h3>
-                          <p className="text-slate-600 mb-4">All {documents.length} documents in this project were marked as non-relevant.</p>
-                          <Button 
-                            variant="outline" 
-                            onClick={() => setShowRelevantOnly(false)}
-                            className="flex items-center gap-2"
-                          >
-                            <Filter className="h-4 w-4" />
-                            Show All Documents
-                          </Button>
+                          <p className="text-slate-600">All {documents.length} documents in this project were marked as non-relevant.</p>
                         </div>
                       ) : (
                         <div className="text-center py-12">

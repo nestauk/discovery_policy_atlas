@@ -19,10 +19,13 @@ from app.services.synthesis.schemas import (
     OutcomeTheme,
     RetrievedChunk,
     StructuredBriefing,
+    ScoredContext,
+    ThemeEvidence,
+    RCSConfig,
 )
 
 
-ThemeBranch = Literal["issue", "intervention", "outcome"]
+ThemeBranch = Literal["issue", "intervention", "outcome", "risk"]
 
 
 class Concept(BaseModel):
@@ -65,6 +68,12 @@ class SynthesisState(TypedDict, total=False):
     project_id: str
     research_question: str
 
+    # User intent (captured at search time; used to tailor synthesis)
+    target_population: List[str]  # e.g., ["Children"]
+    target_outcomes: List[str]  # e.g., ["body weight/size reduction"]
+    target_geography: List[str]  # e.g., ["UK"]
+    target_inner_setting: List[str]  # e.g., ["Schools"]
+
     # Raw data
     raw_extractions: List[Dict]
     doc_metadata: Dict[str, Dict[str, Any]]
@@ -75,16 +84,19 @@ class SynthesisState(TypedDict, total=False):
     issue_concepts: List[Concept]
     intervention_concepts: List[Concept]
     outcome_concepts: List[Concept]
+    risk_concepts: List[Concept]
 
     # Discovered themes by branch (from LLM)
     discovered_issue_themes: List[DiscoveredTheme]
     discovered_intervention_themes: List[DiscoveredTheme]
     discovered_outcome_themes: List[DiscoveredTheme]
+    discovered_risk_themes: List[DiscoveredTheme]
 
     # Final themes with mapped concepts
     final_issue_themes: List[FinalTheme]
     final_intervention_themes: List[FinalTheme]
     final_outcome_themes: List[FinalTheme]
+    final_risk_themes: List[FinalTheme]
 
     # Evidence coverage statistics
     evidence_coverage: EvidenceCoverageSnapshot
@@ -100,18 +112,35 @@ class SynthesisState(TypedDict, total=False):
 
     # Theme to document mappings (for constrained RAG)
     theme_to_doc_uuids: Dict[str, List[str]]  # theme_name -> [doc_uuid, ...]
+    theme_to_extraction_ids: Dict[str, List[str]]  # theme_name -> [extraction_id, ...]
+    db_theme_to_extraction_ids: Dict[
+        str, List[str]
+    ]  # theme_name -> [extraction_id, ...]
 
-    # RAG retrieval results
+    # RAG retrieval results (legacy - kept for backward compatibility)
     theme_evidence: Dict[str, List[RetrievedChunk]]
     issue_evidence: Dict[str, List[RetrievedChunk]]
+    outcome_evidence: Dict[str, List[RetrievedChunk]]
     grounded_citations: List[CitationInfo]
     chunk_to_citation: Dict[str, int]
     doc_citation_map: Dict[str, int]  # doc_uuid -> citation number
+
+    # RCS (Contextual Summarisation) results - enhanced evidence gathering
+    rcs_config: RCSConfig
+    scored_theme_evidence: List[ThemeEvidence]  # Theme-grouped scored contexts
+    scored_issue_evidence: List[ThemeEvidence]  # Issue-grouped scored contexts
+    scored_outcome_evidence: List[ThemeEvidence]  # Outcome-grouped scored contexts
+    all_scored_contexts: List[ScoredContext]  # All contexts across themes
+    themes_with_gaps: List[str]  # Themes lacking sufficient evidence
+    rcs_iterations_run: int  # Number of evidence gathering iterations
 
     # Final outputs
     executive_briefing: str
     structured_briefing: Optional[StructuredBriefing]
     citation_map: Dict[str, CitationInfo]
+
+    # Briefing results (tool-augmented generation)
+    briefing_results: Optional[Dict[str, Any]]  # Tool calls, verification results
 
     # Langfuse tracing
     langfuse_handler: Any

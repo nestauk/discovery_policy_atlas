@@ -1,12 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
+import asyncio
+from datetime import datetime
+import json
 import logging
 import os
-from datetime import datetime
+from typing import Optional, List, Dict
 import uuid
-from typing import Optional, List
 import pandas as pd
-import asyncio
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.search_wizard import SearchWizardService
@@ -15,6 +16,7 @@ from app.services.chatbot import ChatRequest, ChatResponse
 from app.services.chatbot.chat_service import chatbot_service
 from app.services.synthesis.schemas import (
     SynthesisSummary,
+    EvidenceCoverageSnapshot,
     Finding,
     ThematicGroup,
     EvidenceItem,
@@ -28,11 +30,48 @@ from app.services.analysis.schemas import (
     PopulationOptionsResponse,
     OutcomeOptionsRequest,
     OutcomeOptionsResponse,
+    InnerSettingOptionsRequest,
+    InnerSettingOptionsResponse,
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
+from app.services.analysis.evidence.category import (
+    EVIDENCE_CATEGORIES,
+    EVIDENCE_CATEGORY_RANKS,
+    NON_EVIDENCE_CATEGORY,
+    is_non_evidence_document,
+)
+from app.services.analysis.evidence.strength import (
+    UNKNOWN_RANK,
+    parse_sample_size,
+    calculate_evidence_strength,
+    get_document_max_sample_size,
+    get_or_calculate_document_evidence,
+    build_document_evidence_info,
+)
+from app.services.analysis.utils.navigator import (
+    compute_shared_docs_mappings,
+    build_doc_scores_and_mappings,
+    build_related_interventions,
+    aggregate_all_interventions,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
+    """Parse a JSON field that may be stored as text."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return None
+
 
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 
@@ -153,6 +192,44 @@ async def get_synthesis_summary(
         # Check if synthesis is already cached
         cached = await read_cached_summary(project_id)
         if cached:
+            # Normalise evidence coverage counts to reflect screening outcomes, even for older cached runs.
+            try:
+                screened_res = (
+                    vectorization_service.supabase.table("analysis_documents")
+                    .select("id", count="exact")
+                    .eq("analysis_project_id", project_id)
+                    .execute()
+                )
+                total_screened = (
+                    screened_res.count
+                    if hasattr(screened_res, "count")
+                    else len(screened_res.data or [])
+                )
+                synthesised_res = (
+                    vectorization_service.supabase.table("analysis_documents")
+                    .select("id", count="exact")
+                    .eq("analysis_project_id", project_id)
+                    .eq("is_relevant", True)
+                    .execute()
+                )
+                total_synthesised = (
+                    synthesised_res.count
+                    if hasattr(synthesised_res, "count")
+                    else len(synthesised_res.data or [])
+                )
+
+                if cached.evidence_coverage:
+                    cached.evidence_coverage.total_screened = total_screened
+                    cached.evidence_coverage.total_synthesised = total_synthesised
+                else:
+                    cached.evidence_coverage = EvidenceCoverageSnapshot(
+                        total_screened=total_screened,
+                        total_synthesised=total_synthesised,
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to compute screened/synthesised counts for project {project_id}: {e}"
+                )
             return cached
 
         # If analysis still running or synthesising, return appropriate response
@@ -504,36 +581,82 @@ async def delete_analysis_project(
         raise HTTPException(status_code=500, detail="Failed to delete analysis project")
 
 
-async def trigger_synthesis_for_project(project_id: str) -> None:
-    """Trigger synthesis for a project if not already running/completed."""
+async def trigger_synthesis_for_project(
+    project_id: str, force: bool = False, invalidate_previous: bool = False
+) -> None:
+    """Trigger synthesis for a project.
+
+    Args:
+        project_id: Analysis project UUID.
+        force: If True, rerun even when a completed run exists.
+        invalidate_previous: If True, mark prior completed runs as invalidated.
+    """
     from app.services.synthesis.logbook import (
         get_synthesis_status,
         create_synthesis_run_placeholder,
+        invalidate_cache,
     )
     from app.services.synthesis.agent import SynthesisAgent
 
-    # Check if synthesis already exists or is running
     synthesis_status = await get_synthesis_status(project_id)
 
-    if synthesis_status in ["running", "completed"]:
-        logger.info(f"Synthesis already {synthesis_status} for project {project_id}")
-        if synthesis_status == "completed":
-            # Mark project as completed since synthesis is done (async to avoid blocking)
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: vectorization_service.supabase.table("analysis_projects")
-                .update({"status": "completed"})
-                .eq("id", project_id)
-                .execute(),
-            )
+    if synthesis_status == "running" and not force:
+        logger.info(f"Synthesis already running for project {project_id}")
         return
+
+    if synthesis_status == "completed" and not force:
+        logger.info(f"Synthesis already completed for project {project_id}")
+        # Keep marking the project completed for consistency
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: vectorization_service.supabase.table("analysis_projects")
+            .update({"status": "completed"})
+            .eq("id", project_id)
+            .execute(),
+        )
+        return
+
+    if invalidate_previous and synthesis_status in [
+        "completed",
+        "failed",
+        "invalidated",
+    ]:
+        try:
+            await invalidate_cache(project_id)
+        except Exception as e:
+            logger.warning(
+                f"Failed to invalidate prior synthesis cache for {project_id}: {e}"
+            )
+
+    if force:
+        try:
+            # Clear prior synthesis_runs rows to satisfy unique constraint on analysis_project_id
+            vectorization_service.supabase.table("synthesis_runs").delete().eq(
+                "analysis_project_id", project_id
+            ).execute()
+        except Exception as e:
+            logger.warning(
+                f"Failed to clear existing synthesis_runs for forced rerun of project {project_id}: {e}"
+            )
 
     # Create placeholder to prevent duplicate runs
     run_id = await create_synthesis_run_placeholder(project_id)
 
     try:
         logger.info(f"Starting synthesis for project {project_id}")
+
+        # Mark project as synthesising (async to avoid blocking).
+        # The analysis phase uses "running"; synthesis should be distinguished so
+        # the frontend can render the correct progress state.
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: vectorization_service.supabase.table("analysis_projects")
+            .update({"status": "synthesising"})
+            .eq("id", project_id)
+            .execute(),
+        )
 
         project_user_id = None
         try:
@@ -554,7 +677,6 @@ async def trigger_synthesis_for_project(project_id: str) -> None:
 
         # Remove the placeholder run before creating the final one (async to avoid blocking)
         supabase = vectorization_service.supabase
-        loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
             lambda: supabase.table("synthesis_runs")
@@ -716,7 +838,7 @@ async def run_analysis_for_project(
         await loop.run_in_executor(
             None,
             lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "running"})
+            .update({"status": "running", "search_query": search_query_data})
             .eq("id", project_id)
             .execute(),
         )
@@ -788,6 +910,59 @@ async def run_analysis_for_project(
         raise HTTPException(status_code=500, detail=f"Failed to run analysis: {str(e)}")
 
 
+@router.post("/{project_id}/rerun-synthesis")
+async def rerun_synthesis_for_project(
+    project_id: str,
+    request: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Manually rerun synthesis using cached analysis outputs.
+
+    Args:
+        project_id: Analysis project UUID.
+        request: Payload containing rerun options.
+        current_user: Authenticated user.
+
+    Returns:
+        JSON response confirming rerun initiation.
+    """
+    try:
+        from app.services.synthesis.logbook import get_synthesis_status
+
+        # Ensure project exists and user has access
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
+        force = bool(request.get("force", True))
+        invalidate_previous = bool(request.get("invalidate_previous", True))
+
+        current_status = await get_synthesis_status(project_id)
+        if current_status == "running" and not force:
+            raise HTTPException(
+                status_code=409,
+                detail="Synthesis is already running for this project; rerun with force=true to override.",
+            )
+
+        await trigger_synthesis_for_project(
+            project_id, force=force, invalidate_previous=invalidate_previous
+        )
+
+        return {
+            "project_id": project_id,
+            "status": "started",
+            "force": force,
+            "invalidate_previous": invalidate_previous,
+            "previous_status": current_status,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rerunning synthesis for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to rerun synthesis: {str(e)}"
+        )
+
+
 @router.get("/{project_id}/documents")
 async def get_project_documents(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)
@@ -805,12 +980,44 @@ async def get_project_documents(
         )
         # Map database field names to frontend expectations
         documents = []
+        filtered_other_count = 0
+
         for doc in docs_result.data:
+            # Filter out "Other (Non-evidence documents)" - these shouldn't reach the UI
+            if is_non_evidence_document(doc):
+                filtered_other_count += 1
+                continue
+
             doc_copy = doc.copy()
             # Map citation_count (database) to cited_by_count (frontend)
             if "citation_count" in doc_copy:
                 doc_copy["cited_by_count"] = doc_copy["citation_count"]
+            evidence_category = doc_copy.get("evidence_category")
+            doc_copy["evidence_category_rank"] = EVIDENCE_CATEGORY_RANKS.get(
+                evidence_category, UNKNOWN_RANK
+            )
+            evidence_info = get_or_calculate_document_evidence(doc)
+            conclusion = (doc.get("extraction_results") or {}).get("conclusion") or {}
+            doc_copy["evidence_strength"] = evidence_info["stars"]
+            if evidence_info["justification"]:
+                doc_copy["evidence_strength_justification"] = evidence_info[
+                    "justification"
+                ]
+            # Always include sample_size (may be None)
+            doc_copy["sample_size"] = evidence_info["sample_size"]
+            # Extract predicted impact from extraction results
+            predicted_impact = conclusion.get("predicted_impact") or {}
+            doc_copy["predicted_impact"] = predicted_impact.get("stars")
+            doc_copy["predicted_impact_justification"] = predicted_impact.get(
+                "justification"
+            )
             documents.append(doc_copy)
+
+        if filtered_other_count > 0:
+            logger.info(
+                f"Filtered {filtered_other_count} 'Other (Non-evidence)' documents from project {project_id} "
+                f"(returning {len(documents)} documents to UI)"
+            )
 
         return {"documents": documents, "total": len(documents)}
 
@@ -828,7 +1035,7 @@ async def get_project_charts_data(
         # Get all documents for this project
         docs_result = (
             vectorization_service.supabase.table("analysis_documents")
-            .select("year, source_country, authors")
+            .select("year, source_country, authors, evidence_category")
             .eq("analysis_project_id", project_id)
             .execute()
         )
@@ -838,12 +1045,15 @@ async def get_project_charts_data(
                 "documents_by_year": [],
                 "documents_by_country": [],
                 "documents_by_author": [],
+                "documents_by_evidence_category": [],
             }
 
         # Aggregate data
         year_counts = {}
         country_counts = {}
         author_counts = {}
+        evidence_category_counts = {}
+        filtered_other_count = 0
 
         for doc in docs_result.data:
             # Count by year
@@ -917,6 +1127,15 @@ async def get_project_charts_data(
                             # Regular author or no country data available
                             author_counts[author] = author_counts.get(author, 0) + 1
 
+            # Count by evidence category (track but don't include "Other" in results)
+            evidence_category = doc.get("evidence_category")
+            if evidence_category and evidence_category.strip():
+                if evidence_category == NON_EVIDENCE_CATEGORY:
+                    filtered_other_count += 1
+                evidence_category_counts[evidence_category] = (
+                    evidence_category_counts.get(evidence_category, 0) + 1
+                )
+
         # Sort and format data
         documents_by_year = [
             {"year": year, "count": count}
@@ -937,10 +1156,30 @@ async def get_project_charts_data(
             )[:10]
         ]
 
+        # Sort evidence categories by strength (predefined order)
+        # Exclude "Other (Non-evidence documents)" - these are filtered out during acquisition
+        evidence_category_order = [
+            cat for cat in EVIDENCE_CATEGORIES if cat != NON_EVIDENCE_CATEGORY
+        ]
+
+        documents_by_evidence_category = []
+        for category in evidence_category_order:
+            if category in evidence_category_counts:
+                documents_by_evidence_category.append(
+                    {"category": category, "count": evidence_category_counts[category]}
+                )
+
+        if filtered_other_count > 0:
+            logger.info(
+                f"Charts data for project {project_id}: {filtered_other_count} 'Other (Non-evidence)' documents "
+                f"excluded from evidence category chart (total categories shown: {len(documents_by_evidence_category)})"
+            )
+
         return {
             "documents_by_year": documents_by_year,
             "documents_by_country": documents_by_country,
             "documents_by_author": documents_by_author,
+            "documents_by_evidence_category": documents_by_evidence_category,
         }
 
     except Exception as e:
@@ -1011,7 +1250,7 @@ async def get_thematic_group_items(
     project_id: str,
     theme_id: str,
     item_type: str = Query(
-        ..., description="Type of items", regex="^(intervention|issue)$"
+        ..., description="Type of items", pattern="^(intervention|issue)$"
     ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -1053,43 +1292,13 @@ async def get_project_interventions(
         if not docs_result.data:
             return {"interventions": [], "total": 0}
 
+        # Total documents for density calculation
+        project_total_docs = len(docs_result.data)
+
         # Process interventions from all documents
-        aggregated_interventions = {}
-
-        def get_study_type_rank(study_type):
-            """Convert study type letter to numeric rank for sorting (lower = better)
-            g (RCT) is highest quality, empty is lowest quality"""
-            if not study_type:
-                return 999  # Empty types go to the end (lowest quality)
-
-            # Study type is already a letter (a-j) from Maryland Scientific Methods Scale
-            study_type_clean = study_type.strip().lower()
-
-            # Reverse ranking so 'g' (RCT) gets rank 1 (highest), 'a' gets rank 8
-            if study_type_clean == "g":  # Randomised controlled trial - highest quality
-                return 1
-            elif study_type_clean == "h":  # Meta-analysis
-                return 2
-            elif study_type_clean == "f":  # Quasi-experimental study
-                return 3
-            elif study_type_clean == "e":  # Comparison of outcomes in treated group
-                return 4
-            elif study_type_clean == "d":  # Study measures outcome pre and post
-                return 5
-            elif study_type_clean == "c":  # Cross-sectional with control variables
-                return 6
-            elif study_type_clean == "b":  # Study measures outcome pre and post
-                return 7
-            elif study_type_clean == "a":  # Purely cross-sectional study
-                return 8
-            elif study_type_clean == "i":  # Policy recommendation/theoretical modelling
-                return 9
-            elif (
-                study_type_clean == "j"
-            ):  # News article/opinion piece/government announcement
-                return 10
-            else:
-                return 999  # Unknown types go to the end
+        aggregated_interventions: dict[str, dict] = {}
+        # Separate accumulator for temporary data (sample_sizes, seen_doc_ids, docs_with_evidence)
+        accumulator: dict[str, dict] = {}
 
         for document in docs_result.data:
             extraction_results = document.get("extraction_results", {})
@@ -1114,19 +1323,30 @@ async def get_project_interventions(
                 intervention_key = f"{intervention_name}_{intervention.get('type', '')}_{intervention.get('country', '')}"
 
                 if intervention_key not in aggregated_interventions:
-                    # Initialize intervention data
+                    # Initialize intervention data (final output fields only)
+                    evidence_cat = document.get("evidence_category")
                     aggregated_interventions[intervention_key] = {
                         "name": intervention_name,
                         "type": intervention.get("type", "Unknown"),
                         "country": intervention.get("country", "Unknown"),
                         "description": intervention.get("description", ""),
-                        "study_types": [],
-                        "sample_sizes": [],
+                        "evidence_category": evidence_cat,
+                        "evidence_category_rank": EVIDENCE_CATEGORY_RANKS.get(
+                            evidence_cat, UNKNOWN_RANK
+                        )
+                        if evidence_cat
+                        else UNKNOWN_RANK,
+                        "is_systematic_review": evidence_cat
+                        == "Systematic Review and Meta-Analysis",
                         "result_count": 0,
                         "results_summary": [],
-                        "highest_study_type": None,
-                        "highest_study_type_rank": 999,
                         "documents": [],
+                    }
+                    # Initialize accumulator for temporary tracking data
+                    accumulator[intervention_key] = {
+                        "sample_sizes": [],
+                        "seen_doc_ids": set(),
+                        "documents_with_evidence": [],
                     }
 
                 # Add document info
@@ -1139,37 +1359,25 @@ async def get_project_interventions(
                     }
                 )
 
-                # Add study type if available
-                study_type = intervention.get("study_type")
-                if study_type:
-                    aggregated_interventions[intervention_key]["study_types"].append(
-                        study_type
+                # Get sample size for this intervention (for aggregate stats display)
+                sample_size_int = parse_sample_size(intervention.get("sample_size"))
+
+                # Add sample size to list if available (for aggregate stats)
+                if sample_size_int is not None:
+                    accumulator[intervention_key]["sample_sizes"].append(
+                        sample_size_int
                     )
 
-                    # Update highest study type (lowest rank number = highest quality)
-                    study_rank = get_study_type_rank(study_type)
-                    if (
-                        study_rank
-                        < aggregated_interventions[intervention_key][
-                            "highest_study_type_rank"
-                        ]
-                    ):
-                        aggregated_interventions[intervention_key][
-                            "highest_study_type"
-                        ] = study_type
-                        aggregated_interventions[intervention_key][
-                            "highest_study_type_rank"
-                        ] = study_rank
+                # Track evidence info for strength calculation (one entry per document)
+                # Use document-level max sample size for penalty calculation
+                doc_id = document.get("doc_id")
+                if doc_id not in accumulator[intervention_key]["seen_doc_ids"]:
+                    accumulator[intervention_key]["seen_doc_ids"].add(doc_id)
 
-                # Add sample size if available
-                sample_size = intervention.get("sample_size")
-                if sample_size:
-                    try:
-                        aggregated_interventions[intervention_key][
-                            "sample_sizes"
-                        ].append(int(sample_size))
-                    except (ValueError, TypeError):
-                        pass  # Skip non-numeric sample sizes
+                    max_sample_size = get_document_max_sample_size(interventions)
+                    accumulator[intervention_key]["documents_with_evidence"].append(
+                        build_document_evidence_info(document, max_sample_size, doc_id)
+                    )
 
                 # Add result count and summaries for this intervention
                 intervention_results = results_by_intervention.get(intervention_idx, [])
@@ -1180,7 +1388,10 @@ async def get_project_interventions(
                 # Add results summaries with detailed information
                 for result in intervention_results:
                     outcome = result.get("outcome_variable", "Unknown outcome")
-                    direction = result.get("effect_direction", "unknown")
+                    # Support both 'direction' (new schema) and 'effect_direction' (legacy) field names
+                    direction = result.get("direction") or result.get(
+                        "effect_direction", "unknown"
+                    )
                     if outcome and outcome != "Unknown outcome":
                         result_detail = {
                             "outcome": outcome,
@@ -1193,6 +1404,15 @@ async def get_project_interventions(
                             "supporting_quote": result.get("supporting_quote"),
                             "population_measured": result.get("population_measured"),
                             "subgroup_or_dose": result.get("subgroup_or_dose"),
+                            "n_studies": result.get("n_studies"),
+                            "sample_size": result.get("sample_size"),
+                            "stratum_type": result.get("stratum_type"),
+                            "stratum_value": result.get("stratum_value"),
+                            # SR-specific fields for meta-analysis results
+                            "heterogeneity_I2": result.get("heterogeneity_I2"),
+                            "tau2": result.get("tau2"),
+                            "summary_statistic": result.get("summary_statistic"),
+                            "estimate_level": result.get("estimate_level"),
                         }
                         aggregated_interventions[intervention_key][
                             "results_summary"
@@ -1200,9 +1420,12 @@ async def get_project_interventions(
 
         # Convert to list and add computed fields
         interventions_list = []
-        for key, intervention_data in aggregated_interventions.items():
+        for intervention_key, intervention_data in aggregated_interventions.items():
+            # Get temporary data from accumulator
+            acc = accumulator[intervention_key]
+            sample_sizes = acc["sample_sizes"]
+
             # Calculate aggregate sample size
-            sample_sizes = intervention_data["sample_sizes"]
             if sample_sizes:
                 intervention_data["total_sample_size"] = sum(sample_sizes)
                 intervention_data["avg_sample_size"] = sum(sample_sizes) / len(
@@ -1252,15 +1475,22 @@ async def get_project_interventions(
 
             intervention_data["results_summary"] = unique_results
 
-            # Clean up temporary fields
-            del intervention_data["sample_sizes"]
-            del intervention_data["study_types"]
+            # Calculate evidence strength using new methodology
+            evidence_strength = calculate_evidence_strength(
+                acc["documents_with_evidence"],
+                project_total_docs,
+            )
+            intervention_data["stars"] = evidence_strength["stars"]
+            intervention_data["base_rating"] = evidence_strength["base_rating"]
+            intervention_data["cap_applied"] = evidence_strength["cap_applied"]
+            intervention_data["cap_message"] = evidence_strength["cap_message"]
+            intervention_data["evidence_mix"] = evidence_strength["evidence_mix"]
 
             interventions_list.append(intervention_data)
 
-        # Sort by highest study type rank (best first), then by result count
+        # Sort by stars (highest first), then by evidence category rank, then by result count
         interventions_list.sort(
-            key=lambda x: (x["highest_study_type_rank"], -x["result_count"])
+            key=lambda x: (-x["stars"], x["evidence_category_rank"], -x["result_count"])
         )
 
         return {"interventions": interventions_list, "total": len(interventions_list)}
@@ -1469,10 +1699,68 @@ async def get_issue_intervention_navigator(
         themes = themes_res.data
         issue_themes = [t for t in themes if t["theme_type"] == "issue"]
         intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
+        risk_theme_rows = [t for t in themes if t["theme_type"] == "risk"]
+        intervention_themes_by_id = {
+            t.get("id"): t for t in intervention_themes if t.get("id")
+        }
 
         logger.info(
             f"Found {len(issue_themes)} issue themes and {len(intervention_themes)} intervention themes"
         )
+
+        # Get outcome themes for impact profile display
+        outcome_themes_res = (
+            vectorization_service.supabase.table("synthesis_outcome_themes")
+            .select("*")
+            .eq("synthesis_run_id", run_id)
+            .execute()
+        )
+        outcome_themes = outcome_themes_res.data or []
+        for outcome in outcome_themes:
+            outcome["magnitude_detail"] = _parse_json_field(
+                outcome.get("magnitude_detail")
+            )
+            outcome["causal_mechanism_detail"] = _parse_json_field(
+                outcome.get("causal_mechanism_detail")
+            )
+
+        outcomes_by_intervention: Dict[str, List[Dict]] = {}
+        for outcome in outcome_themes:
+            intervention_id = outcome.get("intervention_theme_id")
+            if intervention_id:
+                outcomes_by_intervention.setdefault(intervention_id, []).append(outcome)
+
+        risks_by_intervention: Dict[str, List[Dict]] = {}
+        risk_theme_ids = [t.get("id") for t in risk_theme_rows if t.get("id")]
+        links_by_theme: Dict[str, List[Dict]] = {}
+        if risk_theme_ids:
+            links_res = (
+                vectorization_service.supabase.table("theme_intervention_links")
+                .select("theme_id, intervention_theme_id, link_strength")
+                .in_("theme_id", risk_theme_ids)
+                .execute()
+            )
+            for link in links_res.data or []:
+                links_by_theme.setdefault(link["theme_id"], []).append(
+                    {
+                        "intervention_theme_id": link["intervention_theme_id"],
+                        "link_strength": link["link_strength"],
+                    }
+                )
+
+        for risk_theme in risk_theme_rows:
+            linked_interventions = links_by_theme.get(risk_theme.get("id"), [])
+            if linked_interventions:
+                risk_theme["linked_interventions"] = linked_interventions
+                for linked in linked_interventions:
+                    risks_by_intervention.setdefault(
+                        linked["intervention_theme_id"], []
+                    ).append(risk_theme)
+                continue
+
+            linked_id = risk_theme.get("linked_intervention_theme_id")
+            if linked_id:
+                risks_by_intervention.setdefault(linked_id, []).append(risk_theme)
 
         # Get theme assignments to link themes to extractions
         assignments_res = (
@@ -1517,263 +1805,64 @@ async def get_issue_intervention_navigator(
 
         documents = docs_result.data or []
         docs_by_id = {str(d["id"]): d for d in documents if d and d.get("id")}
+        docs_by_doc_id = {
+            d.get("doc_id"): d for d in documents if d and d.get("doc_id")
+        }
 
-        # Build document-level issue-intervention mappings from extraction results
-        doc_mappings = {}  # doc_id -> [(issue_extraction_id, intervention_extraction_id)]
-        doc_scores = {}  # doc_id -> {impact_score, evidence_score}
+        # Build document scores and issue-intervention mappings
+        doc_scores, doc_mappings = build_doc_scores_and_mappings(documents, extractions)
 
-        for document in documents:
-            if not document:
-                continue
-            doc_id = document.get("doc_id")
-            analysis_doc_id = document.get("id")
-            if not analysis_doc_id:
-                continue
-            analysis_doc_id = str(analysis_doc_id)
-            extraction_results = document.get("extraction_results", {})
+        # Pre-compute shared document mappings
+        issue_intervention_shared_docs = compute_shared_docs_mappings(
+            issue_themes,
+            intervention_themes,
+            theme_to_extractions,
+            doc_mappings,
+        )
 
-            if not extraction_results or not doc_id:
-                continue
-
-            # Get conclusion scores
-            conclusion = extraction_results.get("conclusion", {}) or {}
-            evidence_strength = conclusion.get("evidence_strength", {}) or {}
-            predicted_impact = conclusion.get("predicted_impact", {}) or {}
-
-            doc_scores[doc_id] = {
-                "impact_score": predicted_impact.get("stars"),
-                "evidence_score": evidence_strength.get("stars"),
-                "impact_justification": predicted_impact.get("justification", ""),
-                "evidence_justification": evidence_strength.get("justification", ""),
-            }
-
-            # Get mappings from extraction results
-            # Note: issues, interventions, and mappings are available but not currently used
-            # in this simplified implementation that relies on theme assignments
-            # issues = extraction_results.get("issues", [])
-            # interventions = extraction_results.get("interventions", [])
-            # mappings = extraction_results.get("mappings", [])
-
-            # Find corresponding extraction IDs for issues and interventions in this document
-            doc_issue_extractions = []
-            doc_intervention_extractions = []
-
-            for extraction in extractions:
-                if str(extraction.get("analysis_document_id")) == analysis_doc_id:
-                    if extraction.get("extraction_type") == "issue":
-                        doc_issue_extractions.append(extraction["id"])
-                    elif extraction.get("extraction_type") == "intervention":
-                        doc_intervention_extractions.append(extraction["id"])
-
-            # For now, create all possible combinations of issue-intervention pairs from this document
-            # (This is a simplification - in reality we'd want to use the specific mappings)
-            doc_mapping_pairs = []
-            for issue_ext_id in doc_issue_extractions:
-                for intervention_ext_id in doc_intervention_extractions:
-                    doc_mapping_pairs.append((issue_ext_id, intervention_ext_id))
-
-            if doc_mapping_pairs:
-                doc_mappings[doc_id] = doc_mapping_pairs
-
-        # Now build the navigator structure
+        # Build navigator structure using helper functions
         navigator_issue_themes = []
 
         for issue_theme in issue_themes:
-            theme_id = issue_theme["id"]
             theme_name = issue_theme["theme_name"]
             theme_description = issue_theme.get("summary_description", "")
             frequency = issue_theme.get("frequency", 0)
 
             logger.info(f"Processing issue theme: {theme_name} (freq: {frequency})")
 
-            # Get extractions assigned to this issue theme
-            issue_extraction_ids = theme_to_extractions.get(theme_id, [])
+            related_interventions = build_related_interventions(
+                issue_theme,
+                intervention_themes,
+                theme_to_extractions,
+                issue_intervention_shared_docs,
+                extractions_by_id,
+                docs_by_id,
+                docs_by_doc_id,
+                doc_scores,
+                len(documents),
+            )
 
-            # Find related intervention themes based on document co-occurrence
-            related_interventions = []
+            for intervention in related_interventions:
+                theme_id = intervention.get("theme_id")
+                if not theme_id:
+                    continue
 
-            for intervention_theme in intervention_themes:
-                intervention_theme_id = intervention_theme["id"]
-                intervention_theme_name = intervention_theme["theme_name"]
-                intervention_description = intervention_theme.get(
-                    "summary_description", ""
+                theme = intervention_themes_by_id.get(theme_id)
+                if theme:
+                    intervention["transferability_rating"] = theme.get(
+                        "transferability_rating"
+                    )
+                    intervention["transferability_note"] = theme.get(
+                        "transferability_note"
+                    )
+                    intervention["transferability_breakdown"] = theme.get(
+                        "transferability_breakdown"
+                    )
+
+                intervention["outcome_themes"] = outcomes_by_intervention.get(
+                    theme_id, []
                 )
-
-                # Get extractions assigned to this intervention theme
-                intervention_extraction_ids = theme_to_extractions.get(
-                    intervention_theme_id, []
-                )
-
-                # Find documents that have both issue and intervention extractions
-                shared_docs = []
-                impact_scores = []
-                evidence_scores = []
-
-                for doc_id, mapping_pairs in doc_mappings.items():
-                    doc_has_issue = any(
-                        issue_ext_id in issue_extraction_ids
-                        for issue_ext_id, _ in mapping_pairs
-                    )
-                    doc_has_intervention = any(
-                        intervention_ext_id in intervention_extraction_ids
-                        for _, intervention_ext_id in mapping_pairs
-                    )
-
-                    if doc_has_issue and doc_has_intervention:
-                        shared_docs.append(doc_id)
-                        scores = doc_scores.get(doc_id, {})
-                        if scores.get("impact_score") is not None:
-                            impact_scores.append(scores["impact_score"])
-                        if scores.get("evidence_score") is not None:
-                            evidence_scores.append(scores["evidence_score"])
-
-                # Only include intervention themes that have actual connections
-                if shared_docs:
-                    # Calculate average scores
-                    avg_impact_score = (
-                        sum(impact_scores) / len(impact_scores)
-                        if impact_scores
-                        else None
-                    )
-                    avg_evidence_score = (
-                        sum(evidence_scores) / len(evidence_scores)
-                        if evidence_scores
-                        else None
-                    )
-
-                    # Build detailed interventions from the extractions
-                    detailed_interventions = []
-                    for ext_id in intervention_extraction_ids:
-                        extraction = extractions_by_id.get(str(ext_id))
-                        if extraction and extraction.get("analysis_document_id"):
-                            doc = docs_by_id.get(
-                                str(extraction["analysis_document_id"])
-                            )
-                            if doc and doc.get("doc_id") in shared_docs:
-                                raw_data = extraction.get("raw_data", {})
-
-                                # Extract results from document's extraction_results
-                                extraction_results = doc.get("extraction_results", {})
-                                interventions_data = extraction_results.get(
-                                    "interventions", []
-                                )
-                                results_data = extraction_results.get("results", [])
-
-                                # Find matching intervention and its results
-                                intervention_results = []
-                                intervention_name = extraction.get(
-                                    "label", raw_data.get("name", "")
-                                )
-
-                                # Match by intervention name/label
-                                for i, intervention_data in enumerate(
-                                    interventions_data
-                                ):
-                                    if (
-                                        intervention_data.get("name")
-                                        == intervention_name
-                                        or intervention_data.get("label")
-                                        == intervention_name
-                                    ):
-                                        # Find results for this intervention by idx
-                                        for result in results_data:
-                                            if result.get("intervention_idx") == i:
-                                                intervention_results.append(
-                                                    {
-                                                        "outcome_variable": result.get(
-                                                            "outcome_variable"
-                                                        ),
-                                                        "effect_direction": result.get(
-                                                            "effect_direction"
-                                                        ),
-                                                        "effect_size": result.get(
-                                                            "effect_size"
-                                                        ),
-                                                        "p_value": result.get(
-                                                            "p_value"
-                                                        ),
-                                                        "uncertainty": result.get(
-                                                            "uncertainty"
-                                                        ),
-                                                        "result_text": result.get(
-                                                            "result_text"
-                                                        ),
-                                                        "population_measured": result.get(
-                                                            "population_measured"
-                                                        ),
-                                                        "subgroup_or_dose": result.get(
-                                                            "subgroup_or_dose"
-                                                        ),
-                                                    }
-                                                )
-                                        break
-
-                                detailed_interventions.append(
-                                    {
-                                        "name": intervention_name,
-                                        "description": extraction.get(
-                                            "description",
-                                            raw_data.get("description", ""),
-                                        ),
-                                        "type": raw_data.get("type", "Unknown"),
-                                        "country": raw_data.get("country"),
-                                        "study_type": raw_data.get("study_type"),
-                                        "sample_size": raw_data.get("sample_size"),
-                                        "impact_score": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("impact_score"),
-                                        "evidence_score": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("evidence_score"),
-                                        "impact_justification": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("impact_justification", ""),
-                                        "evidence_justification": doc_scores.get(
-                                            doc.get("doc_id"), {}
-                                        ).get("evidence_justification", ""),
-                                        "results": intervention_results,
-                                        "source_documents": [
-                                            {
-                                                "doc_id": doc.get("doc_id"),
-                                                "title": doc.get("title"),
-                                                "source": doc.get("source"),
-                                                "landing_page_url": doc.get(
-                                                    "landing_page_url"
-                                                ),
-                                            }
-                                        ],
-                                    }
-                                )
-
-                    # Deduplicate by name
-                    unique_interventions = {}
-                    for detail in detailed_interventions:
-                        name = detail.get("name", "")
-                        if name and name not in unique_interventions:
-                            unique_interventions[name] = detail
-
-                    related_interventions.append(
-                        {
-                            "theme_name": intervention_theme_name,
-                            "description": intervention_description,
-                            "impact_summary": intervention_theme.get(
-                                "impact_summary", ""
-                            ),
-                            "frequency": len(shared_docs),
-                            "avg_impact_score": round(avg_impact_score, 1)
-                            if avg_impact_score
-                            else None,
-                            "avg_evidence_score": round(avg_evidence_score, 1)
-                            if avg_evidence_score
-                            else None,
-                            "detailed_interventions": list(
-                                unique_interventions.values()
-                            ),
-                        }
-                    )
-
-            # Sort interventions by frequency of connection
-            related_interventions.sort(key=lambda x: x["frequency"], reverse=True)
+                intervention["risk_themes"] = risks_by_intervention.get(theme_id, [])
 
             # Only include issue themes that have related interventions
             if related_interventions:
@@ -1789,9 +1878,17 @@ async def get_issue_intervention_navigator(
         # Sort issue themes by frequency
         navigator_issue_themes.sort(key=lambda x: x["frequency"], reverse=True)
 
+        # Aggregate interventions across all issues
+        all_interventions = aggregate_all_interventions(
+            navigator_issue_themes, docs_by_doc_id, len(documents)
+        )
+
         logger.info(f"Returning {len(navigator_issue_themes)} issue themes")
 
-        return {"issue_themes": navigator_issue_themes}
+        return {
+            "issue_themes": navigator_issue_themes,
+            "all_interventions": all_interventions,
+        }
 
     except Exception as e:
         logger.error(
@@ -2015,14 +2112,12 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 raw_data = extraction.get("raw_data", {})
 
-                # Get scores from document conclusion
                 extraction_results = doc.get("extraction_results", {})
                 conclusion = extraction_results.get("conclusion", {}) or {}
                 evidence_strength = conclusion.get("evidence_strength", {}) or {}
-                predicted_impact = conclusion.get("predicted_impact", {}) or {}
 
-                impact_score = evidence_strength.get("stars")
-                evidence_score = predicted_impact.get("stars")
+                impact_score = doc.get("impact_score")
+                evidence_score = evidence_strength.get("stars")
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
@@ -2061,15 +2156,22 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                                 "description", raw_data.get("description", "")
                             ),
                             "Country": raw_data.get("country", ""),
-                            "Study Type": raw_data.get("study_type", ""),
+                            "Evidence Category": doc.get("evidence_category", ""),
                             "Sample Size": raw_data.get("sample_size", ""),
                             "Impact Score": impact_score,
                             "Evidence Score": evidence_score,
                             "Outcome Variable": result.get("outcome_variable", ""),
-                            "Effect Direction": result.get("effect_direction", ""),
+                            # Support both 'direction' (new) and 'effect_direction' (legacy)
+                            "Effect Direction": result.get("direction")
+                            or result.get("effect_direction", ""),
                             "Effect Size": result.get("effect_size", ""),
                             "P-Value": result.get("p_value", ""),
                             "Uncertainty": result.get("uncertainty", ""),
+                            # SR-specific fields for meta-analysis results
+                            "Heterogeneity I2": result.get("heterogeneity_I2", ""),
+                            "Tau2": result.get("tau2", ""),
+                            "Summary Statistic": result.get("summary_statistic", ""),
+                            "Estimate Level": result.get("estimate_level", ""),
                             "Result Text": result.get("result_text", ""),
                             "Population Measured": result.get(
                                 "population_measured", ""
@@ -2111,11 +2213,16 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     logger.warning(f"Skipping None document at index {i}")
                     continue
 
-                # Extract evidence assessment from conclusion if available
                 extraction_results = doc.get("extraction_results", {}) or {}
                 conclusion = extraction_results.get("conclusion", {}) or {}
                 evidence_strength = conclusion.get("evidence_strength", {}) or {}
-                predicted_impact = conclusion.get("predicted_impact", {}) or {}
+                evidence_category = doc.get("evidence_category", "")
+                evidence_score = evidence_strength.get("stars")
+                evidence_justification = evidence_strength.get("justification", "")
+                if evidence_score is None and evidence_category:
+                    evidence_info = get_or_calculate_document_evidence(doc)
+                    evidence_score = evidence_info["stars"]
+                    evidence_justification = evidence_info.get("justification", "")
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])
@@ -2135,14 +2242,11 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                         "Relevance": "Yes" if doc.get("is_relevant", False) else "No",
                         "Relevance Reason": doc.get("relevance_reason", ""),
                         "Confidence": doc.get("relevance_confidence", ""),
-                        "Evidence Score": evidence_strength.get("stars", ""),
-                        "Evidence Justification": evidence_strength.get(
-                            "justification", ""
-                        ),
-                        "Impact Score": predicted_impact.get("stars", ""),
-                        "Impact Justification": predicted_impact.get(
-                            "justification", ""
-                        ),
+                        "Evidence Category": evidence_category,
+                        "Evidence Score": evidence_score or "",
+                        "Evidence Justification": evidence_justification,
+                        "Impact Score": doc.get("impact_score", ""),
+                        "Impact Justification": doc.get("impact_score_label", ""),
                         "Extraction Status": doc.get("extraction_status", ""),
                         "Text Source": doc.get("text_source", ""),
                         "Full Text Available": "Yes"
@@ -2394,6 +2498,32 @@ async def generate_outcome_options(
 
     return OutcomeOptionsResponse(
         research_question=request.research_question, outcome_options=outcome_options
+    )
+
+
+@router.post(
+    "/generate-inner-setting-options", response_model=InnerSettingOptionsResponse
+)
+async def generate_inner_setting_options(
+    request: InnerSettingOptionsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Generate inner setting options for a research question using AI"""
+    service = SearchWizardService()
+    inner_setting_options = await service.generate_inner_setting_options(
+        research_question=request.research_question,
+        max_options=request.max_options,
+        user_id=current_user.user_id,
+    )
+
+    if not inner_setting_options:
+        raise HTTPException(
+            status_code=500, detail="Failed to generate inner setting options"
+        )
+
+    return InnerSettingOptionsResponse(
+        research_question=request.research_question,
+        inner_setting_options=inner_setting_options,
     )
 
 

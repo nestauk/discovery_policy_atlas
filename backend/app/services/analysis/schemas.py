@@ -29,10 +29,14 @@ class UnifiedReference(BaseModel):
     relevance_confidence: Optional[float] = None
     relevance_reason: Optional[str] = None
     top_line: Optional[str] = None  # Concise summary of main takeaway
-    document_type: Optional[
-        str
-    ] = None  # "research_paper" | "reviews" | "policy_document" | "other"
+    # TODO: Remove document_type fields once old projects no longer need them
+    # Kept for backward compatibility with existing Supabase data
+    document_type: Optional[str] = None
     document_type_reason: Optional[str] = None
+    # Evidence categorisation (replaces document_type)
+    evidence_category: Optional[str] = None
+    evidence_confidence: Optional[float] = None
+    evidence_category_reasoning: Optional[str] = None
     # Acquisition fields
     acquisition_status: Optional[str] = None  # "success" | "failed" | "not_attempted"
     acquisition_error: Optional[str] = None  # Error message if acquisition failed
@@ -48,6 +52,14 @@ class UnifiedReference(BaseModel):
     ] = None  # "full_text" | "abstract" - what was used for extraction
 
 
+class ImplementationConstraints(BaseModel):
+    """Optional implementation constraints provided by the user."""
+
+    cost: Optional[str] = None  # "high" | "moderate" | "low" | null
+    staffing: Optional[str] = None
+    implementation_complexity: Optional[str] = None
+
+
 class SearchContext(BaseModel):
     """Flat search context payload sent by the search wizard."""
 
@@ -57,11 +69,13 @@ class SearchContext(BaseModel):
     screening_factors: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=list)
     geography: List[str] = Field(default_factory=list)
+    inner_setting: List[str] = Field(default_factory=list)
     time_preset: Optional[str] = None
     time_from: Optional[str] = None
     time_to: Optional[str] = None
     max_results: Optional[int] = None
     additional_questions: List[str] = Field(default_factory=list)
+    implementation_constraints: Optional[ImplementationConstraints] = None
 
 
 # Search wizard API request/response schemas
@@ -83,6 +97,16 @@ class OutcomeOptionsRequest(BaseModel):
 class OutcomeOptionsResponse(BaseModel):
     research_question: str
     outcome_options: List[str]  # Ordered from broad to narrow
+
+
+class InnerSettingOptionsRequest(BaseModel):
+    research_question: str
+    max_options: int = 5
+
+
+class InnerSettingOptionsResponse(BaseModel):
+    research_question: str
+    inner_setting_options: List[str]
 
 
 class AdditionalQuestionsRequest(BaseModel):

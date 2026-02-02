@@ -1,29 +1,63 @@
 import React from 'react'
 import { cn } from '@/lib/utils'
 import { Tooltip } from '@/components/ui/tooltip'
+import { Star } from 'lucide-react'
+
+type DisplayMode = 'badge' | 'icons' | 'icons-with-number'
 
 interface StarRatingProps {
   stars: number | null | undefined
   maxStars?: number
   size?: 'sm' | 'md' | 'lg'
   className?: string
-  tooltip?: string
+  tooltip?: React.ReactNode
+  /** Display mode: 'badge' for X/5 format, 'icons' for star icons only, 'icons-with-number' for both */
+  mode?: DisplayMode
+  /** Show greyed stars instead of "N/A" text when stars is null/undefined */
+  showGreyedStarsOnNull?: boolean
 }
 
-export function StarRating({ 
-  stars, 
-  maxStars = 5, 
-  size = 'sm', 
+export function StarRating({
+  stars,
+  maxStars = 5,
+  size = 'sm',
   className,
-  tooltip
+  tooltip,
+  mode = 'badge',
+  showGreyedStarsOnNull = false
 }: StarRatingProps) {
+  const sizeConfig = {
+    sm: { text: 'text-xs', icon: 'h-3 w-3', minWidth: 'min-w-[2rem]' },
+    md: { text: 'text-sm', icon: 'h-4 w-4', minWidth: 'min-w-[2.5rem]' },
+    lg: { text: 'text-base', icon: 'h-5 w-5', minWidth: 'min-w-[3rem]' },
+  }[size]
+
+  // Handle null/undefined stars
   if (stars == null) {
+    if (showGreyedStarsOnNull) {
+      // Show all greyed stars with tooltip
+      const greyedStars = (
+        <span className={cn("inline-flex items-center gap-0.5", className)}>
+          {Array.from({ length: maxStars }, (_, i) => (
+            <Star
+              key={i}
+              className={cn(sizeConfig.icon, "fill-gray-200 text-gray-200")}
+            />
+          ))}
+        </span>
+      )
+      return (
+        <Tooltip content={tooltip || "Not enough data"}>
+          {greyedStars}
+        </Tooltip>
+      )
+    }
+
+    // Default: show "N/A" text
     const naDisplay = (
       <span className={cn(
         "text-slate-400",
-        size === 'sm' && "text-xs",
-        size === 'md' && "text-sm", 
-        size === 'lg' && "text-base",
+        sizeConfig.text,
         className
       )}>
         N/A
@@ -41,17 +75,74 @@ export function StarRating({
     return naDisplay
   }
 
-  const ratingDisplay = (
-    <span className={cn(
-      "inline-block px-2 py-1 rounded text-center font-medium bg-blue-100 text-blue-800",
-      size === 'sm' && "text-xs min-w-[2rem]",
-      size === 'md' && "text-sm min-w-[2.5rem]",
-      size === 'lg' && "text-base min-w-[3rem]",
-      className
-    )}>
-      {stars}/{maxStars}
+  // Handle 0 stars case - show all greyed stars
+  if (stars === 0) {
+    const greyedStars = (
+      <span className={cn("inline-flex items-center gap-0.5", className)}>
+        {Array.from({ length: maxStars }, (_, i) => (
+          <Star
+            key={i}
+            className={cn(sizeConfig.icon, "fill-gray-200 text-gray-200")}
+          />
+        ))}
+      </span>
+    )
+    return (
+      <Tooltip content={tooltip || "Not enough data"}>
+        {greyedStars}
+      </Tooltip>
+    )
+  }
+
+  // Star icons component
+  const StarIcons = () => (
+    <span className="inline-flex items-center gap-0.5">
+      {Array.from({ length: maxStars }, (_, i) => (
+        <Star
+          key={i}
+          className={cn(
+            sizeConfig.icon,
+            i < stars
+              ? "fill-amber-400 text-amber-400"
+              : "fill-gray-200 text-gray-200"
+          )}
+        />
+      ))}
     </span>
   )
+
+  let ratingDisplay: React.ReactNode
+
+  if (mode === 'icons') {
+    ratingDisplay = (
+      <span className={cn("inline-flex items-center", className)}>
+        <StarIcons />
+      </span>
+    )
+  } else if (mode === 'icons-with-number') {
+    ratingDisplay = (
+      <span className={cn(
+        "inline-flex items-center gap-1.5",
+        sizeConfig.text,
+        className
+      )}>
+        <StarIcons />
+        <span className="text-gray-600 font-medium">{stars}/{maxStars}</span>
+      </span>
+    )
+  } else {
+    // Badge mode (original behavior)
+    ratingDisplay = (
+      <span className={cn(
+        "inline-block px-2 py-1 rounded text-center font-medium bg-blue-100 text-blue-800",
+        sizeConfig.text,
+        sizeConfig.minWidth,
+        className
+      )}>
+        {stars}/{maxStars}
+      </span>
+    )
+  }
 
   if (tooltip) {
     return (

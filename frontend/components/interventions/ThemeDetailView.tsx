@@ -1,10 +1,14 @@
 'use client'
 
 import React, { useMemo, useState } from 'react'
-import { ArrowLeft, ChevronRight } from 'lucide-react'
+import { ArrowLeft, ChevronRight, ChevronDown, Globe, Users, Building2, DollarSign, UserCheck, Cog } from 'lucide-react'
 import { TierBadge } from '@/components/ui/tier-badge'
 import { Badge } from '@/components/ui/badge'
 import { InterventionCard, type InterventionCardData } from './InterventionCard'
+import { ImpactProfileCard } from '@/components/synthesis/ImpactProfileCard'
+import { RiskWarnings } from '@/components/synthesis/RiskWarnings'
+import type { OutcomeTheme, RiskTheme, TransferabilityBreakdown } from '@/types/search'
+import { formatEvidenceMixCompact, getEvidenceScoreExplanation } from '@/lib/evidenceCategories'
 
 interface DetailedIntervention {
   name: string
@@ -52,6 +56,16 @@ interface ThemeDetailViewProps {
   avgEvidenceScore?: number
   interventions: InterventionTheme[]
   onBack: () => void
+  // Rich data from synthesis
+  impactSummary?: string
+  outcomeThemes?: OutcomeTheme[]
+  riskThemes?: RiskTheme[]
+  transferabilityRating?: string | null
+  transferabilityNote?: string | null
+  transferabilityBreakdown?: TransferabilityBreakdown | null
+  displayEvidenceMix?: Record<string, number>
+  evidenceStars?: number
+  capMessage?: string | null
 }
 
 function convertToCardData(detail: DetailedIntervention): InterventionCardData {
@@ -93,6 +107,137 @@ interface InterventionGroup {
   avgEvidence: number | null
 }
 
+const toLabel = (value?: string) =>
+  value ? value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : ''
+
+const contextFitStyles: Record<string, string> = {
+  'Excellent Fit': 'text-green-700 bg-green-50',
+  'Good Fit': 'text-green-700 bg-green-50',
+  'Moderate Fit': 'text-yellow-700 bg-yellow-50',
+  'Limited Fit': 'text-orange-700 bg-orange-50',
+  'Poor Fit': 'text-red-700 bg-red-50',
+  'Unknown': 'text-slate-600 bg-slate-50',
+}
+
+const requirementsStyles: Record<string, string> = {
+  'Low': 'text-green-700 bg-green-50',
+  'Medium': 'text-yellow-700 bg-yellow-50',
+  'High': 'text-red-700 bg-red-50',
+  'Unknown': 'text-slate-600 bg-slate-50',
+}
+
+function ContextFitSection({ breakdown, rating, note }: { 
+  breakdown?: TransferabilityBreakdown | null
+  rating?: string | null
+  note?: string | null 
+}) {
+  if (!breakdown && !rating) return null
+
+  const contextRating = breakdown?.context_fit_rating || rating || 'Unknown'
+  const requirementsRating = breakdown?.implementation_requirements_rating || 'Unknown'
+  const hasAnyToleranceExceeded = Object.values(breakdown?.implementation_exceeds_tolerance || {}).some(Boolean)
+
+  const contextDimensions = [
+    { key: 'inner_setting', label: 'Setting', icon: Building2 },
+    { key: 'population', label: 'Population', icon: Users },
+    { key: 'geography', label: 'Geography', icon: Globe },
+  ] as const
+
+  const implementationDimensions = [
+    { key: 'cost', label: 'Cost', icon: DollarSign },
+    { key: 'staffing', label: 'Staffing', icon: UserCheck },
+    { key: 'implementation_complexity', label: 'Complexity', icon: Cog },
+  ] as const
+
+  return (
+    <div className="space-y-6">
+      {/* Summary badges */}
+      <div className="flex flex-wrap gap-3">
+        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${contextFitStyles[contextRating] || contextFitStyles.Unknown}`}>
+          <span className="font-medium">Context Fit:</span>
+          <span>{contextRating}</span>
+        </div>
+        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${requirementsStyles[requirementsRating] || requirementsStyles.Unknown}`}>
+          <span className="font-medium">Implementation Requirements:</span>
+          <span>{requirementsRating}{hasAnyToleranceExceeded ? ' ⚠️' : ''}</span>
+        </div>
+      </div>
+
+      {note && (
+        <p className="text-gray-700 leading-relaxed">{note}</p>
+      )}
+
+      {breakdown && (
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Context Fit Details */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Context Fit</h4>
+            <div className="space-y-3">
+              {contextDimensions.map(({ key, label, icon: Icon }) => {
+                const value = breakdown?.[key]
+                const dimensionNote = breakdown?.notes?.[key]
+                if (!value && !dimensionNote) return null
+                
+                return (
+                  <div key={key} className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex items-center gap-3 mb-2">
+                      <Icon className="h-4 w-4 text-gray-500" />
+                      <span className="font-medium text-gray-900">{label}</span>
+                      {value && (
+                        <Badge variant="outline" className="ml-auto text-xs">
+                          {toLabel(value)}
+                        </Badge>
+                      )}
+                    </div>
+                    {dimensionNote && (
+                      <p className="text-sm text-gray-600 leading-relaxed">{dimensionNote}</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Implementation Requirements Details */}
+          <div className="space-y-4">
+            <h4 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Implementation Requirements</h4>
+            <div className="space-y-3">
+              {implementationDimensions.map(({ key, label, icon: Icon }) => {
+                const evidenceValue = breakdown?.implementation_evidence?.[key]
+                const exceedsTolerance = breakdown?.implementation_exceeds_tolerance?.[key]
+                const dimensionNote = breakdown?.notes?.[key]
+                if (!evidenceValue && !dimensionNote) return null
+                
+                return (
+                  <div key={key} className={`rounded-lg p-4 ${exceedsTolerance ? 'bg-red-50 border border-red-100' : 'bg-gray-50'}`}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <Icon className={`h-4 w-4 ${exceedsTolerance ? 'text-red-500' : 'text-gray-500'}`} />
+                      <span className={`font-medium ${exceedsTolerance ? 'text-red-900' : 'text-gray-900'}`}>{label}</span>
+                      {evidenceValue && (
+                        <Badge 
+                          variant="outline" 
+                          className={`ml-auto text-xs ${exceedsTolerance ? 'border-red-200 text-red-700' : ''}`}
+                        >
+                          {toLabel(evidenceValue)}{exceedsTolerance ? ' ⚠️' : ''}
+                        </Badge>
+                      )}
+                    </div>
+                    {dimensionNote && (
+                      <p className={`text-sm leading-relaxed ${exceedsTolerance ? 'text-red-700' : 'text-gray-600'}`}>
+                        {dimensionNote}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ThemeDetailView({
   themeName,
   themeDescription,
@@ -100,8 +245,18 @@ export function ThemeDetailView({
   avgEvidenceScore,
   interventions,
   onBack,
+  impactSummary,
+  outcomeThemes,
+  riskThemes,
+  transferabilityRating,
+  transferabilityNote,
+  transferabilityBreakdown,
+  displayEvidenceMix,
+  evidenceStars,
+  capMessage,
 }: ThemeDetailViewProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [showInsufficientOutcomes, setShowInsufficientOutcomes] = useState(false)
   
   const groups = useMemo(() => {
     const allDetailed: DetailedIntervention[] = []
@@ -178,9 +333,34 @@ export function ThemeDetailView({
       return next
     })
   }
+
+  // Split outcomes into primary and insufficient evidence
+  const { primaryOutcomes, insufficientOutcomes } = useMemo(() => {
+    if (!outcomeThemes) return { primaryOutcomes: [], insufficientOutcomes: [] }
+    
+    const sorted = [...outcomeThemes].sort(
+      (a, b) => (b.positive_count + b.negative_count + b.null_count) -
+                (a.positive_count + a.negative_count + a.null_count)
+    )
+    
+    return {
+      primaryOutcomes: sorted.filter(o => o.verdict_label !== 'insufficient_evidence'),
+      insufficientOutcomes: sorted.filter(o => o.verdict_label === 'insufficient_evidence'),
+    }
+  }, [outcomeThemes])
+
+  const evidenceMixText = formatEvidenceMixCompact(displayEvidenceMix)
+  const evidenceExplanation = evidenceStars !== undefined 
+    ? getEvidenceScoreExplanation(evidenceStars, displayEvidenceMix, capMessage)
+    : undefined
+
+  const hasContextFitInfo = transferabilityRating || transferabilityBreakdown
+  const hasImpactProfile = primaryOutcomes.length > 0
+  const hasRisks = riskThemes && riskThemes.length > 0
   
   return (
     <div className="space-y-6">
+      {/* Back button */}
       <button
         className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors"
         onClick={onBack}
@@ -190,6 +370,7 @@ export function ThemeDetailView({
         <span className="text-sm font-medium">Back to Themes</span>
       </button>
       
+      {/* Header with title and scores */}
       <div className="pb-6 border-b border-gray-100">
         <h2 className="text-2xl font-bold text-gray-900 mb-2">{themeName}</h2>
         <div className="flex items-center justify-between gap-6">
@@ -206,99 +387,213 @@ export function ThemeDetailView({
           </div>
         </div>
       </div>
-      
-      <div className="space-y-3">
-        {groups.map(group => {
-          const isMulti = group.items.length > 1
-          const isExpanded = expandedGroups.has(group.key)
+
+      {/* Section 1: What is this intervention about? */}
+      {(impactSummary || evidenceMixText) && (
+        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">What is this intervention?</h3>
           
-          if (!isMulti) {
-            const item = group.items[0]
-            return (
-              <InterventionCard
-                key={group.key}
-                intervention={convertToCardData(item)}
-                studyCount={1}
+          {impactSummary && (
+            <p className="text-gray-700 leading-relaxed">{impactSummary}</p>
+          )}
+        </section>
+      )}
+
+      {/* Section 2: Evidence Base */}
+      {evidenceMixText && (
+        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Evidence Base</h3>
+          <p className="text-sm text-gray-600">
+            The strength and composition of the research evidence supporting this intervention.
+          </p>
+          
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+            <div className="font-medium text-blue-900 mb-1">Evidence Mix</div>
+            <p className="text-blue-800">{evidenceMixText}</p>
+            {evidenceExplanation && (
+              <p className="text-blue-700 text-sm mt-2">{evidenceExplanation}</p>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Section 3: Impact Profile (Outcomes) */}
+      {hasImpactProfile && (
+        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Impact Profile</h3>
+          <p className="text-sm text-gray-600">
+            Key outcomes measured across the evidence base, showing direction and strength of effects.
+          </p>
+          
+          <div className="grid gap-3">
+            {primaryOutcomes.map((outcome) => (
+              <ImpactProfileCard
+                key={outcome.outcome_name}
+                outcome={outcome}
               />
-            )
-          }
+            ))}
+          </div>
           
-          return (
-            <div 
-              key={group.key} 
-              className="bg-white border border-gray-100 rounded-xl overflow-hidden"
-            >
-              <div
-                className="p-5 hover:bg-gray-50 transition-colors cursor-pointer"
-                onClick={() => toggleGroup(group.key)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    toggleGroup(group.key)
-                  }
-                }}
+          {insufficientOutcomes.length > 0 && (
+            <div className="pt-2">
+              <button
+                type="button"
+                className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900"
+                onClick={() => setShowInsufficientOutcomes(!showInsufficientOutcomes)}
               >
-                <div className="flex justify-between items-start gap-4 mb-3">
-                  <div className="flex items-center gap-2 flex-wrap min-w-0">
-                    <h3 className="text-base font-semibold text-gray-900">
-                      {group.title}
-                    </h3>
-                    {group.category && group.category !== 'Unknown' && (
-                      <Badge 
-                        variant="outline" 
-                        className="shrink-0 text-xs font-medium uppercase tracking-wide text-gray-500 bg-gray-50"
-                      >
-                        {group.category}
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  <div className="shrink-0 flex items-center gap-3">
-                    {group.avgImpact != null && (
-                      <TierBadge score={group.avgImpact} label="Impact" />
-                    )}
-                    {group.avgEvidence != null && (
-                      <TierBadge score={group.avgEvidence} label="Evidence" />
-                    )}
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-1 text-blue-600 text-sm font-medium">
-                  <span className="text-gray-400 mr-2">{group.items.length} studies</span>
-                  {isExpanded ? 'Hide' : 'View'}
-                  <ChevronRight 
-                    size={16} 
-                    className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                  />
-                </div>
-              </div>
+                {showInsufficientOutcomes ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                {showInsufficientOutcomes 
+                  ? `Hide ${insufficientOutcomes.length} outcomes with insufficient evidence`
+                  : `Show ${insufficientOutcomes.length} outcomes with insufficient evidence`
+                }
+              </button>
               
-              {isExpanded && (
-                <div className="px-5 pb-5 border-t border-gray-100">
-                  <div className="pt-4 space-y-3">
-                    {group.items.map((item, idx) => (
-                      <InterventionCard
-                        key={`${group.key}-${idx}`}
-                        intervention={convertToCardData(item)}
-                        studyCount={1}
-                      />
-                    ))}
-                  </div>
+              {showInsufficientOutcomes && (
+                <div className="grid gap-3 mt-3">
+                  {insufficientOutcomes.map((outcome) => (
+                    <ImpactProfileCard
+                      key={outcome.outcome_name}
+                      outcome={outcome}
+                    />
+                  ))}
                 </div>
               )}
             </div>
-          )
-        })}
+          )}
+        </section>
+      )}
+
+      {/* Section 4: Risk Warnings */}
+      {hasRisks && (
+        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Risks & Adverse Effects</h3>
+          <p className="text-sm text-gray-600">
+            Potential risks and adverse effects identified in the evidence.
+          </p>
+          <RiskWarnings risks={riskThemes!} />
+        </section>
+      )}
+
+      {/* Section 5: Context Fit & Implementation Requirements */}
+      {hasContextFitInfo && (
+        <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900">Context Fit & Implementation</h3>
+          <p className="text-sm text-gray-600">
+            Assessment of how well this intervention may transfer to your context and what resources are needed to implement it.
+          </p>
+          <ContextFitSection 
+            breakdown={transferabilityBreakdown}
+            rating={transferabilityRating}
+            note={transferabilityNote}
+          />
+        </section>
+      )}
+
+      {/* Section 6: Detailed Studies */}
+      <section className="space-y-4">
+        <h3 className="text-lg font-semibold text-gray-900">
+          Studies & Evidence ({groups.reduce((sum, g) => sum + g.items.length, 0)})
+        </h3>
+        <p className="text-sm text-gray-600">
+          Individual studies and interventions that contribute to this theme.
+        </p>
         
-        {groups.length === 0 && (
-          <div className="bg-gray-50 border border-gray-100 rounded-xl p-8 text-center text-gray-500">
-            No intervention details available for this theme.
-          </div>
-        )}
-      </div>
+        <div className="space-y-3">
+          {groups.map(group => {
+            const isMulti = group.items.length > 1
+            const isExpanded = expandedGroups.has(group.key)
+            
+            if (!isMulti) {
+              const item = group.items[0]
+              return (
+                <InterventionCard
+                  key={group.key}
+                  intervention={convertToCardData(item)}
+                  studyCount={1}
+                />
+              )
+            }
+            
+            return (
+              <div 
+                key={group.key} 
+                className="bg-white border border-gray-100 rounded-xl overflow-hidden"
+              >
+                <div
+                  className="p-5 hover:bg-gray-50 transition-colors cursor-pointer"
+                  onClick={() => toggleGroup(group.key)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      toggleGroup(group.key)
+                    }
+                  }}
+                >
+                  <div className="flex justify-between items-start gap-4 mb-3">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <h3 className="text-base font-semibold text-gray-900">
+                        {group.title}
+                      </h3>
+                      {group.category && group.category !== 'Unknown' && (
+                        <Badge 
+                          variant="outline" 
+                          className="shrink-0 text-xs font-medium uppercase tracking-wide text-gray-500 bg-gray-50"
+                        >
+                          {group.category}
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    <div className="shrink-0 flex items-center gap-3">
+                      {group.avgImpact != null && (
+                        <TierBadge score={group.avgImpact} label="Impact" />
+                      )}
+                      {group.avgEvidence != null && (
+                        <TierBadge score={group.avgEvidence} label="Evidence" />
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-1 text-blue-600 text-sm font-medium">
+                    <span className="text-gray-400 mr-2">{group.items.length} studies</span>
+                    {isExpanded ? 'Hide' : 'View'}
+                    <ChevronRight 
+                      size={16} 
+                      className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                    />
+                  </div>
+                </div>
+                
+                {isExpanded && (
+                  <div className="px-5 pb-5 border-t border-gray-100">
+                    <div className="pt-4 space-y-3">
+                      {group.items.map((item, idx) => (
+                        <InterventionCard
+                          key={`${group.key}-${idx}`}
+                          intervention={convertToCardData(item)}
+                          studyCount={1}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          
+          {groups.length === 0 && (
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-8 text-center text-gray-500">
+              No intervention details available for this theme.
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   )
 }
-

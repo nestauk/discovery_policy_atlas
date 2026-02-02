@@ -13,7 +13,7 @@ import pandas as pd
 
 from app.core.config import settings
 from .scrape import async_fetch_html
-from .utils_paths import sanitize_id_to_filename
+from .utils.paths import sanitize_id_to_filename
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,19 @@ class AcquisitionService:
                 f"Acquisition filtering: processing {len(relevant_df)} relevant documents, "
                 f"skipping {skipped_count} irrelevant documents"
             )
+
+            # Filter out non-evidence documents (keep "Unknown" - full text may reveal more)
+            if "evidence_category" in relevant_df.columns:
+                pre_filter = len(relevant_df)
+                relevant_df = relevant_df[
+                    relevant_df["evidence_category"] != "Other (Non-evidence documents)"
+                ]
+                skipped_non_evidence = pre_filter - len(relevant_df)
+                if skipped_non_evidence > 0:
+                    logger.info(
+                        f"Acquisition filtering: skipped {skipped_non_evidence} non-evidence documents"
+                    )
+
             records = relevant_df.to_dict("records")
         else:
             logger.info("No relevance filtering available - processing all documents")

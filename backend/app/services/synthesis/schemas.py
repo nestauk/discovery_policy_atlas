@@ -51,6 +51,121 @@ class CitationInfo(BaseModel):
 
 
 # =============================================================================
+# CONTEXTUAL SUMMARISATION (RCS) - paper-qa inspired
+# =============================================================================
+
+
+class ScoredContext(BaseModel):
+    """A document chunk summarised in context of a specific question/theme.
+
+    Implements paper-qa's Ranking and Contextual Summarisation (RCS) pattern:
+    - Each chunk is summarised in context of a question
+    - Assigned a relevance score (0-10)
+    - Used for quality-based filtering and ranking
+    """
+
+    context_id: str = Field(..., description="Unique identifier for this context")
+    summary: str = Field(
+        ..., description="Contextual summary of the chunk (max ~100 words)"
+    )
+    relevance_score: int = Field(
+        ..., ge=0, le=10, description="Relevance to question (0-10)"
+    )
+    question: str = Field(..., description="Question/theme used for summarisation")
+
+    # Source traceability
+    chunk_id: str = Field(..., description="Reference to source document chunk")
+    document_id: str = Field(..., description="Reference to source document UUID")
+    document_title: str = Field("", description="Document title for citation")
+    chunk_text: str = Field("", description="Original chunk text (truncated)")
+
+    # Citation metadata
+    citation_key: str = Field(..., description="Short citation key e.g., 'pqa-abc123'")
+    full_citation: str = Field("", description="Full citation for bibliography")
+
+    # Theme linkage (for structured output)
+    theme_id: Optional[str] = Field(
+        None, description="Associated theme ID if applicable"
+    )
+    theme_name: Optional[str] = Field(
+        None, description="Associated theme name if applicable"
+    )
+
+
+class ThemeEvidence(BaseModel):
+    """Evidence gathered for a specific theme via RCS.
+
+    Groups scored contexts by theme for structured briefing generation.
+    """
+
+    theme_id: str = Field(..., description="Theme identifier")
+    theme_name: str = Field(..., description="Theme display name")
+    theme_description: str = Field("", description="Theme summary/description")
+    theme_question: str = Field(..., description="Question used for RCS scoring")
+
+    # Scored contexts for this theme
+    scored_contexts: List["ScoredContext"] = Field(
+        default_factory=list, description="Contexts scored for this theme"
+    )
+
+    # Quality metrics
+    total_chunks_retrieved: int = Field(
+        0, description="Total chunks retrieved before scoring"
+    )
+    total_chunks_scored: int = Field(
+        0, description="Total chunks that received RCS scoring"
+    )
+    high_quality_count: int = Field(0, description="Count of contexts with score >= 6")
+    evidence_sufficient: bool = Field(
+        False, description="Whether theme has sufficient evidence"
+    )
+
+
+class EvidenceGatheringResult(BaseModel):
+    """Output of the theme-driven evidence gathering phase."""
+
+    theme_evidence: List[ThemeEvidence] = Field(
+        default_factory=list, description="Evidence grouped by theme"
+    )
+
+    # Cross-theme metrics
+    total_contexts: int = Field(
+        0, description="Total scored contexts across all themes"
+    )
+    themes_with_sufficient_evidence: int = Field(
+        0, description="Count of themes with sufficient evidence"
+    )
+    themes_with_gaps: List[str] = Field(
+        default_factory=list, description="Theme names lacking evidence"
+    )
+    iterations_run: int = Field(1, description="Number of retrieval iterations")
+
+
+class RCSConfig(BaseModel):
+    """Configuration for Contextual Summarisation (RCS) process."""
+
+    score_threshold: int = Field(
+        3, ge=0, le=10, description="Minimum score to include context"
+    )
+    high_quality_threshold: int = Field(
+        6, ge=0, le=10, description="Score threshold for high-quality evidence"
+    )
+    max_contexts_per_theme: int = Field(
+        10, description="Maximum contexts to keep per theme"
+    )
+    max_total_contexts: int = Field(
+        50, description="Maximum total contexts for briefing"
+    )
+    min_high_quality_per_theme: int = Field(
+        2, description="Minimum high-quality contexts for theme sufficiency"
+    )
+    chunks_to_retrieve: int = Field(
+        15, description="Number of chunks to retrieve per theme"
+    )
+    rcs_concurrency: int = Field(10, description="Max parallel RCS calls")
+
+
+# =============================================================================
 # STRUCTURED BRIEFING (JSON for Frontend Rendering)
 # =============================================================================
 
@@ -77,15 +192,58 @@ class OutcomeEffect(BaseModel):
 class InterventionTableRow(BaseModel):
     """A row in the Key Interventions table."""
 
-    intervention_name: str = Field(..., description="Intervention name")
+    intervention_name: str = Field(..., description="Intervention type/category name")
     citation_numbers: List[int] = Field(
-        default_factory=list, description="Citation numbers"
+        default_factory=list, description="Citation numbers [N] used"
     )
     context: str = Field(
-        "", description="Structured context: Location, Setting, Study types"
+        "",
+        description=(
+            "Context and features: delivery method, setting, key components, "
+            "notable features (e.g., 'School-based with family involvement')"
+        ),
+    )
+    key_study_description: str = Field(
+        "",
+        description=(
+            "Concrete implementation details from the top-ranked study in this intervention "
+            "category (what was done, where, duration/intensity), suitable for the 'Key Study' column."
+        ),
+    )
+    key_study_citation: Optional[int] = Field(
+        None,
+        description=(
+            "Citation number [N] for the key study described in key_study_description, if available."
+        ),
+    )
+    population_applicability: str = Field(
+        "",
+        description=(
+            "How this intervention applies to the target population (as specified by the user at search time). "
+            "Used to tailor synthesis; may be left empty if not applicable."
+        ),
+    )
+    outcome_relevance: str = Field(
+        "",
+        description=(
+            "How this intervention maps to the target outcomes (as specified by the user at search time). "
+            "Used to tailor synthesis; may be left empty if not applicable."
+        ),
+    )
+    delivery_features: List[str] = Field(
+        default_factory=list,
+        description="Key delivery attributes (e.g., school-based, family involvement, duration/intensity).",
+    )
+    subgroup_effects: List[str] = Field(
+        default_factory=list,
+        description="Notable subgroup findings (e.g., more effective in younger children, girls, high-risk groups).",
     )
     impact_narrative: str = Field(
-        "", description="1-2 sentence RAG-grounded summary of key effects"
+        "",
+        description=(
+            "Impact and outcomes: effectiveness on key outcomes, effect sizes, "
+            "findings (e.g., 'Modest BMI reduction; more effective in overweight children')"
+        ),
     )
     outcome_effects: List[OutcomeEffect] = Field(
         default_factory=list, description="Effects grouped by outcome theme"
@@ -103,6 +261,13 @@ class RecommendationItem(BaseModel):
     description: str = Field(
         ...,
         description="Full recommendation text with evidence and citations in [N] format",
+    )
+    implementation_option: str = Field(
+        "",
+        description=(
+            "Optional implementation option / delivery suggestion that extrapolates beyond the evidence base. "
+            "Should be explicitly labelled as an option and written conditionally."
+        ),
     )
     citation_numbers: List[int] = Field(
         default_factory=list, description="List of citation numbers used in description"
@@ -148,6 +313,28 @@ class CoreAnswer(BaseModel):
     directive: str = Field("", description="Key recommendation")
 
 
+class SynthesisSection(BaseModel):
+    """Optional synthesis section inserted between interventions and recommendations."""
+
+    title: str = Field(..., description="Section title")
+    content_type: Literal["paragraphs", "bullets"] = Field(
+        "paragraphs", description="Rendering preference."
+    )
+    paragraphs: List[str] = Field(default_factory=list, description="Paragraph content")
+    bullets: List[str] = Field(default_factory=list, description="Bullet content")
+    citation_numbers_used: List[int] = Field(
+        default_factory=list, description="Citations referenced in this section"
+    )
+
+
+class SynthesisSectionProposal(BaseModel):
+    """Structured proposal for a synthesis section."""
+
+    section_title: str = Field(..., description="Proposed section title")
+    rationale: str = Field(..., description="Why this section is needed")
+    focus: str = Field(..., description="What the section will cover")
+
+
 class StructuredBriefing(BaseModel):
     """Complete structured executive briefing for frontend rendering."""
 
@@ -156,6 +343,7 @@ class StructuredBriefing(BaseModel):
     evidence_snapshot_summary: str = Field("")
     background_section: Optional[BackgroundSection] = Field(None)
     interventions_table: List[InterventionTableRow] = Field(default_factory=list)
+    synthesis_sections: List["SynthesisSection"] = Field(default_factory=list)
     recommendations: List[RecommendationItem] = Field(default_factory=list)
     top_citations: List[TopCitationItem] = Field(default_factory=list)
     follow_up_suggestions: List[str] = Field(default_factory=list)
@@ -169,12 +357,20 @@ class StructuredBriefing(BaseModel):
 class EvidenceCoverageSnapshot(BaseModel):
     """Deterministically computed evidence coverage statistics."""
 
-    total_sources: int = Field(
-        ..., description="Total number of unique source documents"
+    total_screened: int = Field(
+        ..., description="Number of documents screened (all retrieved candidates)"
+    )
+    total_synthesised: int = Field(
+        ...,
+        description="Number of evidence documents synthesised (excluding 'Other' non-evidence docs)",
     )
     study_types: Dict[str, int] = Field(default_factory=dict)
     source_types: Dict[str, int] = Field(
         default_factory=dict, description="Academic, Government, NGO, etc."
+    )
+    evidence_categories: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Evidence type distribution: Systematic Review, RCT, Observational, etc.",
     )
     countries: Dict[str, int] = Field(default_factory=dict)
     years: Dict[int, int] = Field(default_factory=dict)
@@ -185,6 +381,80 @@ class EvidenceCoverageSnapshot(BaseModel):
 # =============================================================================
 # AGGREGATED THEMES
 # =============================================================================
+
+
+VerdictType = Literal[
+    "well_evidenced_positive",
+    "well_evidenced_negative",
+    "evidenced_positive",
+    "evidenced_negative",
+    "suggested_positive",
+    "suggested_negative",
+    "contested",
+    "no_effect",
+    "insufficient_evidence",
+    "probable_contribution",
+]
+
+
+SemanticMagnitudeType = Literal[
+    "transformational",
+    "substantial",
+    "moderate",
+    "marginal",
+    "unknown",
+]
+
+
+CausalityClaimType = Literal["attribution", "contribution", "correlation"]
+
+
+class TransferabilityBreakdown(BaseModel):
+    """Per-dimension transferability scores."""
+
+    inner_setting: str
+    population: str
+    geography: str
+    notes: Dict[str, str] = Field(default_factory=dict)
+    data_availability: Dict[str, str] = Field(default_factory=dict)
+    context_fit_rating: Optional[str] = None
+    implementation_requirements_rating: Optional[str] = None
+    implementation_constraints_specified: bool = False
+    implementation_evidence: Dict[str, str] = Field(default_factory=dict)
+    implementation_constraints: Dict[str, str] = Field(default_factory=dict)
+    implementation_exceeds_tolerance: Dict[str, bool] = Field(default_factory=dict)
+
+
+class MagnitudeDetail(BaseModel):
+    """Structured magnitude breakdown for tooltips."""
+
+    direction: Literal["increase", "decrease", "contested"]
+    bucket_counts: Dict[str, int] = Field(default_factory=dict)
+    source_count: int
+    total_sources: int
+    measurement_count: int
+    dominant_scale: Optional[str] = None
+    thresholds: str
+
+
+class CausalityDetail(BaseModel):
+    """Structured causal mechanism counts for tooltips."""
+
+    attribution: int = 0
+    contribution: int = 0
+    correlation: int = 0
+
+
+class RiskTheme(BaseModel):
+    """LLM-clustered risk theme (stored in synthesis_themes with type='risk')."""
+
+    theme_name: str
+    summary_description: str
+    frequency: int
+    source_doc_ids: List[str] = Field(default_factory=list)
+    has_harm_warning: bool = False
+    linked_intervention_theme_id: Optional[str] = None
+    linked_interventions: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class OutcomeTheme(BaseModel):
@@ -201,6 +471,40 @@ class OutcomeTheme(BaseModel):
     sample_effect_sizes: List[str] = Field(default_factory=list)
     frequency: int = Field(0)
     source_doc_ids: List[str] = Field(default_factory=list)
+    verdict_label: Optional[VerdictType] = Field(None)
+    verdict_description: Optional[str] = Field(None)
+    discord_flag: bool = Field(False)
+    discord_reason: Optional[str] = Field(None)
+    predicted_magnitude: Optional[SemanticMagnitudeType] = Field(None)
+    magnitude_detail: Optional[MagnitudeDetail] = Field(None)
+    intervention_theme_id: Optional[str] = Field(None)
+    primary_causal_mechanism: Optional[CausalityClaimType] = Field(None)
+    causal_mechanism_detail: Optional[CausalityDetail] = Field(None)
+
+
+class InterventionDetails(BaseModel):
+    """Rich intervention detail for table enrichment."""
+
+    intervention_name: str = Field(..., description="Intervention type/category name")
+    delivery_features: List[str] = Field(
+        default_factory=list,
+        description="Delivery method, setting, intensity, components (e.g., school-based, family involvement, duration).",
+    )
+    target_population: List[str] = Field(
+        default_factory=list,
+        description="Populations targeted (ages, risk groups, sexes).",
+    )
+    subgroup_effects: List[str] = Field(
+        default_factory=list,
+        description="Subgroup differences (e.g., more effective in girls, younger children).",
+    )
+    effect_sizes: List[str] = Field(
+        default_factory=list,
+        description="Effect sizes with units (e.g., BMI −0.2 kg/m², prevalence −5%).",
+    )
+    supporting_citations: List[int] = Field(
+        default_factory=list, description="Citation numbers supporting these details."
+    )
 
 
 class KeyIssue(BaseModel):
@@ -232,6 +536,12 @@ class PolicyIntervention(BaseModel):
     countries: List[str] = Field(default_factory=list)
     study_types: Dict[str, int] = Field(default_factory=dict)
     related_outcomes: List[str] = Field(default_factory=list)
+    transferability_rating: Optional[str] = Field(None)
+    transferability_note: Optional[str] = Field(None)
+    transferability_breakdown: Optional[TransferabilityBreakdown] = Field(None)
+    impact_score: Optional[float] = Field(None)
+    impact_score_label: Optional[str] = Field(None)
+    impact_score_breakdown: Optional[Dict[str, object]] = Field(None)
 
 
 class SynthesisSummary(BaseModel):
@@ -242,6 +552,7 @@ class SynthesisSummary(BaseModel):
     key_issues: List[KeyIssue] = Field(default_factory=list)
     interventions: List[PolicyIntervention] = Field(default_factory=list)
     outcome_themes: List[OutcomeTheme] = Field(default_factory=list)
+    risk_themes: List[RiskTheme] = Field(default_factory=list)
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = Field(None)
     citation_map: Dict[str, CitationInfo] = Field(default_factory=dict)
 

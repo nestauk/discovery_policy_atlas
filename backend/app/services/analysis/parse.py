@@ -19,6 +19,12 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger(__name__)
 
 
+class ParsingError(Exception):
+    """Exception raised when parsing fails with a user-friendly message."""
+
+    pass
+
+
 def should_skip_large_pdf(
     file_size_bytes: int, page_count: int = None
 ) -> tuple[bool, str | None]:
@@ -88,7 +94,7 @@ class ParsingService:
             should_skip, skip_reason = should_skip_large_pdf(file_size)
             if should_skip:
                 logger.warning("Skipping PDF %s: %s", doc_id, skip_reason)
-                return None
+                raise ParsingError(skip_reason)
 
         try:
             # Run parsing in executor to avoid blocking event loop
@@ -114,7 +120,9 @@ class ParsingService:
 
         except asyncio.TimeoutError:
             logger.warning("Parsing timeout for %s after %.1fs", doc_id, timeout)
-            return None
+            raise ParsingError(f"Parsing timed out after {timeout:.0f} seconds")
+        except ParsingError:
+            raise  # Re-raise user-friendly parsing errors
         except Exception as e:
             logger.warning("Parsing failed for %s: %s", doc_id, e)
             return None
@@ -123,16 +131,19 @@ class ParsingService:
         """
         Parse PDF file and extract text.
 
-        Checks page count after opening and raises exception if too large.
+        Truncates to MAX_PDF_PAGES if the document exceeds the limit.
         """
         doc = fitz.open(path)
 
-        # Check page count after opening
+        # Check page count after opening - truncate if too large
         page_count = len(doc)
+        pages_to_parse = min(page_count, settings.MAX_PDF_PAGES)
         if page_count > settings.MAX_PDF_PAGES:
-            doc.close()
-            raise ValueError(
-                f"PDF has {page_count} pages, exceeding limit of {settings.MAX_PDF_PAGES}"
+            logger.warning(
+                "PDF %s has %d pages, truncating to first %d pages",
+                doc_id,
+                page_count,
+                settings.MAX_PDF_PAGES,
             )
 
         page_spans = []
@@ -140,7 +151,8 @@ class ParsingService:
         char_offset = 0
 
         try:
-            for i, page in enumerate(doc):
+            for i in range(pages_to_parse):
+                page = doc[i]
                 txt = page.get_text("text")
                 texts.append(txt)
                 start = char_offset
@@ -166,25 +178,54 @@ class ParsingService:
             doc.close()
 
     def _parse_html(self, doc_id: str, path: Path) -> ParsedText:
-        # Prefer Scrapling’s DOM extraction when available
+        file_size = path.stat().st_size
+        logger.info(
+            "[HTML_PARSE] Starting parse for %s (file_size=%d bytes)",
+            doc_id,
+            file_size,
+        )
+
+        scrapling_text = None
+        scrapling_error = None
+
+        # Prefer Scrapling's DOM extraction when available
         if Fetcher is not None:
             try:
                 # Some sites embed JSON-escaped strings; get cleaned text via Scrapling's methods
                 page = Fetcher.from_file(str(path))
-                text = page.get_all_text(
+                scrapling_text = page.get_all_text(
                     ignore_tags=("script", "style", "noscript", "meta", "link")
                 )
-                if text and len(text) > 0:
-                    page_spans = [{"page": 1, "char_start": 0, "char_end": len(text)}]
-                    return ParsedText(doc_id, text, page_spans)
-            except Exception:
-                pass
+                logger.info(
+                    "[HTML_PARSE] Scrapling result for %s: %d chars",
+                    doc_id,
+                    len(scrapling_text) if scrapling_text else 0,
+                )
+                if scrapling_text and len(scrapling_text) > 0:
+                    page_spans = [
+                        {"page": 1, "char_start": 0, "char_end": len(scrapling_text)}
+                    ]
+                    return ParsedText(doc_id, scrapling_text, page_spans)
+            except Exception as e:
+                scrapling_error = str(e)
+                logger.warning(
+                    "[HTML_PARSE] Scrapling failed for %s: %s",
+                    doc_id,
+                    scrapling_error,
+                )
+        else:
+            logger.info("[HTML_PARSE] Scrapling not available, using BeautifulSoup")
 
         # Fallback: BeautifulSoup readability approximation
+        logger.info("[HTML_PARSE] Using BeautifulSoup fallback for %s", doc_id)
         html = path.read_text(encoding="utf-8", errors="ignore")
+        logger.info("[HTML_PARSE] Raw HTML length for %s: %d chars", doc_id, len(html))
+
         soup = BeautifulSoup(html, "lxml")
+
         # Try to prioritize main content regions if present
         candidates = []
+        matched_selectors = []
         for selector in [
             "article",
             "main",
@@ -196,17 +237,48 @@ class ParsingService:
             found = soup.select(selector)
             if found:
                 candidates.extend(found)
+                matched_selectors.append(f"{selector}({len(found)})")
+
+        if matched_selectors:
+            logger.info(
+                "[HTML_PARSE] Matched selectors for %s: %s",
+                doc_id,
+                ", ".join(matched_selectors),
+            )
+        else:
+            logger.info(
+                "[HTML_PARSE] No content selectors matched for %s, using fallback elements",
+                doc_id,
+            )
+
         nodes = (
             candidates
             if candidates
             else soup.find_all(["article", "section", "div", "p", "h1", "h2", "h3"])
         )
 
+        logger.info("[HTML_PARSE] Found %d nodes for %s", len(nodes), doc_id)
+
         paragraphs = []
         for el in nodes:
             t = el.get_text(" ", strip=True)
             if t:
                 paragraphs.append(t)
+
         text = "\n".join(paragraphs)
         page_spans = [{"page": 1, "char_start": 0, "char_end": len(text)}]
+
+        logger.info(
+            "[HTML_PARSE] Final result for %s: %d chars from %d paragraphs (scrapling=%s, bs_selectors=%s)",
+            doc_id,
+            len(text),
+            len(paragraphs),
+            len(scrapling_text)
+            if scrapling_text
+            else "failed"
+            if scrapling_error
+            else "n/a",
+            ",".join(matched_selectors) if matched_selectors else "fallback",
+        )
+
         return ParsedText(doc_id, text, page_spans)

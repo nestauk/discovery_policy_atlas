@@ -57,9 +57,27 @@ export default function SearchPage() {
         }
       }
 
+      const normaliseConstraint = (value: string | undefined) => {
+        if (!value || value === 'Any') {
+          return undefined
+        }
+        return value.toLowerCase()
+      }
+      const implementationConstraints = {
+        cost: normaliseConstraint(context.implementationConstraints.cost),
+        staffing: normaliseConstraint(context.implementationConstraints.staffing),
+        implementation_complexity: normaliseConstraint(
+          context.implementationConstraints.implementationComplexity,
+        ),
+      }
+      const hasImplementationConstraints = Object.values(
+        implementationConstraints,
+      ).some(Boolean)
+
       const searchContext = {
         research_question: context.researchQuestion,
         population: context.population.selected,
+        inner_setting: context.innerSetting,
         outcome: context.outcome.selected,
         screening_factors: context.screeningFactors,
         sources: context.parameters.sources,
@@ -69,6 +87,9 @@ export default function SearchPage() {
         time_to: dateTo,
         max_results: context.maxResults,
         additional_questions: context.additionalQuestions,
+        ...(hasImplementationConstraints
+          ? { implementation_constraints: implementationConstraints }
+          : {}),
       }
 
       const analysisConfig = {

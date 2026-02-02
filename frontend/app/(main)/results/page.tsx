@@ -9,11 +9,11 @@ export default function ResultsRedirectPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { activeProject } = useAnalysisProjectStore()
-  
+
   useEffect(() => {
     // Check for project_id in URL (legacy links)
     const urlProjectId = searchParams.get('project_id')
-    
+
     if (urlProjectId) {
       // Redirect to the new URL structure
       router.replace(`/projects/${urlProjectId}`)

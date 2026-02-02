@@ -71,7 +71,6 @@ async def get_findings(
 
     # Use theme_assignments to determine exactly which extractions belong
     # to the selected theme in the latest completed synthesis run.
-    assigned_extraction_ids: set[str] = set()
     assigned_doc_uuids: set[str] = set()
     per_doc_assigned_intervention_names: dict[str, set[str]] = {}
     per_doc_assigned_issue_labels: dict[str, set[str]] = {}
@@ -121,33 +120,34 @@ async def get_findings(
                 )
                 ex_ids = [str(a["extraction_id"]) for a in (assign_res.data or [])]
                 if ex_ids:
-                    assigned_extraction_ids = set(ex_ids)
                     # Fetch extraction records to map to documents and names/labels
-                    exts_res = await _async_supabase_query(
-                        lambda: supabase.table("analysis_extractions")
-                        .select(
-                            "id, analysis_document_id, extraction_type, label, raw_data"
+                    for i in range(0, len(ex_ids), 100):
+                        chunk = ex_ids[i : i + 100]
+                        exts_res = await _async_supabase_query(
+                            lambda: supabase.table("analysis_extractions")
+                            .select(
+                                "id, analysis_document_id, extraction_type, label, raw_data"
+                            )
+                            .in_("id", chunk)
+                            .execute()
                         )
-                        .in_("id", list(assigned_extraction_ids))
-                        .execute()
-                    )
-                    for row in exts_res.data or []:
-                        doc_uuid = str(row.get("analysis_document_id") or "")
-                        assigned_doc_uuids.add(doc_uuid)
-                        etype = str(row.get("extraction_type") or "")
-                        raw = row.get("raw_data") or {}
-                        if etype == "intervention":
-                            name = str(row.get("label") or raw.get("name") or "")
-                            if name:
-                                per_doc_assigned_intervention_names.setdefault(
-                                    doc_uuid, set()
-                                ).add(name)
-                        elif etype == "issue":
-                            label = str(row.get("label") or raw.get("label") or "")
-                            if label:
-                                per_doc_assigned_issue_labels.setdefault(
-                                    doc_uuid, set()
-                                ).add(label)
+                        for row in exts_res.data or []:
+                            doc_uuid = str(row.get("analysis_document_id") or "")
+                            assigned_doc_uuids.add(doc_uuid)
+                            etype = str(row.get("extraction_type") or "")
+                            raw = row.get("raw_data") or {}
+                            if etype == "intervention":
+                                name = str(row.get("label") or raw.get("name") or "")
+                                if name:
+                                    per_doc_assigned_intervention_names.setdefault(
+                                        doc_uuid, set()
+                                    ).add(name)
+                            elif etype == "issue":
+                                label = str(row.get("label") or raw.get("label") or "")
+                                if label:
+                                    per_doc_assigned_issue_labels.setdefault(
+                                        doc_uuid, set()
+                                    ).add(label)
     except Exception as e:
         logger.warning("[findings] Failed to use theme_assignments: %s", e)
 
@@ -293,7 +293,11 @@ async def get_findings(
                 Intervention=str(intr.get("name") or "") or None,
                 StudyDesign=str(intr.get("study_type") or "") or None,
                 Outcome=str(res.get("outcome_variable") or "") or None,
-                EffectDirection=str(res.get("effect_direction") or "") or None,
+                # Support both 'direction' (new schema) and 'effect_direction' (legacy)
+                EffectDirection=str(
+                    res.get("direction") or res.get("effect_direction") or ""
+                )
+                or None,
                 EffectSizeType=str(res.get("effect_size_type") or "") or None,
                 EffectSize=str(res.get("effect_size") or "") or None,
                 PValue=str(res.get("p_value") or "") or None,
