@@ -447,10 +447,22 @@ export default function ProjectResultsPage() {
     }
   }, [analysisComplete])
 
-  // Start polling when project ID is available
+  // Start polling when project ID is available and project is in a running state
   useEffect(() => {
     if (!projectId) {
       console.log('No project ID, skipping polling setup')
+      return
+    }
+
+    // Only poll if we're viewing a project that is actually running
+    // Check the activeProject from store - if it's for a different project or not running, skip polling
+    const currentProjectStatus = activeProject?.id === projectId ? activeProject.status : null
+    const isProjectRunning = currentProjectStatus === 'running' || currentProjectStatus === 'synthesising'
+    
+    // If we know the project is not running (completed, failed, created), don't start polling
+    if (currentProjectStatus && !isProjectRunning) {
+      console.log(`Project ${projectId} status is '${currentProjectStatus}', no polling needed`)
+      setAnalysisComplete(currentProjectStatus === 'completed' || currentProjectStatus === 'created')
       return
     }
 
@@ -566,7 +578,7 @@ export default function ProjectResultsPage() {
       }
       hasStartedPollingRef.current = null
     }
-  }, [projectId, analysisComplete]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, analysisComplete, activeProject?.id, activeProject?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load data when navigating to a project
   useEffect(() => {
