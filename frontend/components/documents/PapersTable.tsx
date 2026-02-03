@@ -164,6 +164,7 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
       dataIndex: 'evidence_category',
       key: 'evidence_category_base',
       width: '10%',
+      defaultSortOrder: 'ascend',
       sorter: (a, b) => {
         const aRank = a.evidence_category_rank ?? 999
         const bRank = b.evidence_category_rank ?? 999

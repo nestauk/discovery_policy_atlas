@@ -212,7 +212,12 @@ def _build_detailed_intervention(
     intervention_name = extraction.get("label", raw_data.get("name", ""))
     doc_id = doc.get("doc_id")
     evidence_cat = doc.get("evidence_category")
+    evidence_cat_reasoning = doc.get("evidence_category_reasoning")
     scores = doc_scores.get(doc_id, {})
+    # Get supporting quote from extraction or raw_data
+    supporting_quote = extraction.get("supporting_quote") or raw_data.get(
+        "supporting_quote"
+    )
 
     # Find matching intervention and its results by name/label
     intervention_results = []
@@ -233,6 +238,7 @@ def _build_detailed_intervention(
         "type": raw_data.get("type", "Unknown"),
         "country": raw_data.get("country"),
         "evidence_category": evidence_cat,
+        "evidence_category_reasoning": evidence_cat_reasoning,
         "is_systematic_review": evidence_cat == "Systematic Review and Meta-Analysis",
         "sample_size": parse_sample_size(raw_data.get("sample_size")),
         "impact_score": scores.get("impact_score"),
@@ -245,6 +251,7 @@ def _build_detailed_intervention(
         "evidence_justification": scores.get("evidence_justification", ""),
         "has_harm_warning": scores.get("has_harm_warning", False),
         "harm_warning_reason": scores.get("harm_warning_reason"),
+        "supporting_quote": supporting_quote,
         "results": intervention_results,
         "source_documents": [
             {

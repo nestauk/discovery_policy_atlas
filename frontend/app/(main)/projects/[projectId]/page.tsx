@@ -127,8 +127,6 @@ export default function ProjectResultsPage() {
   const [isPreparingDocumentsDownload, setIsPreparingDocumentsDownload] = useState(false)
   
   // Interventions view state
-  const [interventionsGroupByIssues, setInterventionsGroupByIssues] = useState(false)
-  const [interventionsSortBy, setInterventionsSortBy] = useState<'frequency' | 'impact' | 'evidence'>('frequency')
   const [isPreparingInterventionsDownload, setIsPreparingInterventionsDownload] = useState(false)
   
   // Data states
@@ -1093,47 +1091,18 @@ export default function ProjectResultsPage() {
                         </div>
                       )}
                       
-                      {/* Controls for interventions */}
+                      {/* Download button for interventions */}
                       {urlSubTab === 'interventions' && (
-                        <div className="flex items-center gap-6">
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor="group-by-issues" className="text-sm text-slate-700">
-                              Group by issues
-                            </Label>
-                            <Switch
-                              id="group-by-issues"
-                              checked={interventionsGroupByIssues}
-                              onCheckedChange={setInterventionsGroupByIssues}
-                            />
-                          </div>
-                          
-                          <div className="flex items-center gap-2">
-                            <Label className="text-sm text-slate-700">Sort by:</Label>
-                            <select 
-                              value={interventionsSortBy}
-                              onChange={(e) => setInterventionsSortBy(e.target.value as 'frequency' | 'impact' | 'evidence')}
-                              className="text-sm border rounded px-2 py-1 bg-white"
-                            >
-                              <option value="impact">Impact</option>
-                              <option value="evidence">Evidence</option>
-                              <option value="frequency">Frequency</option>
-                            </select>
-                          </div>
-                          
-                          {/* Interventions Download Button */}
-                          <div className="flex items-center gap-2">
-                            <Button
-                              onClick={handleDownloadInterventionsCSV}
-                              disabled={isPreparingInterventionsDownload}
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-2"
-                            >
-                              <Download className="h-4 w-4" />
-                              {isPreparingInterventionsDownload ? 'Downloading...' : 'Download'}
-                            </Button>
-                          </div>
-                        </div>
+                        <Button
+                          onClick={handleDownloadInterventionsCSV}
+                          disabled={isPreparingInterventionsDownload}
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center gap-2"
+                        >
+                          <Download className="h-4 w-4" />
+                          {isPreparingInterventionsDownload ? 'Downloading...' : 'Download'}
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -1141,15 +1110,7 @@ export default function ProjectResultsPage() {
                   {/* Content based on active sub-tab */}
                   {urlSubTab === 'interventions' && (
                     <div>
-                      <InterventionsNavigator 
-                        showHeader={false}
-                        viewMode={interventionsGroupByIssues ? 'grouped' : 'all'}
-                        onViewModeChange={(mode) => setInterventionsGroupByIssues(mode === 'grouped')}
-                        sortBy={interventionsSortBy}
-                        onSortByChange={setInterventionsSortBy}
-                        onDownload={handleDownloadInterventionsCSV}
-                        isPreparingDownload={isPreparingInterventionsDownload}
-                      />
+                      <InterventionsNavigator showHeader={true} />
                     </div>
                   )}
 

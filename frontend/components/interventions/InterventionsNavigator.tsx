@@ -3,62 +3,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
-import { useAuth } from '@clerk/nextjs'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
-import { Loader2, ChevronRight, ChevronDown, Target, AlertTriangle, Download } from 'lucide-react'
-import { NavigatorInterventionsTable } from '@/components/interventions/NavigatorInterventionsTable'
-import { ImpactProfileCard } from '@/components/synthesis/ImpactProfileCard'
-import { RiskWarnings } from '@/components/synthesis/RiskWarnings'
-import { TransferabilityScore } from '@/components/synthesis/TransferabilityScore'
-import { type InterventionData } from '@/components/interventions/InterventionsTable'
-import { StarRating } from '@/components/ui/star-rating'
+import { Loader2, Target, AlertTriangle } from 'lucide-react'
+import { ThemeList, type ThemeListItem } from './ThemeList'
+import { ThemeDetailView } from './ThemeDetailView'
 import type { OutcomeTheme, RiskTheme, TransferabilityBreakdown } from '@/types/search'
-import { getEvidenceScoreExplanation, formatEvidenceMixCompact, getEvidenceCategories } from '@/lib/evidenceCategories'
-
-interface IssueTheme {
-  theme_name: string
-  description: string
-  frequency: number
-  related_interventions: IssueInterventionTheme[]
-}
-
-interface BaseInterventionTheme {
-  theme_name: string
-  description: string
-  impact_summary?: string
-  frequency: number
-  impact_score?: number
-  impact_score_label?: string
-  impact_score_breakdown?: Record<string, unknown> | null
-  avg_impact_score?: number
-  avg_evidence_score?: number
-  detailed_interventions?: DetailedIntervention[]
-  transferability_rating?: string | null
-  transferability_note?: string | null
-  transferability_breakdown?: TransferabilityBreakdown | null
-  outcome_themes?: OutcomeTheme[]
-  risk_themes?: RiskTheme[]
-}
-
-interface IssueInterventionTheme extends BaseInterventionTheme {
-  issue_display_evidence_mix?: Record<string, number>
-  issue_stars?: number
-  issue_base_rating?: number
-  issue_cap_applied?: string | null
-  issue_cap_message?: string | null
-}
-
-interface AllInterventionTheme extends BaseInterventionTheme {
-  stars?: number
-  base_rating?: number
-  cap_applied?: string | null
-  cap_message?: string | null
-  display_evidence_mix?: Record<string, number>
-}
 
 interface DetailedIntervention {
   name: string
@@ -66,6 +15,7 @@ interface DetailedIntervention {
   type?: string
   country?: string
   evidence_category?: string
+  evidence_category_reasoning?: string
   is_systematic_review?: boolean
   sample_size?: number | null
   impact_score?: number
@@ -78,54 +28,12 @@ interface DetailedIntervention {
   evidence_justification?: string
   has_harm_warning?: boolean
   harm_warning_reason?: string
+  supporting_quote?: string
   document_url?: string
   results: Array<{
     outcome_variable?: string
-    // Support both 'direction' (new schema) and 'effect_direction' (legacy)
     direction?: string
     effect_direction?: string
-    effect_size?: string
-    effect_size_type?: string
-    p_value?: string
-    uncertainty?: string
-    result_text?: string
-    population_measured?: string
-    subgroup_or_dose?: string
-    // SR-specific fields for meta-analysis results
-    heterogeneity_I2?: string
-    tau2?: string
-    summary_statistic?: string
-    estimate_level?: string
-    // Sample size fields
-    n_studies?: number
-    sample_size?: number
-    // Stratum fields
-    stratum_type?: string
-    stratum_value?: string
-  }>
-  source_documents: Array<{
-    doc_id?: string
-    title?: string
-    source?: string
-    landing_page_url?: string
-    evidence_category?: string
-    evidence_confidence?: number
-    sample_size?: number
-  }>
-}
-
-interface AggregatedInterventionRow {
-  name: string
-  type: string
-  country: string
-  description: string
-  evidence_category?: string
-  evidence_categories?: string[]
-  is_systematic_review?: boolean
-  result_count: number
-  results_summary: Array<{
-    outcome: string
-    direction: string
     effect_size?: string
     effect_size_type?: string
     p_value?: string
@@ -142,118 +50,120 @@ interface AggregatedInterventionRow {
     sample_size?: number
     stratum_type?: string
     stratum_value?: string
-    evidence_category?: string
-    is_systematic_review?: boolean
   }>
-  outcome_groups?: Array<{
-    document: {
-      doc_id: string
-      title: string
-      source: string
-      landing_page_url?: string
-      evidence_category?: string
-      reported_sample_size?: number
-    }
-    results: AggregatedInterventionRow['results_summary']
-  }>
-  total_sample_size: number | null
-  documents: Array<{
-    doc_id: string
-    title: string
-    source: string
+  source_documents: Array<{
+    doc_id?: string
+    title?: string
+    source?: string
     landing_page_url?: string
+    evidence_category?: string
+    evidence_confidence?: number
+    sample_size?: number
   }>
+}
+
+interface InterventionTheme {
+  theme_name: string
+  description: string
+  impact_summary?: string
+  frequency: number
   impact_score?: number
-  evidence_score?: number
-  impact_justification?: string
-  evidence_justification?: string
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown> | null
+  avg_impact_score?: number
+  avg_evidence_score?: number
+  detailed_interventions?: DetailedIntervention[]
+  transferability_rating?: string | null
+  transferability_note?: string | null
+  transferability_breakdown?: TransferabilityBreakdown | null
+  outcome_themes?: OutcomeTheme[]
+  risk_themes?: RiskTheme[]
+  // Evidence mix fields
+  stars?: number
+  base_rating?: number
+  cap_applied?: string | null
+  cap_message?: string | null
+  display_evidence_mix?: Record<string, number>
+  // Issue-specific fields (when grouped by issue)
+  issue_display_evidence_mix?: Record<string, number>
+  issue_stars?: number
+  issue_base_rating?: number
+  issue_cap_applied?: string | null
+  issue_cap_message?: string | null
+}
+
+interface IssueTheme {
+  theme_name: string
+  description: string
+  frequency: number
+  related_interventions: InterventionTheme[]
 }
 
 interface NavigatorData {
   issue_themes: IssueTheme[]
-  all_interventions?: AllInterventionTheme[]
-}
-
-// Type for result summary entries
-type ResultSummary = AggregatedInterventionRow['results_summary'][number]
-
-// Type for input results (from DetailedIntervention)
-type ResultInput = DetailedIntervention['results'][number]
-
-/**
- * Maps a raw result object to the standardized ResultSummary format.
- * Consolidates duplicated mapping logic.
- */
-function mapResultToSummary(result: ResultInput, evidenceCategory?: string): ResultSummary {
-  return {
-    outcome: result.outcome_variable || 'Outcome',
-    direction: result.direction || result.effect_direction || 'unknown',
-    effect_size: result.effect_size,
-    effect_size_type: result.effect_size_type,
-    p_value: result.p_value,
-    uncertainty: result.uncertainty,
-    result_text: result.result_text,
-    supporting_quote: undefined,
-    population_measured: result.population_measured,
-    subgroup_or_dose: result.subgroup_or_dose,
-    heterogeneity_I2: result.heterogeneity_I2,
-    tau2: result.tau2,
-    summary_statistic: result.summary_statistic,
-    estimate_level: result.estimate_level,
-    n_studies: result.n_studies,
-    sample_size: result.sample_size,
-    stratum_type: result.stratum_type,
-    stratum_value: result.stratum_value,
-    evidence_category: evidenceCategory,
-    is_systematic_review: evidenceCategory === 'Systematic Review and Meta-Analysis',
-  }
+  all_interventions?: InterventionTheme[]
 }
 
 interface InterventionsNavigatorProps {
   showHeader?: boolean
-  viewMode?: 'grouped' | 'all'
-  onViewModeChange?: (mode: 'grouped' | 'all') => void
-  sortBy?: 'frequency' | 'impact' | 'evidence'
-  onSortByChange?: (sortBy: 'frequency' | 'impact' | 'evidence') => void
-  onDownload?: () => void
-  isPreparingDownload?: boolean
+}
+
+function RangeFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: number
+  onChange: (v: number) => void
+}) {
+  const tiers = ['Very low', 'Low', 'Moderate', 'High', 'Very high']
+  const _shown = tiers[Math.max(0, Math.min(4, value - 1))]
+
+  return (
+    <div className="flex-1 min-w-[180px]">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm font-medium text-gray-700">{label}</div>
+      </div>
+      <input
+        type="range"
+        min={1}
+        max={5}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+      />
+      <div className="flex justify-between text-xs text-gray-400 mt-1">
+        <span>Very low</span>
+        <span>Very high</span>
+      </div>
+    </div>
+  )
 }
 
 export function InterventionsNavigator({ 
-  showHeader = true,
-  viewMode: externalViewMode,
-  onViewModeChange,
-  sortBy: externalSortBy,
-  onSortByChange,
-  onDownload,
-  isPreparingDownload: externalIsPreparingDownload
+  showHeader = true
 }: InterventionsNavigatorProps) {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth } = useAPI()
-  const { getToken } = useAuth()
   
   const [data, setData] = useState<NavigatorData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
-  const [expandedInterventions, setExpandedInterventions] = useState<Set<string>>(new Set())
-  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
-  const [expandedInsufficientOutcomes, setExpandedInsufficientOutcomes] = useState<Set<string>>(new Set())
   
-  // Fallback state for extracted interventions (when synthesis is not done)
-  const [fallbackInterventions, setFallbackInterventions] = useState<InterventionData[] | null>(null)
-  const [loadingFallback, setLoadingFallback] = useState(false)
+  const [selectedTheme, setSelectedTheme] = useState<ThemeListItem | null>(null)
   
-  // Use external state if provided, otherwise use internal state
-  const [internalViewMode, setInternalViewMode] = useState<'grouped' | 'all'>('all')
-  const [internalSortBy, setInternalSortBy] = useState<'frequency' | 'impact' | 'evidence'>('evidence')
-  const [internalIsPreparingDownload, setInternalIsPreparingDownload] = useState(false)
+  const [sortBy, _setSortBy] = useState<'impact' | 'evidence'>('evidence')
+  const [minImpact, setMinImpact] = useState(1)
+  const [minEvidence, setMinEvidence] = useState(1)
+  const [issueThemeFilter, setIssueThemeFilter] = useState<string>('All')
   
-  const viewMode = externalViewMode ?? internalViewMode
-  const setViewMode = onViewModeChange ?? setInternalViewMode
-  const sortBy = externalSortBy ?? internalSortBy
-  const setSortBy = onSortByChange ?? setInternalSortBy
-  const isPreparingDownload = externalIsPreparingDownload ?? internalIsPreparingDownload
+  const issueThemeOptions = useMemo(() => {
+    if (!data) return ['All']
+    const themes = data.issue_themes.map(t => t.theme_name)
+    return ['All', ...themes]
+  }, [data])
 
   const loadNavigatorData = useCallback(async () => {
     if (!activeProject?.id) return
@@ -263,12 +173,6 @@ export function InterventionsNavigator({
     
     try {
       const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/issue-intervention-navigator`)
-      console.log('Navigator API response:', response)
-      console.log('Number of issue themes:', response?.issue_themes?.length || 0)
-      if (response?.issue_themes?.length > 0) {
-        console.log('First issue theme:', response.issue_themes[0])
-        console.log('First intervention (if any):', response.issue_themes[0]?.related_interventions?.[0])
-      }
       setData(response as NavigatorData)
     } catch (err) {
       console.error('Failed to load navigator data:', err)
@@ -281,450 +185,209 @@ export function InterventionsNavigator({
   useEffect(() => {
     if (!activeProject?.id) return
     loadNavigatorData()
-  }, [activeProject?.id, loadNavigatorData])
-  
-  // Load fallback interventions if navigator data is empty
-  useEffect(() => {
-    const loadFallback = async () => {
-      if (!activeProject?.id) return
-      if (!data || data.issue_themes.length > 0) return // Only load if navigator is empty
+  }, [activeProject?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Aggregate all intervention themes across issues (or from all_interventions if available)
+  const allInterventionThemes = useMemo(() => {
+    if (!data) return []
+    
+    // If backend provides all_interventions directly, use that
+    if (data.all_interventions && data.all_interventions.length > 0) {
+      // Apply issue theme filter if needed
+      if (issueThemeFilter === 'All') {
+        return data.all_interventions.map(intervention => ({
+          theme_name: intervention.theme_name,
+          description: intervention.description,
+          impact_summary: intervention.impact_summary,
+          frequency: intervention.frequency,
+          avg_impact_score: intervention.impact_score ?? intervention.avg_impact_score,
+          avg_evidence_score: intervention.stars ?? intervention.avg_evidence_score,
+          detailed_interventions: intervention.detailed_interventions,
+          // Pass through all the rich data
+          transferability_rating: intervention.transferability_rating,
+          transferability_note: intervention.transferability_note,
+          transferability_breakdown: intervention.transferability_breakdown,
+          outcome_themes: intervention.outcome_themes,
+          risk_themes: intervention.risk_themes,
+          display_evidence_mix: intervention.display_evidence_mix,
+          stars: intervention.stars,
+          cap_message: intervention.cap_message,
+          impact_score_breakdown: intervention.impact_score_breakdown,
+        }))
+      }
       
-      setLoadingFallback(true)
-      try {
-        const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/interventions`)
-        setFallbackInterventions(response.interventions || [])
-      } catch (err) {
-        console.error('Failed to load fallback interventions:', err)
-        setFallbackInterventions([])
-      } finally {
-        setLoadingFallback(false)
-      }
-    }
-    
-    loadFallback()
-  }, [activeProject?.id, data]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const toggleIssue = useCallback((themeName: string) => {
-    setExpandedIssues(prev => {
-      const newExpanded = new Set(prev)
-      if (newExpanded.has(themeName)) {
-        newExpanded.delete(themeName)
-      } else {
-        newExpanded.add(themeName)
-      }
-      return newExpanded
-    })
-  }, [])
-
-  const toggleIntervention = useCallback((themeName: string) => {
-    setExpandedInterventions(prev => {
-      const newExpanded = new Set(prev)
-      if (newExpanded.has(themeName)) {
-        newExpanded.delete(themeName)
-      } else {
-        newExpanded.add(themeName)
-      }
-      return newExpanded
-    })
-  }, [])
-
-  const toggleDetails = useCallback((detailsKey: string) => {
-    setExpandedDetails(prev => {
-      const newExpanded = new Set(prev)
-      if (newExpanded.has(detailsKey)) {
-        newExpanded.delete(detailsKey)
-      } else {
-        newExpanded.add(detailsKey)
-      }
-      return newExpanded
-    })
-  }, [])
-
-  const toggleInsufficientOutcomes = useCallback((key: string) => {
-    setExpandedInsufficientOutcomes(prev => {
-      const newExpanded = new Set(prev)
-      if (newExpanded.has(key)) {
-        newExpanded.delete(key)
-      } else {
-        newExpanded.add(key)
-      }
-      return newExpanded
-    })
-  }, [])
-
-  const handleDownloadCSV = useCallback(async () => {
-    // Use external handler if provided
-    if (onDownload) {
-      onDownload()
-      return
-    }
-    
-    // Otherwise use internal download logic
-    if (!activeProject?.id) return
-    
-    setInternalIsPreparingDownload(true)
-    
-    try {
-      const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/download/interventions-csv`)
+      // Filter by issue theme - need to aggregate from issue_themes
+      const filteredIssues = data.issue_themes.filter(t => t.theme_name === issueThemeFilter)
+      const interventionsMap = new Map<string, InterventionTheme>()
       
-      if (response.download_key) {
-        const token = await getToken()
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
-        
-        const downloadResponse = await fetch(`${cleanBaseUrl}/api/download/${response.download_key}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'text/csv',
-          },
+      filteredIssues.forEach(issue => {
+        issue.related_interventions.forEach(intervention => {
+          if (!interventionsMap.has(intervention.theme_name)) {
+            interventionsMap.set(intervention.theme_name, intervention)
+          }
         })
-        
-        if (downloadResponse.ok) {
-          const projectName = activeProject?.title || 'project'
-          const cleanProjectName = projectName.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_')
-          const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_')
-          const filename = `${cleanProjectName}_interventions_${timestamp}.csv`
-
-          const blob = await downloadResponse.blob()
-          const url = window.URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = filename
-          document.body.appendChild(a)
-          a.click()
-          window.URL.revokeObjectURL(url)
-          document.body.removeChild(a)
-        } else {
-          alert('Failed to download file')
-        }
-      }
-    } catch (err) {
-      console.error('Failed to download CSV:', err)
-      alert('Failed to download CSV. Please try again.')
-    } finally {
-      setInternalIsPreparingDownload(false)
+      })
+      
+      return Array.from(interventionsMap.values()).map(intervention => ({
+        theme_name: intervention.theme_name,
+        description: intervention.description,
+        impact_summary: intervention.impact_summary,
+        frequency: intervention.frequency,
+        avg_impact_score: intervention.impact_score ?? intervention.avg_impact_score,
+        avg_evidence_score: intervention.issue_stars ?? intervention.avg_evidence_score,
+        detailed_interventions: intervention.detailed_interventions,
+        transferability_rating: intervention.transferability_rating,
+        transferability_note: intervention.transferability_note,
+        transferability_breakdown: intervention.transferability_breakdown,
+        outcome_themes: intervention.outcome_themes,
+        risk_themes: intervention.risk_themes,
+        display_evidence_mix: intervention.issue_display_evidence_mix ?? intervention.display_evidence_mix,
+        stars: intervention.issue_stars ?? intervention.stars,
+        cap_message: intervention.issue_cap_message ?? intervention.cap_message,
+        impact_score_breakdown: intervention.impact_score_breakdown,
+      }))
     }
-  }, [activeProject?.id, activeProject?.title, fetchWithAuth, getToken, onDownload])
-
-  const renderStars = useCallback(
-    (score?: number, tooltip?: string, showGreyedStarsOnNull: boolean = false) => {
-      return (
-        <StarRating
-          stars={score != null ? Math.round(score) : null}
-          size="sm"
-          mode="icons"
-          tooltip={tooltip}
-          showGreyedStarsOnNull={showGreyedStarsOnNull}
-        />
-      )
-    },
-    []
-  )
-
-  const formatImpactBreakdown = useCallback((breakdown?: Record<string, unknown> | null) => {
-    if (!breakdown) return undefined
-    if (breakdown.net_impact !== undefined) {
-      const net = breakdown.net_impact ?? 'N/A'
-      const pos = breakdown.positive_evidence ?? 'N/A'
-      const neg = breakdown.negative_evidence ?? 'N/A'
-      const nul = breakdown.null_evidence ?? 'N/A'
-      const conf = breakdown.confidence ?? 'N/A'
-      const harm = breakdown.harm_warnings ?? 0
-      return `Net: ${net} | Pos: ${pos} | Neg: ${neg} | Null: ${nul} | Conf: ${conf} | Harm: ${harm}`
-    }
-    const evidence = breakdown.evidence_strength ?? 'N/A'
-    const transfer = breakdown.transferability ?? 'N/A'
-    const magnitude = breakdown.magnitude_adjustment ?? 'N/A'
-    const harm = breakdown.harm_multiplier ?? 'N/A'
-    return `Evidence: ${evidence} | Transfer: ${transfer} | Magnitude: ${magnitude} | Harm: ${harm}`
-  }, [])
-
-  const sortIssueInterventions = useCallback((interventions: IssueInterventionTheme[]) => {
-    return [...interventions].sort((a, b) => {
-      switch (sortBy) {
-        case 'impact':
-          return (b.impact_score ?? b.avg_impact_score ?? 0) - (a.impact_score ?? a.avg_impact_score ?? 0)
-        case 'evidence':
-          return (b.issue_stars ?? 0) - (a.issue_stars ?? 0)
-        case 'frequency':
-        default:
-          return (b.frequency || 0) - (a.frequency || 0)
-      }
-    })
-  }, [sortBy])
-
-  const sortAllInterventions = useCallback((interventions: AllInterventionTheme[]) => {
-    return [...interventions].sort((a, b) => {
-      switch (sortBy) {
-        case 'impact':
-          return (b.impact_score ?? b.avg_impact_score ?? 0) - (a.impact_score ?? a.avg_impact_score ?? 0)
-        case 'evidence':
-          return (b.stars ?? b.avg_evidence_score ?? 0) - (a.stars ?? a.avg_evidence_score ?? 0)
-        case 'frequency':
-        default:
-          return (b.frequency || 0) - (a.frequency || 0)
-      }
-    })
-  }, [sortBy])
-
-  const getAllInterventions = useMemo(() => {
-    if (!data?.all_interventions) return []
-    return sortAllInterventions(data.all_interventions)
-  }, [data, sortAllInterventions])
-
-  const convertToNavigatorInterventionData = useCallback((detailedInterventions: DetailedIntervention[]) => {
-    if (!detailedInterventions || detailedInterventions.length === 0) {
-      return []
-    }
-
-    const categories = getEvidenceCategories()
-    const categoryRank = new Map(categories.map(category => [category.name, category.rank]))
-
-    const aggregated = new Map<string, {
-      name: string
-      types: Set<string>
-      countries: Set<string>
+    
+    // Fallback: aggregate from issue_themes
+    const interventionsMap = new Map<string, {
+      theme_name: string
       description: string
-      evidence_categories: Set<string>
-      has_sr: boolean
-      has_non_sr: boolean
-      result_count: number
-      results_summary: AggregatedInterventionRow['results_summary']
-      outcome_groups: Map<string, {
-        document: NonNullable<AggregatedInterventionRow['outcome_groups']>[number]['document']
-        results: AggregatedInterventionRow['results_summary']
-      }>
-      total_sample_size: number | null
-      documents: Map<string, AggregatedInterventionRow['documents'][number]>
-      evidence_scores: Array<{ score: number; justification?: string }>
-      impact_justifications: Array<{ score: number; justification?: string }>
-      has_harm_warning: boolean
-      harm_warning_reasons: Set<string>
+      impact_summary?: string
+      frequency: number
+      impact_scores: number[]
+      evidence_scores: number[]
+      detailed_interventions: DetailedIntervention[]
+      transferability_rating?: string | null
+      transferability_note?: string | null
+      transferability_breakdown?: TransferabilityBreakdown | null
+      outcome_themes?: OutcomeTheme[]
+      risk_themes?: RiskTheme[]
+      display_evidence_mix?: Record<string, number>
+      stars?: number
+      cap_message?: string | null
+      impact_score_breakdown?: Record<string, unknown> | null
     }>()
-
-    const getDisplayValue = (value?: string) => {
-      if (!value) return null
-      const trimmed = value.trim()
-      return trimmed && trimmed !== 'Unknown' ? trimmed : null
-    }
-
-    let unknownDocumentCounter = 0
-
-    detailedInterventions.forEach((detail) => {
-      const name = detail.name?.trim()
-      if (!name) return
-
-      if (!aggregated.has(name)) {
-        aggregated.set(name, {
-          name,
-          types: new Set(),
-          countries: new Set(),
-          description: '',
-          evidence_categories: new Set(),
-          has_sr: false,
-          has_non_sr: false,
-          result_count: 0,
-          results_summary: [],
-          outcome_groups: new Map(),
-          total_sample_size: null,
-          documents: new Map(),
-          evidence_scores: [],
-          impact_justifications: [],
-          has_harm_warning: false,
-          harm_warning_reasons: new Set(),
-        })
-      }
-
-      const entry = aggregated.get(name)!
-      const typeValue = getDisplayValue(detail.type)
-      if (typeValue) entry.types.add(typeValue)
-      const countryValue = getDisplayValue(detail.country)
-      if (countryValue) entry.countries.add(countryValue)
-
-      if (detail.description) {
-        if (!entry.description || detail.description.length > entry.description.length) {
-          entry.description = detail.description
-        }
-      }
-
-      if (detail.evidence_category) {
-        entry.evidence_categories.add(detail.evidence_category)
-        if (detail.evidence_category === 'Systematic Review and Meta-Analysis') {
-          entry.has_sr = true
+    
+    const filteredIssues = issueThemeFilter === 'All' 
+      ? data.issue_themes 
+      : data.issue_themes.filter(t => t.theme_name === issueThemeFilter)
+    
+    filteredIssues.forEach(issue => {
+      issue.related_interventions.forEach(intervention => {
+        const key = intervention.theme_name
+        const existing = interventionsMap.get(key)
+        
+        if (existing) {
+          existing.frequency += intervention.frequency
+          if (intervention.avg_impact_score != null) {
+            existing.impact_scores.push(intervention.avg_impact_score)
+          }
+          if (intervention.avg_evidence_score != null) {
+            existing.evidence_scores.push(intervention.avg_evidence_score)
+          }
+          if (!existing.impact_summary && intervention.impact_summary) {
+            existing.impact_summary = intervention.impact_summary
+          }
+          // Merge detailed interventions (dedupe by doc)
+          const newDetails = intervention.detailed_interventions || []
+          newDetails.forEach(detail => {
+            const detailDocId = detail.source_documents?.[0]?.doc_id || ''
+            const detailDocTitle = detail.source_documents?.[0]?.title || ''
+            const exists = existing.detailed_interventions.some(d => {
+              const dDocId = d.source_documents?.[0]?.doc_id || ''
+              const dDocTitle = d.source_documents?.[0]?.title || ''
+              return d.name === detail.name && (dDocId === detailDocId || dDocTitle === detailDocTitle)
+            })
+            if (!exists) {
+              existing.detailed_interventions.push(detail)
+            }
+          })
+          // Merge outcome themes if not already set
+          if (!existing.outcome_themes && intervention.outcome_themes) {
+            existing.outcome_themes = intervention.outcome_themes
+          }
+          if (!existing.risk_themes && intervention.risk_themes) {
+            existing.risk_themes = intervention.risk_themes
+          }
+          if (!existing.transferability_breakdown && intervention.transferability_breakdown) {
+            existing.transferability_breakdown = intervention.transferability_breakdown
+            existing.transferability_rating = intervention.transferability_rating
+            existing.transferability_note = intervention.transferability_note
+          }
         } else {
-          entry.has_non_sr = true
-        }
-      }
-
-      const results = detail.results || []
-      const sourceDoc = detail.source_documents?.[0]
-      const docKey = sourceDoc?.doc_id
-        || sourceDoc?.landing_page_url
-        || sourceDoc?.title
-        || `${name}-unknown-${unknownDocumentCounter++}`
-      const parseSampleSize = (value: unknown) => {
-        if (typeof value === 'number' && value > 0) return value
-        if (typeof value === 'string') {
-          const cleaned = value.replace(/,/g, '').trim()
-          const parsed = Number(cleaned)
-          if (!Number.isNaN(parsed) && parsed > 0) return parsed
-        }
-        return 0
-      }
-
-      const reportedSampleSize = Math.max(
-        parseSampleSize(detail.sample_size),
-        ...results.map(result => result.sample_size || 0)
-      )
-      const document = {
-        doc_id: sourceDoc?.doc_id || '',
-        title: sourceDoc?.title || 'Unknown',
-        source: sourceDoc?.source || 'Unknown',
-        landing_page_url: sourceDoc?.landing_page_url || detail.document_url,
-        evidence_category: sourceDoc?.evidence_category,
-        reported_sample_size: reportedSampleSize > 0 ? reportedSampleSize : undefined,
-      }
-
-      if (!entry.outcome_groups.has(docKey)) {
-        entry.outcome_groups.set(docKey, { document, results: [] })
-      }
-      const outcomeGroup = entry.outcome_groups.get(docKey)!
-
-      entry.result_count += results.length
-      const mappedResults = results.map(result => mapResultToSummary(result, detail.evidence_category))
-      entry.results_summary.push(...mappedResults)
-      outcomeGroup.results.push(...mappedResults)
-
-      const docSampleSize = parseSampleSize(detail.sample_size) || parseSampleSize(sourceDoc?.sample_size)
-      if (docSampleSize > 0) {
-        entry.total_sample_size = entry.total_sample_size === null
-          ? docSampleSize
-          : Math.max(entry.total_sample_size, docSampleSize)
-      }
-
-      detail.source_documents?.forEach(doc => {
-        const docId = doc.doc_id || ''
-        if (!docId) return
-        if (!entry.documents.has(docId)) {
-          entry.documents.set(docId, {
-            doc_id: docId,
-            title: doc.title || 'Unknown',
-            source: doc.source || 'Unknown',
-            landing_page_url: doc.landing_page_url || detail.document_url,
+          interventionsMap.set(key, {
+            theme_name: intervention.theme_name,
+            description: intervention.description,
+            impact_summary: intervention.impact_summary,
+            frequency: intervention.frequency,
+            impact_scores: intervention.avg_impact_score != null ? [intervention.avg_impact_score] : [],
+            evidence_scores: intervention.avg_evidence_score != null ? [intervention.avg_evidence_score] : [],
+            detailed_interventions: [...(intervention.detailed_interventions || [])],
+            transferability_rating: intervention.transferability_rating,
+            transferability_note: intervention.transferability_note,
+            transferability_breakdown: intervention.transferability_breakdown,
+            outcome_themes: intervention.outcome_themes,
+            risk_themes: intervention.risk_themes,
+            display_evidence_mix: intervention.issue_display_evidence_mix ?? intervention.display_evidence_mix,
+            stars: intervention.issue_stars ?? intervention.stars,
+            cap_message: intervention.issue_cap_message ?? intervention.cap_message,
+            impact_score_breakdown: intervention.impact_score_breakdown,
           })
         }
       })
-
-      if (typeof detail.impact_score === 'number') {
-        entry.impact_justifications.push({
-          score: detail.impact_score,
-          justification: detail.impact_justification,
-        })
-      }
-
-      if (typeof detail.evidence_score === 'number') {
-        entry.evidence_scores.push({
-          score: detail.evidence_score,
-          justification: detail.evidence_justification,
-        })
-      }
-
-      if (detail.has_harm_warning) {
-        entry.has_harm_warning = true
-        if (detail.harm_warning_reason) {
-          entry.harm_warning_reasons.add(detail.harm_warning_reason)
-        }
-      }
     })
-
-    return Array.from(aggregated.values()).map((entry) => {
-      const evidenceCategories = Array.from(entry.evidence_categories).sort((a, b) => {
-        const rankA = categoryRank.get(a) ?? 999
-        const rankB = categoryRank.get(b) ?? 999
-        return rankA - rankB
-      })
-      const primaryCategory = evidenceCategories[0]
-      const isSystematicReview = entry.has_sr && !entry.has_non_sr
-
-      const evidenceScoreEntry = entry.evidence_scores.reduce<{ score?: number; justification?: string }>(
-        (best, current) => {
-          if (best.score === undefined || current.score > best.score) {
-            return { score: current.score, justification: current.justification }
-          }
-          return best
-        },
-        {}
-      )
-
-      const impactScoreEntry = entry.impact_justifications.reduce<{ score?: number; justification?: string }>(
-        (best, current) => {
-          if (best.score === undefined || current.score > best.score) {
-            return { score: current.score, justification: current.justification }
-          }
-          return best
-        },
-        {}
-      )
-
-      const harmWarningReason = entry.harm_warning_reasons.size > 0
-        ? Array.from(entry.harm_warning_reasons).join('; ')
-        : undefined
-
-      return {
-        name: entry.name,
-        type: entry.types.size > 0 ? Array.from(entry.types).join(', ') : 'Unknown',
-        country: entry.countries.size > 0 ? Array.from(entry.countries).join(', ') : 'Unknown',
-        description: entry.description,
-        evidence_category: primaryCategory,
-        evidence_categories: evidenceCategories.length > 0 ? evidenceCategories : undefined,
-        is_systematic_review: isSystematicReview,
-        result_count: entry.result_count,
-        results_summary: entry.results_summary,
-        outcome_groups: Array.from(entry.outcome_groups.values()),
-        total_sample_size: entry.total_sample_size,
-        documents: Array.from(entry.documents.values()),
-        impact_score: impactScoreEntry.score,
-        evidence_score: evidenceScoreEntry.score,
-        impact_justification: impactScoreEntry.justification,
-        evidence_justification: evidenceScoreEntry.justification,
-        has_harm_warning: entry.has_harm_warning,
-        harm_warning_reason: harmWarningReason,
-      }
-    })
-  }, [])
-  
-  // Convert fallback interventions to navigator format
-  const convertFallbackToNavigatorFormat = useCallback((interventions: InterventionData[]) => {
-    return interventions.map((intervention) => ({
-      name: intervention.name,
-      type: intervention.type,
-      country: intervention.country,
+    
+    return Array.from(interventionsMap.values()).map(intervention => ({
+      theme_name: intervention.theme_name,
       description: intervention.description,
-      evidence_category: intervention.evidence_category,
-      is_systematic_review: intervention.is_systematic_review,
-      result_count: intervention.result_count,
-      results_summary: intervention.results_summary,
-      total_sample_size: intervention.total_sample_size,
-      documents: intervention.documents,
-      // These fields might not be present in fallback data, but include them if available
-      impact_score: undefined,
-      evidence_score: undefined,
-      impact_justification: undefined,
-      evidence_justification: undefined,
+      impact_summary: intervention.impact_summary,
+      frequency: intervention.frequency,
+      avg_impact_score: intervention.impact_scores.length > 0 
+        ? intervention.impact_scores.reduce((a, b) => a + b, 0) / intervention.impact_scores.length 
+        : undefined,
+      avg_evidence_score: intervention.evidence_scores.length > 0
+        ? intervention.evidence_scores.reduce((a, b) => a + b, 0) / intervention.evidence_scores.length
+        : undefined,
+      detailed_interventions: intervention.detailed_interventions,
+      transferability_rating: intervention.transferability_rating,
+      transferability_note: intervention.transferability_note,
+      transferability_breakdown: intervention.transferability_breakdown,
+      outcome_themes: intervention.outcome_themes,
+      risk_themes: intervention.risk_themes,
+      display_evidence_mix: intervention.display_evidence_mix,
+      stars: intervention.stars,
+      cap_message: intervention.cap_message,
+      impact_score_breakdown: intervention.impact_score_breakdown,
     }))
-  }, [])
+  }, [data, issueThemeFilter])
 
-  // Render evidence mix summary from backend-provided display mix
-  const renderEvidenceMix = useCallback((evidenceMix: Record<string, number> | undefined) => {
-    const mixText = formatEvidenceMixCompact(evidenceMix)
-    if (!mixText) return null
-    return (
-      <p className="text-sm text-slate-600">
-        <span className="font-semibold">Evidence Mix: </span>
-        {mixText}
-      </p>
-    )
-  }, [])
+  // Get the full intervention data for the selected theme
+  const selectedThemeData = useMemo(() => {
+    if (!selectedTheme || !data) return null
+    
+    // Find the full intervention data with all the rich fields
+    const fullData = allInterventionThemes.find(t => t.theme_name === selectedTheme.theme_name)
+    return fullData || null
+  }, [selectedTheme, data, allInterventionThemes])
+
+  // Get interventions for the selected theme (for ThemeDetailView)
+  const selectedThemeInterventions = useMemo(() => {
+    if (!selectedTheme || !data) return []
+    
+    const filteredIssues = issueThemeFilter === 'All' 
+      ? data.issue_themes 
+      : data.issue_themes.filter(t => t.theme_name === issueThemeFilter)
+    
+    const matching: InterventionTheme[] = []
+    filteredIssues.forEach(issue => {
+      issue.related_interventions.forEach(intervention => {
+        if (intervention.theme_name === selectedTheme.theme_name) {
+          matching.push(intervention)
+        }
+      })
+    })
+    return matching
+  }, [selectedTheme, data, issueThemeFilter])
 
   if (!activeProject) {
     return (
@@ -738,55 +401,66 @@ export function InterventionsNavigator({
     )
   }
 
+  if (selectedTheme && selectedThemeData) {
+    return (
+      <div className="flex flex-col h-full">
+        <ThemeDetailView
+          themeName={selectedTheme.theme_name}
+          themeDescription={selectedThemeData.description || selectedTheme.description}
+          avgImpactScore={selectedThemeData.avg_impact_score ?? selectedTheme.avg_impact_score ?? undefined}
+          avgEvidenceScore={selectedThemeData.avg_evidence_score ?? selectedTheme.avg_evidence_score ?? undefined}
+          interventions={selectedThemeInterventions}
+          onBack={() => setSelectedTheme(null)}
+          // Pass through all the rich data
+          impactSummary={selectedThemeData.impact_summary}
+          outcomeThemes={selectedThemeData.outcome_themes}
+          riskThemes={selectedThemeData.risk_themes}
+          transferabilityRating={selectedThemeData.transferability_rating}
+          transferabilityNote={selectedThemeData.transferability_note}
+          transferabilityBreakdown={selectedThemeData.transferability_breakdown}
+          displayEvidenceMix={selectedThemeData.display_evidence_mix}
+          evidenceStars={selectedThemeData.stars}
+          capMessage={selectedThemeData.cap_message}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header - only show on standalone page */}
       {showHeader && (
         <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="standalone-group-by-issues" className="text-sm text-slate-700">
-                  Group by issues
-                </Label>
-                <Switch
-                  id="standalone-group-by-issues"
-                  checked={viewMode === 'grouped'}
-                  onCheckedChange={(checked) => setViewMode(checked ? 'grouped' : 'all')}
-                />
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Label className="text-sm text-slate-700">Sort by:</Label>
-                <select 
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as 'frequency' | 'impact' | 'evidence')}
-                  className="text-sm border rounded px-2 py-1 bg-white"
+          <div className="bg-white border border-gray-100 rounded-xl p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <RangeFilter 
+                label="Min Impact" 
+                value={minImpact} 
+                onChange={setMinImpact} 
+              />
+              <RangeFilter 
+                label="Min Evidence" 
+                value={minEvidence} 
+                onChange={setMinEvidence} 
+              />
+              <div className="flex-1 min-w-[180px]">
+                <div className="text-sm font-medium text-gray-700 mb-2">Choose by issues</div>
+                <select
+                  value={issueThemeFilter}
+                  onChange={(e) => setIssueThemeFilter(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="impact">Impact</option>
-                  <option value="evidence">Evidence</option>
-                  <option value="frequency">Frequency</option>
+                  {issueThemeOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
                 </select>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={handleDownloadCSV}
-                  disabled={isPreparingDownload || !data || data.issue_themes.length === 0}
-                  variant="outline"
-                  size="sm"
-                  className="flex items-center gap-2"
-                >
-                  <Download className="h-4 w-4" />
-                  {isPreparingDownload ? 'Downloading...' : 'Download'}
-                </Button>
               </div>
             </div>
           </div>
         </div>
       )}
       
-      {/* Content */}
       <div className="flex-1">
         {loading && (
           <div className="flex items-center justify-center py-12">
@@ -802,456 +476,32 @@ export function InterventionsNavigator({
             <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-slate-900 mb-2">Error Loading Data</h3>
             <p className="text-slate-600">{error}</p>
-            <div className="flex gap-2 mt-4 justify-center">
-              <Button onClick={loadNavigatorData}>
-                Try Again
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={async () => {
-                  try {
-                    const debugResponse = await fetchWithAuth(`/api/analysis-projects/${activeProject?.id}/debug-themes`)
-                    console.log('Debug themes response:', debugResponse)
-                  } catch (err) {
-                    console.error('Debug failed:', err)
-                  }
-                }}
-              >
-                Debug Themes
-              </Button>
-            </div>
+            <Button onClick={loadNavigatorData} className="mt-4">
+              Try Again
+            </Button>
           </div>
         )}
 
-        {data && (
-          <div className="space-y-6">
+        {data && !loading && !error && (
+          <>
             {data.issue_themes.length === 0 ? (
-              loadingFallback ? (
-                <div className="flex items-center justify-center py-12">
-                  <div className="text-center">
-                    <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-                    <p className="text-slate-600">Loading extracted interventions...</p>
-                  </div>
-                </div>
-              ) : fallbackInterventions && fallbackInterventions.length > 0 ? (
-                <div className="space-y-4">
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-2 text-sm text-slate-600 mb-2">
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
-                        <span>Synthesis pending - showing extracted interventions (ungrouped)</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                  <NavigatorInterventionsTable 
-                    interventions={convertFallbackToNavigatorFormat(fallbackInterventions)} 
-                  />
-                </div>
-              ) : (
-                <Card>
-                  <CardContent className="p-8 text-center">
-                    <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-slate-900 mb-2">No Interventions Found</h3>
-                    <p className="text-slate-600">
-                      This happens when documents are still being processed.
-                    </p>
-                  </CardContent>
-                </Card>
-              )
-            ) : viewMode === 'all' ? (
-              <div className="space-y-4">
-                {getAllInterventions.map((intervention) => (
-                  <Card key={intervention.theme_name} className="overflow-hidden">
-                    <CardHeader className="pb-2">
-                      <div 
-                        className="flex items-center justify-between cursor-pointer"
-                        onClick={() => toggleIntervention(`all-${intervention.theme_name}`)}
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3">
-                            <h5 className="font-medium text-lg">{intervention.theme_name}</h5>
-                          </div>
-                          {expandedInterventions.has(`all-${intervention.theme_name}`) && (
-                            <div className="mt-1 space-y-1">
-                              <p className="text-sm text-slate-600">{intervention.description}</p>
-                              {intervention.impact_summary && (
-                                <p className="text-sm text-slate-600">
-                                  <span className="font-semibold">Impact: </span>
-                                  {intervention.impact_summary}
-                                </p>
-                              )}
-                              {renderEvidenceMix(intervention.display_evidence_mix)}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex items-start gap-4 ml-4">
-                          <div className="text-right">
-                            <div className="text-xs text-slate-500">Evidence:</div>
-                            {renderStars(
-                              intervention.stars ?? intervention.avg_evidence_score,
-                              intervention.stars !== undefined
-                                ? getEvidenceScoreExplanation(
-                                  intervention.stars,
-                                  intervention.display_evidence_mix,
-                                  intervention.cap_message
-                                )
-                                : intervention.avg_evidence_score != null
-                                  ? 'Average evidence strength across documents'
-                                  : undefined,
-                              true
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <div className="text-xs text-slate-500">Impact:</div>
-                            {renderStars(
-                              intervention.impact_score ?? intervention.avg_impact_score,
-                              formatImpactBreakdown(intervention.impact_score_breakdown),
-                              true
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <div className="text-xs text-slate-500">Frequency:</div>
-                            <div className="flex items-center gap-1 justify-end">
-                              <span className="text-xs text-slate-600 text-right">{intervention.frequency}</span>
-                            </div>
-                          </div>
-                          <div className="ml-2">
-                            {expandedInterventions.has(`all-${intervention.theme_name}`) ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </CardHeader>
-
-                    {expandedInterventions.has(`all-${intervention.theme_name}`) && (
-                      <CardContent className="pt-0">
-                        <div className="space-y-3">
-                          {(intervention.transferability_rating || intervention.transferability_breakdown) && (
-                            <TransferabilityScore
-                              rating={intervention.transferability_rating}
-                              note={intervention.transferability_note}
-                              breakdown={intervention.transferability_breakdown}
-                            />
-                          )}
-
-                          {intervention.outcome_themes?.length ? (
-                            <div className="space-y-2">
-                              <div className="text-sm font-medium text-slate-700">Impact Profile</div>
-                              {(() => {
-                                const sortedOutcomes = [...intervention.outcome_themes].sort(
-                                  (a, b) =>
-                                    (b.positive_count + b.negative_count + b.null_count) -
-                                    (a.positive_count + a.negative_count + a.null_count)
-                                )
-                                const primaryOutcomes = sortedOutcomes.filter(
-                                  (outcome) => outcome.verdict_label !== 'insufficient_evidence'
-                                )
-                                const insufficientOutcomes = sortedOutcomes.filter(
-                                  (outcome) => outcome.verdict_label === 'insufficient_evidence'
-                                )
-                                const insufficientKey = `all-${intervention.theme_name}-insufficient`
-
-                                return (
-                                  <div className="space-y-2">
-                                    <div className="grid gap-2">
-                                      {primaryOutcomes.map((outcome) => (
-                                        <ImpactProfileCard
-                                          key={`${intervention.theme_name}-${outcome.outcome_name}`}
-                                          outcome={outcome}
-                                        />
-                                      ))}
-                                    </div>
-                                    {insufficientOutcomes.length > 0 && (
-                                      <div className="space-y-2">
-                                        <button
-                                          type="button"
-                                          className="flex items-center gap-2 text-xs font-medium text-slate-600"
-                                          onClick={() => toggleInsufficientOutcomes(insufficientKey)}
-                                        >
-                                          {expandedInsufficientOutcomes.has(insufficientKey) ? (
-                                            <ChevronDown className="h-4 w-4" />
-                                          ) : (
-                                            <ChevronRight className="h-4 w-4" />
-                                          )}
-                                          {expandedInsufficientOutcomes.has(insufficientKey)
-                                            ? `Hide ${insufficientOutcomes.length} outcomes with insufficient evidence`
-                                            : `Show ${insufficientOutcomes.length} outcomes with insufficient evidence`}
-                                        </button>
-                                        {expandedInsufficientOutcomes.has(insufficientKey) && (
-                                          <div className="grid gap-2">
-                                            {insufficientOutcomes.map((outcome) => (
-                                              <ImpactProfileCard
-                                                key={`${intervention.theme_name}-${outcome.outcome_name}-insufficient`}
-                                                outcome={outcome}
-                                              />
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })()}
-                            </div>
-                          ) : null}
-
-                          {intervention.risk_themes?.length ? (
-                            <RiskWarnings risks={intervention.risk_themes} />
-                          ) : null}
-                        </div>
-
-                        {intervention.detailed_interventions?.length ? (
-                          <div className="space-y-2">
-                            <button
-                              type="button"
-                              className="flex items-center gap-2 text-sm font-medium text-slate-700"
-                              onClick={() => toggleDetails(`all-${intervention.theme_name}`)}
-                            >
-                              {expandedDetails.has(`all-${intervention.theme_name}`) ? (
-                                <ChevronDown className="h-4 w-4" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4" />
-                              )}
-                              Detailed interventions
-                            </button>
-                            {expandedDetails.has(`all-${intervention.theme_name}`) && (
-                              <NavigatorInterventionsTable 
-                                interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                              />
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-sm text-slate-600">
-                            <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents across multiple issues.</p>
-                          </div>
-                        )}
-                      </CardContent>
-                    )}
-                  </Card>
-                ))}
+              <div className="bg-white border border-gray-100 rounded-xl p-8 text-center">
+                <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-900 mb-2">No Interventions Found</h3>
+                <p className="text-slate-600">
+                  This happens when documents are still being processed or synthesis has not completed.
+                </p>
               </div>
             ) : (
-              data.issue_themes.map((issue) => (
-                <Card key={issue.theme_name} className="overflow-hidden">
-                  <CardHeader className="pb-3">
-                    <div 
-                      className="flex items-center justify-between cursor-pointer"
-                      onClick={() => toggleIssue(issue.theme_name)}
-                    >
-                      <div className="flex-1">
-                        <CardTitle className="text-lg flex items-center gap-3">
-                          {issue.theme_name}
-                          <Badge variant="secondary">{issue.frequency} documents</Badge>
-                        </CardTitle>
-                        {expandedIssues.has(issue.theme_name) && (
-                          <p className="text-slate-600 mt-2">{issue.description}</p>
-                        )}
-                      </div>
-                      <div className="ml-4">
-                        {expandedIssues.has(issue.theme_name) ? (
-                          <ChevronDown className="h-5 w-5" />
-                        ) : (
-                          <ChevronRight className="h-5 w-5" />
-                        )}
-                      </div>
-                    </div>
-                  </CardHeader>
-
-                  {expandedIssues.has(issue.theme_name) && (
-                    <CardContent className="pt-0">
-                      <div className="space-y-4">
-                        <h4 className="font-medium text-slate-900 flex items-center gap-2">
-                          Interventions:
-                        </h4>
-                        
-                        {sortIssueInterventions(issue.related_interventions).map((intervention) => (
-                          <Card key={intervention.theme_name} className="ml-6">
-                            <CardHeader className="pb-2">
-                              <div 
-                                className="flex items-center justify-between cursor-pointer"
-                                onClick={() => toggleIntervention(`${issue.theme_name}-${intervention.theme_name}`)}
-                              >
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-3">
-                                    <h5 className="font-medium">{intervention.theme_name}</h5>
-                                  </div>
-                                  {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
-                                    <div className="mt-1 space-y-1">
-                                      <p className="text-sm text-slate-600">{intervention.description}</p>
-                                      {intervention.impact_summary && (
-                                        <p className="text-sm text-slate-600">
-                                          <span className="font-semibold">Impact: </span>
-                                          {intervention.impact_summary}
-                                        </p>
-                                      )}
-                                      {renderEvidenceMix(intervention.issue_display_evidence_mix)}
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div className="flex items-start gap-4 ml-4">
-                                  <div className="text-right">
-                                    <div className="text-xs text-slate-500">Evidence:</div>
-                                    {renderStars(
-                                      intervention.issue_stars ?? intervention.avg_evidence_score,
-                                      intervention.issue_stars !== undefined
-                                        ? getEvidenceScoreExplanation(
-                                          intervention.issue_stars,
-                                          intervention.issue_display_evidence_mix,
-                                          intervention.issue_cap_message
-                                        )
-                                        : intervention.avg_evidence_score != null
-                                          ? 'Average evidence strength across documents'
-                                          : undefined,
-                                      true
-                                    )}
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-xs text-slate-500">Impact:</div>
-                                    {renderStars(
-                                      intervention.impact_score ?? intervention.avg_impact_score,
-                                      formatImpactBreakdown(intervention.impact_score_breakdown),
-                                      true
-                                    )}
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-xs text-slate-500">Frequency:</div>
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs text-slate-600">{intervention.frequency}</span>
-                                    </div>
-                                  </div>
-                                  <div className="ml-2">
-                                    {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) ? (
-                                      <ChevronDown className="h-4 w-4" />
-                                    ) : (
-                                      <ChevronRight className="h-4 w-4" />
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </CardHeader>
-
-                            {expandedInterventions.has(`${issue.theme_name}-${intervention.theme_name}`) && (
-                              <CardContent className="pt-0">
-                                <div className="space-y-3">
-                                  {(intervention.transferability_rating || intervention.transferability_breakdown) && (
-                                    <TransferabilityScore
-                                      rating={intervention.transferability_rating}
-                                      note={intervention.transferability_note}
-                                      breakdown={intervention.transferability_breakdown}
-                                    />
-                                  )}
-
-                                  {intervention.outcome_themes?.length ? (
-                                    <div className="space-y-2">
-                                      <div className="text-sm font-medium text-slate-700">Impact Profile</div>
-                                      {(() => {
-                                        const sortedOutcomes = [...intervention.outcome_themes].sort(
-                                          (a, b) =>
-                                            (b.positive_count + b.negative_count + b.null_count) -
-                                            (a.positive_count + a.negative_count + a.null_count)
-                                        )
-                                        const primaryOutcomes = sortedOutcomes.filter(
-                                          (outcome) => outcome.verdict_label !== 'insufficient_evidence'
-                                        )
-                                        const insufficientOutcomes = sortedOutcomes.filter(
-                                          (outcome) => outcome.verdict_label === 'insufficient_evidence'
-                                        )
-                                        const insufficientKey = `${issue.theme_name}-${intervention.theme_name}-insufficient`
-
-                                        return (
-                                          <div className="space-y-2">
-                                            <div className="grid gap-2">
-                                              {primaryOutcomes.map((outcome) => (
-                                                <ImpactProfileCard
-                                                  key={`${intervention.theme_name}-${outcome.outcome_name}`}
-                                                  outcome={outcome}
-                                                />
-                                              ))}
-                                            </div>
-                                            {insufficientOutcomes.length > 0 && (
-                                              <div className="space-y-2">
-                                                <button
-                                                  type="button"
-                                                  className="flex items-center gap-2 text-xs font-medium text-slate-600"
-                                                  onClick={() =>
-                                                    toggleInsufficientOutcomes(insufficientKey)
-                                                  }
-                                                >
-                                                  {expandedInsufficientOutcomes.has(insufficientKey) ? (
-                                                    <ChevronDown className="h-4 w-4" />
-                                                  ) : (
-                                                    <ChevronRight className="h-4 w-4" />
-                                                  )}
-                                                  {expandedInsufficientOutcomes.has(insufficientKey)
-                                                    ? `Hide ${insufficientOutcomes.length} outcomes with insufficient evidence`
-                                                    : `Show ${insufficientOutcomes.length} outcomes with insufficient evidence`}
-                                                </button>
-                                                {expandedInsufficientOutcomes.has(insufficientKey) && (
-                                                  <div className="grid gap-2">
-                                                    {insufficientOutcomes.map((outcome) => (
-                                                      <ImpactProfileCard
-                                                        key={`${intervention.theme_name}-${outcome.outcome_name}-insufficient`}
-                                                        outcome={outcome}
-                                                      />
-                                                    ))}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            )}
-                                          </div>
-                                        )
-                                      })()}
-                                    </div>
-                                  ) : null}
-
-                                  {intervention.risk_themes?.length ? (
-                                    <RiskWarnings risks={intervention.risk_themes} />
-                                  ) : null}
-                                </div>
-
-                                {intervention.detailed_interventions?.length ? (
-                                  <div className="space-y-2">
-                                    <button
-                                      type="button"
-                                      className="flex items-center gap-2 text-sm font-medium text-slate-700"
-                                      onClick={() =>
-                                        toggleDetails(`details-${issue.theme_name}-${intervention.theme_name}`)
-                                      }
-                                    >
-                                      {expandedDetails.has(`details-${issue.theme_name}-${intervention.theme_name}`) ? (
-                                        <ChevronDown className="h-4 w-4" />
-                                      ) : (
-                                        <ChevronRight className="h-4 w-4" />
-                                      )}
-                                      Detailed interventions
-                                    </button>
-                                    {expandedDetails.has(`details-${issue.theme_name}-${intervention.theme_name}`) && (
-                                      <NavigatorInterventionsTable 
-                                        interventions={convertToNavigatorInterventionData(intervention.detailed_interventions)}
-                                      />
-                                    )}
-                                  </div>
-                                ) : (
-                                  <div className="text-sm text-slate-600">
-                                    <p>This intervention theme appears in <strong>{intervention.frequency}</strong> documents.</p>
-                                  </div>
-                                )}
-                              </CardContent>
-                            )}
-                          </Card>
-                        ))}
-                      </div>
-                    </CardContent>
-                  )}
-                </Card>
-              ))
+              <ThemeList
+                themes={allInterventionThemes}
+                onSelectTheme={setSelectedTheme}
+                sortBy={sortBy}
+                minImpact={minImpact}
+                minEvidence={minEvidence}
+              />
             )}
-          </div>
+          </>
         )}
       </div>
     </div>

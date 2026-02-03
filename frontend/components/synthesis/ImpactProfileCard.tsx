@@ -2,8 +2,6 @@
 
 import React from 'react'
 import { Badge } from '@/components/ui/badge'
-import { Tooltip } from '@/components/ui/tooltip'
-import { ConsensusMeter } from '@/components/synthesis/ConsensusMeter'
 import type { OutcomeTheme } from '@/types/search'
 
 const verdictStyles: Record<string, string> = {
@@ -19,28 +17,63 @@ const verdictStyles: Record<string, string> = {
   probable_contribution: 'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-const magnitudeStyles: Record<string, string> = {
-  transformational: 'bg-purple-50 text-purple-700 border-purple-200',
-  substantial: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-  moderate: 'bg-blue-50 text-blue-700 border-blue-200',
-  marginal: 'bg-slate-50 text-slate-700 border-slate-200',
-  unknown: 'bg-slate-50 text-slate-600 border-slate-200',
-}
-
 const toLabel = (value?: string) =>
   value ? value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : ''
 
-const scaleLabelMap: Record<string, string> = {
-  cohens_d: "Cohen's d",
-  smd: 'SMD',
-  or: 'Odds ratio',
-  rr: 'Risk ratio',
-  percentage: 'Percentage points',
-  percent: 'Percent',
+const causalityExplanations: Record<string, string> = {
+  attribution: 'evidence supports a causal claim attributable to the intervention',
+  contribution: 'evidence suggests the intervention contributed but was not solely causal',
+  correlation: 'evidence shows association without a causal claim'
+}
+
+const magnitudeExplanations: Record<string, string> = {
+  transformational: 'very large, potentially paradigm-shifting effect size',
+  substantial: 'large effect size with meaningful practical impact',
+  moderate: 'moderate effect size with practical significance',
+  marginal: 'small effect size with limited practical impact',
+  unknown: 'insufficient data to estimate magnitude'
 }
 
 interface ImpactProfileCardProps {
   outcome: OutcomeTheme
+}
+
+function DirectionBar({
+  positiveCount,
+  negativeCount,
+  nullCount,
+}: {
+  positiveCount: number
+  negativeCount: number
+  nullCount: number
+}) {
+  const total = positiveCount + negativeCount + nullCount
+  if (total <= 0) {
+    return null
+  }
+
+  const positivePct = (positiveCount / total) * 100
+  const negativePct = (negativeCount / total) * 100
+  const nullPct = Math.max(0, 100 - positivePct - negativePct)
+
+  return (
+    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+      <div className="flex h-full w-full">
+        <div
+          className="h-full bg-emerald-400"
+          style={{ width: `${positivePct}%` }}
+        />
+        <div
+          className="h-full bg-amber-300"
+          style={{ width: `${nullPct}%` }}
+        />
+        <div
+          className="h-full bg-rose-400"
+          style={{ width: `${negativePct}%` }}
+        />
+      </div>
+    </div>
+  )
 }
 
 export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
@@ -50,145 +83,69 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
     : undefined
   const magnitudeLabel = outcome.predicted_magnitude
   const causalLabel = outcome.primary_causal_mechanism
-  const magnitudeDetail = outcome.magnitude_detail
-  const causalityDetail = outcome.causal_mechanism_detail
-  const sourceCount =
-    outcome.source_doc_ids?.length ?? outcome.frequency ?? undefined
-
-  const verdictTooltips: Record<string, string> = {
-    well_evidenced_positive: 'Strong, consistent evidence supports a beneficial effect.',
-    well_evidenced_negative: 'Strong, consistent evidence supports a harmful effect.',
-    evidenced_positive: 'Moderate evidence supports a beneficial effect.',
-    evidenced_negative: 'Moderate evidence supports a harmful effect.',
-    suggested_positive: 'Limited evidence suggests a beneficial effect.',
-    suggested_negative: 'Limited evidence suggests a harmful effect.',
-    contested: 'Evidence is split between beneficial and harmful effects.',
-    no_effect: 'Evidence suggests no consistent effect.',
-    insufficient_evidence: 'Too little evidence to determine effect direction.',
-    probable_contribution: 'Evidence suggests contribution without strong attribution.'
-  }
-
-  const causalityTooltips: Record<string, string> = {
-    attribution: 'Evidence supports a causal claim attributable to the intervention.',
-    contribution: 'Evidence suggests the intervention contributed but was not solely causal.',
-    correlation: 'Evidence shows association without a causal claim.'
-  }
-
-  const magnitudeTooltips: Record<string, string> = {
-    transformational: 'Very large, potentially paradigm-shifting effect size.',
-    substantial: 'Large effect size with meaningful practical impact.',
-    moderate: 'Moderate effect size with practical significance.',
-    marginal: 'Small effect size with limited practical impact.',
-    unknown: 'Insufficient data to estimate magnitude.'
-  }
-
-  const buildMagnitudeTooltip = () => {
-    if (!magnitudeDetail) {
-      return magnitudeTooltips[magnitudeLabel || 'unknown'] || 'Estimated effect size category'
-    }
-    const directionLabel = toLabel(magnitudeDetail.direction)
-    const bucketText = Object.entries(magnitudeDetail.bucket_counts || {})
-      .map(([bucket, count]) => `${toLabel(bucket)}: ${count}`)
-      .join(', ')
-    const sourcesText = `${magnitudeDetail.source_count} of ${magnitudeDetail.total_sources} studies had quantitative effect data`
-    const measurementsText = `${magnitudeDetail.measurement_count} measurements`
-    const thresholdsText = magnitudeDetail.thresholds
-    const scaleLabel =
-      scaleLabelMap[magnitudeDetail.dominant_scale] ||
-      toLabel(magnitudeDetail.dominant_scale)
-    const parts = [
-      directionLabel ? `Direction: ${directionLabel}.` : '',
-      bucketText ? `Buckets: ${bucketText}.` : '',
-      sourcesText ? `${sourcesText}.` : '',
-      measurementsText ? `${measurementsText}.` : '',
-      thresholdsText
-        ? `Thresholds${scaleLabel ? ` (${scaleLabel})` : ''}: ${thresholdsText}.`
-        : ''
-    ].filter(Boolean)
-    return parts.join(' ')
-  }
-
-  const buildCausalityTooltip = () => {
-    if (!causalityDetail) {
-      return causalityTooltips[causalLabel || 'correlation'] || 'Causal strength of the evidence'
-    }
-    const parts = [
-      causalityDetail.attribution
-        ? `${causalityDetail.attribution} source${causalityDetail.attribution === 1 ? '' : 's'} support attribution`
-        : '',
-      causalityDetail.contribution
-        ? `${causalityDetail.contribution} source${causalityDetail.contribution === 1 ? '' : 's'} support contribution`
-        : '',
-      causalityDetail.correlation
-        ? `${causalityDetail.correlation} source${causalityDetail.correlation === 1 ? '' : 's'} support correlation`
-        : ''
-    ].filter(Boolean)
-    return parts.length ? parts.join(', ') : 'No causal claims reported.'
-  }
 
   return (
-    <div className="rounded border border-slate-200 bg-white p-3 space-y-2">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-medium text-slate-900">
-            {outcome.outcome_name}
-          </div>
-          {outcome.outcome_description && (
-            <div className="text-xs text-slate-600 mt-1">
-              {outcome.outcome_description}
-            </div>
-          )}
-        </div>
+    <div className="rounded-xl border border-gray-100 bg-white p-6 space-y-4">
+      {/* Header with outcome name and verdict badge */}
+      <div className="flex items-start justify-between gap-4">
+        <h4 className="text-lg font-semibold text-gray-900">
+          {outcome.outcome_name}
+        </h4>
         {verdictKey && (
-          <Tooltip content={verdictTooltips[verdictKey] || 'Impact verdict label'}>
-            <Badge
-              variant="outline"
-              className={`text-xs ${verdictStyles[verdictKey] || 'bg-slate-50 text-slate-700 border-slate-200'}`}
-            >
-              {toLabel(verdictKey)}
-            </Badge>
-          </Tooltip>
+          <Badge
+            variant="outline"
+            className={`shrink-0 text-sm ${verdictStyles[verdictKey] || 'bg-slate-50 text-slate-700 border-slate-200'}`}
+          >
+            {toLabel(verdictKey)}
+          </Badge>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Outcome description */}
+      {outcome.outcome_description && (
+        <p className="text-gray-700 leading-relaxed">
+          {outcome.outcome_description}
+        </p>
+      )}
+
+      {/* Causality, Magnitude, Contested - each on its own line */}
+      <div className="space-y-2">
         {causalLabel && (
-          <Tooltip content={buildCausalityTooltip()}>
-            <Badge variant="outline" className="text-xs bg-white">
-              Causality: {toLabel(causalLabel)}
-            </Badge>
-          </Tooltip>
+          <p className="text-gray-700">
+            <span className="font-medium">Causality:</span>{' '}
+            {toLabel(causalLabel)}{' '}
+            ({causalityExplanations[causalLabel] || 'causal strength of the evidence'})
+          </p>
         )}
         {magnitudeLabel && (
-          <Tooltip content={buildMagnitudeTooltip()}>
-            <Badge
-              variant="outline"
-              className={`text-xs ${magnitudeStyles[magnitudeLabel] || 'bg-slate-50 text-slate-600 border-slate-200'}`}
-            >
-              Magnitude: {toLabel(magnitudeLabel)}
-            </Badge>
-          </Tooltip>
+          <p className="text-gray-700">
+            <span className="font-medium">Magnitude:</span>{' '}
+            {toLabel(magnitudeLabel)}{' '}
+            ({magnitudeExplanations[magnitudeLabel] || 'estimated effect size category'})
+          </p>
         )}
-        {outcome.discord_flag && outcome.discord_reason && (
-          <Tooltip content={outcome.discord_reason}>
-            <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-200">
-              Contested
-            </Badge>
-          </Tooltip>
+        {/* Direction - show for contested or when there's directional evidence */}
+        {((outcome.positive_count ?? 0) > 0 || (outcome.negative_count ?? 0) > 0) && (
+          <p className="text-gray-700">
+            <span className="font-medium">Direction:</span>{' '}
+            {outcome.verdict_description || outcome.discord_reason || 'Evidence on effect direction.'}
+            {' '}({outcome.positive_count ?? 0}↑ vs {outcome.negative_count ?? 0}↓)
+          </p>
         )}
       </div>
 
-      <ConsensusMeter
+      {/* Direction bar (green/yellow/red) */}
+      <DirectionBar
         positiveCount={outcome.positive_count ?? 0}
         negativeCount={outcome.negative_count ?? 0}
         nullCount={outcome.null_count ?? 0}
-        sourceCount={sourceCount}
       />
 
-      {outcome.verdict_description && (
-        <div className="text-xs text-slate-600">
+      {/* Verdict description - only show if no directional evidence (Direction line handles it otherwise) */}
+      {outcome.verdict_description && (outcome.positive_count ?? 0) === 0 && (outcome.negative_count ?? 0) === 0 && (
+        <p className="text-gray-600">
           {outcome.verdict_description}
-        </div>
+        </p>
       )}
     </div>
   )
