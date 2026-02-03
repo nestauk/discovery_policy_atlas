@@ -8,7 +8,7 @@ import { InterventionCard, type InterventionCardData } from './InterventionCard'
 import { ImpactProfileCard } from '@/components/synthesis/ImpactProfileCard'
 import { RiskWarnings } from '@/components/synthesis/RiskWarnings'
 import type { OutcomeTheme, RiskTheme, TransferabilityBreakdown } from '@/types/search'
-import { formatEvidenceMixCompact, getEvidenceScoreExplanation } from '@/lib/evidenceCategories'
+import { formatEvidenceMixCompact, getEvidenceScoreExplanation, getEvidenceCategoryRank } from '@/lib/evidenceCategories'
 
 interface DetailedIntervention {
   name: string
@@ -16,18 +16,27 @@ interface DetailedIntervention {
   type?: string
   country?: string
   study_type?: string
+  evidence_category?: string
+  evidence_category_reasoning?: string
   sample_size?: number | string | null
   impact_score?: number
   evidence_score?: number
+  impact_score_label?: string
+  impact_score_breakdown?: Record<string, unknown> | null
+  transferability_score?: number
+  transferability_breakdown?: Record<string, unknown> | null
   impact_justification?: string
   evidence_justification?: string
+  supporting_quote?: string
   results?: Array<{
     outcome_variable?: string
     effect_direction?: string
     effect_size?: string
+    effect_size_type?: string
     p_value?: string
     uncertainty?: string
     result_text?: string
+    supporting_quote?: string
     population_measured?: string
     subgroup_or_dose?: string
   }>
@@ -36,6 +45,7 @@ interface DetailedIntervention {
     title?: string
     source?: string
     landing_page_url?: string
+    evidence_category?: string
   }>
 }
 
@@ -69,22 +79,35 @@ interface ThemeDetailViewProps {
 }
 
 function convertToCardData(detail: DetailedIntervention): InterventionCardData {
+  // Get evidence category from the intervention or from the first source document
+  const evidenceCategory = detail.evidence_category || detail.source_documents?.[0]?.evidence_category
+
   return {
     name: detail.name,
     type: detail.type,
     country: detail.country,
     description: detail.description,
     study_type: detail.study_type,
+    evidence_category: evidenceCategory,
+    evidence_category_reasoning: detail.evidence_category_reasoning,
     sample_size: detail.sample_size,
     impact_score: detail.impact_score,
     evidence_score: detail.evidence_score,
+    impact_score_label: detail.impact_score_label,
+    impact_score_breakdown: detail.impact_score_breakdown,
+    transferability_score: detail.transferability_score,
+    transferability_breakdown: detail.transferability_breakdown,
+    impact_justification: detail.impact_justification,
+    supporting_quote: detail.supporting_quote,
     results_summary: detail.results?.map(r => ({
       outcome: r.outcome_variable || '',
       direction: r.effect_direction || '',
       effect_size: r.effect_size,
+      effect_size_type: r.effect_size_type,
       p_value: r.p_value,
       uncertainty: r.uncertainty,
       result_text: r.result_text,
+      supporting_quote: r.supporting_quote,
       population_measured: r.population_measured,
       subgroup_or_dose: r.subgroup_or_dose,
     })),
@@ -105,6 +128,7 @@ interface InterventionGroup {
   items: DetailedIntervention[]
   avgImpact: number | null
   avgEvidence: number | null
+  bestEvidenceRank: number
 }
 
 const toLabel = (value?: string) =>
@@ -152,12 +176,12 @@ function ContextFitCard({ breakdown, rating, note }: ContextFitSectionProps) {
   return (
     <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-3">
-          Context fit
+        <div className="flex justify-between items-start mb-3">
+          <h3 className="text-xl font-bold text-gray-900">Context fit</h3>
           <span className={`inline-flex items-center px-3 py-1 rounded-lg text-sm ${contextFitStyles[contextRating] || contextFitStyles.Unknown}`}>
             {contextRating}
           </span>
-        </h3>
+        </div>
         {note && (
           <p className="text-gray-700 leading-relaxed">{note}</p>
         )}
@@ -214,12 +238,12 @@ function ImplementationCard({ breakdown }: { breakdown?: TransferabilityBreakdow
   return (
     <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-3">
-          Implementation Requirements
+        <div className="flex justify-between items-start mb-3">
+          <h3 className="text-xl font-bold text-gray-900">Implementation requirements</h3>
           <span className={`inline-flex items-center px-3 py-1 rounded-lg text-sm ${requirementsStyles[requirementsRating] || requirementsStyles.Unknown}`}>
             {requirementsRating}{hasAnyToleranceExceeded ? ' ⚠️' : ''}
           </span>
-        </h3>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -311,6 +335,7 @@ export function ThemeDetailView({
           items: [detail],
           avgImpact: null,
           avgEvidence: null,
+          bestEvidenceRank: 999,
         })
       }
     }
@@ -318,6 +343,18 @@ export function ThemeDetailView({
     const result = Array.from(groupMap.values()).map(g => {
       const impactScores = g.items.map(i => i.impact_score).filter((s): s is number => s != null)
       const evidenceScores = g.items.map(i => i.evidence_score).filter((s): s is number => s != null)
+      
+      // Get best (lowest rank = strongest) evidence category rank
+      const evidenceCategoryRanks = g.items
+        .map(i => {
+          const category = i.evidence_category || i.source_documents?.[0]?.evidence_category
+          return category ? getEvidenceCategoryRank(category) : 999
+        })
+        .filter((rank): rank is number => rank !== 999)
+      
+      const bestEvidenceRank = evidenceCategoryRanks.length > 0 
+        ? Math.min(...evidenceCategoryRanks)
+        : 999
       
       return {
         ...g,
@@ -327,13 +364,22 @@ export function ThemeDetailView({
         avgEvidence: evidenceScores.length > 0
           ? evidenceScores.reduce((a, b) => a + b, 0) / evidenceScores.length
           : null,
+        bestEvidenceRank,
       }
     })
     
     result.sort((a, b) => {
-      const aImpact = a.avgImpact ?? 0
-      const bImpact = b.avgImpact ?? 0
-      if (aImpact !== bImpact) return bImpact - aImpact
+      // Primary sort: by evidence score (descending - higher is better)
+      const aEvidence = a.avgEvidence ?? 0
+      const bEvidence = b.avgEvidence ?? 0
+      if (aEvidence !== bEvidence) return bEvidence - aEvidence
+      
+      // Secondary sort: by evidence category rank (ascending - lower rank = stronger evidence)
+      if (a.bestEvidenceRank !== b.bestEvidenceRank) {
+        return a.bestEvidenceRank - b.bestEvidenceRank
+      }
+      
+      // Tertiary sort: by number of items (descending)
       return b.items.length - a.items.length
     })
     
@@ -488,7 +534,7 @@ export function ThemeDetailView({
       {/* Section 6: Risk Warnings */}
       {hasRisks && (
         <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
-          <h3 className="text-lg font-semibold text-gray-900">Risk warnings</h3>
+          <h3 className="text-xl font-bold text-gray-900">Risk warnings</h3>
           <RiskWarnings risks={riskThemes!} />
         </section>
       )}
@@ -497,7 +543,7 @@ export function ThemeDetailView({
       <section className="bg-white border border-gray-100 rounded-xl p-6 space-y-6">
         <div>
           <h3 className="text-xl font-bold text-gray-900 mb-2">
-            Studies & Evidence ({groups.reduce((sum, g) => sum + g.items.length, 0)})
+            Studies & evidence ({groups.reduce((sum, g) => sum + g.items.length, 0)})
           </h3>
           <p className="text-gray-700 leading-relaxed">
             Individual studies and interventions that contribute to this theme.

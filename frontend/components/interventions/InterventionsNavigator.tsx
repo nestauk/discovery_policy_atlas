@@ -15,6 +15,7 @@ interface DetailedIntervention {
   type?: string
   country?: string
   evidence_category?: string
+  evidence_category_reasoning?: string
   is_systematic_review?: boolean
   sample_size?: number | null
   impact_score?: number
@@ -27,6 +28,7 @@ interface DetailedIntervention {
   evidence_justification?: string
   has_harm_warning?: boolean
   harm_warning_reason?: string
+  supporting_quote?: string
   document_url?: string
   results: Array<{
     outcome_variable?: string
@@ -37,6 +39,7 @@ interface DetailedIntervention {
     p_value?: string
     uncertainty?: string
     result_text?: string
+    supporting_quote?: string
     population_measured?: string
     subgroup_or_dose?: string
     heterogeneity_I2?: string
@@ -115,13 +118,12 @@ function RangeFilter({
   onChange: (v: number) => void
 }) {
   const tiers = ['Very low', 'Low', 'Moderate', 'High', 'Very high']
-  const shown = tiers[Math.max(0, Math.min(4, value - 1))]
+  const _shown = tiers[Math.max(0, Math.min(4, value - 1))]
 
   return (
     <div className="flex-1 min-w-[180px]">
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-medium text-gray-700">{label}</div>
-        <div className="text-xs text-gray-500">{shown}+</div>
       </div>
       <input
         type="range"
@@ -441,7 +443,7 @@ export function InterventionsNavigator({
                 onChange={setMinEvidence} 
               />
               <div className="flex-1 min-w-[180px]">
-                <div className="text-sm font-medium text-gray-700 mb-2">Issue theme</div>
+                <div className="text-sm font-medium text-gray-700 mb-2">Choose by issues</div>
                 <select
                   value={issueThemeFilter}
                   onChange={(e) => setIssueThemeFilter(e.target.value)}

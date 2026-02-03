@@ -1,7 +1,7 @@
 'use client'
 
-import React from 'react'
-import { ChevronRight } from 'lucide-react'
+import React, { useState } from 'react'
+import { ChevronRight, ChevronUp, ChevronDown } from 'lucide-react'
 import { TierBadge, scoreToTier, tierToIndex } from '@/components/ui/tier-badge'
 
 export interface ThemeListItem {
@@ -12,6 +12,9 @@ export interface ThemeListItem {
   avg_evidence_score?: number | null
   detailed_interventions?: unknown[]
 }
+
+type SortColumn = 'theme' | 'impact' | 'evidence' | 'studies'
+type SortDirection = 'asc' | 'desc'
 
 interface ThemeListProps {
   themes: ThemeListItem[]
@@ -24,10 +27,26 @@ interface ThemeListProps {
 export function ThemeList({ 
   themes, 
   onSelectTheme,
-  sortBy = 'evidence',
+  sortBy: initialSortBy = 'evidence',
   minImpact = 1,
   minEvidence = 1,
 }: ThemeListProps) {
+  const [sortColumn, setSortColumn] = useState<SortColumn>(
+    initialSortBy === 'impact' ? 'impact' : 'evidence'
+  )
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+
+  const handleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      // Toggle direction if clicking the same column
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      // Set new column, default to descending
+      setSortColumn(column)
+      setSortDirection('desc')
+    }
+  }
+
   const filteredAndSorted = React.useMemo(() => {
     const filtered = themes.filter(theme => {
       const impactTier = tierToIndex(scoreToTier(theme.avg_impact_score))
@@ -36,22 +55,35 @@ export function ThemeList({
     })
     
     filtered.sort((a, b) => {
-      const aStudies = a.detailed_interventions?.length ?? a.frequency ?? 0
-      const bStudies = b.detailed_interventions?.length ?? b.frequency ?? 0
+      let comparison = 0
       
-      if (sortBy === 'impact') {
-        const impactDiff = (b.avg_impact_score ?? 0) - (a.avg_impact_score ?? 0)
-        if (impactDiff !== 0) return impactDiff
-      } else {
-        const evidenceDiff = (b.avg_evidence_score ?? 0) - (a.avg_evidence_score ?? 0)
-        if (evidenceDiff !== 0) return evidenceDiff
+      switch (sortColumn) {
+        case 'theme':
+          comparison = a.theme_name.localeCompare(b.theme_name)
+          break
+        case 'impact':
+          comparison = (b.avg_impact_score ?? 0) - (a.avg_impact_score ?? 0)
+          break
+        case 'evidence':
+          comparison = (b.avg_evidence_score ?? 0) - (a.avg_evidence_score ?? 0)
+          break
+        case 'studies':
+          const aStudies = a.detailed_interventions?.length ?? a.frequency ?? 0
+          const bStudies = b.detailed_interventions?.length ?? b.frequency ?? 0
+          comparison = bStudies - aStudies
+          break
       }
       
-      return bStudies - aStudies
+      // Apply sort direction
+      if (sortDirection === 'asc') {
+        comparison = -comparison
+      }
+      
+      return comparison
     })
     
     return filtered
-  }, [themes, sortBy, minImpact, minEvidence])
+  }, [themes, sortColumn, sortDirection, minImpact, minEvidence])
   
   if (filteredAndSorted.length === 0) {
     return (
@@ -61,13 +93,46 @@ export function ThemeList({
     )
   }
   
+  const SortIcon = ({ column }: { column: SortColumn }) => {
+    if (sortColumn !== column) return null
+    return sortDirection === 'asc' ? (
+      <ChevronUp className="h-3 w-3 ml-1" />
+    ) : (
+      <ChevronDown className="h-3 w-3 ml-1" />
+    )
+  }
+
   return (
     <div className="space-y-2">
-      <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">
-        <div className="col-span-6">Theme</div>
-        <div className="col-span-2">Impact</div>
-        <div className="col-span-2">Evidence</div>
-        <div className="col-span-2 text-center">Studies</div>
+      <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide border-b border-gray-100">
+        <button
+          onClick={() => handleSort('theme')}
+          className="col-span-6 text-left flex items-center hover:text-gray-700 transition-colors cursor-pointer text-xs font-medium text-gray-500 uppercase tracking-wide"
+        >
+          THEME
+          <SortIcon column="theme" />
+        </button>
+        <button
+          onClick={() => handleSort('impact')}
+          className="col-span-2 text-left flex items-center hover:text-gray-700 transition-colors cursor-pointer text-xs font-medium text-gray-500 uppercase tracking-wide"
+        >
+          IMPACT
+          <SortIcon column="impact" />
+        </button>
+        <button
+          onClick={() => handleSort('evidence')}
+          className="col-span-2 text-left flex items-center hover:text-gray-700 transition-colors cursor-pointer text-xs font-medium text-gray-500 uppercase tracking-wide"
+        >
+          EVIDENCE
+          <SortIcon column="evidence" />
+        </button>
+        <button
+          onClick={() => handleSort('studies')}
+          className="col-span-2 text-center flex items-center justify-center hover:text-gray-700 transition-colors cursor-pointer text-xs font-medium text-gray-500 uppercase tracking-wide"
+        >
+          STUDIES
+          <SortIcon column="studies" />
+        </button>
       </div>
       
       {filteredAndSorted.map(theme => (

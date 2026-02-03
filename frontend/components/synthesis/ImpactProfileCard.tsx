@@ -94,7 +94,7 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
         {verdictKey && (
           <Badge
             variant="outline"
-            className={`shrink-0 ${verdictStyles[verdictKey] || 'bg-slate-50 text-slate-700 border-slate-200'}`}
+            className={`shrink-0 text-sm ${verdictStyles[verdictKey] || 'bg-slate-50 text-slate-700 border-slate-200'}`}
           >
             {toLabel(verdictKey)}
           </Badge>
