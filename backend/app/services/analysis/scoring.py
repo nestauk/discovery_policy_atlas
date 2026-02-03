@@ -173,18 +173,41 @@ async def assess_dimension(
     target_text = "; ".join(str(value) for value in targets)
     evidence_text = "; ".join(str(value) for value in evidence_values)
 
+    geography_guidance = ""
+    if dimension_name.strip().lower() in (
+        "geography",
+        "country",
+        "location",
+        "jurisdiction",
+    ):
+        geography_guidance = (
+            "\nGeography guidance:\n"
+            "- Do NOT require the same country to avoid mismatch. Treat geography as macro-context comparability.\n"
+            "- Reserve mismatch for clearly non-comparable macro-contexts (e.g., substantially different levels of\n"
+            "  economic development, governance capacity, or health system maturity), not simply because it is a different country.\n"
+            "- If uncertain between partial and mismatch, prefer partial.\n"
+            "\nCalibration examples (target is UK):\n"
+            "- Evidence='Germany' -> similar or comparable (NOT mismatch)\n"
+            "- Evidence='New Zealand' -> comparable (NOT mismatch)\n"
+            "- Evidence='EU Member States' -> comparable or partial (NOT mismatch)\n"
+            "- Evidence='Italy' -> comparable or partial (NOT match)\n"
+        )
+
     prompt = (
         "You are assessing transferability of research evidence to a target context.\n\n"
         f"Dimension: {dimension_name}\n"
         f"Target options: {target_text}\n"
         f"Evidence options: {evidence_text}\n\n"
-        "Select the best match against any of the target options.\n"
+        "Select the best achievable match level against ANY of the target options.\n"
+        "Evidence may include multiple contexts; choose the BEST match level across evidence options (best-case),\n"
+        "and only return mismatch if NONE of the evidence options has meaningful overlap with ANY target option.\n"
         "Match levels:\n"
         "- match: direct match\n"
         "- similar: highly similar\n"
         "- comparable: comparable context\n"
         "- partial: some overlap\n"
         "- mismatch: no meaningful overlap\n\n"
+        f"{geography_guidance}\n"
         "Respond with JSON only:\n"
         '{"match_level": "match|similar|comparable|partial|mismatch|unknown"}'
     )
