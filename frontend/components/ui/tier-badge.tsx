@@ -1,10 +1,10 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
-type TierLevel = 'Very low' | 'Low' | 'Moderate' | 'High' | 'Very high'
+type TierLevel = 'N/A' | 'Very low' | 'Low' | 'Moderate' | 'High' | 'Very high'
 
 export function scoreToTier(score: number | null | undefined): TierLevel {
-  if (score == null) return 'Moderate'
+  if (score == null) return 'N/A'
   const s = Math.max(1, Math.min(5, score))
   if (s < 1.5) return 'Very low'
   if (s < 2.5) return 'Low'
@@ -15,6 +15,7 @@ export function scoreToTier(score: number | null | undefined): TierLevel {
 
 export function tierToIndex(tier: TierLevel): number {
   switch (tier) {
+    case 'N/A': return 0
     case 'Very low': return 1
     case 'Low': return 2
     case 'Moderate': return 3
@@ -24,6 +25,7 @@ export function tierToIndex(tier: TierLevel): number {
 }
 
 const tierColors: Record<TierLevel, string> = {
+  'N/A': 'bg-slate-100 text-slate-600',
   'Very high': 'bg-green-500 text-white',
   'High': 'bg-lime-400 text-gray-900',
   'Moderate': 'bg-amber-300 text-gray-900',

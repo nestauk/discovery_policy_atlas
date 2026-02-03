@@ -509,13 +509,59 @@ def compute_intervention_impact_score(
     """
     excluded_labels = {"No Outcomes", "No relevant outcomes"}
     doc_count = len(document_scores)
-    filtered = [item for item in document_scores if item[1] not in excluded_labels]
+    excluded_floor_ones_reasons: Dict[str, int] = {}
+
+    def _is_floor_one(
+        score: float, label: str, breakdown: Dict[str, object]
+    ) -> Tuple[bool, Optional[str]]:
+        if score != 1.0:
+            return (False, None)
+        if label in excluded_labels:
+            return (True, "excluded_label")
+        note = str(breakdown.get("note", "")).strip().lower()
+        floor_notes = [
+            "no extractable outcomes",
+            "no primary outcomes",
+            "no outcomes matched target similarity",
+            "no outcomes matched target",
+            "no outcomes matched",
+        ]
+        if any(phrase in note for phrase in floor_notes):
+            return (True, "note_floor")
+        outcomes_used = breakdown.get("outcomes_used")
+        net_magnitude = breakdown.get("net_magnitude")
+        if outcomes_used == 0 and net_magnitude is None:
+            return (True, "no_outcomes_used")
+        return (False, None)
+
+    filtered: List[Tuple[float, str, Dict[str, object], float]] = []
+    for score, label, breakdown, evidence in document_scores:
+        if label in excluded_labels:
+            excluded_floor_ones_reasons["excluded_label"] = (
+                excluded_floor_ones_reasons.get("excluded_label", 0) + 1
+            )
+            continue
+        is_floor, reason = _is_floor_one(score, label, breakdown)
+        if is_floor:
+            reason_key = reason or "floor_one"
+            excluded_floor_ones_reasons[reason_key] = (
+                excluded_floor_ones_reasons.get(reason_key, 0) + 1
+            )
+            continue
+        filtered.append((score, label, breakdown, evidence))
+
+    excluded_floor_ones_count = sum(excluded_floor_ones_reasons.values())
     excluded_count = doc_count - len(filtered)
     if not filtered:
         return (
             2.5,
             "Insufficient Evidence",
-            {"doc_count": doc_count, "excluded_count": excluded_count},
+            {
+                "doc_count": doc_count,
+                "excluded_count": excluded_count,
+                "excluded_floor_ones_count": excluded_floor_ones_count,
+                "excluded_floor_ones_reasons": excluded_floor_ones_reasons,
+            },
         )
 
     pos_docs = 0
@@ -539,6 +585,8 @@ def compute_intervention_impact_score(
                 "doc_count": doc_count,
                 "contributing_docs": 1,
                 "excluded_count": excluded_count,
+                "excluded_floor_ones_count": excluded_floor_ones_count,
+                "excluded_floor_ones_reasons": excluded_floor_ones_reasons,
                 "evidence_weight_total": float(evidence),
                 "discord_flag": discord_flag,
             },
@@ -559,6 +607,8 @@ def compute_intervention_impact_score(
                 "doc_count": doc_count,
                 "contributing_docs": len(filtered),
                 "excluded_count": excluded_count,
+                "excluded_floor_ones_count": excluded_floor_ones_count,
+                "excluded_floor_ones_reasons": excluded_floor_ones_reasons,
                 "discord_flag": discord_flag,
             },
         )
@@ -584,6 +634,8 @@ def compute_intervention_impact_score(
             "doc_count": doc_count,
             "contributing_docs": len(filtered),
             "excluded_count": excluded_count,
+            "excluded_floor_ones_count": excluded_floor_ones_count,
+            "excluded_floor_ones_reasons": excluded_floor_ones_reasons,
             "positive_docs": pos_docs,
             "negative_docs": neg_docs,
             "discord_flag": discord_flag,
