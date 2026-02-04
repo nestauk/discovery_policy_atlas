@@ -1703,6 +1703,17 @@ async def get_issue_intervention_navigator(
         intervention_themes_by_id = {
             t.get("id"): t for t in intervention_themes if t.get("id")
         }
+        intervention_impact_by_id = {
+            t.get("id"): {
+                "impact_score": t.get("impact_score"),
+                "impact_score_label": t.get("impact_score_label"),
+                "impact_score_breakdown": _parse_json_field(
+                    t.get("impact_score_breakdown")
+                ),
+            }
+            for t in intervention_themes
+            if t.get("id")
+        }
 
         logger.info(
             f"Found {len(issue_themes)} issue themes and {len(intervention_themes)} intervention themes"
@@ -1857,6 +1868,15 @@ async def get_issue_intervention_navigator(
                     )
                     intervention["transferability_breakdown"] = theme.get(
                         "transferability_breakdown"
+                    )
+                impact_info = intervention_impact_by_id.get(theme_id)
+                if impact_info:
+                    intervention["impact_score"] = impact_info.get("impact_score")
+                    intervention["impact_score_label"] = impact_info.get(
+                        "impact_score_label"
+                    )
+                    intervention["impact_score_breakdown"] = impact_info.get(
+                        "impact_score_breakdown"
                     )
 
                 intervention["outcome_themes"] = outcomes_by_intervention.get(
