@@ -262,10 +262,15 @@ async def compute_document_transferability(
         ),
     )
 
+    matches = [
+        ("geography", geo_match),
+        ("population", pop_match),
+        ("inner_setting", set_match),
+    ]
     scores = [
-        MATCH_SCORES.get(geo_match),
-        MATCH_SCORES.get(pop_match),
-        MATCH_SCORES.get(set_match),
+        MATCH_SCORES.get(match_level)
+        for _, match_level in matches
+        if match_level != "unknown"
     ]
     valid = [score for score in scores if score is not None]
     context_fit = sum(valid) / len(valid) if valid else 0.5
@@ -465,7 +470,7 @@ async def compute_document_impact_score(
         else CAUSAL_WEIGHTS.get(None, 0.9)
     )
     base_score = 2.5 + (net_magnitude * 2.5)
-    dampened = base_score * (max(0.2, min(1.0, transferability)) ** 0.4)
+    dampened = base_score * (max(0.2, min(1.0, transferability)) ** 0.3)
     final_score = round(max(1.0, min(5.0, dampened)), 1)
 
     if final_score >= 4.5:
