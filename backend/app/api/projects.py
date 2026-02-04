@@ -73,6 +73,36 @@ def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
     return None
 
 
+def _is_prevalence_only(payload: Optional[Dict]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("is_prevalence_only") is True:
+        return True
+    raw = payload.get("raw_data")
+    if isinstance(raw, dict) and raw.get("is_prevalence_only") is True:
+        return True
+    return False
+
+
+def filter_prevalence_only_results(results: List[Dict]) -> List[Dict]:
+    """Filter out prevalence-only outcomes from result lists."""
+    return [result for result in results if not _is_prevalence_only(result)]
+
+
+def filter_prevalence_only_extractions(extractions: List[Dict]) -> List[Dict]:
+    """Filter out prevalence-only results from extraction rows."""
+    filtered = []
+    for extraction in extractions:
+        if not isinstance(extraction, dict):
+            continue
+        if extraction.get("extraction_type") != "result":
+            filtered.append(extraction)
+            continue
+        if not _is_prevalence_only(extraction):
+            filtered.append(extraction)
+    return filtered
+
+
 router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 
 # Organization slug that has access to all projects (dev/admin org)
@@ -423,6 +453,7 @@ async def get_analysis_project(
             .eq("analysis_project_id", project_id)
             .execute()
         )
+        extractions = filter_prevalence_only_extractions(extractions_result.data or [])
 
         # Map database field names to frontend expectations for documents
         documents = []
@@ -450,9 +481,9 @@ async def get_analysis_project(
                 "search_query": project.get("search_query"),
             },
             "documents": documents,
-            "extractions": extractions_result.data,
+            "extractions": extractions,
             "document_count": len(documents),
-            "extraction_count": len(extractions_result.data),
+            "extraction_count": len(extractions),
         }
 
     except HTTPException:
@@ -1205,9 +1236,10 @@ async def get_project_extractions(
             query = query.eq("extraction_type", extraction_type)
 
         extractions_result = query.execute()
+        extractions = filter_prevalence_only_extractions(extractions_result.data or [])
         return {
-            "extractions": extractions_result.data,
-            "total": len(extractions_result.data),
+            "extractions": extractions,
+            "total": len(extractions),
         }
 
     except Exception as e:
@@ -1303,7 +1335,9 @@ async def get_project_interventions(
         for document in docs_result.data:
             extraction_results = document.get("extraction_results", {})
             interventions = extraction_results.get("interventions", [])
-            results = extraction_results.get("results", [])
+            results = filter_prevalence_only_results(
+                extraction_results.get("results", [])
+            )
 
             # Group results by intervention
             results_by_intervention = {}
@@ -1550,7 +1584,7 @@ async def get_document_extraction(
         issues = extraction_results.get("issues", [])
         interventions = extraction_results.get("interventions", [])
         mappings = extraction_results.get("mappings", [])
-        results = extraction_results.get("results", [])
+        results = filter_prevalence_only_results(extraction_results.get("results", []))
         conclusion = extraction_results.get("conclusion")
 
         # Group results by intervention for easier display
@@ -2141,7 +2175,9 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
-                results_data = extraction_results.get("results", [])
+                results_data = filter_prevalence_only_results(
+                    extraction_results.get("results", [])
+                )
 
                 intervention_name = extraction.get("label", raw_data.get("name", ""))
 

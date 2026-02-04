@@ -129,6 +129,7 @@ class ResultItem(BaseModel):
     negative_impact_flag: Optional[bool] = None
     is_primary: bool = False
     is_beneficial: bool = True
+    is_prevalence_only: Optional[bool] = None
     magnitude_estimate: Optional[SemanticMagnitudeType] = None
 
 
@@ -231,5 +232,3 @@ class DocumentExtractionBundle(BaseModel):
     # SR document-level fields
     n_studies_included: Optional[int] = None  # Aggregate study count for SR
     sr_completeness_flag: Optional[str] = None  # "complete", "incomplete_heterogeneity"
-
-

@@ -386,8 +386,13 @@ async def compute_document_impact_score(
     Returns:
         Tuple[Optional[float], str, Dict[str, object]]: Score, label, and breakdown.
     """
+    outcomes = [
+        outcome
+        for outcome in outcomes
+        if not getattr(outcome, "is_prevalence_only", False)
+    ]
     if not outcomes:
-        return (None, "N/A", {"note": "no extractable outcomes"})
+        return (None, "N/A", {"note": "no extractable outcomes after filtering"})
 
     primary = [outcome for outcome in outcomes if outcome.is_primary]
     if not primary:
