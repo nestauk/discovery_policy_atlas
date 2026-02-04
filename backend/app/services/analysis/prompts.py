@@ -419,7 +419,7 @@ Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","direction":"increase|decrease|null|mixed_or_unclear","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","n_studies":int|null,"sample_size":int|null,"stratum_type":"...|null","stratum_value":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"..."}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","n_studies":int|null,"sample_size":int|null,"stratum_type":"...|null","stratum_value":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"...","is_primary":true|false,"is_beneficial":true|false,"magnitude_estimate":"substantial|large|moderate|marginal|unknown"}}]}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
@@ -451,7 +451,17 @@ Effect Size Fields:
 - tau2: τ² (between-study variance) if reported
 
 Direction:
-- "increase" for improvements/increases, "decrease" for reductions, "null" for no significant effect, "mixed_or_unclear" for conflicting results
+- "increase" for improvements/increases, "decrease" for reductions, "null" for no significant effect, "mixed" for conflicting results, "inconclusive" for insufficient data
+
+Primary outcomes:
+- Set is_primary=true for the overall pooled estimate(s) emphasised as the main result (multiple primary outcomes are allowed).
+- For subgroup/sensitivity strata, set is_primary=false unless the paper treats that stratum as the main estimate.
+
+Benefit flag:
+- is_beneficial=true if the outcome change benefits the population (e.g., BMI decrease is beneficial, BMI increase is harmful).
+
+Magnitude estimate:
+- If effect sizes are missing or qualitative only, assign a semantic bucket: substantial | large | moderate | marginal | unknown.
 
 Paper text:
 {full_text}""",

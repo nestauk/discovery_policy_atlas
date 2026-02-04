@@ -424,8 +424,8 @@ class LangChainExtractorService:
                 doc_id = row.get("doc_id")
                 if doc_id in extraction_mapping:
                     extraction_info = extraction_mapping[doc_id]
-                    for field, value in extraction_info.items():
-                        df.at[idx, field] = value
+                    for column_name, value in extraction_info.items():
+                        df.at[idx, column_name] = value
                 else:
                     # Document not processed (likely not relevant or skipped)
                     df.at[idx, "extraction_status"] = "skipped"
@@ -526,7 +526,8 @@ class LangChainExtractorService:
                         "doc_id": doc_id,
                         "intervention_idx": item.get("intervention_idx"),
                         "outcome_variable": item.get("outcome_variable"),
-                        "direction": item.get("direction"),
+                        "direction": item.get("effect_direction")
+                        or item.get("direction"),
                         "estimate_level": item.get("estimate_level"),
                         "effect_size_type": item.get("effect_size_type"),
                         "effect_size": item.get("effect_size"),
