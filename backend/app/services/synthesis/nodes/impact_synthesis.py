@@ -5,6 +5,7 @@ Impact synthesis node for Tier 2 verdict, magnitude, and transferability computa
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from typing import Dict, List, Optional, Tuple
@@ -31,38 +32,38 @@ EFFECT_SIZE_SCALES = {
     "cohens_d": {
         "marginal": 0.2,
         "moderate": 0.5,
-        "substantial": 0.8,
-        "transformational": 1.2,
+        "large": 0.8,
+        "substantial": 1.2,
     },
     "smd": {
         "marginal": 0.2,
         "moderate": 0.5,
-        "substantial": 0.8,
-        "transformational": 1.2,
+        "large": 0.8,
+        "substantial": 1.2,
     },
     "or": {
         "marginal": 1.2,
         "moderate": 1.5,
-        "substantial": 2.0,
-        "transformational": 3.0,
+        "large": 2.0,
+        "substantial": 3.0,
     },
     "rr": {
         "marginal": 1.2,
         "moderate": 1.5,
-        "substantial": 2.0,
-        "transformational": 3.0,
+        "large": 2.0,
+        "substantial": 3.0,
     },
     "percentage": {
         "marginal": 5,
         "moderate": 15,
-        "substantial": 30,
-        "transformational": 50,
+        "large": 30,
+        "substantial": 50,
     },
     "percent": {
         "marginal": 5,
         "moderate": 15,
-        "substantial": 30,
-        "transformational": 50,
+        "large": 30,
+        "substantial": 50,
     },
 }
 
@@ -75,6 +76,7 @@ DEFAULT_USER_CONSTRAINTS = {
 
 TRANSFERABILITY_MODEL = os.getenv("TRANSFERABILITY_MODEL", "gpt-4o-mini")
 IMPACT_SUMMARY_MODEL = os.getenv("IMPACT_SUMMARY_MODEL", "gpt-4o-mini")
+MAGNITUDE_CALIBRATION_MODEL = os.getenv("MAGNITUDE_CALIBRATION_MODEL", "gpt-4o-mini")
 
 # Target context for transferability evaluation (Policy Atlas users are UK-based).
 DEFAULT_TARGET_GEOGRAPHY = ["UK"]
@@ -91,6 +93,160 @@ UK_COUNTRY_SET = {
 }
 
 
+class MagnitudeThresholdResponse(BaseModel):
+    """Structured output for dynamic magnitude thresholds.
+
+    Args:
+        thresholds_by_unit: Mapping of unit/type to threshold cutoffs.
+        reasoning: Optional explanation for threshold choices.
+    """
+
+    thresholds_by_unit: Dict[str, Dict[str, float]] = Field(default_factory=dict)
+    reasoning: Optional[str] = None
+
+
+def build_magnitude_threshold_prompt(
+    outcome_name: str,
+    outcome_description: str,
+    research_question: str,
+    target_population: List[str],
+    effect_sizes_json: str,
+) -> str:
+    """Build LLM prompt for outcome-specific magnitude thresholds.
+
+    Args:
+        outcome_name: Canonical name of the outcome.
+        outcome_description: LLM-generated description of the outcome.
+        research_question: Research question for domain context.
+        target_population: Target population specified by the user.
+        effect_sizes_json: JSON string of effect sizes to calibrate.
+
+    Returns:
+        str: Prompt text for the calibration LLM.
+    """
+
+    population = ", ".join(target_population) if target_population else "Not specified"
+    description = outcome_description or "Not specified"
+    return (
+        "You are calibrating effect size thresholds for research synthesis across diverse domains.\n\n"
+        "## Context\n"
+        f"Research question: {research_question}\n"
+        f"Outcome being measured: {outcome_name}\n"
+        f"Outcome description: {description}\n"
+        f"Target population: {population}\n\n"
+        "## Effect Sizes to Calibrate\n"
+        "The following effect sizes were extracted from research documents for this outcome "
+        "(across all intervention types):\n"
+        f"{effect_sizes_json}\n\n"
+        "## Task\n"
+        "For each unique effect size unit/type present, provide thresholds that define:\n"
+        "- marginal: small effect with limited practical impact\n"
+        "- moderate: moderate effect with practical significance\n"
+        "- large: large effect with meaningful practical impact\n"
+        "- substantial: very large effect, potentially paradigm-shifting\n\n"
+        "Consider:\n"
+        "1. What does a change in this outcome actually mean for the population?\n"
+        "2. What are typical effect sizes seen in this research domain?\n"
+        "3. What magnitude of change would practitioners/policymakers consider significant?\n\n"
+        "Return JSON with the shape:\n"
+        '{\n  "thresholds_by_unit": {\n'
+        '    "<unit_or_type>": {"marginal": <num>, "moderate": <num>, "large": <num>, "substantial": <num>}\n'
+        "  },\n"
+        '  "reasoning": "<brief explanation>"\n'
+        "}\n"
+    )
+
+
+async def generate_dynamic_thresholds(
+    outcome_name: str,
+    outcome_description: str,
+    research_question: str,
+    target_population: List[str],
+    all_effects_for_outcome: List[Dict],
+    cache: Dict[str, Dict[str, Dict[str, float]]],
+    llm,
+) -> Dict[str, Dict[str, float]]:
+    """Generate dynamic thresholds for an outcome using an LLM.
+
+    Args:
+        outcome_name: Canonical name of the outcome.
+        outcome_description: LLM-generated description of the outcome.
+        research_question: Research question for domain context.
+        target_population: Target population specified by the user.
+        all_effects_for_outcome: Effect size records across all interventions.
+        cache: Threshold cache keyed by outcome_name.
+        llm: LLM client instance.
+
+    Returns:
+        Dict[str, Dict[str, float]]: Thresholds per unit/type.
+    """
+
+    if outcome_name in cache:
+        return cache[outcome_name]
+
+    effect_entries = []
+    for item in all_effects_for_outcome:
+        effect_size = item.get("effect_size")
+        if not effect_size:
+            continue
+        raw_effect = str(effect_size).replace("−", "-").strip()
+        if not raw_effect:
+            continue
+        effect_entries.append(
+            {
+                "effect_size": raw_effect,
+                "effect_size_type": item.get("effect_size_type"),
+                "outcome_variable": item.get("outcome_variable"),
+            }
+        )
+
+    if not effect_entries:
+        cache[outcome_name] = {}
+        return {}
+
+    effect_sizes_json = json.dumps(effect_entries, ensure_ascii=True)
+    prompt = build_magnitude_threshold_prompt(
+        outcome_name=outcome_name,
+        outcome_description=outcome_description,
+        research_question=research_question,
+        target_population=target_population,
+        effect_sizes_json=effect_sizes_json,
+    )
+    try:
+        response = await llm.ainvoke(prompt)
+        content = (getattr(response, "content", None) or str(response)).strip()
+        raw_payload = json.loads(content)
+        parsed = MagnitudeThresholdResponse.model_validate(raw_payload)
+    except Exception:
+        cache[outcome_name] = {}
+        return {}
+
+    cleaned: Dict[str, Dict[str, float]] = {}
+    for unit, thresholds in (parsed.thresholds_by_unit or {}).items():
+        if not isinstance(thresholds, dict):
+            continue
+        unit_key = str(unit).strip().lower()
+        normalised_key = {
+            "percent": "percentage",
+            "percentage": "percentage",
+            "cohen's d": "cohens_d",
+            "cohens d": "cohens_d",
+            "d": "cohens_d",
+        }.get(unit_key, unit_key)
+        try:
+            cleaned[normalised_key] = {
+                "marginal": float(thresholds["marginal"]),
+                "moderate": float(thresholds["moderate"]),
+                "large": float(thresholds["large"]),
+                "substantial": float(thresholds["substantial"]),
+            }
+        except Exception:
+            continue
+
+    cache[outcome_name] = cleaned
+    return cleaned
+
+
 async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     """Compute Tier 2 impact synthesis and enrich aggregated tables."""
     print("--- Computing Impact Syntheses (Tier 2) ---")
@@ -98,6 +254,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     interventions = state.get("aggregated_interventions") or []
     outcomes = state.get("aggregated_outcomes") or []
     risk_themes: List[FinalTheme] = state.get("final_risk_themes") or []
+    final_outcome_themes: List[FinalTheme] = state.get("final_outcome_themes") or []
     raw_extractions = state.get("raw_extractions") or []
     doc_scores = state.get("doc_scores") or {}
     theme_to_doc_uuids = state.get("theme_to_doc_uuids") or {}
@@ -106,6 +263,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     doc_metadata = state.get("doc_metadata") or {}
     extraction_to_doc = state.get("extraction_to_doc") or {}
 
+    research_question = state.get("research_question") or "Not specified"
     target_inner_setting = state.get("target_inner_setting") or []
     target_population = state.get("target_population") or []
     target_geography = DEFAULT_TARGET_GEOGRAPHY
@@ -129,9 +287,41 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
         if meta.get("doc_id")
     }
 
+    raw_ext_by_id = {
+        str(ext.get("id")): ext for ext in raw_extractions if ext.get("id")
+    }
+    effects_by_outcome_name: Dict[str, List[Dict]] = {}
+    descriptions_by_outcome_name: Dict[str, str] = {}
+    for theme in final_outcome_themes:
+        theme_name = theme.name or ""
+        if not theme_name:
+            continue
+        if theme.description and theme_name not in descriptions_by_outcome_name:
+            descriptions_by_outcome_name[theme_name] = theme.description
+        for concept in theme.concepts or []:
+            raw_ext = raw_ext_by_id.get(str(concept.id))
+            if not raw_ext or raw_ext.get("type") != "result":
+                continue
+            effects_by_outcome_name.setdefault(theme_name, []).append(
+                {
+                    "effect_size": raw_ext.get("effect_size"),
+                    "effect_size_type": raw_ext.get("effect_size_type"),
+                    "outcome_variable": raw_ext.get("outcome_variable"),
+                }
+            )
+
+    threshold_cache: Dict[str, Dict[str, Dict[str, float]]] = {}
+    magnitude_llm = get_llm(MAGNITUDE_CALIBRATION_MODEL, temperature=0.0)
+
     # Enrich outcomes with verdict and magnitude
     enriched_outcomes: List[OutcomeTheme] = []
     for outcome in outcomes:
+        outcome_name = outcome.outcome_name
+        outcome_description = (
+            outcome.outcome_description
+            or descriptions_by_outcome_name.get(outcome_name, "")
+        )
+        all_effects_for_outcome = effects_by_outcome_name.get(outcome_name, [])
         verdict_label, discord_flag, discord_reason = determine_verdict(
             outcome.positive_count,
             outcome.negative_count,
@@ -141,11 +331,18 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
             ),
         )
 
-        magnitude, magnitude_detail = compute_magnitude_hybrid(
+        magnitude, magnitude_detail = await compute_magnitude_hybrid(
             outcome.source_doc_ids,
             result_extractions,
             doc_scores,
             doc_uuid_by_doc_id,
+            outcome_name,
+            outcome_description,
+            research_question,
+            target_population,
+            threshold_cache,
+            all_effects_for_outcome,
+            magnitude_llm,
         )
         primary_causal_mechanism, causal_mechanism_detail = compute_causal_mechanism(
             outcome.source_doc_ids,
@@ -225,7 +422,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
                 intervention,
                 outcome_list,
                 target_outcomes,
-                state.get("research_question") or "Not specified",
+                research_question,
                 impact_summary_llm,
             )
         document_scores = []
@@ -374,13 +571,47 @@ def determine_verdict(
     return (verdict, False, None)
 
 
-def compute_magnitude_hybrid(
+async def compute_magnitude_hybrid(
     source_doc_ids: List[str],
     result_extractions: List[Dict],
     doc_scores: Dict[str, Dict],
     doc_uuid_by_doc_id: Dict[str, str],
+    outcome_name: str,
+    outcome_description: str,
+    research_question: str,
+    target_population: List[str],
+    threshold_cache: Dict[str, Dict[str, Dict[str, float]]],
+    all_effects_for_outcome: List[Dict],
+    magnitude_llm,
 ) -> Tuple[SemanticMagnitudeType, Optional[MagnitudeDetail]]:
     """Compute magnitude from effect sizes using hybrid scale detection."""
+    thresholds_by_unit = await generate_dynamic_thresholds(
+        outcome_name=outcome_name,
+        outcome_description=outcome_description,
+        research_question=research_question,
+        target_population=target_population,
+        all_effects_for_outcome=all_effects_for_outcome,
+        cache=threshold_cache,
+        llm=magnitude_llm,
+    )
+
+    def apply_thresholds(
+        value: float, scale_key: str, effect_size: str
+    ) -> SemanticMagnitudeType:
+        if thresholds_by_unit:
+            thresholds = thresholds_by_unit.get(scale_key)
+            if thresholds:
+                value = abs(value)
+                if value >= thresholds["substantial"]:
+                    return "substantial"
+                if value >= thresholds["large"]:
+                    return "large"
+                if value >= thresholds["moderate"]:
+                    return "moderate"
+                return "marginal"
+        scale_type = detect_scale_type(scale_key, effect_size)
+        return apply_magnitude_thresholds(value, scale_type)
+
     parsed_effects: List[Dict[str, object]] = []
     direction_weights = {"increase": 0, "decrease": 0}
     for ext in result_extractions:
@@ -388,7 +619,8 @@ def compute_magnitude_hybrid(
         if doc_id not in source_doc_ids:
             continue
         effect_size = ext.get("effect_size", "")
-        effect_type = (ext.get("effect_size_type") or "").lower()
+        effect_type_raw = (ext.get("effect_size_type") or "").strip()
+        effect_type = effect_type_raw.lower()
         doc_uuid = doc_uuid_by_doc_id.get(doc_id, "")
         quality = doc_scores.get(doc_uuid, {}).get("evidence_score", 1) or 1
         effect_direction = (ext.get("effect_direction") or "").lower()
@@ -399,15 +631,15 @@ def compute_magnitude_hybrid(
         if numeric_val is None:
             continue
 
-        scale_type = detect_scale_type(effect_type, effect_size)
-        magnitude = apply_magnitude_thresholds(numeric_val, scale_type)
+        scale_key = effect_type or detect_scale_type(effect_type, effect_size)
+        magnitude = apply_thresholds(numeric_val, scale_key, effect_size)
         parsed_effects.append(
             {
                 "magnitude": magnitude,
                 "quality": quality,
                 "doc_id": doc_id,
                 "direction": effect_direction,
-                "scale_type": scale_type,
+                "scale_type": scale_key,
             }
         )
 
@@ -432,7 +664,7 @@ def compute_magnitude_hybrid(
         weights[mag] = weights.get(mag, 0) + qual
         scale_counts[scale] = scale_counts.get(scale, 0) + 1
 
-    magnitude_order = ["marginal", "moderate", "substantial", "transformational"]
+    magnitude_order = ["marginal", "moderate", "large", "substantial"]
     max_weight = max(weights.values())
     top = [m for m, w in weights.items() if w == max_weight]
     if len(top) > 1:
@@ -449,6 +681,10 @@ def compute_magnitude_hybrid(
     total_sources = len({doc_id for doc_id in source_doc_ids if doc_id})
     measurement_count = len(aligned_effects)
     dominant_scale = max(scale_counts.items(), key=lambda x: x[1])[0]
+    if thresholds_by_unit and dominant_scale in thresholds_by_unit:
+        thresholds_text = format_dynamic_thresholds(thresholds_by_unit[dominant_scale])
+    else:
+        thresholds_text = format_effect_thresholds(dominant_scale)
     detail = MagnitudeDetail(
         direction=direction,
         bucket_counts=weights,
@@ -456,7 +692,7 @@ def compute_magnitude_hybrid(
         total_sources=total_sources,
         measurement_count=measurement_count,
         dominant_scale=dominant_scale,
-        thresholds=format_effect_thresholds(dominant_scale),
+        thresholds=thresholds_text,
     )
     return (result, detail)
 
@@ -1102,10 +1338,32 @@ def resolve_effect_direction(direction_weights: Dict[str, int]) -> str:
 def format_effect_thresholds(scale_type: str) -> str:
     """Format effect size thresholds for tooltip display."""
     if scale_type in ("cohens_d", "smd"):
-        return "d<0.2=marginal, 0.2-0.5=moderate, 0.5-0.8=substantial, >0.8=transformational"
+        return "d<0.2=marginal, 0.2-0.5=moderate, 0.5-0.8=large, >0.8=substantial"
     if scale_type in ("or", "rr"):
-        return "1.0-1.2=marginal, 1.2-1.5=moderate, 1.5-2.0=substantial, >2.0=transformational"
-    return "0-5=marginal, 5-15=moderate, 15-30=substantial, >30=transformational"
+        return "1.0-1.2=marginal, 1.2-1.5=moderate, 1.5-2.0=large, >2.0=substantial"
+    return "0-5=marginal, 5-15=moderate, 15-30=large, >30=substantial"
+
+
+def format_dynamic_thresholds(thresholds: Dict[str, float]) -> str:
+    """Format dynamic thresholds for tooltip display.
+
+    Args:
+        thresholds: Threshold cutoffs for the outcome unit/type.
+
+    Returns:
+        str: Human-readable threshold summary.
+    """
+
+    try:
+        moderate = thresholds["moderate"]
+        large = thresholds["large"]
+        substantial = thresholds["substantial"]
+    except KeyError:
+        return "Custom thresholds"
+    return (
+        f"<{moderate}=marginal, {moderate}-{large}=moderate, "
+        f"{large}-{substantial}=large, >{substantial}=substantial"
+    )
 
 
 def check_attribution_claims(
@@ -1232,10 +1490,10 @@ def apply_magnitude_thresholds(value: float, scale_type: str) -> SemanticMagnitu
     """Apply scale-specific thresholds to determine magnitude."""
     thresholds = EFFECT_SIZE_SCALES.get(scale_type, EFFECT_SIZE_SCALES["percentage"])
     value = abs(value)
-    if value >= thresholds["transformational"]:
-        return "transformational"
     if value >= thresholds["substantial"]:
         return "substantial"
+    if value >= thresholds["large"]:
+        return "large"
     if value >= thresholds["moderate"]:
         return "moderate"
     return "marginal"

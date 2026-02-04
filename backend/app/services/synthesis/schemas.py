@@ -400,6 +400,7 @@ VerdictType = Literal[
 SemanticMagnitudeType = Literal[
     "transformational",
     "substantial",
+    "large",
     "moderate",
     "marginal",
     "unknown",
