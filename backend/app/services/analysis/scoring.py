@@ -474,15 +474,15 @@ async def compute_document_impact_score(
     final_score = round(max(1.0, min(5.0, dampened)), 1)
 
     if final_score >= 4.5:
-        label = "High"
+        label = "Very high"
     elif final_score >= 3.5:
-        label = "Good"
+        label = "High"
     elif final_score >= 2.5:
         label = "Moderate"
     elif final_score >= 1.5:
-        label = "Limited"
-    else:
         label = "Low"
+    else:
+        label = "Very low"
 
     return (
         final_score,
@@ -622,15 +622,15 @@ def compute_intervention_impact_score(
     final_score = round(max(1.0, min(5.0, weighted_avg)), 1)
 
     if final_score >= 4.5:
-        label = "High"
+        label = "Very high"
     elif final_score >= 3.5:
-        label = "Good"
+        label = "High"
     elif final_score >= 2.5:
         label = "Moderate"
     elif final_score >= 1.5:
-        label = "Limited"
-    else:
         label = "Low"
+    else:
+        label = "Very low"
 
     return (
         final_score,

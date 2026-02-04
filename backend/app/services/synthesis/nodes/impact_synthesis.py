@@ -24,7 +24,11 @@ from app.services.synthesis.schemas import (
     MagnitudeDetail,
     CausalityDetail,
 )
-from app.services.analysis.scoring import compute_intervention_impact_score
+from app.services.analysis.scoring import (
+    compute_intervention_impact_score,
+    MAGNITUDE_NORMALISED,
+    CAUSAL_WEIGHTS,
+)
 from app.utils.llm.llm_utils import get_llm
 
 
@@ -103,6 +107,19 @@ class MagnitudeThresholdResponse(BaseModel):
 
     thresholds_by_unit: Dict[str, Dict[str, float]] = Field(default_factory=dict)
     reasoning: Optional[str] = None
+
+
+def _normalise_unit_key(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    unit_key = str(value).strip().lower()
+    return {
+        "percent": "percentage",
+        "percentage": "percentage",
+        "cohen's d": "cohens_d",
+        "cohens d": "cohens_d",
+        "d": "cohens_d",
+    }.get(unit_key, unit_key)
 
 
 def build_magnitude_threshold_prompt(
@@ -225,14 +242,7 @@ async def generate_dynamic_thresholds(
     for unit, thresholds in (parsed.thresholds_by_unit or {}).items():
         if not isinstance(thresholds, dict):
             continue
-        unit_key = str(unit).strip().lower()
-        normalised_key = {
-            "percent": "percentage",
-            "percentage": "percentage",
-            "cohen's d": "cohens_d",
-            "cohens d": "cohens_d",
-            "d": "cohens_d",
-        }.get(unit_key, unit_key)
+        normalised_key = _normalise_unit_key(unit)
         try:
             cleaned[normalised_key] = {
                 "marginal": float(thresholds["marginal"]),
@@ -292,6 +302,7 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
     }
     effects_by_outcome_name: Dict[str, List[Dict]] = {}
     descriptions_by_outcome_name: Dict[str, str] = {}
+    outcome_name_by_extraction_id: Dict[str, str] = {}
     for theme in final_outcome_themes:
         theme_name = theme.name or ""
         if not theme_name:
@@ -299,7 +310,9 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
         if theme.description and theme_name not in descriptions_by_outcome_name:
             descriptions_by_outcome_name[theme_name] = theme.description
         for concept in theme.concepts or []:
-            raw_ext = raw_ext_by_id.get(str(concept.id))
+            concept_id = str(concept.id)
+            outcome_name_by_extraction_id[concept_id] = theme_name
+            raw_ext = raw_ext_by_id.get(concept_id)
             if not raw_ext or raw_ext.get("type") != "result":
                 continue
             effects_by_outcome_name.setdefault(theme_name, []).append(
@@ -381,6 +394,13 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
                 causal_mechanism_detail=causal_mechanism_detail,
             )
         )
+
+    doc_scores = rescore_document_scores_with_calibration(
+        doc_scores,
+        result_extractions,
+        outcome_name_by_extraction_id,
+        threshold_cache,
+    )
 
     outcomes_by_intervention: Dict[str, List[OutcomeTheme]] = {}
     for outcome in enriched_outcomes:
@@ -517,6 +537,9 @@ async def compute_impact_syntheses(state: SynthesisState) -> SynthesisState:
         "aggregated_outcomes": enriched_outcomes,
         "aggregated_interventions": enriched_interventions,
         "final_risk_themes": enriched_risk_themes,
+        "doc_scores": doc_scores,
+        "magnitude_thresholds_by_outcome_name": threshold_cache,
+        "outcome_name_by_extraction_id": outcome_name_by_extraction_id,
     }
 
 
@@ -1364,6 +1387,187 @@ def format_dynamic_thresholds(thresholds: Dict[str, float]) -> str:
         f"<{moderate}=marginal, {moderate}-{large}=moderate, "
         f"{large}-{substantial}=large, >{substantial}=substantial"
     )
+
+
+def _label_from_score(score: float) -> str:
+    if score >= 4.5:
+        return "Very high"
+    if score >= 3.5:
+        return "High"
+    if score >= 2.5:
+        return "Moderate"
+    if score >= 1.5:
+        return "Low"
+    return "Very low"
+
+
+def _resolve_causal_weight(entry: Dict[str, object]) -> float:
+    value = entry.get("causality_claim")
+    if isinstance(entry.get("causal_weight"), (int, float)):
+        return float(entry["causal_weight"])
+    return float(CAUSAL_WEIGHTS.get(value, 0.9))
+
+
+def _find_result_extraction_for_outcome(
+    doc_uuid: str,
+    outcome_entry: Dict[str, object],
+    result_extractions_by_doc: Dict[str, List[Dict]],
+) -> Optional[Dict]:
+    candidates = result_extractions_by_doc.get(doc_uuid, [])
+    if not candidates:
+        return None
+    outcome_name = str(outcome_entry.get("outcome") or "").strip().lower()
+    is_primary = outcome_entry.get("is_primary")
+    is_beneficial = outcome_entry.get("is_beneficial")
+
+    def matches(ext: Dict) -> bool:
+        ext_outcome = str(ext.get("outcome_variable") or "").strip().lower()
+        if ext_outcome and outcome_name and ext_outcome != outcome_name:
+            return False
+        if is_primary is not None and ext.get("is_primary") is not None:
+            if bool(ext.get("is_primary")) != bool(is_primary):
+                return False
+        if is_beneficial is not None and ext.get("is_beneficial") is not None:
+            if bool(ext.get("is_beneficial")) != bool(is_beneficial):
+                return False
+        return True
+
+    for ext in candidates:
+        if matches(ext):
+            return ext
+    return candidates[0] if candidates else None
+
+
+def rescore_document_scores_with_calibration(
+    doc_scores: Dict[str, Dict],
+    result_extractions: List[Dict],
+    outcome_name_by_extraction_id: Dict[str, str],
+    thresholds_by_outcome_name: Dict[str, Dict[str, Dict[str, float]]],
+) -> Dict[str, Dict]:
+    """Recompute document impact scores using calibrated thresholds."""
+    result_extractions_by_doc: Dict[str, List[Dict]] = {}
+    for ext in result_extractions:
+        doc_uuid = ext.get("doc_uuid")
+        if not doc_uuid:
+            continue
+        result_extractions_by_doc.setdefault(str(doc_uuid), []).append(ext)
+
+    for doc_uuid, score_entry in doc_scores.items():
+        breakdown = score_entry.get("impact_score_breakdown")
+        if not isinstance(breakdown, dict):
+            continue
+        if score_entry.get("impact_score") is None:
+            continue
+        outcome_breakdown = breakdown.get("outcome_breakdown")
+        if not isinstance(outcome_breakdown, list) or not outcome_breakdown:
+            continue
+
+        weighted_sum = 0.0
+        weight_sum = 0.0
+        similarity_sum = 0.0
+        included_count = 0
+        updated_outcomes: List[Dict[str, object]] = []
+
+        for entry in outcome_breakdown:
+            if not isinstance(entry, dict):
+                continue
+            included = bool(entry.get("included_in_score", True))
+            similarity = float(entry.get("similarity", 1.0) or 1.0)
+            causal_weight = _resolve_causal_weight(entry)
+            combined_weight = similarity * causal_weight
+
+            calibrated_magnitude = entry.get("magnitude")
+            calibration_outcome_name = None
+            calibration_unit_key = None
+
+            ext = _find_result_extraction_for_outcome(
+                doc_uuid, entry, result_extractions_by_doc
+            )
+            if ext:
+                ext_id = str(ext.get("id") or "")
+                calibration_outcome_name = outcome_name_by_extraction_id.get(ext_id)
+                effect_size = ext.get("effect_size")
+                numeric_val = (
+                    parse_effect_size_value(effect_size) if effect_size else None
+                )
+                unit_key = _normalise_unit_key(ext.get("effect_size_type"))
+                if not unit_key:
+                    unit_key = detect_scale_type("", str(effect_size or ""))
+                thresholds = (
+                    thresholds_by_outcome_name.get(calibration_outcome_name, {}).get(
+                        unit_key
+                    )
+                    if calibration_outcome_name
+                    else None
+                )
+                if thresholds and numeric_val is not None:
+                    value = abs(numeric_val)
+                    if value >= thresholds["substantial"]:
+                        calibrated_magnitude = "substantial"
+                    elif value >= thresholds["large"]:
+                        calibrated_magnitude = "large"
+                    elif value >= thresholds["moderate"]:
+                        calibrated_magnitude = "moderate"
+                    else:
+                        calibrated_magnitude = "marginal"
+                calibration_unit_key = unit_key
+
+            signed_magnitude = MAGNITUDE_NORMALISED.get(
+                calibrated_magnitude or "unknown", 0.0
+            )
+            if entry.get("is_beneficial") is False:
+                signed_magnitude = -signed_magnitude
+            contribution = signed_magnitude * combined_weight
+
+            if included:
+                weighted_sum += contribution
+                weight_sum += combined_weight
+                similarity_sum += similarity
+                included_count += 1
+
+            updated_outcomes.append(
+                {
+                    **entry,
+                    "calibrated_magnitude": calibrated_magnitude,
+                    "calibration_outcome_name": calibration_outcome_name,
+                    "calibration_unit_key": calibration_unit_key,
+                    "signed_magnitude": round(signed_magnitude, 2),
+                    "combined_weight": round(combined_weight, 3),
+                    "contribution": round(contribution, 3),
+                }
+            )
+
+        if included_count == 0:
+            score_entry["impact_score"] = 1.0
+            score_entry["impact_score_label"] = "No relevant outcomes"
+            breakdown[
+                "note"
+            ] = "no outcomes matched target similarity or had usable magnitude"
+            breakdown["outcomes_used"] = 0
+        else:
+            net_magnitude = weighted_sum / weight_sum if weight_sum > 0 else 0.0
+            base_score = 2.5 + (net_magnitude * 2.5)
+            transferability = float(score_entry.get("transferability_score") or 1.0)
+            dampened = base_score * (max(0.2, min(1.0, transferability)) ** 0.4)
+            final_score = round(max(1.0, min(5.0, dampened)), 1)
+            score_entry["impact_score"] = final_score
+            score_entry["impact_score_label"] = _label_from_score(final_score)
+            breakdown["net_magnitude"] = round(net_magnitude, 3)
+            breakdown["base_score"] = round(base_score, 2)
+            breakdown["transferability"] = round(transferability, 2)
+            avg_causal_weight = (
+                (weight_sum / similarity_sum)
+                if similarity_sum > 0
+                else CAUSAL_WEIGHTS.get(None, 0.9)
+            )
+            breakdown["avg_causal_weight"] = round(float(avg_causal_weight), 3)
+            breakdown["outcomes_used"] = included_count
+
+        breakdown["calibrated"] = True
+        breakdown["outcome_breakdown"] = updated_outcomes
+        score_entry["impact_score_breakdown"] = breakdown
+
+    return doc_scores
 
 
 def check_attribution_claims(

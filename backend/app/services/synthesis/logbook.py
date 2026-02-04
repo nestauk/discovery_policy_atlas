@@ -522,6 +522,30 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     }
                 ).execute()
 
+    # Persist calibrated document scores (overwrite strategy)
+    doc_scores = final_state.get("doc_scores") or {}
+    if doc_scores:
+        for doc_uuid, score_entry in doc_scores.items():
+            if not doc_uuid or not isinstance(score_entry, dict):
+                continue
+            impact_score = score_entry.get("impact_score")
+            impact_label = score_entry.get("impact_score_label")
+            impact_breakdown = score_entry.get("impact_score_breakdown")
+            if impact_score is None:
+                continue
+            try:
+                supabase.table("analysis_documents").update(
+                    {
+                        "impact_score": impact_score,
+                        "impact_score_label": impact_label,
+                        "impact_score_breakdown": impact_breakdown,
+                    }
+                ).eq("id", doc_uuid).execute()
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to persist document impact score for {doc_uuid}: {exc}"
+                )
+
 
 def _dedupe(items: List[str]) -> List[str]:
     """Deduplicate list while preserving order."""
