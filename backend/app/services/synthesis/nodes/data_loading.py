@@ -224,6 +224,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 "effect_direction": clean_null_string(raw.get("effect_direction")),
                 "effect_size": clean_null_string(raw.get("effect_size")),
                 "effect_size_type": clean_null_string(raw.get("effect_size_type")),
+                "is_beneficial": raw.get("is_beneficial"),
                 "causality_claim": raw.get("causality_claim"),
                 "p_value": raw.get("p_value"),
                 "uncertainty": raw.get("uncertainty"),
