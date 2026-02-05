@@ -46,6 +46,19 @@ const normaliseValue = (value?: string | null) => {
   return trimmed
 }
 
+const classifyContribution = (result: ContributionResult) => {
+  const direction = (result.effect_direction || '').toLowerCase().trim()
+  if (direction === 'no effect' || direction === 'null' || direction === 'none') {
+    return 'neutral'
+  }
+  if (typeof result.is_beneficial === 'boolean') {
+    return result.is_beneficial ? 'positive' : 'negative'
+  }
+  if (direction === 'increase') return 'positive'
+  if (direction === 'decrease') return 'negative'
+  return 'neutral'
+}
+
 interface ImpactProfileCardProps {
   outcome: OutcomeTheme
 }
@@ -167,6 +180,37 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
       return (a.title || '').localeCompare(b.title || '')
     })
   }, [contributions])
+  const groupedDocuments = useMemo(() => {
+    const buckets: Record<'positive' | 'neutral' | 'negative', ContributionDocument[]> = {
+      positive: [],
+      neutral: [],
+      negative: [],
+    }
+    orderedDocuments.forEach((doc) => {
+      const bucketedResults: Record<'positive' | 'neutral' | 'negative', ContributionResult[]> = {
+        positive: [],
+        neutral: [],
+        negative: [],
+      }
+      doc.results.forEach((result) => {
+        const bucket = classifyContribution(result)
+        bucketedResults[bucket].push(result)
+      })
+      ;(['positive', 'neutral', 'negative'] as const).forEach((bucket) => {
+        if (bucketedResults[bucket].length) {
+          buckets[bucket].push({ ...doc, results: bucketedResults[bucket] })
+        }
+      })
+    })
+    return buckets
+  }, [orderedDocuments])
+  const bucketCounts = useMemo(() => {
+    return {
+      positive: groupedDocuments.positive.reduce((sum, doc) => sum + doc.results.length, 0),
+      neutral: groupedDocuments.neutral.reduce((sum, doc) => sum + doc.results.length, 0),
+      negative: groupedDocuments.negative.reduce((sum, doc) => sum + doc.results.length, 0),
+    }
+  }, [groupedDocuments])
 
   const toggleContributions = async () => {
     const next = !expanded
@@ -285,109 +329,142 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
                 </p>
               )}
               {contributions?.documents?.length ? (
-                <div className="space-y-4">
-                  {orderedDocuments.map((doc) => (
-                    <div key={doc.analysis_document_id} className="rounded-lg border border-gray-100 p-4">
-                      <div className="space-y-1">
-                        {doc.title ? (
-                          doc.landing_page_url ? (
-                            <a
-                              className="text-sm font-semibold text-blue-700 hover:text-blue-800"
-                              href={doc.landing_page_url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {doc.title}
-                            </a>
-                          ) : (
-                            <p className="text-sm font-semibold text-gray-900">{doc.title}</p>
-                          )
-                        ) : (
-                          <p className="text-sm font-semibold text-gray-900">Untitled document</p>
-                        )}
-                        <div className="flex flex-wrap gap-2 text-xs text-gray-500">
-                          {doc.source && <span>{doc.source}</span>}
-                          {doc.year && <span>{doc.year}</span>}
-                          {doc.evidence_category && <span>{doc.evidence_category}</span>}
-                          {doc.doc_id && <span>Doc ID: {doc.doc_id}</span>}
+                <div className="space-y-6">
+                  {[
+                    {
+                      key: 'positive',
+                      label: 'Positive outcomes',
+                      className: 'text-emerald-700',
+                      documents: groupedDocuments.positive,
+                      count: bucketCounts.positive,
+                    },
+                    {
+                      key: 'neutral',
+                      label: 'Neutral outcomes',
+                      className: 'text-amber-700',
+                      documents: groupedDocuments.neutral,
+                      count: bucketCounts.neutral,
+                    },
+                    {
+                      key: 'negative',
+                      label: 'Negative outcomes',
+                      className: 'text-rose-700',
+                      documents: groupedDocuments.negative,
+                      count: bucketCounts.negative,
+                    },
+                  ].map((section) =>
+                    section.documents.length ? (
+                      <div key={section.key} className="space-y-3">
+                        <div className={`text-sm font-semibold ${section.className}`}>
+                          {section.label} ({section.count})
+                        </div>
+                        <div className="space-y-4">
+                          {section.documents.map((doc) => (
+                            <div key={`${section.key}-${doc.analysis_document_id}`} className="rounded-lg border border-gray-100 p-4">
+                              <div className="space-y-1">
+                                {doc.title ? (
+                                  doc.landing_page_url ? (
+                                    <a
+                                      className="text-sm font-semibold text-blue-700 hover:text-blue-800"
+                                      href={doc.landing_page_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      {doc.title}
+                                    </a>
+                                  ) : (
+                                    <p className="text-sm font-semibold text-gray-900">{doc.title}</p>
+                                  )
+                                ) : (
+                                  <p className="text-sm font-semibold text-gray-900">Untitled document</p>
+                                )}
+                                <div className="flex flex-wrap gap-2 text-xs text-gray-500">
+                                  {doc.source && <span>{doc.source}</span>}
+                                  {doc.year && <span>{doc.year}</span>}
+                                  {doc.evidence_category && <span>{doc.evidence_category}</span>}
+                                  {doc.doc_id && <span>Doc ID: {doc.doc_id}</span>}
+                                </div>
+                              </div>
+
+                              <div className="mt-3 space-y-3">
+                                {doc.results.map((result, idx) => {
+                                  const effectSize = normaliseValue(result.effect_size)
+                                  const effectSizeType = normaliseValue(result.effect_size_type)
+                                  const magnitudeValue =
+                                    result.calibrated_magnitude || result.magnitude_estimate
+                                  return (
+                                    <div key={`${section.key}-${doc.analysis_document_id}-${idx}`} className="rounded-md bg-gray-50 p-3">
+                                      <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-gray-900">
+                                        <span>{result.outcome_variable || 'Outcome'}</span>
+                                        {result.effect_direction && (
+                                          <Badge variant="outline" className="text-xs">
+                                            {toLabel(result.effect_direction)}
+                                          </Badge>
+                                        )}
+                                        {magnitudeValue && (
+                                          <Badge variant="outline" className="text-xs">
+                                            Magnitude: {toLabel(magnitudeValue)}
+                                          </Badge>
+                                        )}
+                                        {effectSize && (
+                                          <span className="text-xs text-gray-600">
+                                            {effectSize}{effectSizeType ? ` (${effectSizeType})` : ''}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="mt-2 space-y-1 text-xs text-gray-600">
+                                        {result.causality_claim && (
+                                          <p>
+                                            <span className="font-medium text-gray-700">Causality:</span>{' '}
+                                            {toLabel(result.causality_claim)}
+                                          </p>
+                                        )}
+                                        {typeof result.is_primary === 'boolean' && (
+                                          <p>
+                                            <span className="font-medium text-gray-700">Primary outcome:</span>{' '}
+                                            {result.is_primary ? 'Yes' : 'No'}
+                                          </p>
+                                        )}
+                                        {normaliseValue(result.population_measured) && (
+                                          <p>
+                                            <span className="font-medium text-gray-700">Population:</span>{' '}
+                                            {normaliseValue(result.population_measured)}
+                                          </p>
+                                        )}
+                                        {normaliseValue(result.subgroup_or_dose) && (
+                                          <p>
+                                            <span className="font-medium text-gray-700">Subgroup/dose:</span>{' '}
+                                            {normaliseValue(result.subgroup_or_dose)}
+                                          </p>
+                                        )}
+                                        {normaliseValue(result.uncertainty) && (
+                                          <p>
+                                            <span className="font-medium text-gray-700">Uncertainty:</span>{' '}
+                                            {normaliseValue(result.uncertainty)}
+                                          </p>
+                                        )}
+                                        {normaliseValue(result.p_value) && (
+                                          <p>
+                                            <span className="font-medium text-gray-700">P-value:</span>{' '}
+                                            {normaliseValue(result.p_value)}
+                                          </p>
+                                        )}
+                                      </div>
+                                      {result.supporting_quote && (
+                                        <blockquote className="mt-2 border-l-2 border-gray-200 pl-3 text-xs italic text-gray-500">
+                                          {result.supporting_quote}
+                                        </blockquote>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-
-                      <div className="mt-3 space-y-3">
-                        {doc.results.map((result, idx) => {
-                          const effectSize = normaliseValue(result.effect_size)
-                          const effectSizeType = normaliseValue(result.effect_size_type)
-                          const magnitudeValue =
-                            result.calibrated_magnitude || result.magnitude_estimate
-                          return (
-                            <div key={`${doc.analysis_document_id}-${idx}`} className="rounded-md bg-gray-50 p-3">
-                            <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-gray-900">
-                              <span>{result.outcome_variable || 'Outcome'}</span>
-                              {result.effect_direction && (
-                                <Badge variant="outline" className="text-xs">
-                                  {toLabel(result.effect_direction)}
-                                </Badge>
-                              )}
-                              {magnitudeValue && (
-                                <Badge variant="outline" className="text-xs">
-                                  Magnitude: {toLabel(magnitudeValue)}
-                                </Badge>
-                              )}
-                              {effectSize && (
-                                <span className="text-xs text-gray-600">
-                                  {effectSize}{effectSizeType ? ` (${effectSizeType})` : ''}
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-2 space-y-1 text-xs text-gray-600">
-                              {result.causality_claim && (
-                                <p>
-                                  <span className="font-medium text-gray-700">Causality:</span>{' '}
-                                  {toLabel(result.causality_claim)}
-                                </p>
-                              )}
-                              {typeof result.is_primary === 'boolean' && (
-                                <p>
-                                  <span className="font-medium text-gray-700">Primary outcome:</span>{' '}
-                                  {result.is_primary ? 'Yes' : 'No'}
-                                </p>
-                              )}
-                              {normaliseValue(result.population_measured) && (
-                                <p>
-                                  <span className="font-medium text-gray-700">Population:</span>{' '}
-                                  {normaliseValue(result.population_measured)}
-                                </p>
-                              )}
-                              {normaliseValue(result.subgroup_or_dose) && (
-                                <p>
-                                  <span className="font-medium text-gray-700">Subgroup/dose:</span>{' '}
-                                  {normaliseValue(result.subgroup_or_dose)}
-                                </p>
-                              )}
-                              {normaliseValue(result.uncertainty) && (
-                                <p>
-                                  <span className="font-medium text-gray-700">Uncertainty:</span>{' '}
-                                  {normaliseValue(result.uncertainty)}
-                                </p>
-                              )}
-                              {normaliseValue(result.p_value) && (
-                                <p>
-                                  <span className="font-medium text-gray-700">P-value:</span>{' '}
-                                  {normaliseValue(result.p_value)}
-                                </p>
-                              )}
-                            </div>
-                            {result.supporting_quote && (
-                              <blockquote className="mt-2 border-l-2 border-gray-200 pl-3 text-xs italic text-gray-500">
-                                {result.supporting_quote}
-                              </blockquote>
-                            )}
-                          </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
+                    ) : null
+                  )}
                 </div>
               ) : (
                 <p className="text-sm text-gray-500">No contributing outcomes available.</p>
