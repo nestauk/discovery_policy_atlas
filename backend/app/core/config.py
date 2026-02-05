@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None
     SUPABASE_KEY: Optional[str] = None
 
+    # Authentication
+    AUTH_PROVIDER: str = "clerk"  # Default to clerk, can be overridden by env variable
+
     # Development/Testing
     MOCK_OPENAI: bool = False
     DEBUG_ANALYSIS_FILES: bool = False  # Keep local analysis files for debugging
