@@ -117,6 +117,10 @@ class SynthesisState(TypedDict, total=False):
         str, List[str]
     ]  # theme_name -> [extraction_id, ...]
 
+    # Calibration outputs
+    magnitude_thresholds_by_outcome_name: Dict[str, Dict[str, Dict[str, float]]]
+    outcome_name_by_extraction_id: Dict[str, str]
+
     # RAG retrieval results (legacy - kept for backward compatibility)
     theme_evidence: Dict[str, List[RetrievedChunk]]
     issue_evidence: Dict[str, List[RetrievedChunk]]

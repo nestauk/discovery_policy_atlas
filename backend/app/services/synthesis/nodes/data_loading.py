@@ -215,6 +215,8 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 ),
             }
         elif et == "result":
+            if raw.get("is_prevalence_only") is True:
+                return None
             return {
                 **base,
                 "type": "result",
@@ -224,6 +226,8 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
                 "effect_direction": clean_null_string(raw.get("effect_direction")),
                 "effect_size": clean_null_string(raw.get("effect_size")),
                 "effect_size_type": clean_null_string(raw.get("effect_size_type")),
+                "is_beneficial": raw.get("is_beneficial"),
+                "is_prevalence_only": raw.get("is_prevalence_only"),
                 "causality_claim": raw.get("causality_claim"),
                 "p_value": raw.get("p_value"),
                 "uncertainty": raw.get("uncertainty"),
@@ -246,7 +250,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             }
         return {**base, "type": et}
 
-    uniform = [to_uniform(r) for r in (res.data or [])]
+    uniform = [item for item in (to_uniform(r) for r in (res.data or [])) if item]
 
     # Count docs with scores
     scored_docs = sum(1 for s in doc_scores.values() if s.get("evidence_score"))

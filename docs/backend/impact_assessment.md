@@ -51,6 +51,15 @@ The system receives an **evidence quality score** (Int 1–5) for each document 
   - harm warning flag (where thresholds are met; UI may choose not to surface the label)
   - linkage between risks and the relevant intervention themes
 
+### Impact score alignment notes
+
+- Intervention-level impact scores are **maximum-based** and derived from the
+  best-evidence documents, with moderate caps for limited evidence and a
+  proportional discord penalty (see `docs/backend/impact_score.md`).
+- When Tier 2 synthesis applies calibrated magnitude thresholds, it can
+  **overwrite document-level impact scores** so they remain consistent with the
+  synthesis calibration.
+
 ## Tier 1 (“Reader”): atomic extraction per document
 
 Tier 1 runs a multi-stage extraction pipeline:

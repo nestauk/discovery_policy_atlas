@@ -386,8 +386,13 @@ async def compute_document_impact_score(
     Returns:
         Tuple[Optional[float], str, Dict[str, object]]: Score, label, and breakdown.
     """
+    outcomes = [
+        outcome
+        for outcome in outcomes
+        if not getattr(outcome, "is_prevalence_only", False)
+    ]
     if not outcomes:
-        return (None, "N/A", {"note": "no extractable outcomes"})
+        return (None, "N/A", {"note": "no extractable outcomes after filtering"})
 
     primary = [outcome for outcome in outcomes if outcome.is_primary]
     if not primary:
@@ -474,15 +479,15 @@ async def compute_document_impact_score(
     final_score = round(max(1.0, min(5.0, dampened)), 1)
 
     if final_score >= 4.5:
-        label = "High"
+        label = "Very high"
     elif final_score >= 3.5:
-        label = "Good"
+        label = "High"
     elif final_score >= 2.5:
         label = "Moderate"
     elif final_score >= 1.5:
-        label = "Limited"
-    else:
         label = "Low"
+    else:
+        label = "Very low"
 
     return (
         final_score,
@@ -569,82 +574,131 @@ def compute_intervention_impact_score(
             },
         )
 
-    pos_docs = 0
-    neg_docs = 0
-    for _, _, breakdown, _ in filtered:
-        net_magnitude = float(breakdown.get("net_magnitude", 0.0))
-        if net_magnitude > 0.1:
-            pos_docs += 1
-        elif net_magnitude < -0.1:
-            neg_docs += 1
-    discord_flag = pos_docs > 0 and neg_docs > 0
+    def _apply_moderate_caps(
+        base_score: float,
+        contributing_docs: int,
+        best_evidence: float,
+        best_causality: float,
+    ) -> Tuple[float, List[str], float]:
+        cap = 5.0
+        cap_reasons: List[str] = []
 
-    if len(filtered) == 1:
-        score, _, _, evidence = filtered[0]
-        weighted = score if evidence >= 4 else score * 0.85
-        final_score = round(max(1.0, min(5.0, weighted)), 1)
-        return (
-            final_score,
-            "Single Source",
-            {
-                "doc_count": doc_count,
-                "contributing_docs": 1,
-                "excluded_count": excluded_count,
-                "excluded_floor_ones_count": excluded_floor_ones_count,
-                "excluded_floor_ones_reasons": excluded_floor_ones_reasons,
-                "evidence_weight_total": float(evidence),
-                "discord_flag": discord_flag,
-            },
-        )
+        if contributing_docs == 1:
+            cap = min(cap, 4.0)
+            cap_reasons.append("single_study")
+        elif contributing_docs <= 3:
+            cap = min(cap, 4.3)
+            cap_reasons.append("few_studies")
 
-    weighted_sum = 0.0
-    weight_total = 0.0
-    for score, _, _, evidence in filtered:
-        weight = float(evidence) if evidence is not None else 1.0
-        weighted_sum += float(score) * weight
-        weight_total += weight
+        if best_evidence < 3:
+            cap = min(cap, 3.0)
+            cap_reasons.append("low_evidence")
+        elif best_evidence < 4:
+            cap = min(cap, 3.5)
+            cap_reasons.append("moderate_evidence")
 
-    if weight_total == 0:
-        return (
-            2.5,
-            "Insufficient Evidence",
-            {
-                "doc_count": doc_count,
-                "contributing_docs": len(filtered),
-                "excluded_count": excluded_count,
-                "excluded_floor_ones_count": excluded_floor_ones_count,
-                "excluded_floor_ones_reasons": excluded_floor_ones_reasons,
-                "discord_flag": discord_flag,
-            },
-        )
+        if best_causality < 0.6:
+            cap = min(cap, 3.5)
+            cap_reasons.append("low_causality")
 
-    weighted_avg = weighted_sum / weight_total
-    final_score = round(max(1.0, min(5.0, weighted_avg)), 1)
+        final = min(base_score, cap)
+        applied_reasons = cap_reasons if final < base_score else []
+        return final, applied_reasons, cap
+
+    def _apply_discord_penalty(
+        score: float,
+        documents: List[Tuple[float, str, Dict[str, object], float]],
+    ) -> Tuple[float, bool, float, float, int, int]:
+        pos_weight = 0.0
+        neg_weight = 0.0
+        pos_docs = 0
+        neg_docs = 0
+
+        for _, _, breakdown, evidence in documents:
+            net_magnitude = float(breakdown.get("net_magnitude", 0.0))
+            weight = float(evidence) if evidence is not None else 1.0
+            if net_magnitude > 0.1:
+                pos_weight += weight
+                pos_docs += 1
+            elif net_magnitude < -0.1:
+                neg_weight += weight
+                neg_docs += 1
+
+        has_discord = pos_docs > 0 and neg_docs > 0
+        total_weight = pos_weight + neg_weight
+        if not has_discord or total_weight == 0:
+            return score, False, 0.0, 0.0, pos_docs, neg_docs
+
+        capped = min(score, 4.0)
+        neg_proportion = neg_weight / total_weight
+        penalty = neg_proportion * 1.0
+        final = max(1.0, capped - penalty)
+        return final, True, round(neg_proportion, 2), round(
+            penalty, 2
+        ), pos_docs, neg_docs
+
+    contributing_docs = len(filtered)
+    best_evidence = max(
+        float(evidence) if evidence is not None else 1.0
+        for _, _, _, evidence in filtered
+    )
+    best_evidence_docs = [
+        (score, label, breakdown, evidence)
+        for score, label, breakdown, evidence in filtered
+        if (float(evidence) if evidence is not None else 1.0) == best_evidence
+    ]
+    best_doc = max(best_evidence_docs, key=lambda entry: float(entry[0]))
+    base_score = float(best_doc[0])
+    best_causality = float(best_doc[2].get("avg_causal_weight") or 0.9)
+
+    score_after_caps, cap_reasons, effective_cap = _apply_moderate_caps(
+        base_score=base_score,
+        contributing_docs=contributing_docs,
+        best_evidence=best_evidence,
+        best_causality=best_causality,
+    )
+    (
+        final_score,
+        has_discord,
+        discord_proportion,
+        discord_penalty,
+        pos_docs,
+        neg_docs,
+    ) = _apply_discord_penalty(score_after_caps, filtered)
+    final_score = round(max(1.0, min(5.0, final_score)), 1)
 
     if final_score >= 4.5:
-        label = "High"
+        label = "Very high"
     elif final_score >= 3.5:
-        label = "Good"
+        label = "High"
     elif final_score >= 2.5:
         label = "Moderate"
     elif final_score >= 1.5:
-        label = "Limited"
-    else:
         label = "Low"
+    else:
+        label = "Very low"
 
     return (
         final_score,
         label,
         {
             "doc_count": doc_count,
-            "contributing_docs": len(filtered),
+            "contributing_docs": contributing_docs,
             "excluded_count": excluded_count,
             "excluded_floor_ones_count": excluded_floor_ones_count,
             "excluded_floor_ones_reasons": excluded_floor_ones_reasons,
             "positive_docs": pos_docs,
             "negative_docs": neg_docs,
-            "discord_flag": discord_flag,
-            "weighted_avg": round(weighted_avg, 3),
-            "evidence_weight_total": round(weight_total, 3),
+            "aggregation_method": "maximum",
+            "best_evidence_score": round(best_evidence, 2),
+            "best_evidence_doc_count": len(best_evidence_docs),
+            "best_causality": round(best_causality, 3),
+            "base_score": round(base_score, 3),
+            "caps_applied": cap_reasons,
+            "effective_cap": round(effective_cap, 2),
+            "has_discord": has_discord,
+            "discord_proportion": discord_proportion,
+            "discord_penalty": discord_penalty,
+            "score_after_caps": round(score_after_caps, 3),
         },
     )

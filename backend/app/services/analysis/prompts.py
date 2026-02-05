@@ -269,12 +269,17 @@ Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"...","causality_claim":"attribution|contribution|correlation","negative_impact_flag":false,"is_primary":true|false,"is_beneficial":true|false,"magnitude_estimate":"substantial|large|moderate|marginal|unknown"}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","p_value":"...|null","population_measured":"...|null","subgroup_or_dose":"...|null","result_text":"...","supporting_quote":"...","causality_claim":"attribution|contribution|correlation","negative_impact_flag":false,"is_primary":true|false,"is_beneficial":true|false,"is_prevalence_only":true|false,"magnitude_estimate":"substantial|large|moderate|marginal|unknown"}}]}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
 - Focus on PRIMARY RESULTS for this intervention (effects compared to control/baseline).
 - DO NOT extract control group results or "no change" findings unless they are the main finding.
+- DO NOT extract prevalence statistics, baseline rates, or descriptive proportions that do not show change from an intervention.
+  Only extract outcomes that demonstrate intervention effects.
+  - Skip: "Unemployment was 12% in the study region" (baseline statistic)
+  - Skip: "40% of students had low reading proficiency" (prevalence)
+  - Extract: "Unemployment dropped from 12% to 8% after the programme" (intervention effect)
 - Prefer explicit statistics (e.g., t, β, OR, CI, effect sizes). If absent, keep qualitative result with quote.
 - Include effect direction: "increase" for improvements/increases, "decrease" for reductions, "null" for no effect, "mixed" for divergent subgroup results, "inconclusive" for insufficient data.
 - population_measured: Who was measured for this specific result (may be subset of intervention population).
@@ -290,6 +295,19 @@ is_primary: Set to true if this outcome is a primary outcome the study was desig
 
 is_beneficial: Set to true if the outcome change is beneficial for the target population
   - Example: BMI decrease is beneficial, anxiety increase is harmful
+
+is_prevalence_only: Safety net flag - set to true if this outcome is a descriptive snapshot
+  (prevalence/rate/proportion) that is NOT explicitly tied to an intervention effect or
+  to a before/after or control comparison. Do NOT infer change from background trend statements.
+  If unsure, set is_prevalence_only=true.
+  - Set true (snapshot, no intervention comparison):
+    - "Unemployment rate in the region was 12%"
+    - "40% of students reported low reading proficiency"
+    - "Obesity prevalence among 9-year-olds was 25.8%"
+  - Set false (explicit intervention effect or comparison):
+    - "Employment increased by 8% after the job training programme"
+    - "Obesity prevalence dropped from 40% to 32% in the intervention group vs control"
+    - "BMI decreased by 0.4 compared with baseline after the programme"
 
 magnitude_estimate: Semantic effect size bucket for this result
 
@@ -419,13 +437,18 @@ Intervention:
 {one_intervention_json}
 
 Schema:
-{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","n_studies":int|null,"sample_size":int|null,"stratum_type":"...|null","stratum_value":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"...","is_primary":true|false,"is_beneficial":true|false,"magnitude_estimate":"substantial|large|moderate|marginal|unknown"}}]}}
+{{"results":[{{"intervention_idx":0,"outcome_variable":"...","effect_direction":"increase|decrease|null|mixed|inconclusive","effect_size_type":"...|null","effect_size":"...|null","uncertainty":"...|null","heterogeneity_I2":"...|null","tau2":"...|null","n_studies":int|null,"sample_size":int|null,"stratum_type":"...|null","stratum_value":"...|null","population_measured":"...|null","result_text":"...","supporting_quote":"...","is_primary":true|false,"is_beneficial":true|false,"is_prevalence_only":true|false,"magnitude_estimate":"substantial|large|moderate|marginal|unknown"}}]}}
 
 Rules:
 - MECE: mutually exclusive and collectively exhaustive, avoid duplicate/overlapping outcomes; merge redundant wordings.
 - Extract SEPARATE RESULT ROWS for each stratum (subgroup analysis, follow-up period, setting variant, etc.)
 - Focus on AGGREGATED REVIEW-LEVEL RESULTS for this intervention category, not per-study data
 - Each result row should correspond to a single pooled or aggregate effect estimate for ONE stratum
+- DO NOT extract prevalence statistics, baseline rates, or descriptive proportions that do not show change from an intervention.
+  Only extract outcomes that demonstrate intervention effects.
+  - Skip: "Unemployment was 12% in the study region" (baseline statistic)
+  - Skip: "40% of students had low reading proficiency" (prevalence)
+  - Extract: "Unemployment dropped from 12% to 8% after the programme" (intervention effect)
 
 IMPORTANT - Outcome Variable vs Stratum:
 - outcome_variable: The BASE outcome measure ONLY (e.g., "BMI", "weight", "blood pressure") - DO NOT include time points or subgroup info here
@@ -459,6 +482,20 @@ Primary outcomes:
 
 Benefit flag:
 - is_beneficial=true if the outcome change benefits the population (e.g., BMI decrease is beneficial, BMI increase is harmful).
+
+Prevalence-only flag:
+- is_prevalence_only=true if this outcome is a descriptive snapshot (prevalence/rate/proportion)
+  that is NOT explicitly tied to an intervention effect or to a before/after or control comparison.
+  Do NOT infer change from background trends or surveillance snapshots.
+  If unsure, set is_prevalence_only=true.
+  - Set true (snapshot, no intervention comparison):
+    - "Unemployment rate in the region was 12%"
+    - "40% of students reported low reading proficiency"
+    - "Obesity prevalence among 9-year-olds was 25.8%"
+  - Set false (explicit intervention effect or comparison):
+    - "Employment increased by 8% after the job training programme"
+    - "Obesity prevalence dropped from 40% to 32% in the intervention group vs control"
+    - "BMI decreased by 0.4 compared with baseline after the programme"
 
 Magnitude estimate:
 - If effect sizes are missing or qualitative only, assign a semantic bucket: substantial | large | moderate | marginal | unknown.
