@@ -1951,6 +1951,218 @@ async def get_issue_intervention_navigator(
         raise HTTPException(status_code=500, detail="Failed to fetch navigator data")
 
 
+@router.get("/{project_id}/synthesis/outcome-themes/{outcome_theme_id}/contributions")
+async def get_outcome_theme_contributions(
+    project_id: str,
+    outcome_theme_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get contributing outcome extractions for a synthesis outcome theme."""
+    try:
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
+        runs_res = (
+            vectorization_service.supabase.table("synthesis_runs")
+            .select("id")
+            .eq("analysis_project_id", project_id)
+            .eq("status", "completed")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not runs_res.data:
+            return {"documents": []}
+
+        run_id = runs_res.data[0].get("id")
+        if not run_id:
+            return {"documents": []}
+
+        theme_res = (
+            vectorization_service.supabase.table("synthesis_outcome_themes")
+            .select("id, intervention_theme_id")
+            .eq("id", outcome_theme_id)
+            .eq("synthesis_run_id", run_id)
+            .limit(1)
+            .execute()
+        )
+        if not theme_res.data:
+            raise HTTPException(status_code=404, detail="Outcome theme not found")
+        intervention_theme_id = theme_res.data[0].get("intervention_theme_id")
+        if not intervention_theme_id:
+            return {"documents": []}
+
+        assignments_res = (
+            vectorization_service.supabase.table("outcome_theme_assignments")
+            .select("extraction_id, calibrated_magnitude")
+            .eq("synthesis_run_id", run_id)
+            .eq("synthesis_outcome_theme_id", outcome_theme_id)
+            .execute()
+        )
+        extraction_ids = [
+            str(row.get("extraction_id"))
+            for row in (assignments_res.data or [])
+            if row.get("extraction_id")
+        ]
+        calibrated_by_extraction_id = {
+            str(row.get("extraction_id")): row.get("calibrated_magnitude")
+            for row in (assignments_res.data or [])
+            if row.get("extraction_id")
+        }
+        if not extraction_ids:
+            return {"documents": []}
+
+        extractions_res = (
+            vectorization_service.supabase.table("analysis_extractions")
+            .select("id, analysis_document_id, label, raw_data")
+            .in_("id", extraction_ids)
+            .execute()
+        )
+        extractions = filter_prevalence_only_extractions(extractions_res.data or [])
+        if not extractions:
+            return {"documents": []}
+
+        doc_ids = list(
+            {
+                str(ext.get("analysis_document_id"))
+                for ext in extractions
+                if ext.get("analysis_document_id")
+            }
+        )
+        docs_by_id: Dict[str, Dict] = {}
+        if doc_ids:
+            docs_res = (
+                vectorization_service.supabase.table("analysis_documents")
+                .select(
+                    "id, doc_id, title, source, landing_page_url, doi, year, evidence_category, extraction_results"
+                )
+                .in_("id", doc_ids)
+                .execute()
+            )
+            docs_by_id = {
+                str(doc.get("id")): doc
+                for doc in (docs_res.data or [])
+                if doc and doc.get("id")
+            }
+
+        intervention_assignments_res = (
+            vectorization_service.supabase.table("theme_assignments")
+            .select("extraction_id")
+            .eq("synthesis_run_id", run_id)
+            .eq("synthesis_theme_id", intervention_theme_id)
+            .execute()
+        )
+        intervention_extraction_ids = {
+            str(row.get("extraction_id"))
+            for row in (intervention_assignments_res.data or [])
+            if row.get("extraction_id")
+        }
+
+        intervention_extractions_res = (
+            vectorization_service.supabase.table("analysis_extractions")
+            .select("id, analysis_document_id, raw_data")
+            .eq("analysis_project_id", project_id)
+            .eq("extraction_type", "intervention")
+            .in_("analysis_document_id", doc_ids)
+            .execute()
+        )
+        intervention_by_doc_idx: Dict[tuple[str, int], str] = {}
+        for extraction in intervention_extractions_res.data or []:
+            raw = extraction.get("raw_data") or {}
+            doc_id = str(extraction.get("analysis_document_id") or "")
+            idx = raw.get("idx")
+            if doc_id and isinstance(idx, int):
+                intervention_by_doc_idx[(doc_id, idx)] = str(extraction.get("id"))
+
+        documents_map: Dict[str, Dict] = {}
+        for extraction in extractions:
+            analysis_document_id = str(extraction.get("analysis_document_id") or "")
+            raw = extraction.get("raw_data") or {}
+            doc = docs_by_id.get(analysis_document_id, {})
+            intervention_idx = raw.get("intervention_idx")
+            if not isinstance(intervention_idx, int):
+                continue
+            intervention_extraction_id = intervention_by_doc_idx.get(
+                (analysis_document_id, intervention_idx)
+            )
+            if not intervention_extraction_id:
+                continue
+            if intervention_extraction_id not in intervention_extraction_ids:
+                continue
+
+            effect_dir = (raw.get("effect_direction") or "").lower()
+            is_beneficial = raw.get("is_beneficial")
+            is_contributing = False
+            if effect_dir in ("null", "none", "no effect"):
+                is_contributing = True
+            elif is_beneficial is True or is_beneficial is False:
+                is_contributing = True
+            elif effect_dir in ("increase", "decrease"):
+                is_contributing = True
+            if not is_contributing:
+                continue
+
+            entry = documents_map.setdefault(
+                analysis_document_id,
+                {
+                    "analysis_document_id": analysis_document_id,
+                    "doc_id": doc.get("doc_id"),
+                    "title": doc.get("title"),
+                    "source": doc.get("source"),
+                    "landing_page_url": doc.get("landing_page_url"),
+                    "doi": doc.get("doi"),
+                    "year": doc.get("year"),
+                    "evidence_category": doc.get("evidence_category"),
+                    "evidence_score": None,
+                    "results": [],
+                },
+            )
+
+            entry["results"].append(
+                {
+                    "extraction_id": extraction.get("id"),
+                    "outcome_variable": raw.get("outcome_variable")
+                    or extraction.get("label"),
+                    "effect_direction": raw.get("effect_direction"),
+                    "magnitude_estimate": raw.get("magnitude_estimate"),
+                    "calibrated_magnitude": calibrated_by_extraction_id.get(
+                        str(extraction.get("id") or "")
+                    ),
+                    "effect_size": raw.get("effect_size"),
+                    "effect_size_type": raw.get("effect_size_type"),
+                    "uncertainty": raw.get("uncertainty"),
+                    "p_value": raw.get("p_value"),
+                    "population_measured": raw.get("population_measured"),
+                    "subgroup_or_dose": raw.get("subgroup_or_dose"),
+                    "causality_claim": raw.get("causality_claim"),
+                    "is_primary": raw.get("is_primary"),
+                    "is_beneficial": raw.get("is_beneficial"),
+                    "result_text": raw.get("result_text"),
+                    "supporting_quote": raw.get("supporting_quote"),
+                }
+            )
+
+        for doc_id, entry in documents_map.items():
+            doc = docs_by_id.get(doc_id)
+            if doc:
+                evidence_info = get_or_calculate_document_evidence(doc)
+                entry["evidence_score"] = evidence_info.get("stars")
+
+        documents = list(documents_map.values())
+        documents.sort(key=lambda doc: (doc.get("title") or ""))
+        return {"documents": documents}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error fetching outcome theme contributions for {outcome_theme_id}: {e}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch outcome theme contributions",
+        )
+
+
 @router.get("/{project_id}/debug-themes")
 async def debug_themes(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)

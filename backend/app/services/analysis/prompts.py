@@ -296,11 +296,18 @@ is_primary: Set to true if this outcome is a primary outcome the study was desig
 is_beneficial: Set to true if the outcome change is beneficial for the target population
   - Example: BMI decrease is beneficial, anxiety increase is harmful
 
-is_prevalence_only: Safety net flag - set to true if this outcome describes a prevalence, rate, or proportion
-  as a descriptive statistic WITHOUT showing change from an intervention. If unsure, extract it and set this true.
-  - Example: "Unemployment rate in the region was 12%"
-  - Example: "Carbon emissions in the sector totalled 50 Mt annually"
-  - Counterexample: "Employment increased by 8% after the job training programme"
+is_prevalence_only: Safety net flag - set to true if this outcome is a descriptive snapshot
+  (prevalence/rate/proportion) that is NOT explicitly tied to an intervention effect or
+  to a before/after or control comparison. Do NOT infer change from background trend statements.
+  If unsure, set is_prevalence_only=true.
+  - Set true (snapshot, no intervention comparison):
+    - "Unemployment rate in the region was 12%"
+    - "40% of students reported low reading proficiency"
+    - "Obesity prevalence among 9-year-olds was 25.8%"
+  - Set false (explicit intervention effect or comparison):
+    - "Employment increased by 8% after the job training programme"
+    - "Obesity prevalence dropped from 40% to 32% in the intervention group vs control"
+    - "BMI decreased by 0.4 compared with baseline after the programme"
 
 magnitude_estimate: Semantic effect size bucket for this result
 
@@ -477,11 +484,18 @@ Benefit flag:
 - is_beneficial=true if the outcome change benefits the population (e.g., BMI decrease is beneficial, BMI increase is harmful).
 
 Prevalence-only flag:
-- is_prevalence_only=true if this outcome describes a prevalence, rate, or proportion as a descriptive statistic
-  WITHOUT showing change from an intervention. If unsure, extract it and set this true.
-  - Example: "Unemployment rate in the region was 12%"
-  - Example: "Carbon emissions in the sector totalled 50 Mt annually"
-  - Counterexample: "Employment increased by 8% after the job training programme"
+- is_prevalence_only=true if this outcome is a descriptive snapshot (prevalence/rate/proportion)
+  that is NOT explicitly tied to an intervention effect or to a before/after or control comparison.
+  Do NOT infer change from background trends or surveillance snapshots.
+  If unsure, set is_prevalence_only=true.
+  - Set true (snapshot, no intervention comparison):
+    - "Unemployment rate in the region was 12%"
+    - "40% of students reported low reading proficiency"
+    - "Obesity prevalence among 9-year-olds was 25.8%"
+  - Set false (explicit intervention effect or comparison):
+    - "Employment increased by 8% after the job training programme"
+    - "Obesity prevalence dropped from 40% to 32% in the intervention group vs control"
+    - "BMI decreased by 0.4 compared with baseline after the programme"
 
 Magnitude estimate:
 - If effect sizes are missing or qualitative only, assign a semantic bucket: substantial | large | moderate | marginal | unknown.

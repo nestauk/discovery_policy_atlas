@@ -421,6 +421,11 @@ def aggregate_all_interventions(
                     "theme_id": intervention.get("theme_id"),
                     "description": intervention.get("description", ""),
                     "impact_summary": intervention.get("impact_summary", ""),
+                    "impact_score": intervention.get("impact_score"),
+                    "impact_score_label": intervention.get("impact_score_label"),
+                    "impact_score_breakdown": intervention.get(
+                        "impact_score_breakdown"
+                    ),
                     "transferability_rating": intervention.get(
                         "transferability_rating"
                     ),
@@ -437,6 +442,16 @@ def aggregate_all_interventions(
 
             entry = all_interventions_map[theme_name]
             entry["frequency"] += intervention.get("frequency", 0)
+
+            if (
+                entry.get("impact_score") is None
+                and intervention.get("impact_score") is not None
+            ):
+                entry["impact_score"] = intervention.get("impact_score")
+                entry["impact_score_label"] = intervention.get("impact_score_label")
+                entry["impact_score_breakdown"] = intervention.get(
+                    "impact_score_breakdown"
+                )
 
             if intervention.get("avg_impact_score") is not None:
                 entry["impact_scores"].append(intervention["avg_impact_score"])
@@ -484,6 +499,8 @@ def aggregate_all_interventions(
 
         impact_scores = entry["impact_scores"]
         avg_impact = sum(impact_scores) / len(impact_scores) if impact_scores else None
+        synthesis_impact = entry.get("impact_score")
+        shown_impact = synthesis_impact if synthesis_impact is not None else avg_impact
 
         all_interventions.append(
             {
@@ -491,14 +508,17 @@ def aggregate_all_interventions(
                 "theme_id": entry.get("theme_id"),
                 "description": entry["description"],
                 "impact_summary": entry["impact_summary"],
+                "impact_score": synthesis_impact,
+                "impact_score_label": entry.get("impact_score_label"),
+                "impact_score_breakdown": entry.get("impact_score_breakdown"),
                 "frequency": entry["frequency"],
                 "transferability_rating": entry.get("transferability_rating"),
                 "transferability_note": entry.get("transferability_note"),
                 "transferability_breakdown": entry.get("transferability_breakdown"),
                 "outcome_themes": entry.get("outcome_themes", []),
                 "risk_themes": entry.get("risk_themes", []),
-                "avg_impact_score": round(avg_impact, 1)
-                if avg_impact is not None
+                "avg_impact_score": round(shown_impact, 1)
+                if shown_impact is not None
                 else None,
                 "stars": strength["stars"],
                 "base_rating": strength["base_rating"],

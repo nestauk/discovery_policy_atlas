@@ -190,6 +190,7 @@ export interface CausalityDetail {
   }
 
   export interface OutcomeTheme {
+    id?: string
     outcome_name: string
     outcome_description: string
     effect_consensus: 'increase' | 'decrease' | 'mixed' | 'no change' | 'insufficient'

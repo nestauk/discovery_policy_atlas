@@ -26,6 +26,11 @@ from app.services.synthesis.schemas import (
     EvidenceCoverageSnapshot,
     StructuredBriefing,
 )
+from app.services.synthesis.nodes.impact_synthesis import (
+    parse_effect_size_value,
+    detect_scale_type,
+    _normalise_unit_key,
+)
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
@@ -353,6 +358,44 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     [c["id"] if isinstance(c, dict) else c.id for c in (concepts or [])]
                 )
 
+    raw_extractions = final_state.get("raw_extractions") or []
+    outcome_name_by_extraction_id = (
+        final_state.get("outcome_name_by_extraction_id") or {}
+    )
+    thresholds_by_outcome_name = (
+        final_state.get("magnitude_thresholds_by_outcome_name") or {}
+    )
+    calibrated_magnitude_by_extraction_id: Dict[str, str] = {}
+    for ext in raw_extractions:
+        if ext.get("type") != "result":
+            continue
+        ext_id = str(ext.get("id") or "")
+        if not ext_id:
+            continue
+        outcome_name = outcome_name_by_extraction_id.get(ext_id)
+        if not outcome_name:
+            continue
+        thresholds_by_unit = thresholds_by_outcome_name.get(outcome_name) or {}
+        effect_size = ext.get("effect_size")
+        numeric_val = parse_effect_size_value(effect_size) if effect_size else None
+        if numeric_val is None:
+            continue
+        unit_key = _normalise_unit_key(ext.get("effect_size_type"))
+        if not unit_key:
+            unit_key = detect_scale_type("", str(effect_size or ""))
+        thresholds = thresholds_by_unit.get(unit_key)
+        if not thresholds:
+            continue
+        value = abs(numeric_val)
+        if value >= thresholds.get("substantial", float("inf")):
+            calibrated_magnitude_by_extraction_id[ext_id] = "substantial"
+        elif value >= thresholds.get("large", float("inf")):
+            calibrated_magnitude_by_extraction_id[ext_id] = "large"
+        elif value >= thresholds.get("moderate", float("inf")):
+            calibrated_magnitude_by_extraction_id[ext_id] = "moderate"
+        else:
+            calibrated_magnitude_by_extraction_id[ext_id] = "marginal"
+
     theme_assignments: List[Dict] = []
 
     # Write issue themes
@@ -471,6 +514,9 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "synthesis_run_id": run_id,
                     "synthesis_outcome_theme_id": outcome_id,
                     "extraction_id": ex_id,
+                    "calibrated_magnitude": calibrated_magnitude_by_extraction_id.get(
+                        ex_id
+                    ),
                     "created_at": datetime.utcnow().isoformat(),
                 }
             )
