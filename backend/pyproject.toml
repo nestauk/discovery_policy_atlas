@@ -67,3 +67,8 @@ dev = [
     "matplotlib>=3.10.8",
     "seaborn>=0.13.2",
 ]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
