@@ -1489,24 +1489,3 @@ backend/app/services/synthesis/
     ├── quality.py                      # get_document_quality, get_multiple_document_quality
     └── verification.py                 # verify_claim_support, verify_multiple_claims
 ```
-
----
-
-## Changelog
-
-### January 2026
-
-- **Evidence Base card**: shows both **screened** and **synthesised** counts.
-- **Key Sources**: removed LLM "why selected" generation; now uses `analysis_documents.top_line`.
-- **Interventions table**: adds a "Key Study" column and performs per-row evidence gathering via tools.
-- **Recommendations**: structured output includes a clearer `implementation_option` field for rendering.
-- **Tool budgets**: increased default per-section tool budget and expanded interventions-section budget.
-
-### February 2026
-
-- Consolidated `synthesis.md` and `synthesis_methodology.md` into this single document.
-- Added risk themes (Phase 2) and impact synthesis (Phase 3) to documentation.
-- Added state management, error handling, and full configuration reference.
-- Added "Design principles: systematic review analogy" section mapping each pipeline phase to established review methodology.
-- Expanded Phase 5 (RCS) with full prompt content and methodological rationale.
-- Expanded Phase 6 (Briefing generation) with: orchestrator system prompt and evidence quality guidelines, section generation prompt with citation rules, per-section instructions, structured output enforcement, evidence drift safeguards, and verification prompt with claim-by-claim checking logic.

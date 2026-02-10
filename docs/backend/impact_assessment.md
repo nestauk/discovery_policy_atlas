@@ -815,16 +815,3 @@ The API exposes (and the frontend renders):
 - LLM-generated impact summary per intervention
 
 ---
-
-## Operational notes
-
-- **Re-synthesis after changes**: when synthesis logic changes, re-run
-  synthesis for target projects to repopulate cached summaries.
-- **Backfilling**: historical projects may need re-synthesis to populate newer
-  Impact Profile fields.
-- **Cache versioning**: synthesis runs are versioned (`version: 4`).  The
-  logbook reader should handle older versions gracefully.
-- **LLM models**: transferability, magnitude calibration, and impact summary
-  each use separately configurable LLM models (defaulting to GPT-4o-mini),
-  controllable via environment variables `TRANSFERABILITY_MODEL`,
-  `MAGNITUDE_CALIBRATION_MODEL`, and `IMPACT_SUMMARY_MODEL`.
