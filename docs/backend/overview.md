@@ -45,7 +45,7 @@ backend/
 │   │
 │   ├── services/                   # Business logic services
     │   │   ├── analysis/               # Document analysis & extraction
-    │   │   ├── synthesis/              # Evidence synthesis (see synthesis.md)
+    │   │   ├── synthesis/              # Evidence synthesis (see synthesis_methodology.md)
     │   │   ├── vectorization.py        # Embedding & vector search
     │   │   ├── download.py             # File download service
     │   │   ├── logging.py              # Supabase logging service
