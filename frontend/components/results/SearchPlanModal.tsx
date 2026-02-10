@@ -21,6 +21,7 @@ const SOURCE_LABELS: Record<string, string> = {
 
 const TIME_PRESET_LABELS: Record<string, string> = {
   LAST_YEAR: 'Last year',
+  LAST_2_YEARS: 'Last 2 years',
   LAST_5_YEARS: 'Last 5 years',
   LAST_10_YEARS: 'Last 10 years',
   SINCE_2000: 'Since 2000',

@@ -35,8 +35,17 @@ const Chip = ({ active, children, onClick }: { active?: boolean; children: React
 
 // ---------------- TYPES & CONSTANTS ----------------
 type Step = "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
-type TimePreset = "LAST_YEAR" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
+type TimePreset = "LAST_YEAR" | "LAST_2_YEARS" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
+const TIME_PRESET_LABELS: Record<TimePreset, string> = {
+  LAST_YEAR: "Last year",
+  LAST_2_YEARS: "Last 2 years",
+  LAST_5_YEARS: "Last 5 years",
+  LAST_10_YEARS: "Last 10 years",
+  SINCE_2000: "Since 2000",
+  ANY: "Any time",
+  CUSTOM: "Custom range",
+};
 const SOURCE_LABELS: Record<"openalex" | "overton", string> = {
   openalex: "Academic literature",
   overton: "Grey literature",
@@ -777,33 +786,36 @@ function ScreenParameters() {
         <div className="space-y-4">
           <h3 className="font-semibold text-lg">When should the evidence be published?</h3>
           <div className="flex flex-wrap gap-3">
-            {["LAST_YEAR", "LAST_5_YEARS", "LAST_10_YEARS", "SINCE_2000", "ANY", "CUSTOM"].map((p) => (
+            {["LAST_YEAR", "LAST_2_YEARS", "LAST_5_YEARS", "LAST_10_YEARS", "SINCE_2000", "ANY", "CUSTOM"].map((p) => (
               <Chip
                 key={p}
                 active={s.parameters.timePreset === p}
                 onClick={() => s.set({ parameters: { ...s.parameters, timePreset: p as TimePreset } })}
               >
-                {p.replaceAll("_", " ")}
+                {TIME_PRESET_LABELS[p as TimePreset]}
               </Chip>
             ))}
           </div>
           {s.parameters.timePreset === "CUSTOM" && (
-            <div className="flex gap-3 max-w-lg">
-              <div className="flex-1">
-                <div className="text-xs text-gray-500 mb-2">From</div>
-                <Input
-                  type="date"
-                  value={s.parameters.customFrom || ""}
-                  onChange={(e) => s.set({ parameters: { ...s.parameters, customFrom: e.target.value } })}
-                />
-              </div>
-              <div className="flex-1">
-                <div className="text-xs text-gray-500 mb-2">To</div>
-                <Input
-                  type="date"
-                  value={s.parameters.customTo || ""}
-                  onChange={(e) => s.set({ parameters: { ...s.parameters, customTo: e.target.value } })}
-                />
+            <div className="max-w-3xl rounded-2xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
+              <p className="text-sm text-gray-600">Select a start and end date for your custom range.</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex-1">
+                  <div className="text-xs text-gray-500 mb-2">From</div>
+                  <Input
+                    type="date"
+                    value={s.parameters.customFrom || ""}
+                    onChange={(e) => s.set({ parameters: { ...s.parameters, customFrom: e.target.value } })}
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-xs text-gray-500 mb-2">To</div>
+                  <Input
+                    type="date"
+                    value={s.parameters.customTo || ""}
+                    onChange={(e) => s.set({ parameters: { ...s.parameters, customTo: e.target.value } })}
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -865,82 +877,93 @@ function ScreenParameters() {
         </div>
 
         {/* Implementation constraints (optional) */}
-        <div className="max-w-2xl">
-          <details className="rounded-xl border border-gray-200 bg-gray-50/40 p-4">
-            <summary className="cursor-pointer text-sm font-medium text-gray-800">
-              Implementation constraints (optional)
-            </summary>
-            <div className="mt-4 space-y-4">
-              <p className="text-sm text-gray-600">
-                Share resource or complexity limits if relevant. Leave as “Any” to skip matching.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <div className="text-xs text-gray-500">Cost tolerance</div>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    value={s.implementationConstraints.cost}
-                    onChange={(e) =>
-                      s.set({
-                        implementationConstraints: {
-                          ...s.implementationConstraints,
-                          cost: e.target.value,
-                        },
-                      })
-                    }
-                  >
-                    {constraintOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
+        <div className="space-y-4 max-w-2xl">
+          <h3 className="font-semibold text-lg">Do you have implementation constraints we should consider?</h3>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <span>Optional. Leave as “Any” if you do not want to filter by implementation feasibility.</span>
+            <Tooltip
+              content={
+                <div className="max-w-xs text-sm space-y-1">
+                  <p><span className="font-medium">Low</span>: minimal resources or operational effort required.</p>
+                  <p><span className="font-medium">Moderate</span>: manageable resources and coordination needed.</p>
+                  <p><span className="font-medium">High</span>: substantial resources, staffing, or delivery complexity.</p>
                 </div>
-                <div className="space-y-2">
-                  <div className="text-xs text-gray-500">Staffing capacity</div>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    value={s.implementationConstraints.staffing}
-                    onChange={(e) =>
-                      s.set({
-                        implementationConstraints: {
-                          ...s.implementationConstraints,
-                          staffing: e.target.value,
-                        },
-                      })
-                    }
-                  >
-                    {constraintOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-xs text-gray-500">Complexity tolerance</div>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    value={s.implementationConstraints.implementationComplexity}
-                    onChange={(e) =>
-                      s.set({
-                        implementationConstraints: {
-                          ...s.implementationConstraints,
-                          implementationComplexity: e.target.value,
-                        },
-                      })
-                    }
-                  >
-                    {constraintOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+              }
+            >
+              <button
+                type="button"
+                className="inline-flex items-center justify-center h-5 w-5 rounded-full border border-gray-300 text-xs text-gray-600 hover:bg-gray-50"
+                aria-label="How level values are interpreted"
+              >
+                ?
+              </button>
+            </Tooltip>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500">Cost tolerance</div>
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                value={s.implementationConstraints.cost}
+                onChange={(e) =>
+                  s.set({
+                    implementationConstraints: {
+                      ...s.implementationConstraints,
+                      cost: e.target.value,
+                    },
+                  })
+                }
+              >
+                {constraintOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
             </div>
-          </details>
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500">Staffing capacity</div>
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                value={s.implementationConstraints.staffing}
+                onChange={(e) =>
+                  s.set({
+                    implementationConstraints: {
+                      ...s.implementationConstraints,
+                      staffing: e.target.value,
+                    },
+                  })
+                }
+              >
+                {constraintOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500">Complexity tolerance</div>
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                value={s.implementationConstraints.implementationComplexity}
+                onChange={(e) =>
+                  s.set({
+                    implementationConstraints: {
+                      ...s.implementationConstraints,
+                      implementationComplexity: e.target.value,
+                    },
+                  })
+                }
+              >
+                {constraintOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
 
       </div>
@@ -1163,6 +1186,10 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
     context.implementationConstraints.staffing,
     context.implementationConstraints.implementationComplexity,
   ].some((value) => value && value !== "Any");
+  const hasCustomDateRange =
+    context.parameters.timePreset === "CUSTOM" &&
+    (context.parameters.customFrom || context.parameters.customTo);
+  const timeWindowLabel = TIME_PRESET_LABELS[context.parameters.timePreset];
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
@@ -1191,90 +1218,147 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
         <CardHeader>
           <CardTitle>Search parameters</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <span className="font-medium">Population: </span>
-            {context.population.selected.length > 0 ? (
-              <span>{context.population.selected.join(", ")}</span>
-            ) : (
-              <span className="text-gray-500">Not specified</span>
-            )}
+        <CardContent className="space-y-6">
+          <div className="grid gap-4">
+            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Population</div>
+              {context.population.selected.length > 0 ? (
+                <p className="text-gray-900">{context.population.selected.join(", ")}</p>
+              ) : (
+                <p className="text-gray-500">Not specified</p>
+              )}
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Setting</div>
+              {context.innerSetting.length > 0 ? (
+                <p className="text-gray-900">{context.innerSetting.join(", ")}</p>
+              ) : (
+                <p className="text-gray-500">No preference</p>
+              )}
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Outcome</div>
+              {context.outcome.selected.length > 0 ? (
+                <p className="text-gray-900">{context.outcome.selected.join(", ")}</p>
+              ) : (
+                <p className="text-gray-500">Not specified</p>
+              )}
+            </div>
           </div>
-          <div>
-            <span className="font-medium">Outcome: </span>
-            {context.outcome.selected.length > 0 ? (
-              <span>{context.outcome.selected.join(", ")}</span>
-            ) : (
-              <span className="text-gray-500">Not specified</span>
-            )}
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+            <div className="text-xs uppercase tracking-wide text-gray-500">Filters</div>
+            <div className="space-y-3">
+              <div>
+                <span className="font-medium">Search sources</span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {context.parameters.sources.length > 0 ? (
+                    context.parameters.sources.map((src) => (
+                      <span key={src} className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                        {SOURCE_LABELS[src] ?? src}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-gray-500">Not specified</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <span className="font-medium">Time window</span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    {timeWindowLabel}
+                  </span>
+                  {hasCustomDateRange && (
+                    <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                      {context.parameters.customFrom || "No start date"} to{" "}
+                      {context.parameters.customTo || "No end date"}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <span className="font-medium">Geography</span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {context.parameters.geography.length > 0 ? (
+                    context.parameters.geography.map((geo) => (
+                      <span key={geo} className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                        {GEO_LABELS[geo] || geo}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-gray-500">Not specified</span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
-          <div>
-            <span className="font-medium">Sources: </span>
-            <span>
-              {context.parameters.sources.length > 0
-                ? context.parameters.sources.map((src) => SOURCE_LABELS[src] ?? src).join(", ")
-                : "Not specified"}
-            </span>
-          </div>
-          {context.parameters.geography.length > 0 && (
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+            <div className="text-xs uppercase tracking-wide text-gray-500">Prioritisation</div>
             <div>
-              <span className="font-medium">Where should we look for evidence? (options): </span>
-              <span>{context.parameters.geography.join(", ")}</span>
+              <span className="font-medium">Implementation constraints</span>
+              {hasImplementationConstraints ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    Cost: {context.implementationConstraints.cost}
+                  </span>
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    Staffing: {context.implementationConstraints.staffing}
+                  </span>
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    Complexity: {context.implementationConstraints.implementationComplexity}
+                  </span>
+                </div>
+              ) : (
+                <div className="mt-2 text-gray-500">Not specified</div>
+              )}
             </div>
-          )}
-          <div>
-            <span className="font-medium">Implementation constraints: </span>
-            {hasImplementationConstraints ? (
-              <span>
-                Cost: {context.implementationConstraints.cost}, Staffing:{" "}
-                {context.implementationConstraints.staffing}, Complexity:{" "}
-                {context.implementationConstraints.implementationComplexity}
-              </span>
-            ) : (
-              <span className="text-gray-500">Not specified</span>
-            )}
-          </div>
-          <div>
-            <span className="font-medium">Time window: </span>
-            <span>{context.parameters.timePreset.replaceAll("_", " ")}</span>
-          </div>
-          {context.screeningFactors.length > 0 && (
             <div>
-              <span className="font-medium">Screening factors: </span>
-              <span>{context.screeningFactors.join(", ")}</span>
-            </div>
-          )}
-          <div>
-            <span className="font-medium">Max results: </span>
-            <div className="inline-flex items-center gap-2 mt-1">
-              <button
-                type="button"
-                className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
-                disabled={isRunning}
-                aria-label="Decrease results"
-              >–</button>
-              <span className="min-w-[2ch] text-center">{s.maxResults}</span>
-              <button
-                type="button"
-                className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
-                disabled={isRunning}
-                aria-label="Increase results"
-              >+</button>
+              <span className="font-medium">Screening factors</span>
+              {context.screeningFactors.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {context.screeningFactors.map((factor) => (
+                    <span key={factor} className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                      {factor}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-gray-500">None added</div>
+              )}
             </div>
           </div>
-          {/* Additional questions step is currently skipped */}
-          {/* {context.additionalQuestions.length > 0 && (
-            <div>
-              <span className="font-medium">Questions: </span>
-              <ul className="list-disc pl-6 mt-2 space-y-1">
-                {context.additionalQuestions.map((q, i) => (
-                  <li key={i}>{q}</li>
-                ))}
-              </ul>
+
+            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+              <div className="text-xs uppercase tracking-wide text-blue-700 mb-1">Retrieval limit</div>
+              <p className="text-sm text-gray-700 mb-3">
+                Maximum number of results retrieved from each selected source.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-medium">Max results per source:</span>
+                <div className="inline-flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
+                    disabled={isRunning}
+                    aria-label="Decrease results"
+                  >–</button>
+                  <span className="min-w-[2ch] text-center font-semibold">{s.maxResults}</span>
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
+                    disabled={isRunning}
+                    aria-label="Increase results"
+                  >+</button>
+                </div>
+                <span className="text-xs text-gray-500">
+                  {context.parameters.sources.length || 0} source{context.parameters.sources.length === 1 ? "" : "s"} selected
+                </span>
+              </div>
             </div>
-          )} */}
         </CardContent>
       </Card>
     </div>

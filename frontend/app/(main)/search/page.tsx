@@ -45,6 +45,9 @@ export default function SearchPage() {
           case "LAST_YEAR":
             dateFrom = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString().split('T')[0];
             break;
+          case "LAST_2_YEARS":
+            dateFrom = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()).toISOString().split('T')[0];
+            break;
           case "LAST_5_YEARS":
             dateFrom = new Date(now.getFullYear() - 5, now.getMonth(), now.getDate()).toISOString().split('T')[0];
             break;
