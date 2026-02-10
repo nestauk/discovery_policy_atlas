@@ -272,7 +272,7 @@ function ProgressBar({ step }: { step: Step }) {
     { id: "INNER_SETTING", label: "Setting" },
     { id: "OUTCOME", label: "Outcome" },
     { id: "PARAMETERS", label: "Parameters" },
-    { id: "SCREENING", label: "Screening" },
+    { id: "SCREENING", label: "Prioritisation" },
     { id: "SUMMARY", label: "Summary" },
   ];
   const currentIdx = steps.findIndex((s) => s.id === step);
@@ -484,7 +484,7 @@ function ScreenPopulation() {
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you targeting a particular population?</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
+        <p className="text-gray-600 text-lg">We use this to prioritise evidence for the populations you care about.</p>
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
@@ -638,7 +638,7 @@ function ScreenInnerSetting() {
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular settings?</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information and assess transferability.</p>
+        <p className="text-gray-600 text-lg">We use this to prioritise context-matched evidence and assess transferability.</p>
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
@@ -770,7 +770,7 @@ function ScreenOutcome() {
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular outcomes?</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
+        <p className="text-gray-600 text-lg">We use this to prioritise evidence measuring your outcomes of interest.</p>
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
@@ -860,9 +860,13 @@ function ScreenOutcome() {
 function ScreenParameters() {
   const s = useWizard();
   const [selectedCountry, setSelectedCountry] = useState("");
-  const constraintOptions = ["Any", "Low", "Moderate", "High"];
   const hasSelectedSource =
     s.parameters.access.academic || s.parameters.access.policy;
+  const hasInvalidCustomDateRange =
+    s.parameters.timePreset === "CUSTOM" &&
+    !!s.parameters.customFrom &&
+    !!s.parameters.customTo &&
+    s.parameters.customFrom > s.parameters.customTo;
 
   const toggleAccess = (k: keyof Access) => {
     s.set({ parameters: { ...s.parameters, access: { ...s.parameters.access, [k]: !s.parameters.access[k] } } });
@@ -903,7 +907,7 @@ function ScreenParameters() {
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
+        <p className="text-gray-600 text-lg">We use these filters to narrow the evidence set before ranking.</p>
       </div>
 
       <div className="space-y-8">
@@ -960,6 +964,11 @@ function ScreenParameters() {
                   />
                 </div>
               </div>
+              {hasInvalidCustomDateRange && (
+                <p className="text-sm text-red-600">
+                  End date must be the same as or later than the start date.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -1019,11 +1028,91 @@ function ScreenParameters() {
           </div>
         </div>
 
-        {/* Implementation constraints (optional) */}
-        <div className="space-y-4 max-w-2xl">
-          <h3 className="font-semibold text-lg">Do you have implementation constraints we should consider?</h3>
+      </div>
+
+      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
+        </div>
+        <Button
+          variant="secondary"
+          className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+          onClick={() => s.next()}
+          disabled={!hasSelectedSource || hasInvalidCustomDateRange}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ScreenScreening() {
+  const s = useWizard();
+  const [customInput, setCustomInput] = useState("");
+  const constraintOptions = ["Any", "Low", "Moderate", "High"];
+
+  const addFactor = () => {
+    if (customInput.trim() && !s.screeningFactors.includes(customInput.trim())) {
+      s.set({ screeningFactors: [...s.screeningFactors, customInput.trim()] });
+      setCustomInput("");
+    }
+  };
+
+  const removeFactor = (factor: string) => {
+    s.set({ screeningFactors: s.screeningFactors.filter(f => f !== factor) });
+  };
+
+  const handleNext = async () => {
+    // Skip ADDITIONAL_QUESTIONS step - go directly to SUMMARY
+    // (Keeping generation code commented out for future use)
+    // s.set({ isGeneratingOptions: true });
+    // 
+    // try {
+    //   const response = await generateAdditionalQuestions(
+    //     s.researchQuestion,
+    //     s.population.selected,
+    //     s.outcome.selected
+    //   ).catch(() => ({ additional_questions: [] }));
+    //
+    //   const generatedQuestions = response?.additional_questions || [];
+    //   
+    //   // Preselect generated questions
+    //   s.set({ 
+    //     generatedAdditionalQuestions: generatedQuestions,
+    //     additionalQuestions: generatedQuestions,
+    //     step: "ADDITIONAL_QUESTIONS"
+    //   });
+    // } catch (error) {
+    //   console.error('Failed to generate additional questions:', error);
+    //   // Continue with empty questions if generation fails
+    //   s.set({ 
+    //     generatedAdditionalQuestions: [],
+    //     step: "ADDITIONAL_QUESTIONS" 
+    //   });
+    // } finally {
+    //   s.set({ isGeneratingOptions: false });
+    // }
+    
+    // Go directly to SUMMARY
+    s.set({ step: "SUMMARY" });
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+      <div className="text-center space-y-3">
+        <h2 className="text-2xl font-semibold">Prioritisation and assessment settings</h2>
+        <p className="text-gray-600 text-lg">
+          Optional. Configure how evidence is prioritised during screening and assessed for implementation fit.
+        </p>
+      </div>
+
+      <div className="space-y-6 max-w-2xl mx-auto">
+        <div className="space-y-4">
+          <h3 className="font-semibold text-lg">Implementation constraints</h3>
           <div className="flex items-center gap-2 text-sm text-gray-600">
-            <span>Optional. Leave as “Any” if you do not want to filter by implementation feasibility.</span>
+            <span>Used during impact and transferability assessment.</span>
             <Tooltip
               content={
                 <div className="max-w-xs text-sm space-y-1">
@@ -1109,84 +1198,15 @@ function ScreenParameters() {
           </div>
         </div>
 
-      </div>
+        <div className="h-px bg-gray-100" />
 
-      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
+        <div className="space-y-3">
+          <h3 className="font-semibold text-lg">Screening factors</h3>
+          <p className="text-sm text-gray-600">
+            Used during screening to prioritise and rank the most relevant evidence.
+          </p>
         </div>
-        <Button
-          variant="secondary"
-          className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
-          onClick={() => s.next()}
-          disabled={!hasSelectedSource}
-        >
-          Next
-        </Button>
-      </div>
-    </div>
-  );
-}
 
-function ScreenScreening() {
-  const s = useWizard();
-  const [customInput, setCustomInput] = useState("");
-
-  const addFactor = () => {
-    if (customInput.trim() && !s.screeningFactors.includes(customInput.trim())) {
-      s.set({ screeningFactors: [...s.screeningFactors, customInput.trim()] });
-      setCustomInput("");
-    }
-  };
-
-  const removeFactor = (factor: string) => {
-    s.set({ screeningFactors: s.screeningFactors.filter(f => f !== factor) });
-  };
-
-  const handleNext = async () => {
-    // Skip ADDITIONAL_QUESTIONS step - go directly to SUMMARY
-    // (Keeping generation code commented out for future use)
-    // s.set({ isGeneratingOptions: true });
-    // 
-    // try {
-    //   const response = await generateAdditionalQuestions(
-    //     s.researchQuestion,
-    //     s.population.selected,
-    //     s.outcome.selected
-    //   ).catch(() => ({ additional_questions: [] }));
-    //
-    //   const generatedQuestions = response?.additional_questions || [];
-    //   
-    //   // Preselect generated questions
-    //   s.set({ 
-    //     generatedAdditionalQuestions: generatedQuestions,
-    //     additionalQuestions: generatedQuestions,
-    //     step: "ADDITIONAL_QUESTIONS"
-    //   });
-    // } catch (error) {
-    //   console.error('Failed to generate additional questions:', error);
-    //   // Continue with empty questions if generation fails
-    //   s.set({ 
-    //     generatedAdditionalQuestions: [],
-    //     step: "ADDITIONAL_QUESTIONS" 
-    //   });
-    // } finally {
-    //   s.set({ isGeneratingOptions: false });
-    // }
-    
-    // Go directly to SUMMARY
-    s.set({ step: "SUMMARY" });
-  };
-
-  return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      <div className="text-center space-y-3">
-        <h2 className="text-2xl font-semibold">Anything else to consider when screening the evidence?</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
-      </div>
-
-      <div className="space-y-6 max-w-2xl mx-auto">
         {/* Selected factors as buttons */}
         {s.screeningFactors.length > 0 && (
           <div>
@@ -1427,7 +1447,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
                       </span>
                     ))
                   ) : (
-                    <span className="text-gray-500">Not specified</span>
+                    <span className="text-gray-500">None selected</span>
                   )}
                 </div>
               </button>
@@ -1455,7 +1475,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
                       </span>
                     ))
                   ) : (
-                    <span className="text-gray-500">Not specified</span>
+                    <span className="text-gray-500">No preference</span>
                   )}
                 </div>
               </button>
@@ -1464,7 +1484,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
 
           <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
             <div className="text-xs uppercase tracking-wide text-gray-500">Prioritisation</div>
-            <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+            <button type="button" onClick={() => goToStep("SCREENING")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
               <span className="font-medium">Implementation constraints</span>
               {hasImplementationConstraints ? (
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1479,7 +1499,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
                   </span>
                 </div>
               ) : (
-                <div className="mt-2 text-gray-500">Not specified</div>
+                <div className="mt-2 text-gray-500">No preference</div>
               )}
             </button>
             <button type="button" onClick={() => goToStep("SCREENING")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
@@ -1539,7 +1559,14 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
           variant="secondary"
           className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
           onClick={() => onRunAnalysis(context)}
-          disabled={isRunning || !hasSelectedSource}
+          disabled={
+            isRunning ||
+            !hasSelectedSource ||
+            (context.parameters.timePreset === "CUSTOM" &&
+              !!context.parameters.customFrom &&
+              !!context.parameters.customTo &&
+              context.parameters.customFrom > context.parameters.customTo)
+          }
         >
           {isRunning ? 'Starting up...' : 'Run Analysis'}
         </Button>
@@ -1549,6 +1576,14 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
           Select at least one search source before running analysis.
         </p>
       )}
+      {context.parameters.timePreset === "CUSTOM" &&
+        !!context.parameters.customFrom &&
+        !!context.parameters.customTo &&
+        context.parameters.customFrom > context.parameters.customTo && (
+          <p className="text-sm text-red-600 text-right">
+            Fix your custom date range before running analysis.
+          </p>
+        )}
     </div>
   );
 }
