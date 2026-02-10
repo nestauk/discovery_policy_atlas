@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Settings, Search, Copy, CheckCircle, Info } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import type { AnalysisProject } from '@/lib/analysisProjectStore'
+import { useWizard } from '@/components/search/SearchWizard'
 
 interface SearchPlanModalProps {
   project: AnalysisProject
@@ -118,6 +119,7 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
   }
 
   const startNewSearch = () => {
+    useWizard.getState().reset()
     setIsOpen(false)
     router.push('/search')
   }

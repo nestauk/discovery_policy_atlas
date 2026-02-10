@@ -160,6 +160,7 @@ interface WizardState {
   additionalQuestions: string[];
   maxResults: number;
   set: (p: Partial<WizardState>) => void;
+  reset: () => void;
   next: () => void;
   back: () => void;
   buildContext: () => SearchContext;
@@ -193,6 +194,35 @@ export const useWizard = create<WizardState>((set, get) => ({
   additionalQuestions: [],
   maxResults: 30,
   set: (p) => set(p),
+  reset: () =>
+    set({
+      step: "ASK",
+      researchQuestion: "",
+      population: { selected: [], keepBroad: false },
+      innerSetting: { selected: [], noPreference: true },
+      outcome: { selected: [], keepBroad: false },
+      implementationConstraints: {
+        cost: "Any",
+        staffing: "Any",
+        implementationComplexity: "Any",
+      },
+      generatedPopulationOptions: [],
+      generatedInnerSettingOptions: [],
+      generatedOutcomeOptions: [],
+      generatedAdditionalQuestions: [],
+      isGeneratingOptions: false,
+      parameters: {
+        sources: [],
+        access: { academic: true, policy: true },
+        geography: [ANYWHERE_VALUE],
+        timePreset: "LAST_10_YEARS",
+        customFrom: undefined,
+        customTo: undefined,
+      },
+      screeningFactors: [],
+      additionalQuestions: [],
+      maxResults: 30,
+    }),
   next: () => {
     const s = get();
     // Skip ADDITIONAL_QUESTIONS step - go directly from SCREENING to SUMMARY
@@ -1195,7 +1225,10 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
       {/* Navigation at top */}
       <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
+          <Button variant="ghost" onClick={() => s.reset()} disabled={isRunning}>Start new search</Button>
+        </div>
         <Button onClick={() => onRunAnalysis(context)} disabled={isRunning}>
           {isRunning ? 'Starting up...' : 'Run Analysis'}
         </Button>
