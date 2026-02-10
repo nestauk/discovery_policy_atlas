@@ -54,98 +54,74 @@ Given an `analysis_project`, the synthesis process produces:
 ### Pipeline diagram
 
 ```mermaid
-flowchart TB
-    subgraph P1["Phase 1 — Data Loading"]
+flowchart TD
+    %% ── Phase 1 ──
+    P1["<b>Phase 1: Data Loading</b><br/>Load extractions, document metadata,<br/>quality scores, and prior assignments<br/>↓<br/>Create canonical concepts<br/>(issues, interventions, outcomes, risks)"]
+
+    %% ── Phase 2 ──
+    P1 --> P2_fan
+
+    P2_fan["<b>Phase 2: Theme Discovery</b><br/><i>4 branches run in parallel</i>"]
+
+    P2_fan --> P2_I["Issues"]
+    P2_fan --> P2_V["Interventions"]
+    P2_fan --> P2_O["Outcomes"]
+    P2_fan --> P2_R["Risks"]
+
+    P2_I --> P2_join[" "]
+    P2_V --> P2_join
+    P2_O --> P2_join
+    P2_R --> P2_join
+
+    P2_note["Each branch:<br/>1. Discover themes — LLM structured output<br/>2. Critique themes — QA against MECE criteria<br/>3. Classify concepts — map to themes (32-way concurrent)"]
+
+    P2_fan -.-> P2_note
+
+    %% ── Phase 3 ──
+    P2_join --> P3A["<b>Phase 3a: Evidence Coverage</b><br/>Deterministic stats: screened vs synthesised,<br/>study types, countries, overall strength"]
+
+    P3A --> P3B["<b>Phase 3b: Aggregated Tables</b><br/>Quality-weighted effect counts per<br/>intervention and outcome theme"]
+
+    P3B --> P3C["<b>Phase 3c: Impact Synthesis</b><br/>Verdicts, magnitude, transferability,<br/>causal mechanism, risk linkage, impact scores"]
+
+    %% ── Phase 4 ──
+    P3C --> P4["<b>Phase 4: RAG Retrieval</b><br/>For each theme: vector search →<br/>constrain to theme documents →<br/>quality-weighted re-ranking →<br/>assign citation numbers"]
+
+    %% ── Phase 5 ──
+    P4 --> P5["<b>Phase 5: Contextual Summarisation (RCS)</b><br/>For each theme: generate targeted question →<br/>LLM scores each chunk for relevance (0–10) →<br/>filter low-relevance, assess evidence sufficiency"]
+
+    %% ── Phase 6 ──
+    P5 --> P6["<b>Phase 6: Briefing Generation</b><br/><i>5 sections, each through the loop below</i>"]
+
+    P6 --> SEC["Background → Interventions Table →<br/>Synthesis Sections → Core Answer →<br/>Recommendations"]
+
+    SEC --> LOOP
+
+    subgraph LOOP["Per-section generation loop"]
         direction LR
-        P1A["Load raw extractions<br/><i>documents, metadata, scores,<br/>extractions, prior assignments</i>"]
-        P1B["Create canonical concepts<br/><i>issues, interventions,<br/>outcomes, risks</i>"]
-        P1A --> P1B
+        L1["<b>Orchestrator</b><br/>Selects evidence<br/>tools to call"]
+        L2["<b>Tool Executor</b><br/>Runs tools against<br/>pre-computed state"]
+        L3["<b>Generator</b><br/>Writes section<br/>with [N] citations"]
+        L4["<b>Verifier</b><br/>Claim-by-claim<br/>check against evidence"]
+        L1 --> L2 --> L3 --> L4
     end
 
-    subgraph P2["Phase 2 — Theme Discovery (parallel)"]
-        direction LR
-        P2A["Issues"]
-        P2B["Interventions"]
-        P2C["Outcomes"]
-        P2D["Risks"]
-    end
+    %% ── Output ──
+    LOOP --> OUT["<b>Structured Briefing</b><br/>+ citation database + evidence coverage"]
 
-    subgraph P2detail["Each branch: 3-step pipeline"]
-        direction LR
-        D1["Discover themes<br/><i>LLM structured output</i>"]
-        D2["Critique themes<br/><i>QA against MECE criteria</i>"]
-        D3["Classify concepts<br/><i>32-way concurrent mapping</i>"]
-        D1 --> D2 --> D3
-    end
-
-    subgraph P3["Phase 3 — Aggregation & Impact"]
-        direction LR
-        P3A["Evidence coverage<br/><i>deterministic stats</i>"]
-        P3B["Aggregated tables<br/><i>quality-weighted<br/>effect counts</i>"]
-        P3C["Impact synthesis<br/><i>verdicts, magnitude,<br/>transferability</i>"]
-        P3A --> P3B --> P3C
-    end
-
-    subgraph P4["Phase 4 — RAG Retrieval"]
-        direction LR
-        P4A["Themes"]
-        P4B["Issues"]
-        P4C["Outcomes"]
-        P4A --> P4B --> P4C
-    end
-
-    subgraph P4detail["Constrained retrieval per theme"]
-        direction LR
-        R1["Vector search"]
-        R2["Filter to<br/>theme documents"]
-        R3["Quality-weighted<br/>re-ranking"]
-        R4["Assign<br/>citations"]
-        R1 --> R2 --> R3 --> R4
-    end
-
-    subgraph P5["Phase 5 — Contextual Summarisation (RCS)"]
-        direction LR
-        P5A["Generate<br/>theme question"]
-        P5B["Score each chunk<br/><i>relevance 0–10</i>"]
-        P5C["Filter & assess<br/>sufficiency"]
-        P5A --> P5B --> P5C
-    end
-
-    subgraph P6["Phase 6 — Briefing Generation"]
-        direction TB
-        subgraph loop["Per section (×5)"]
-            direction LR
-            O["Orchestrator<br/><i>selects evidence tools</i>"]
-            T["Tool executor<br/><i>runs tools against state</i>"]
-            G["Generator<br/><i>writes section with [N] cites</i>"]
-            V["Verifier<br/><i>claim-by-claim check</i>"]
-            O --> T --> G --> V
-        end
-        S1["Background"]
-        S2["Interventions table"]
-        S3["Synthesis sections"]
-        S4["Core answer"]
-        S5["Recommendations"]
-        S1 --> S2 --> S3 --> S4 --> S5
-    end
-
-    OUT["Structured Briefing<br/><i>+ citation database<br/>+ evidence coverage</i>"]
-
-    P1 --> P2
-    P2 -.-> P2detail
-    P2 --> P3
-    P3 --> P4
-    P4 -.-> P4detail
-    P4 --> P5
-    P5 --> P6
-    P6 --> OUT
-
+    %% ── Styles ──
     classDef phase fill:#e8f0fe,stroke:#4285f4,stroke-width:2px,color:#1a1a1a
-    classDef detail fill:#fef7e0,stroke:#f9ab00,stroke-width:1px,color:#1a1a1a
+    classDef note fill:#fef7e0,stroke:#f9ab00,stroke-width:1px,color:#1a1a1a,stroke-dasharray:5 5
+    classDef branch fill:#f3e8fd,stroke:#9334e6,stroke-width:1px,color:#1a1a1a
+    classDef join fill:none,stroke:none,color:none
+    classDef loop fill:#fce8e6,stroke:#ea4335,stroke-width:1px,color:#1a1a1a
     classDef output fill:#e6f4ea,stroke:#34a853,stroke-width:2px,color:#1a1a1a
 
-    class P1,P2,P3,P4,P5,P6 phase
-    class P2detail,P4detail detail
+    class P1,P2_fan,P3A,P3B,P3C,P4,P5,P6,SEC phase
+    class P2_note note
+    class P2_I,P2_V,P2_O,P2_R branch
+    class P2_join join
+    class LOOP,L1,L2,L3,L4 loop
     class OUT output
 ```
 
