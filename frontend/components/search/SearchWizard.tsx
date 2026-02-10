@@ -444,12 +444,6 @@ function ScreenPopulation() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you targeting a particular population?</h2>
         <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
@@ -508,6 +502,11 @@ function ScreenPopulation() {
           />
           <Button onClick={addCustom}>+ Add</Button>
         </div>
+      </div>
+
+      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
       </div>
     </div>
   );
@@ -578,11 +577,6 @@ function ScreenInnerSetting() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular settings?</h2>
         <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information and assess transferability.</p>
@@ -654,6 +648,11 @@ function ScreenInnerSetting() {
           <Button onClick={addCustom}>+ Add</Button>
         </div>
       </div>
+
+      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+      </div>
     </div>
   );
 }
@@ -708,12 +707,6 @@ function ScreenOutcome() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular outcomes?</h2>
         <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
@@ -773,6 +766,11 @@ function ScreenOutcome() {
           <Button onClick={addCustom}>+ Add</Button>
         </div>
       </div>
+
+      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+      </div>
     </div>
   );
 }
@@ -813,12 +811,6 @@ function ScreenParameters() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
         <p className="text-gray-600 text-lg">We will use this filter only the most relevant information</p>
@@ -1023,6 +1015,11 @@ function ScreenParameters() {
         </div>
 
       </div>
+
+      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+      </div>
     </div>
   );
 }
@@ -1079,14 +1076,6 @@ function ScreenScreening() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={handleNext} disabled={s.isGeneratingOptions}>
-          {s.isGeneratingOptions ? "Generating..." : "Next"}
-        </Button>
-      </div>
-
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Anything else to consider when screening the evidence?</h2>
         <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
@@ -1128,6 +1117,13 @@ function ScreenScreening() {
           <Button onClick={addFactor}>+ Add</Button>
         </div>
       </div>
+
+      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={handleNext} disabled={s.isGeneratingOptions}>
+          {s.isGeneratingOptions ? "Generating..." : "Next"}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1163,12 +1159,6 @@ function ScreenAdditionalQuestions() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Specific research questions?</h2>
         <p className="text-gray-600 text-lg">We will use these to shape the summary write-up</p>
@@ -1229,6 +1219,11 @@ function ScreenAdditionalQuestions() {
           <Button onClick={addQuestion}>+ Add</Button>
         </div>
       </div>
+
+      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+      </div>
     </div>
   );
 }
@@ -1249,17 +1244,6 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
-          <Button variant="ghost" onClick={() => s.reset()} disabled={isRunning}>Start new search</Button>
-        </div>
-        <Button onClick={() => onRunAnalysis(context)} disabled={isRunning}>
-          {isRunning ? 'Starting up...' : 'Run Analysis'}
-        </Button>
-      </div>
-
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Summary</h2>
       </div>
@@ -1420,6 +1404,16 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
             </div>
         </CardContent>
       </Card>
+
+      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
+          <Button variant="secondary" onClick={() => s.reset()} disabled={isRunning}>Start new search</Button>
+        </div>
+        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => onRunAnalysis(context)} disabled={isRunning}>
+          {isRunning ? 'Starting up...' : 'Run Analysis'}
+        </Button>
+      </div>
     </div>
   );
 }
