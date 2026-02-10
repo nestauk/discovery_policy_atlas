@@ -1331,6 +1331,7 @@ function ScreenAdditionalQuestions() {
 function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (context: SearchContext) => void; isRunning?: boolean }) {
   const s = useWizard();
   const context = s.buildContext();
+  const goToStep = (step: Step) => s.set({ step });
   const impliedQuestion = generateImpliedResearchQuestion(context);
   const hasImplementationConstraints = [
     context.implementationConstraints.cost,
@@ -1363,36 +1364,48 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid gap-4">
-            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+            <button
+              type="button"
+              onClick={() => goToStep("POPULATION")}
+              className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-left transition hover:bg-gray-50"
+            >
               <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Population</div>
               {context.population.selected.length > 0 ? (
                 <p className="text-gray-900">{context.population.selected.join(", ")}</p>
               ) : (
                 <p className="text-gray-500">Not specified</p>
               )}
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+            </button>
+            <button
+              type="button"
+              onClick={() => goToStep("INNER_SETTING")}
+              className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-left transition hover:bg-gray-50"
+            >
               <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Setting</div>
               {context.innerSetting.length > 0 ? (
                 <p className="text-gray-900">{context.innerSetting.join(", ")}</p>
               ) : (
                 <p className="text-gray-500">No preference</p>
               )}
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+            </button>
+            <button
+              type="button"
+              onClick={() => goToStep("OUTCOME")}
+              className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-left transition hover:bg-gray-50"
+            >
               <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Outcome</div>
               {context.outcome.selected.length > 0 ? (
                 <p className="text-gray-900">{context.outcome.selected.join(", ")}</p>
               ) : (
                 <p className="text-gray-500">Not specified</p>
               )}
-            </div>
+            </button>
           </div>
 
           <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
             <div className="text-xs uppercase tracking-wide text-gray-500">Filters</div>
             <div className="space-y-3">
-              <div>
+              <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
                 <span className="font-medium">Search sources</span>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {context.parameters.sources.length > 0 ? (
@@ -1405,8 +1418,8 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
                     <span className="text-gray-500">Not specified</span>
                   )}
                 </div>
-              </div>
-              <div>
+              </button>
+              <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
                 <span className="font-medium">Time window</span>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
@@ -1419,8 +1432,8 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
                     </span>
                   )}
                 </div>
-              </div>
-              <div>
+              </button>
+              <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
                 <span className="font-medium">Geography</span>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {context.parameters.geography.length > 0 ? (
@@ -1433,13 +1446,13 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
                     <span className="text-gray-500">Not specified</span>
                   )}
                 </div>
-              </div>
+              </button>
             </div>
           </div>
 
           <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
             <div className="text-xs uppercase tracking-wide text-gray-500">Prioritisation</div>
-            <div>
+            <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
               <span className="font-medium">Implementation constraints</span>
               {hasImplementationConstraints ? (
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1456,8 +1469,8 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
               ) : (
                 <div className="mt-2 text-gray-500">Not specified</div>
               )}
-            </div>
-            <div>
+            </button>
+            <button type="button" onClick={() => goToStep("SCREENING")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
               <span className="font-medium">Screening factors</span>
               {context.screeningFactors.length > 0 ? (
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1470,7 +1483,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
               ) : (
                 <div className="mt-2 text-gray-500">None added</div>
               )}
-            </div>
+            </button>
           </div>
 
             <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
