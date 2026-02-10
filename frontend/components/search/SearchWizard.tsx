@@ -169,9 +169,9 @@ interface WizardState {
 export const useWizard = create<WizardState>((set, get) => ({
   step: "ASK",
   researchQuestion: "",
-  population: { selected: [], keepBroad: false },
+  population: { selected: ["Anyone"], keepBroad: false },
   innerSetting: { selected: [], noPreference: true },
-  outcome: { selected: [], keepBroad: false },
+  outcome: { selected: ["I don't have a particular outcome in mind"], keepBroad: false },
   implementationConstraints: {
     cost: "Any",
     staffing: "Any",
@@ -198,9 +198,9 @@ export const useWizard = create<WizardState>((set, get) => ({
     set({
       step: "ASK",
       researchQuestion: "",
-      population: { selected: [], keepBroad: false },
+      population: { selected: ["Anyone"], keepBroad: false },
       innerSetting: { selected: [], noPreference: true },
-      outcome: { selected: [], keepBroad: false },
+      outcome: { selected: ["I don't have a particular outcome in mind"], keepBroad: false },
       implementationConstraints: {
         cost: "Any",
         staffing: "Any",
@@ -397,13 +397,25 @@ function ScreenAsk() {
 function ScreenPopulation() {
   const s = useWizard();
   const [customInput, setCustomInput] = useState("");
+  const ANYONE_OPTION = "Anyone";
 
   const togglePopulation = (pop: string) => {
     const current = s.population.selected;
+    // "Anyone" behaves as a mutually exclusive option.
+    if (pop === ANYONE_OPTION) {
+      if (current.includes(ANYONE_OPTION)) {
+        s.set({ population: { ...s.population, selected: [] } });
+      } else {
+        s.set({ population: { ...s.population, selected: [ANYONE_OPTION] } });
+      }
+      return;
+    }
+
     if (current.includes(pop)) {
       s.set({ population: { ...s.population, selected: current.filter(p => p !== pop) } });
     } else {
-      s.set({ population: { ...s.population, selected: [...current, pop] } });
+      const withoutAnyone = current.filter(p => p !== ANYONE_OPTION);
+      s.set({ population: { ...s.population, selected: [...withoutAnyone, pop] } });
     }
   };
 
@@ -411,10 +423,11 @@ function ScreenPopulation() {
     const trimmed = customInput.trim();
     // Use generated options or fallback to defaults
     const exampleOptions = s.generatedPopulationOptions.length > 0
-      ? ["Anyone", ...s.generatedPopulationOptions] as string[]
-      : ["Anyone", ...FALLBACK_POPULATION_EXAMPLES] as string[];
+      ? [ANYONE_OPTION, ...s.generatedPopulationOptions] as string[]
+      : [ANYONE_OPTION, ...FALLBACK_POPULATION_EXAMPLES] as string[];
     if (trimmed && !s.population.selected.includes(trimmed) && !exampleOptions.includes(trimmed)) {
-      s.set({ population: { ...s.population, selected: [...s.population.selected, trimmed] } });
+      const withoutAnyone = s.population.selected.filter((p) => p !== ANYONE_OPTION);
+      s.set({ population: { ...s.population, selected: [...withoutAnyone, trimmed] } });
       setCustomInput("");
     }
   };
@@ -425,8 +438,8 @@ function ScreenPopulation() {
 
   // Use generated options or fallback to defaults
   const exampleOptions = s.generatedPopulationOptions.length > 0
-    ? ["Anyone", ...s.generatedPopulationOptions] as string[]
-    : ["Anyone", ...FALLBACK_POPULATION_EXAMPLES] as string[];
+    ? [ANYONE_OPTION, ...s.generatedPopulationOptions] as string[]
+    : [ANYONE_OPTION, ...FALLBACK_POPULATION_EXAMPLES] as string[];
   const customOptions = s.population.selected.filter(pop => !exampleOptions.includes(pop));
 
   return (
@@ -648,13 +661,25 @@ function ScreenInnerSetting() {
 function ScreenOutcome() {
   const s = useWizard();
   const [customInput, setCustomInput] = useState("");
+  const NO_OUTCOME_OPTION = "I don't have a particular outcome in mind";
 
   const toggleOutcome = (outcome: string) => {
     const current = s.outcome.selected;
+    // "No particular outcome" behaves as a mutually exclusive option.
+    if (outcome === NO_OUTCOME_OPTION) {
+      if (current.includes(NO_OUTCOME_OPTION)) {
+        s.set({ outcome: { ...s.outcome, selected: [] } });
+      } else {
+        s.set({ outcome: { ...s.outcome, selected: [NO_OUTCOME_OPTION] } });
+      }
+      return;
+    }
+
     if (current.includes(outcome)) {
       s.set({ outcome: { ...s.outcome, selected: current.filter(o => o !== outcome) } });
     } else {
-      s.set({ outcome: { ...s.outcome, selected: [...current, outcome] } });
+      const withoutNoOutcome = current.filter(o => o !== NO_OUTCOME_OPTION);
+      s.set({ outcome: { ...s.outcome, selected: [...withoutNoOutcome, outcome] } });
     }
   };
 
@@ -662,10 +687,11 @@ function ScreenOutcome() {
     const trimmed = customInput.trim();
     // Use generated options or fallback to defaults
     const exampleOptions = s.generatedOutcomeOptions.length > 0
-      ? ["I don't have a particular outcome in mind", ...s.generatedOutcomeOptions] as string[]
-      : ["I don't have a particular outcome in mind", ...FALLBACK_OUTCOME_EXAMPLES] as string[];
+      ? [NO_OUTCOME_OPTION, ...s.generatedOutcomeOptions] as string[]
+      : [NO_OUTCOME_OPTION, ...FALLBACK_OUTCOME_EXAMPLES] as string[];
     if (trimmed && !s.outcome.selected.includes(trimmed) && !exampleOptions.includes(trimmed)) {
-      s.set({ outcome: { ...s.outcome, selected: [...s.outcome.selected, trimmed] } });
+      const withoutNoOutcome = s.outcome.selected.filter(o => o !== NO_OUTCOME_OPTION);
+      s.set({ outcome: { ...s.outcome, selected: [...withoutNoOutcome, trimmed] } });
       setCustomInput("");
     }
   };
@@ -676,8 +702,8 @@ function ScreenOutcome() {
 
   // Use generated options or fallback to defaults
   const exampleOptions = s.generatedOutcomeOptions.length > 0
-    ? ["I don't have a particular outcome in mind", ...s.generatedOutcomeOptions] as string[]
-    : ["I don't have a particular outcome in mind", ...FALLBACK_OUTCOME_EXAMPLES] as string[];
+    ? [NO_OUTCOME_OPTION, ...s.generatedOutcomeOptions] as string[]
+    : [NO_OUTCOME_OPTION, ...FALLBACK_OUTCOME_EXAMPLES] as string[];
   const customOptions = s.outcome.selected.filter(outcome => !exampleOptions.includes(outcome));
 
   return (
