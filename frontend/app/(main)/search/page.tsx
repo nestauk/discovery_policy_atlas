@@ -79,9 +79,9 @@ export default function SearchPage() {
 
       const searchContext = {
         research_question: context.researchQuestion,
-        population: context.population.selected,
+        population: context.population,
         inner_setting: context.innerSetting,
-        outcome: context.outcome.selected,
+        outcome: context.outcome,
         screening_factors: context.screeningFactors,
         sources: context.parameters.sources,
         geography: context.parameters.geography,

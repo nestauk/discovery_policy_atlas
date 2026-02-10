@@ -104,15 +104,9 @@ const GEO_LABELS: Record<string, string> = {
 // Search context type - stores all the structured data
 export type SearchContext = {
   researchQuestion: string;
-  population: {
-    selected: string[]; // Selected population options (examples + custom)
-    keepBroad: boolean; // "Keep it broad" option
-  };
+  population: string[];
   innerSetting: string[];
-  outcome: {
-    selected: string[]; // Selected outcome options (examples + custom)
-    keepBroad: boolean; // "Keep it broad" option
-  };
+  outcome: string[];
   implementationConstraints: {
     cost: string;
     staffing: string;
@@ -135,9 +129,9 @@ export type SearchContext = {
 interface WizardState {
   step: Step;
   researchQuestion: string;
-  population: { selected: string[]; keepBroad: boolean };
+  population: { selected: string[]; noPreference: boolean };
   innerSetting: { selected: string[]; noPreference: boolean };
-  outcome: { selected: string[]; keepBroad: boolean };
+  outcome: { selected: string[]; noPreference: boolean };
   implementationConstraints: {
     cost: string;
     staffing: string;
@@ -169,9 +163,9 @@ interface WizardState {
 export const useWizard = create<WizardState>((set, get) => ({
   step: "ASK",
   researchQuestion: "",
-  population: { selected: ["Anyone"], keepBroad: false },
+  population: { selected: [], noPreference: true },
   innerSetting: { selected: [], noPreference: true },
-  outcome: { selected: ["I don't have a particular outcome in mind"], keepBroad: false },
+  outcome: { selected: [], noPreference: true },
   implementationConstraints: {
     cost: "Any",
     staffing: "Any",
@@ -198,9 +192,9 @@ export const useWizard = create<WizardState>((set, get) => ({
     set({
       step: "ASK",
       researchQuestion: "",
-      population: { selected: ["Anyone"], keepBroad: false },
+      population: { selected: [], noPreference: true },
       innerSetting: { selected: [], noPreference: true },
-      outcome: { selected: ["I don't have a particular outcome in mind"], keepBroad: false },
+      outcome: { selected: [], noPreference: true },
       implementationConstraints: {
         cost: "Any",
         staffing: "Any",
@@ -257,9 +251,9 @@ export const useWizard = create<WizardState>((set, get) => ({
     const s = get();
     return {
       researchQuestion: s.researchQuestion,
-      population: s.population,
+      population: s.population.noPreference ? [] : s.population.selected,
       innerSetting: s.innerSetting.noPreference ? [] : s.innerSetting.selected,
-      outcome: s.outcome,
+      outcome: s.outcome.noPreference ? [] : s.outcome.selected,
       implementationConstraints: s.implementationConstraints,
       parameters: s.parameters,
       screeningFactors: s.screeningFactors,
@@ -293,18 +287,18 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
   }
   
   // Add population context
-  if (context.population.selected.length > 0) {
-    const popText = context.population.selected.length === 1 
-      ? context.population.selected[0]
-      : context.population.selected.join(", ");
+  if (context.population.length > 0) {
+    const popText = context.population.length === 1 
+      ? context.population[0]
+      : context.population.join(", ");
     parts.push(`for ${popText}`);
   }
   
   // Add outcome context
-  if (context.outcome.selected.length > 0) {
-    const outcomeText = context.outcome.selected.length === 1
-      ? context.outcome.selected[0]
-      : context.outcome.selected.join(", ");
+  if (context.outcome.length > 0) {
+    const outcomeText = context.outcome.length === 1
+      ? context.outcome[0]
+      : context.outcome.join(", ");
     parts.push(`could achieve ${outcomeText}`);
   }
   
@@ -399,61 +393,42 @@ function ScreenAsk() {
 function ScreenPopulation() {
   const s = useWizard();
   const [customInput, setCustomInput] = useState("");
-  const ANYONE_OPTION = "Anyone";
 
   const togglePopulation = (pop: string) => {
     const current = s.population.selected;
-    // "Anyone" behaves as a mutually exclusive option.
-    if (pop === ANYONE_OPTION) {
-      if (current.includes(ANYONE_OPTION)) {
-        s.set({ population: { ...s.population, selected: [] } });
-      } else {
-        s.set({ population: { ...s.population, selected: [ANYONE_OPTION] } });
-      }
+    if (s.population.noPreference) {
+      s.set({ population: { selected: [pop], noPreference: false } });
       return;
     }
-
     if (current.includes(pop)) {
       const next = current.filter(p => p !== pop);
-      s.set({
-        population: {
-          ...s.population,
-          selected: next.length > 0 ? next : [ANYONE_OPTION],
-        },
-      });
+      s.set({ population: { selected: next, noPreference: next.length === 0 } });
     } else {
-      const withoutAnyone = current.filter(p => p !== ANYONE_OPTION);
-      s.set({ population: { ...s.population, selected: [...withoutAnyone, pop] } });
+      s.set({ population: { selected: [...current, pop], noPreference: false } });
     }
+  };
+
+  const selectNoPreference = () => {
+    s.set({ population: { selected: [], noPreference: true } });
   };
 
   const addCustom = () => {
     const trimmed = customInput.trim();
-    // Use generated options or fallback to defaults
-    const exampleOptions = s.generatedPopulationOptions.length > 0
-      ? [ANYONE_OPTION, ...s.generatedPopulationOptions] as string[]
-      : [ANYONE_OPTION, ...FALLBACK_POPULATION_EXAMPLES] as string[];
-    if (trimmed && !s.population.selected.includes(trimmed) && !exampleOptions.includes(trimmed)) {
-      const withoutAnyone = s.population.selected.filter((p) => p !== ANYONE_OPTION);
-      s.set({ population: { ...s.population, selected: [...withoutAnyone, trimmed] } });
-      setCustomInput("");
+    if (!trimmed) return;
+    if (!s.population.selected.includes(trimmed)) {
+      s.set({ population: { selected: [...s.population.selected, trimmed], noPreference: false } });
     }
+    setCustomInput("");
   };
 
   const removePopulation = (pop: string) => {
     const next = s.population.selected.filter(p => p !== pop);
-    s.set({
-      population: {
-        ...s.population,
-        selected: next.length > 0 ? next : [ANYONE_OPTION],
-      },
-    });
+    s.set({ population: { selected: next, noPreference: next.length === 0 } });
   };
 
-  // Use generated options or fallback to defaults
   const exampleOptions = s.generatedPopulationOptions.length > 0
-    ? [ANYONE_OPTION, ...s.generatedPopulationOptions] as string[]
-    : [ANYONE_OPTION, ...FALLBACK_POPULATION_EXAMPLES] as string[];
+    ? s.generatedPopulationOptions
+    : [...FALLBACK_POPULATION_EXAMPLES];
   const customOptions = s.population.selected.filter(pop => !exampleOptions.includes(pop));
 
   return (
@@ -464,26 +439,19 @@ function ScreenPopulation() {
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
-        {/* Options in single column */}
         <div className="flex flex-col gap-3">
-          {exampleOptions.slice(0, 1).map((pop) => {
-            const isSelected = s.population.selected.includes(pop);
-            return (
-              <button
-                key={pop}
-                type="button"
-                onClick={() => togglePopulation(pop)}
-                className={cx(
-                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
-                  isSelected
-                    ? "bg-blue-600 !text-white ring-blue-600"
-                    : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
-                )}
-              >
-                {pop}
-              </button>
-            );
-          })}
+          <button
+            type="button"
+            onClick={selectNoPreference}
+            className={cx(
+              "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
+              s.population.noPreference
+                ? "bg-blue-600 !text-white ring-blue-600"
+                : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+            )}
+          >
+            Anyone
+          </button>
 
           <div className="flex items-center gap-3 py-1">
             <div className="h-px flex-1 bg-gray-200" />
@@ -491,7 +459,7 @@ function ScreenPopulation() {
             <div className="h-px flex-1 bg-gray-200" />
           </div>
 
-          {exampleOptions.slice(1).map((pop) => {
+          {exampleOptions.map((pop) => {
             const isSelected = s.population.selected.includes(pop);
             return (
               <button
@@ -711,61 +679,42 @@ function ScreenInnerSetting() {
 function ScreenOutcome() {
   const s = useWizard();
   const [customInput, setCustomInput] = useState("");
-  const NO_OUTCOME_OPTION = "I don't have a particular outcome in mind";
 
   const toggleOutcome = (outcome: string) => {
     const current = s.outcome.selected;
-    // "No particular outcome" behaves as a mutually exclusive option.
-    if (outcome === NO_OUTCOME_OPTION) {
-      if (current.includes(NO_OUTCOME_OPTION)) {
-        s.set({ outcome: { ...s.outcome, selected: [] } });
-      } else {
-        s.set({ outcome: { ...s.outcome, selected: [NO_OUTCOME_OPTION] } });
-      }
+    if (s.outcome.noPreference) {
+      s.set({ outcome: { selected: [outcome], noPreference: false } });
       return;
     }
-
     if (current.includes(outcome)) {
       const next = current.filter(o => o !== outcome);
-      s.set({
-        outcome: {
-          ...s.outcome,
-          selected: next.length > 0 ? next : [NO_OUTCOME_OPTION],
-        },
-      });
+      s.set({ outcome: { selected: next, noPreference: next.length === 0 } });
     } else {
-      const withoutNoOutcome = current.filter(o => o !== NO_OUTCOME_OPTION);
-      s.set({ outcome: { ...s.outcome, selected: [...withoutNoOutcome, outcome] } });
+      s.set({ outcome: { selected: [...current, outcome], noPreference: false } });
     }
+  };
+
+  const selectNoPreference = () => {
+    s.set({ outcome: { selected: [], noPreference: true } });
   };
 
   const addCustom = () => {
     const trimmed = customInput.trim();
-    // Use generated options or fallback to defaults
-    const exampleOptions = s.generatedOutcomeOptions.length > 0
-      ? [NO_OUTCOME_OPTION, ...s.generatedOutcomeOptions] as string[]
-      : [NO_OUTCOME_OPTION, ...FALLBACK_OUTCOME_EXAMPLES] as string[];
-    if (trimmed && !s.outcome.selected.includes(trimmed) && !exampleOptions.includes(trimmed)) {
-      const withoutNoOutcome = s.outcome.selected.filter(o => o !== NO_OUTCOME_OPTION);
-      s.set({ outcome: { ...s.outcome, selected: [...withoutNoOutcome, trimmed] } });
-      setCustomInput("");
+    if (!trimmed) return;
+    if (!s.outcome.selected.includes(trimmed)) {
+      s.set({ outcome: { selected: [...s.outcome.selected, trimmed], noPreference: false } });
     }
+    setCustomInput("");
   };
 
   const removeOutcome = (outcome: string) => {
     const next = s.outcome.selected.filter(o => o !== outcome);
-    s.set({
-      outcome: {
-        ...s.outcome,
-        selected: next.length > 0 ? next : [NO_OUTCOME_OPTION],
-      },
-    });
+    s.set({ outcome: { selected: next, noPreference: next.length === 0 } });
   };
 
-  // Use generated options or fallback to defaults
   const exampleOptions = s.generatedOutcomeOptions.length > 0
-    ? [NO_OUTCOME_OPTION, ...s.generatedOutcomeOptions] as string[]
-    : [NO_OUTCOME_OPTION, ...FALLBACK_OUTCOME_EXAMPLES] as string[];
+    ? s.generatedOutcomeOptions
+    : [...FALLBACK_OUTCOME_EXAMPLES];
   const customOptions = s.outcome.selected.filter(outcome => !exampleOptions.includes(outcome));
 
   return (
@@ -776,26 +725,19 @@ function ScreenOutcome() {
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
-        {/* Options in single column */}
         <div className="flex flex-col gap-3">
-          {exampleOptions.slice(0, 1).map((outcome) => {
-            const isSelected = s.outcome.selected.includes(outcome);
-            return (
-              <button
-                key={outcome}
-                type="button"
-                onClick={() => toggleOutcome(outcome)}
-                className={cx(
-                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
-                  isSelected
-                    ? "bg-blue-600 !text-white ring-blue-600"
-                    : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
-                )}
-              >
-                {outcome}
-              </button>
-            );
-          })}
+          <button
+            type="button"
+            onClick={selectNoPreference}
+            className={cx(
+              "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
+              s.outcome.noPreference
+                ? "bg-blue-600 !text-white ring-blue-600"
+                : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+            )}
+          >
+            I don&apos;t have a particular outcome in mind
+          </button>
 
           <div className="flex items-center gap-3 py-1">
             <div className="h-px flex-1 bg-gray-200" />
@@ -803,7 +745,7 @@ function ScreenOutcome() {
             <div className="h-px flex-1 bg-gray-200" />
           </div>
 
-          {exampleOptions.slice(1).map((outcome) => {
+          {exampleOptions.map((outcome) => {
             const isSelected = s.outcome.selected.includes(outcome);
             return (
               <button
@@ -1370,10 +1312,10 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
               className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-left transition hover:bg-gray-50"
             >
               <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Population</div>
-              {context.population.selected.length > 0 ? (
-                <p className="text-gray-900">{context.population.selected.join(", ")}</p>
+              {context.population.length > 0 ? (
+                <p className="text-gray-900">{context.population.join(", ")}</p>
               ) : (
-                <p className="text-gray-500">Not specified</p>
+                <p className="text-gray-500">Anyone</p>
               )}
             </button>
             <button
@@ -1394,10 +1336,10 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
               className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-left transition hover:bg-gray-50"
             >
               <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Outcome</div>
-              {context.outcome.selected.length > 0 ? (
-                <p className="text-gray-900">{context.outcome.selected.join(", ")}</p>
+              {context.outcome.length > 0 ? (
+                <p className="text-gray-900">{context.outcome.join(", ")}</p>
               ) : (
-                <p className="text-gray-500">Not specified</p>
+                <p className="text-gray-500">No preference</p>
               )}
             </button>
           </div>
