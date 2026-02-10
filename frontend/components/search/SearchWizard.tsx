@@ -266,12 +266,56 @@ export const useWizard = create<WizardState>((set, get) => ({
 // ---------------- HELPERS ----------------
 function ProgressBar({ step }: { step: Step }) {
   // Skip ADDITIONAL_QUESTIONS in progress calculation
-  const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "PARAMETERS", "SCREENING", "SUMMARY"];
-  const currentIdx = steps.indexOf(step);
-  const pct = Math.round(((currentIdx + 1) / steps.length) * 100);
+  const steps: { id: Step; label: string }[] = [
+    { id: "ASK", label: "Question" },
+    { id: "POPULATION", label: "Population" },
+    { id: "INNER_SETTING", label: "Setting" },
+    { id: "OUTCOME", label: "Outcome" },
+    { id: "PARAMETERS", label: "Parameters" },
+    { id: "SCREENING", label: "Screening" },
+    { id: "SUMMARY", label: "Summary" },
+  ];
+  const currentIdx = steps.findIndex((s) => s.id === step);
   return (
-    <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-      <div className="h-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
+    <div className="w-full border-b border-gray-100 bg-white px-4 py-3">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-2">
+        {steps.map((item, idx) => {
+          const isCompleted = idx < currentIdx;
+          const isCurrent = idx === currentIdx;
+          return (
+            <React.Fragment key={item.id}>
+              <div className="min-w-0 flex items-center gap-2">
+                <div
+                  className={cx(
+                    "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ring-1",
+                    isCompleted || isCurrent
+                      ? "bg-blue-600 !text-white ring-blue-600"
+                      : "bg-white text-gray-500 ring-gray-300"
+                  )}
+                >
+                  {idx + 1}
+                </div>
+                <span
+                  className={cx(
+                    "hidden text-xs sm:inline",
+                    isCurrent ? "font-semibold text-gray-900" : "text-gray-500"
+                  )}
+                >
+                  {item.label}
+                </span>
+              </div>
+              {idx < steps.length - 1 && (
+                <div
+                  className={cx(
+                    "h-px flex-1",
+                    idx < currentIdx ? "bg-blue-600" : "bg-gray-200"
+                  )}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -382,7 +426,12 @@ function ScreenAsk() {
             disabled={!s.researchQuestion.trim() || s.isGeneratingOptions} 
             onClick={handleNext}
           >
-            {s.isGeneratingOptions ? 'Generating options...' : 'Continue'}
+            {s.isGeneratingOptions ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/30 border-t-black" />
+                Generating options...
+              </span>
+            ) : 'Continue'}
           </Button>
         </div>
       </div>
@@ -812,6 +861,8 @@ function ScreenParameters() {
   const s = useWizard();
   const [selectedCountry, setSelectedCountry] = useState("");
   const constraintOptions = ["Any", "Low", "Moderate", "High"];
+  const hasSelectedSource =
+    s.parameters.access.academic || s.parameters.access.policy;
 
   const toggleAccess = (k: keyof Access) => {
     s.set({ parameters: { ...s.parameters, access: { ...s.parameters.access, [k]: !s.parameters.access[k] } } });
@@ -830,7 +881,13 @@ function ScreenParameters() {
   };
 
   const removeGeo = (g: string) => {
-    s.set({ parameters: { ...s.parameters, geography: s.parameters.geography.filter(x => x !== g) } });
+    const next = s.parameters.geography.filter(x => x !== g);
+    s.set({
+      parameters: {
+        ...s.parameters,
+        geography: next.length > 0 ? next : [ANYWHERE_VALUE],
+      },
+    });
   };
 
   // Update sources based on access
@@ -846,7 +903,7 @@ function ScreenParameters() {
     <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
-        <p className="text-gray-600 text-lg">We will use this filter only the most relevant information</p>
+        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
       </div>
 
       <div className="space-y-8">
@@ -861,6 +918,11 @@ function ScreenParameters() {
               Grey literature (think tanks and governments)
             </Chip>
           </div>
+          {!hasSelectedSource && (
+            <p className="text-sm text-red-600">
+              Select at least one source to continue.
+            </p>
+          )}
         </div>
 
         {/* Time window */}
@@ -1054,7 +1116,14 @@ function ScreenParameters() {
           <Button variant="secondary" onClick={() => s.back()}>Back</Button>
           <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
         </div>
-        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
+        <Button
+          variant="secondary"
+          className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+          onClick={() => s.next()}
+          disabled={!hasSelectedSource}
+        >
+          Next
+        </Button>
       </div>
     </div>
   );
@@ -1273,6 +1342,7 @@ function ScreenAdditionalQuestions() {
 function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (context: SearchContext) => void; isRunning?: boolean }) {
   const s = useWizard();
   const context = s.buildContext();
+  const hasSelectedSource = context.parameters.sources.length > 0;
   const goToStep = (step: Step) => s.set({ step });
   const impliedQuestion = generateImpliedResearchQuestion(context);
   const hasImplementationConstraints = [
@@ -1465,10 +1535,20 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
           <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
           <Button variant="secondary" onClick={() => s.reset()} disabled={isRunning}>Start new search</Button>
         </div>
-        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => onRunAnalysis(context)} disabled={isRunning}>
+        <Button
+          variant="secondary"
+          className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+          onClick={() => onRunAnalysis(context)}
+          disabled={isRunning || !hasSelectedSource}
+        >
           {isRunning ? 'Starting up...' : 'Run Analysis'}
         </Button>
       </div>
+      {!hasSelectedSource && (
+        <p className="text-sm text-red-600 text-right">
+          Select at least one search source before running analysis.
+        </p>
+      )}
     </div>
   );
 }
