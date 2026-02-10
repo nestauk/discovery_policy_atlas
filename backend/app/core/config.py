@@ -89,6 +89,7 @@ class Settings(BaseSettings):
 
     # OpenAlex Configuration
     OPENALEX_EMAIL: Optional[str] = None
+    OPENALEX_API_KEY: Optional[str] = None
 
     # MediaCloud Configuration
     MEDIACLOUD_API_KEY: Optional[str] = None
