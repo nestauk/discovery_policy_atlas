@@ -380,8 +380,10 @@ function ScreenAsk() {
           value={s.researchQuestion} 
           onChange={(e) => s.set({ researchQuestion: e.target.value })} 
         />
-        <div className="flex justify-end">
+        <div className="flex justify-end items-center">
           <Button 
+            variant="secondary"
+            className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
             full 
             disabled={!s.researchQuestion.trim() || s.isGeneratingOptions} 
             onClick={handleNext}
@@ -412,7 +414,13 @@ function ScreenPopulation() {
     }
 
     if (current.includes(pop)) {
-      s.set({ population: { ...s.population, selected: current.filter(p => p !== pop) } });
+      const next = current.filter(p => p !== pop);
+      s.set({
+        population: {
+          ...s.population,
+          selected: next.length > 0 ? next : [ANYONE_OPTION],
+        },
+      });
     } else {
       const withoutAnyone = current.filter(p => p !== ANYONE_OPTION);
       s.set({ population: { ...s.population, selected: [...withoutAnyone, pop] } });
@@ -433,7 +441,13 @@ function ScreenPopulation() {
   };
 
   const removePopulation = (pop: string) => {
-    s.set({ population: { ...s.population, selected: s.population.selected.filter(p => p !== pop) } });
+    const next = s.population.selected.filter(p => p !== pop);
+    s.set({
+      population: {
+        ...s.population,
+        selected: next.length > 0 ? next : [ANYONE_OPTION],
+      },
+    });
   };
 
   // Use generated options or fallback to defaults
@@ -452,7 +466,32 @@ function ScreenPopulation() {
       <div className="space-y-6 max-w-2xl mx-auto">
         {/* Options in single column */}
         <div className="flex flex-col gap-3">
-          {exampleOptions.map((pop) => {
+          {exampleOptions.slice(0, 1).map((pop) => {
+            const isSelected = s.population.selected.includes(pop);
+            return (
+              <button
+                key={pop}
+                type="button"
+                onClick={() => togglePopulation(pop)}
+                className={cx(
+                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
+                  isSelected
+                    ? "bg-blue-600 !text-white ring-blue-600"
+                    : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+                )}
+              >
+                {pop}
+              </button>
+            );
+          })}
+
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Or select specific populations</span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
+
+          {exampleOptions.slice(1).map((pop) => {
             const isSelected = s.population.selected.includes(pop);
             return (
               <button
@@ -505,8 +544,11 @@ function ScreenPopulation() {
       </div>
 
       <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
+        </div>
+        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
       </div>
     </div>
   );
@@ -597,6 +639,12 @@ function ScreenInnerSetting() {
             No preference
           </button>
 
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Or select specific settings</span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
+
           {exampleOptions.map((setting) => {
             const isSelected = s.innerSetting.selected.includes(setting);
             return (
@@ -650,8 +698,11 @@ function ScreenInnerSetting() {
       </div>
 
       <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
+        </div>
+        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
       </div>
     </div>
   );
@@ -675,7 +726,13 @@ function ScreenOutcome() {
     }
 
     if (current.includes(outcome)) {
-      s.set({ outcome: { ...s.outcome, selected: current.filter(o => o !== outcome) } });
+      const next = current.filter(o => o !== outcome);
+      s.set({
+        outcome: {
+          ...s.outcome,
+          selected: next.length > 0 ? next : [NO_OUTCOME_OPTION],
+        },
+      });
     } else {
       const withoutNoOutcome = current.filter(o => o !== NO_OUTCOME_OPTION);
       s.set({ outcome: { ...s.outcome, selected: [...withoutNoOutcome, outcome] } });
@@ -696,7 +753,13 @@ function ScreenOutcome() {
   };
 
   const removeOutcome = (outcome: string) => {
-    s.set({ outcome: { ...s.outcome, selected: s.outcome.selected.filter(o => o !== outcome) } });
+    const next = s.outcome.selected.filter(o => o !== outcome);
+    s.set({
+      outcome: {
+        ...s.outcome,
+        selected: next.length > 0 ? next : [NO_OUTCOME_OPTION],
+      },
+    });
   };
 
   // Use generated options or fallback to defaults
@@ -715,7 +778,32 @@ function ScreenOutcome() {
       <div className="space-y-6 max-w-2xl mx-auto">
         {/* Options in single column */}
         <div className="flex flex-col gap-3">
-          {exampleOptions.map((outcome) => {
+          {exampleOptions.slice(0, 1).map((outcome) => {
+            const isSelected = s.outcome.selected.includes(outcome);
+            return (
+              <button
+                key={outcome}
+                type="button"
+                onClick={() => toggleOutcome(outcome)}
+                className={cx(
+                  "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
+                  isSelected
+                    ? "bg-blue-600 !text-white ring-blue-600"
+                    : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+                )}
+              >
+                {outcome}
+              </button>
+            );
+          })}
+
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Or select specific outcomes</span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
+
+          {exampleOptions.slice(1).map((outcome) => {
             const isSelected = s.outcome.selected.includes(outcome);
             return (
               <button
@@ -768,8 +856,11 @@ function ScreenOutcome() {
       </div>
 
       <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
+        </div>
+        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
       </div>
     </div>
   );
@@ -1017,8 +1108,11 @@ function ScreenParameters() {
       </div>
 
       <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
+        </div>
+        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
       </div>
     </div>
   );
@@ -1119,8 +1213,11 @@ function ScreenScreening() {
       </div>
 
       <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={handleNext} disabled={s.isGeneratingOptions}>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
+        </div>
+        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={handleNext} disabled={s.isGeneratingOptions}>
           {s.isGeneratingOptions ? "Generating..." : "Next"}
         </Button>
       </div>
@@ -1221,8 +1318,11 @@ function ScreenAdditionalQuestions() {
       </div>
 
       <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => s.next()}>Next</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
+          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
+        </div>
+        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
       </div>
     </div>
   );
@@ -1410,7 +1510,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
           <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
           <Button variant="secondary" onClick={() => s.reset()} disabled={isRunning}>Start new search</Button>
         </div>
-        <Button className="bg-blue-600 !text-white hover:bg-blue-700" onClick={() => onRunAnalysis(context)} disabled={isRunning}>
+        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => onRunAnalysis(context)} disabled={isRunning}>
           {isRunning ? 'Starting up...' : 'Run Analysis'}
         </Button>
       </div>
