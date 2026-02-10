@@ -177,8 +177,12 @@ export default function ProjectResultsPage() {
         return
       }
       
-      // If we already have this project in store, no need to fetch
-      if (activeProject?.id === projectId) return
+      // If we already have this project in store with full payload, no need to fetch.
+      // The projects list endpoint omits search_query, so we must refetch when that field is missing.
+      const hasSearchQueryField =
+        !!activeProject &&
+        Object.prototype.hasOwnProperty.call(activeProject, 'search_query')
+      if (activeProject?.id === projectId && hasSearchQueryField) return
       
       setProjectLoading(true)
       setError(null)
