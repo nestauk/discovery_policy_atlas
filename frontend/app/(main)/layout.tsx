@@ -265,7 +265,7 @@ export default function AgentLayout({
       <div className="flex-1 flex flex-col ml-64 min-h-0">
         <div className="flex-1 min-h-0 overflow-auto">
           <div className="min-h-full flex flex-col bg-white">
-            <div className="min-h-0">
+            <div className="flex-1 min-h-0 flex flex-col">
               {children}
             </div>
             <Footer />

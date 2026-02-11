@@ -868,7 +868,7 @@ export default function ProjectResultsPage() {
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex-1 flex flex-col bg-slate-50">
       {/* Header */}
       <div className="border-b border-slate-200 bg-white px-8 py-6">
         <div className="flex items-center justify-between">
@@ -907,7 +907,7 @@ export default function ProjectResultsPage() {
       </div>
 
       {/* Main Content */}
-      <div className="bg-slate-50">
+      <div className="flex-1">
 
         {/* Show error state */}
         {error && (
