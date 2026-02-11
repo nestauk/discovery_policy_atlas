@@ -59,6 +59,7 @@ const toTitleCase = (str: string) => {
 interface ProjectChartsProps { 
   projectId: string
   projectTitle?: string
+  isPublic?: boolean
 }
 interface ChartData {
   documents_by_year: Array<{ year: number; count: number }>
@@ -67,7 +68,7 @@ interface ChartData {
   documents_by_evidence_category?: Array<{ category: string; count: number }>
 }
 
-export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
+export function ProjectCharts({ projectId, projectTitle, isPublic = false }: ProjectChartsProps) {
   const [chartData, setChartData] = useState<ChartData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -95,7 +96,13 @@ export function ProjectCharts({ projectId, projectTitle }: ProjectChartsProps) {
       setLoading(true)
       setError(null)
       try {
-        const data = await fetchWithAuth(`/api/analysis-projects/${projectId}/charts-data`)
+        let data: ChartData
+        if (isPublic) {
+          const { getPublicProjectChartsData } = await import('@/lib/publicApi')
+          data = await getPublicProjectChartsData(projectId) as ChartData
+        } else {
+          data = await fetchWithAuth(`/api/analysis-projects/${projectId}/charts-data`)
+        }
         setChartData(data)
       } catch (err) {
         console.error('Failed to fetch chart data:', err)

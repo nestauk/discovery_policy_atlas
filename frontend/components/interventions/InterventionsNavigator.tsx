@@ -106,6 +106,8 @@ interface NavigatorData {
 
 interface InterventionsNavigatorProps {
   showHeader?: boolean
+  isPublic?: boolean
+  publicProjectId?: string
 }
 
 function RangeFilter({
@@ -143,10 +145,14 @@ function RangeFilter({
 }
 
 export function InterventionsNavigator({ 
-  showHeader = true
+  showHeader = true,
+  isPublic = false,
+  publicProjectId,
 }: InterventionsNavigatorProps) {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth } = useAPI()
+  
+  const projectId = isPublic ? publicProjectId : activeProject?.id
   
   const [data, setData] = useState<NavigatorData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -166,26 +172,32 @@ export function InterventionsNavigator({
   }, [data])
 
   const loadNavigatorData = useCallback(async () => {
-    if (!activeProject?.id) return
+    if (!projectId) return
     
     setLoading(true)
     setError(null)
     
     try {
-      const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/issue-intervention-navigator`)
-      setData(response as NavigatorData)
+      let response: NavigatorData
+      if (isPublic) {
+        const { getPublicNavigator } = await import('@/lib/publicApi')
+        response = await getPublicNavigator(projectId) as NavigatorData
+      } else {
+        response = await fetchWithAuth(`/api/analysis-projects/${projectId}/issue-intervention-navigator`) as NavigatorData
+      }
+      setData(response)
     } catch (err) {
       console.error('Failed to load navigator data:', err)
       setError(err instanceof Error ? err.message : 'Failed to load data')
     } finally {
       setLoading(false)
     }
-  }, [activeProject?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, isPublic, fetchWithAuth])
 
   useEffect(() => {
-    if (!activeProject?.id) return
+    if (!projectId) return
     loadNavigatorData()
-  }, [activeProject?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, loadNavigatorData])
 
   // Aggregate all intervention themes across issues (or from all_interventions if available)
   const allInterventionThemes = useMemo(() => {
@@ -389,7 +401,7 @@ export function InterventionsNavigator({
     return matching
   }, [selectedTheme, data, issueThemeFilter])
 
-  if (!activeProject) {
+  if (!projectId) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">

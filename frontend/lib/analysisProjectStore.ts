@@ -15,6 +15,7 @@ export interface AnalysisProject {
   created_by_name?: string
   organization_id?: string
   is_demo?: boolean
+  is_public?: boolean
   search_query?: {
     original_query?: string
     boolean_query?: string

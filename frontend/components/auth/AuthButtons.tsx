@@ -2,7 +2,6 @@
 
 import {
   SignInButton,
-  SignUpButton,
   SignedIn,
   SignedOut,
   UserButton,
@@ -13,18 +12,13 @@ export function AuthButtons() {
   return (
     <>
       <SignedOut>
-        <div className="space-x-4">
-          <SignInButton mode="modal">
-            <Button variant="ghost">Sign In</Button>
-          </SignInButton>
-          <SignUpButton mode="modal">
-            <Button>Sign Up</Button>
-          </SignUpButton>
-        </div>
+        <SignInButton mode="modal">
+          <Button variant="ghost">Sign In</Button>
+        </SignInButton>
       </SignedOut>
       <SignedIn>
         <UserButton />
       </SignedIn>
     </>
   );
-} 
+}
