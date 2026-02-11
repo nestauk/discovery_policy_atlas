@@ -648,7 +648,7 @@ function ScreenInnerSetting() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-6">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular settings?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise context-matched evidence and assess transferability.</p>
@@ -773,7 +773,7 @@ function ScreenOutcome() {
   const customOptions = s.outcome.selected.filter(outcome => !exampleOptions.includes(outcome));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-2">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular outcomes?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise evidence measuring your outcomes of interest.</p>
@@ -903,7 +903,7 @@ function ScreenParameters() {
   }, [s.parameters.access.academic, s.parameters.access.policy]);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-0">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
         <p className="text-gray-600 text-lg">We use these filters to narrow the evidence set before ranking.</p>
@@ -1074,7 +1074,7 @@ function ScreenScreening() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Additional criteria</h2>
         <p className="text-gray-600 text-lg">
@@ -1251,7 +1251,7 @@ function ScreenAdditionalQuestions() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Specific research questions?</h2>
         <p className="text-gray-600 text-lg">We will use these to shape the summary write-up</p>
@@ -1547,7 +1547,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
   const primaryAction = getPrimaryAction();
 
   return (
-    <div className="bg-white text-gray-900 min-h-[calc(100vh-8rem)] flex flex-col">
+    <div className="bg-white text-gray-900 min-h-[calc(100vh-8rem)] flex flex-col pb-4">
       <ProgressBar
         step={s.step}
         researchQuestion={s.researchQuestion}
@@ -1565,7 +1565,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
       </div>
 
       {showActionBar && (
-        <div className={cx("max-w-4xl mx-auto w-full px-8", isSummaryStep ? "mt-3 mb-4" : "mt-auto")}>
+        <div className="max-w-4xl mx-auto w-full px-8 mt-3">
           <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div className="flex items-center gap-2">
               <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>

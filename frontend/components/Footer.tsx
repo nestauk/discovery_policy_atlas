@@ -7,7 +7,7 @@ export const FOOTER_DISCLAIMER_TEXT =
 
 export function Footer({ className = '' }: { className?: string }) {
   return (
-    <footer className={`flex-shrink-0 mt-auto border-t border-slate-200 bg-slate-50 px-4 py-4 ${className}`.trim()}>
+    <footer className={`flex-shrink-0 border-t border-slate-200 bg-slate-50 px-4 py-4 ${className}`.trim()}>
       <p className="text-xs text-slate-600 max-w-4xl mx-auto text-center leading-relaxed">
         {FOOTER_DISCLAIMER_TEXT}
       </p>
