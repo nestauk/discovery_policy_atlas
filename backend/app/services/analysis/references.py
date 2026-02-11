@@ -556,17 +556,18 @@ class ReferencesService:
                 task_meta.append(("openalex_search", query_variant))
 
                 # Also collect raw responses for first query only (to avoid too much data)
-                if idx == 0:
-                    tasks.append(
-                        openalex_service.fetch_raw(
-                            query=query_str,
-                            max_results=limit,
-                            min_citations=settings.DEFAULT_MIN_CITATIONS,
-                            date_from=df_val,
-                            date_to=dt_val,
-                        )
-                    )
-                    task_meta.append(("openalex_raw", query_variant))
+                # DISABLED: Commented out to save credits (10 credits per fetch_raw call)
+                # if idx == 0:
+                #     tasks.append(
+                #         openalex_service.fetch_raw(
+                #             query=query_str,
+                #             max_results=limit,
+                #             min_citations=settings.DEFAULT_MIN_CITATIONS,
+                #             date_from=df_val,
+                #             date_to=dt_val,
+                #         )
+                #     )
+                #     task_meta.append(("openalex_raw", query_variant))
 
         if overton_service:
             # Determine source_country parameter from geography_filter
@@ -661,6 +662,10 @@ class ReferencesService:
                     raw_overton = g
                 elif isinstance(g, pd.DataFrame):
                     results.append(g)
+
+        # Check OpenAlex rate limit once after all queries complete
+        if openalex_service:
+            await openalex_service.check_rate_limit()
 
         if not results:
             df = pd.DataFrame(

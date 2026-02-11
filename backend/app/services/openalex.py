@@ -6,6 +6,8 @@ from openai import AsyncOpenAI
 from app.core.config import settings
 import logging
 import asyncio
+import httpx
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,17 @@ class OpenAlexService:
             config.email = settings.OPENALEX_EMAIL
         config.max_retries = 3
         config.retry_backoff_factor = 0.5
+
+        # Configure API key for OpenAlex (PyAlex has built-in support)
+        if settings.OPENALEX_API_KEY:
+            config.api_key = settings.OPENALEX_API_KEY
+            self._api_key = settings.OPENALEX_API_KEY
+            logger.info("OpenAlex API key configured")
+        else:
+            self._api_key = None
+            logger.warning(
+                "OpenAlex API key not configured - limited to 100 credits per day"
+            )
 
         # Initialize OpenAI client for boolean query generation
         if settings.OPENAI_API_KEY:
@@ -420,6 +433,46 @@ class OpenAlexService:
         """Format papers for LLM screening"""
         # Create dictionary with title and content
         return df.set_index("id")[["title", "content"]].to_dict("index")
+
+    async def check_rate_limit(self) -> Optional[Dict]:
+        """Check current OpenAlex rate limit status.
+
+        Returns:
+            Dict with rate limit information, or None if API key is not configured
+        """
+        if not self._api_key:
+            logger.warning("Cannot check rate limit: API key not configured")
+            return None
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://api.openalex.org/rate-limit",
+                    params={"api_key": self._api_key},
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                rate_limit_info = data.get("rate_limit", {})
+                credits_limit = rate_limit_info.get("credits_limit", 0)
+                credits_used = rate_limit_info.get("credits_used", 0)
+                credits_remaining = rate_limit_info.get("credits_remaining", 0)
+                resets_in_seconds = rate_limit_info.get("resets_in_seconds", 0)
+                resets_in_hours = math.ceil(resets_in_seconds / 3600)
+
+                logger.info(
+                    "📊 OpenAlex Rate Limit: %d/%d credits used, %d remaining (resets in %dh)",
+                    credits_used,
+                    credits_limit,
+                    credits_remaining,
+                    resets_in_hours,
+                )
+
+                return rate_limit_info
+        except Exception as e:
+            logger.error("Failed to check OpenAlex rate limit: %s", e)
+            return None
 
     async def fetch_raw(
         self,
