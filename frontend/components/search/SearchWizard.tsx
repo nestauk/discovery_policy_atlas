@@ -438,7 +438,7 @@ function ScreenAsk() {
           value={s.researchQuestion} 
           onChange={(e) => s.set({ researchQuestion: e.target.value })} 
         />
-        <div className="flex justify-end items-center">
+        <div className="flex justify-end items-center mt-6">
           <Button 
             variant="secondary"
             className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
