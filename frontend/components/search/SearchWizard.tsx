@@ -264,8 +264,15 @@ export const useWizard = create<WizardState>((set, get) => ({
 }));
 
 // ---------------- HELPERS ----------------
-function ProgressBar({ step }: { step: Step }) {
-  // Skip ADDITIONAL_QUESTIONS in progress calculation
+function ProgressBar({
+  step,
+  researchQuestion,
+  onStepClick,
+}: {
+  step: Step;
+  researchQuestion: string;
+  onStepClick: (s: Step) => void;
+}) {
   const steps: { id: Step; label: string }[] = [
     { id: "ASK", label: "Question" },
     { id: "POPULATION", label: "Population" },
@@ -276,15 +283,28 @@ function ProgressBar({ step }: { step: Step }) {
     { id: "SUMMARY", label: "Summary" },
   ];
   const currentIdx = steps.findIndex((s) => s.id === step);
+  const canJump = !!researchQuestion.trim();
+
   return (
     <div className="w-full border-b border-gray-100 bg-white px-4 py-3">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2">
         {steps.map((item, idx) => {
           const isCompleted = idx < currentIdx;
           const isCurrent = idx === currentIdx;
+          const isClickable = canJump;
           return (
             <React.Fragment key={item.id}>
-              <div className="min-w-0 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => isClickable && onStepClick(item.id)}
+                disabled={!isClickable}
+                className={cx(
+                  "min-w-0 flex items-center gap-2 text-left transition",
+                  isClickable
+                    ? "cursor-pointer hover:opacity-80"
+                    : "cursor-default"
+                )}
+              >
                 <div
                   className={cx(
                     "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ring-1",
@@ -303,7 +323,7 @@ function ProgressBar({ step }: { step: Step }) {
                 >
                   {item.label}
                 </span>
-              </div>
+              </button>
               {idx < steps.length - 1 && (
                 <div
                   className={cx(
@@ -1600,7 +1620,11 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
-      <ProgressBar step={s.step} />
+      <ProgressBar
+        step={s.step}
+        researchQuestion={s.researchQuestion}
+        onStepClick={(step) => s.set({ step })}
+      />
       {s.step === "ASK" && <ScreenAsk />}
       {s.step === "POPULATION" && <ScreenPopulation />}
       {s.step === "INNER_SETTING" && <ScreenInnerSetting />}
