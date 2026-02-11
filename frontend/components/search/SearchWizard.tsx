@@ -929,7 +929,7 @@ function ScreenParameters() {
           <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
             <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Retrieval limit</div>
             <div className="flex flex-wrap items-center gap-3">
-              <span className="font-medium">Max results screened per source:</span>
+              <span className="font-medium">Max results to screen per source:</span>
               <div className="inline-flex items-center gap-2">
                 <button
                   type="button"
