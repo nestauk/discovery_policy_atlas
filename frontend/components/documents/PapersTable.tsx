@@ -12,6 +12,7 @@ import { getEvidenceCategoryColors, getEvidenceCategoryShortName } from '@/lib/e
 interface PapersTableProps {
   papers: Paper[]
   showAdditionalColumns?: boolean
+  highlightNonRelevant?: boolean
 }
 
 interface DataType extends Paper {
@@ -21,7 +22,7 @@ interface DataType extends Paper {
   relevanceDisplay: string
 }
 
-export function PapersTable({ papers, showAdditionalColumns = false }: PapersTableProps) {
+export function PapersTable({ papers, showAdditionalColumns = false, highlightNonRelevant = false }: PapersTableProps) {
   // Transform papers data for the table
   const tableData: DataType[] = useMemo(() => {
     return papers.map((paper) => ({
@@ -722,7 +723,14 @@ export function PapersTable({ papers, showAdditionalColumns = false }: PapersTab
         scroll={{ x: 1200 }}
         size="small"
         bordered
-        rowClassName={(record) => record.is_relevant ? 'bg-green-50' : 'bg-white'}
+        rowClassName={(record) => {
+          // When showing all docs (highlightNonRelevant=true), gray out non-relevant/non-evidence rows
+          const isRelevantEvidence = record.is_relevant_evidence !== false && record.is_relevant !== false && record.is_evidence !== false
+          if (highlightNonRelevant && !isRelevantEvidence) {
+            return 'bg-slate-100 opacity-60'
+          }
+          return 'bg-white'
+        }}
         sortDirections={['descend', 'ascend']}
       />
     </div>

@@ -86,6 +86,9 @@ interface AnalysisDocument {
   impact_score_breakdown?: Record<string, unknown>
   transferability_score?: number
   transferability_breakdown?: Record<string, unknown>
+  // New fields for filtering
+  is_evidence?: boolean
+  is_relevant_evidence?: boolean
 }
 
 type TabType = 'summary' | 'evidence' | 'assistant'
@@ -122,6 +125,9 @@ export default function ProjectResultsPage() {
 
   // Column visibility state
   const [showAdditionalColumns, setShowAdditionalColumns] = useState(false)
+  
+  // Documents filter state - only show relevant evidence documents by default
+  const [showOnlyRelevant, setShowOnlyRelevant] = useState(true)
   
   // Documents download state
   const [isPreparingDocumentsDownload, setIsPreparingDocumentsDownload] = useState(false)
@@ -693,8 +699,10 @@ export default function ProjectResultsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
-  const overtonCount = documents.filter(doc => doc.source === 'overton').length
-  const openalexCount = documents.filter(doc => doc.source === 'openalex').length
+  // Filter to relevant evidence documents for stats
+  const relevantEvidenceDocs = documents.filter(doc => doc.is_relevant_evidence !== false && doc.is_relevant !== false && doc.is_evidence !== false)
+  const overtonCount = relevantEvidenceDocs.filter(doc => doc.source === 'overton').length
+  const openalexCount = relevantEvidenceDocs.filter(doc => doc.source === 'openalex').length
 
   // Create study strength and sample size mappings
   const { studyStrengthMapping, sampleSizeMapping } = useMemo(() => {
@@ -809,6 +817,10 @@ export default function ProjectResultsPage() {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
       const conclusion = doc.extraction_results?.conclusion
       const evidenceStrength = conclusion?.evidence_strength
+      const isRelevant = Boolean(doc.is_relevant !== false)
+      const isEvidence = Boolean(doc.is_evidence !== false)
+      const isRelevantEvidence = isRelevant && isEvidence
+      
       return {
         id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
         title: String(doc.title || 'Untitled'),
@@ -816,7 +828,9 @@ export default function ProjectResultsPage() {
         publication_year: Number(doc.year || 0),
         cited_by_count: Number(doc.cited_by_count || 0),
         authors: Array.isArray(doc.authors) ? doc.authors : ['Unknown'],
-        is_relevant: Boolean(doc.is_relevant !== false),
+        is_relevant: isRelevant,
+        is_evidence: isEvidence,
+        is_relevant_evidence: isRelevantEvidence,
         abstract: doc.abstract_or_summary,
         relevance_reason: doc.relevance_reason,
         confidence: doc.relevance_confidence,
@@ -846,12 +860,12 @@ export default function ProjectResultsPage() {
       }
     })
 
-    // Always filter to show only relevant documents
-    const relevant = allTransformed.filter(doc => doc.is_relevant)
+    // Count relevant evidence documents
+    const relevantEvidenceCount = allTransformed.filter(doc => doc.is_relevant_evidence).length
 
     return {
-      transformedPapers: relevant,
-      relevantCount: relevant.length
+      transformedPapers: allTransformed,
+      relevantCount: relevantEvidenceCount
     }
   }, [documents, studyStrengthMapping, sampleSizeMapping])
 
@@ -1074,13 +1088,23 @@ export default function ProjectResultsPage() {
                           className="flex items-center gap-2"
                         >
                           <FileText className="h-3 w-3" />
-                          Documents ({relevantCount})
+                          Documents ({showOnlyRelevant ? relevantCount : `${relevantCount}+${transformedPapers.length - relevantCount}`})
                         </Button>
                       </div>
 
                       {/* Filter Toggles (only show for documents) */}
                       {urlSubTab === 'documents' && (
                         <div className="flex items-center gap-6">
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              id="only-relevant"
+                              checked={showOnlyRelevant}
+                              onCheckedChange={setShowOnlyRelevant}
+                            />
+                            <Label htmlFor="only-relevant" className="text-sm text-slate-700">
+                              Only relevant
+                            </Label>
+                          </div>
                           <div className="flex items-center gap-2">
                             <Label htmlFor="additional-columns" className="text-sm text-slate-700">
                               More info
@@ -1146,7 +1170,14 @@ export default function ProjectResultsPage() {
                           <p className="text-slate-600">{dataError}</p>
                         </div>
                       ) : transformedPapers.length > 0 ? (
-                        <PapersTable papers={transformedPapers} showAdditionalColumns={showAdditionalColumns} />
+                        <PapersTable 
+                          papers={showOnlyRelevant 
+                            ? transformedPapers.filter(p => p.is_relevant_evidence) 
+                            : transformedPapers
+                          } 
+                          showAdditionalColumns={showAdditionalColumns}
+                          highlightNonRelevant={!showOnlyRelevant}
+                        />
                       ) : documents.length > 0 ? (
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />

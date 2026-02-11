@@ -269,7 +269,7 @@ export default function ProjectsPage() {
                       <div className="flex items-center justify-between text-xs text-slate-500">
                         <span className="flex items-center gap-1">
                           <Search className="h-3 w-3" />
-                          {project.total_references} total, {project.relevant_references} relevant
+                          {project.relevant_references} sources ({project.total_references} screened)
                         </span>
                         <span className={`px-2 py-1 rounded-md text-xs font-medium ${
                           project.status === 'completed' ? 'bg-green-100 text-green-800' :
