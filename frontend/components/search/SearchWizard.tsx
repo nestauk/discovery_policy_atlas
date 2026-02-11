@@ -519,7 +519,7 @@ function ScreenPopulation() {
                 : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
             )}
           >
-            Anyone
+            No preference
           </button>
 
           <div className="flex items-center gap-3 py-1">
@@ -580,13 +580,6 @@ function ScreenPopulation() {
         </div>
       </div>
 
-      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
-        </div>
-        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
-      </div>
     </div>
   );
 }
@@ -655,7 +648,7 @@ function ScreenInnerSetting() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-6">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular settings?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise context-matched evidence and assess transferability.</p>
@@ -734,13 +727,6 @@ function ScreenInnerSetting() {
         </div>
       </div>
 
-      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
-        </div>
-        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
-      </div>
     </div>
   );
 }
@@ -805,7 +791,7 @@ function ScreenOutcome() {
                 : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
             )}
           >
-            I don&apos;t have a particular outcome in mind
+            No preference
           </button>
 
           <div className="flex items-center gap-3 py-1">
@@ -866,13 +852,6 @@ function ScreenOutcome() {
         </div>
       </div>
 
-      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
-        </div>
-        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
-      </div>
     </div>
   );
 }
@@ -1050,20 +1029,6 @@ function ScreenParameters() {
 
       </div>
 
-      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
-        </div>
-        <Button
-          variant="secondary"
-          className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
-          onClick={() => s.next()}
-          disabled={!hasSelectedSource || hasInvalidCustomDateRange}
-        >
-          Next
-        </Button>
-      </div>
     </div>
   );
 }
@@ -1082,41 +1047,6 @@ function ScreenScreening() {
 
   const removeFactor = (factor: string) => {
     s.set({ screeningFactors: s.screeningFactors.filter(f => f !== factor) });
-  };
-
-  const handleNext = async () => {
-    // Skip ADDITIONAL_QUESTIONS step - go directly to SUMMARY
-    // (Keeping generation code commented out for future use)
-    // s.set({ isGeneratingOptions: true });
-    // 
-    // try {
-    //   const response = await generateAdditionalQuestions(
-    //     s.researchQuestion,
-    //     s.population.selected,
-    //     s.outcome.selected
-    //   ).catch(() => ({ additional_questions: [] }));
-    //
-    //   const generatedQuestions = response?.additional_questions || [];
-    //   
-    //   // Preselect generated questions
-    //   s.set({ 
-    //     generatedAdditionalQuestions: generatedQuestions,
-    //     additionalQuestions: generatedQuestions,
-    //     step: "ADDITIONAL_QUESTIONS"
-    //   });
-    // } catch (error) {
-    //   console.error('Failed to generate additional questions:', error);
-    //   // Continue with empty questions if generation fails
-    //   s.set({ 
-    //     generatedAdditionalQuestions: [],
-    //     step: "ADDITIONAL_QUESTIONS" 
-    //   });
-    // } finally {
-    //   s.set({ isGeneratingOptions: false });
-    // }
-    
-    // Go directly to SUMMARY
-    s.set({ step: "SUMMARY" });
   };
 
   return (
@@ -1263,15 +1193,6 @@ function ScreenScreening() {
         </div>
       </div>
 
-      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
-        </div>
-        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={handleNext} disabled={s.isGeneratingOptions}>
-          {s.isGeneratingOptions ? "Generating..." : "Next"}
-        </Button>
-      </div>
     </div>
   );
 }
@@ -1368,21 +1289,13 @@ function ScreenAdditionalQuestions() {
         </div>
       </div>
 
-      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-          <Button variant="secondary" onClick={() => s.reset()}>Restart</Button>
-        </div>
-        <Button variant="secondary" className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0" onClick={() => s.next()}>Next</Button>
-      </div>
     </div>
   );
 }
 
-function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (context: SearchContext) => void; isRunning?: boolean }) {
+function ScreenSummary({ isRunning = false }: { isRunning?: boolean }) {
   const s = useWizard();
   const context = s.buildContext();
-  const hasSelectedSource = context.parameters.sources.length > 0;
   const goToStep = (step: Step) => s.set({ step });
   const impliedQuestion = generateImpliedResearchQuestion(context);
   const hasImplementationConstraints = [
@@ -1425,7 +1338,7 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
               {context.population.length > 0 ? (
                 <p className="text-gray-900">{context.population.join(", ")}</p>
               ) : (
-                <p className="text-gray-500">Anyone</p>
+                <p className="text-gray-500">No preference</p>
               )}
             </button>
             <button
@@ -1570,40 +1483,6 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
         </CardContent>
       </Card>
 
-      <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
-          <Button variant="secondary" onClick={() => s.reset()} disabled={isRunning}>Start new search</Button>
-        </div>
-        <Button
-          variant="secondary"
-          className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
-          onClick={() => onRunAnalysis(context)}
-          disabled={
-            isRunning ||
-            !hasSelectedSource ||
-            (context.parameters.timePreset === "CUSTOM" &&
-              !!context.parameters.customFrom &&
-              !!context.parameters.customTo &&
-              context.parameters.customFrom > context.parameters.customTo)
-          }
-        >
-          {isRunning ? 'Starting up...' : 'Run Analysis'}
-        </Button>
-      </div>
-      {!hasSelectedSource && (
-        <p className="text-sm text-red-600 text-right">
-          Select at least one search source before running analysis.
-        </p>
-      )}
-      {context.parameters.timePreset === "CUSTOM" &&
-        !!context.parameters.customFrom &&
-        !!context.parameters.customTo &&
-        context.parameters.customFrom > context.parameters.customTo && (
-          <p className="text-sm text-red-600 text-right">
-            Fix your custom date range before running analysis.
-          </p>
-        )}
     </div>
   );
 }
@@ -1617,22 +1496,100 @@ interface SearchWizardProps {
 
 export default function SearchWizard({ onRunAnalysis, isRunning = false }: SearchWizardProps) {
   const s = useWizard();
+  const context = s.buildContext();
+  const hasSelectedSource = context.parameters.sources.length > 0;
+  const hasInvalidCustomDateRange =
+    context.parameters.timePreset === "CUSTOM" &&
+    !!context.parameters.customFrom &&
+    !!context.parameters.customTo &&
+    context.parameters.customFrom > context.parameters.customTo;
+
+  const isSummaryStep = s.step === "SUMMARY";
+  const showActionBar = s.step !== "ASK";
+
+  const getPrimaryAction = () => {
+    if (isSummaryStep) {
+      return {
+        label: isRunning ? "Starting up..." : "Run Analysis",
+        onClick: () => onRunAnalysis(context),
+        disabled: isRunning || !hasSelectedSource || hasInvalidCustomDateRange,
+      };
+    }
+
+    if (s.step === "SCREENING") {
+      return {
+        label: s.isGeneratingOptions ? "Generating..." : "Next",
+        onClick: () => s.set({ step: "SUMMARY" }),
+        disabled: s.isGeneratingOptions,
+      };
+    }
+
+    if (s.step === "PARAMETERS") {
+      return {
+        label: "Next",
+        onClick: () => s.next(),
+        disabled: !hasSelectedSource || hasInvalidCustomDateRange,
+      };
+    }
+
+    return {
+      label: "Next",
+      onClick: () => s.next(),
+      disabled: false,
+    };
+  };
+
+  const primaryAction = getPrimaryAction();
 
   return (
-    <div className="bg-white text-gray-900">
+    <div className="bg-white text-gray-900 min-h-[calc(100vh-8rem)] flex flex-col">
       <ProgressBar
         step={s.step}
         researchQuestion={s.researchQuestion}
         onStepClick={(step) => s.set({ step })}
       />
-      {s.step === "ASK" && <ScreenAsk />}
-      {s.step === "POPULATION" && <ScreenPopulation />}
-      {s.step === "INNER_SETTING" && <ScreenInnerSetting />}
-      {s.step === "OUTCOME" && <ScreenOutcome />}
-      {s.step === "PARAMETERS" && <ScreenParameters />}
-      {s.step === "SCREENING" && <ScreenScreening />}
-      {s.step === "ADDITIONAL_QUESTIONS" && <ScreenAdditionalQuestions />}
-      {s.step === "SUMMARY" && <ScreenSummary onRunAnalysis={onRunAnalysis} isRunning={isRunning} />}
+      <div className="flex-1">
+        {s.step === "ASK" && <ScreenAsk />}
+        {s.step === "POPULATION" && <ScreenPopulation />}
+        {s.step === "INNER_SETTING" && <ScreenInnerSetting />}
+        {s.step === "OUTCOME" && <ScreenOutcome />}
+        {s.step === "PARAMETERS" && <ScreenParameters />}
+        {s.step === "SCREENING" && <ScreenScreening />}
+        {s.step === "ADDITIONAL_QUESTIONS" && <ScreenAdditionalQuestions />}
+        {s.step === "SUMMARY" && <ScreenSummary isRunning={isRunning} />}
+      </div>
+
+      {showActionBar && (
+        <div className="mt-auto max-w-4xl mx-auto w-full px-8">
+          <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
+              <Button variant="secondary" onClick={() => s.reset()} disabled={isRunning}>
+                {isSummaryStep ? "Start new search" : "Restart"}
+              </Button>
+            </div>
+            <Button
+              variant="secondary"
+              className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+              onClick={primaryAction.onClick}
+              disabled={primaryAction.disabled}
+            >
+              {primaryAction.label}
+            </Button>
+          </div>
+
+          {isSummaryStep && !hasSelectedSource && (
+            <p className="mt-2 text-sm text-red-600 text-right">
+              Select at least one search source before running analysis.
+            </p>
+          )}
+          {isSummaryStep && hasInvalidCustomDateRange && (
+            <p className="mt-2 text-sm text-red-600 text-right">
+              Fix your custom date range before running analysis.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
