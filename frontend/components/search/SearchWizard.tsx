@@ -1619,7 +1619,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
   const s = useWizard();
 
   return (
-    <div className="min-h-screen bg-white text-gray-900">
+    <div className="bg-white text-gray-900">
       <ProgressBar
         step={s.step}
         researchQuestion={s.researchQuestion}

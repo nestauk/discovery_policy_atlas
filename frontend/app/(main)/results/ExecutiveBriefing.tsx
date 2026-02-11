@@ -21,6 +21,7 @@ import {
   getEvidenceCategoryShortName,
   getEvidenceCategoryRank
 } from "@/lib/evidenceCategories";
+import { FOOTER_DISCLAIMER_TEXT } from "@/components/Footer";
 
 interface ExecutiveBriefingProps {
   briefing: string;
@@ -891,11 +892,13 @@ export function ExecutiveBriefing({
             .pill { text-decoration:none; background:#e0f2fe; color:#1d4ed8; }
             .pill-inline { text-decoration:none; color:#1d4ed8; font-weight:600; }
             .question-text { font-size:14px; color:#0f172a; font-weight:600; }
+            .pdf-footer { margin-top:24px; padding:16px; border-top:1px solid #e2e8f0; background:#f8fafc; font-size:11px; color:#64748b; text-align:center; line-height:1.5; max-width:42rem; margin-left:auto; margin-right:auto; }
           </style>
         </head>
         <body>
           <h1>Executive Summary</h1>
           ${structuredHtml}
+          <footer class="pdf-footer">${FOOTER_DISCLAIMER_TEXT}</footer>
         </body>
       </html>
     `;
