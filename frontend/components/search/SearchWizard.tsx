@@ -930,7 +930,7 @@ function ScreenParameters() {
         <p className="text-gray-600 text-lg">We use these filters to narrow the evidence set before ranking.</p>
       </div>
 
-      <div className="space-y-8">
+      <div className="space-y-8 max-w-2xl mx-auto">
         {/* Sources */}
         <div className="space-y-4">
           <h3 className="font-semibold text-lg">Which sources should we use?</h3>
@@ -964,7 +964,7 @@ function ScreenParameters() {
             ))}
           </div>
           {s.parameters.timePreset === "CUSTOM" && (
-            <div className="max-w-3xl rounded-2xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
               <p className="text-sm text-gray-600">Select a start and end date for your custom range.</p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="flex-1">
@@ -994,7 +994,7 @@ function ScreenParameters() {
         </div>
 
         {/* Geography */}
-        <div className="space-y-4 max-w-2xl">
+        <div className="space-y-4">
           <h3 className="font-semibold text-lg">In which countries should we look for evidence?</h3>
           <div>
             {/* Selected options */}
@@ -1132,7 +1132,7 @@ function ScreenScreening() {
         <div className="space-y-4">
           <h3 className="font-semibold text-lg">Implementation constraints</h3>
           <div className="flex items-center gap-2 text-sm text-gray-600">
-            <span>Used during impact and transferability assessment.</span>
+            <span>Optionally set your tolerance on implementation factors. Used during impact and transferability assessment.</span>
             <Tooltip
               content={
                 <div className="max-w-xs text-sm space-y-1">
@@ -1221,9 +1221,9 @@ function ScreenScreening() {
         <div className="h-px bg-gray-100" />
 
         <div className="space-y-3">
-          <h3 className="font-semibold text-lg">Screening factors</h3>
+          <h3 className="font-semibold text-lg">Additional screening factors</h3>
           <p className="text-sm text-gray-600">
-            Used during screening to prioritise and rank the most relevant evidence.
+            Add any other criteria that you think are important to consider when screening the evidence.
           </p>
         </div>
 
