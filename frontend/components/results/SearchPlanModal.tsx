@@ -230,6 +230,36 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
           </div>
 
           <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+            <div className="text-xs uppercase tracking-wide text-gray-500">Refinement</div>
+            <div>
+              <span className="font-medium text-sm">Implementation constraints</span>
+              {hasImplementationConstraints ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {constraintCost && <span className={chipClassName}>Cost: {constraintCost}</span>}
+                  {constraintStaffing && <span className={chipClassName}>Staffing: {constraintStaffing}</span>}
+                  {constraintComplexity && <span className={chipClassName}>Complexity: {constraintComplexity}</span>}
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-gray-500">Not specified</div>
+              )}
+            </div>
+            <div>
+              <span className="font-medium text-sm">Screening factors</span>
+              {searchQuery.screening_factors && searchQuery.screening_factors.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {searchQuery.screening_factors.map((item, idx) => (
+                    <span key={`${item}-${idx}`} className={chipClassName}>
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-gray-500">None added</div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
             <div className="text-xs uppercase tracking-wide text-gray-500">Filters</div>
             <div>
               <span className="font-medium text-sm">Search sources</span>
@@ -271,36 +301,6 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
                   <span className="text-sm text-gray-500">Not specified</span>
                 )}
               </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
-            <div className="text-xs uppercase tracking-wide text-gray-500">Prioritisation</div>
-            <div>
-              <span className="font-medium text-sm">Implementation constraints</span>
-              {hasImplementationConstraints ? (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {constraintCost && <span className={chipClassName}>Cost: {constraintCost}</span>}
-                  {constraintStaffing && <span className={chipClassName}>Staffing: {constraintStaffing}</span>}
-                  {constraintComplexity && <span className={chipClassName}>Complexity: {constraintComplexity}</span>}
-                </div>
-              ) : (
-                <div className="mt-2 text-sm text-gray-500">Not specified</div>
-              )}
-            </div>
-            <div>
-              <span className="font-medium text-sm">Screening factors</span>
-              {searchQuery.screening_factors && searchQuery.screening_factors.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {searchQuery.screening_factors.map((item, idx) => (
-                    <span key={`${item}-${idx}`} className={chipClassName}>
-                      {item}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-2 text-sm text-gray-500">None added</div>
-              )}
             </div>
           </div>
 
