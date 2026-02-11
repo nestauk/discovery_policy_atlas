@@ -501,7 +501,7 @@ function ScreenPopulation() {
   const customOptions = s.population.selected.filter(pop => !exampleOptions.includes(pop));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-8">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you targeting a particular population?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise evidence for the populations you care about.</p>
@@ -1560,7 +1560,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
       </div>
 
       {showActionBar && (
-        <div className="mt-auto max-w-4xl mx-auto w-full px-8">
+        <div className={cx("mt-auto max-w-4xl mx-auto w-full px-8", isSummaryStep && "mb-4")}>
           <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div className="flex items-center gap-2">
               <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
