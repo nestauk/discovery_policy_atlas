@@ -1547,7 +1547,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
   const primaryAction = getPrimaryAction();
 
   return (
-    <div className="bg-white text-gray-900 min-h-[calc(100vh-8rem)] flex flex-col pb-4">
+    <div className="bg-white text-gray-900 flex-1 flex flex-col pb-4">
       <ProgressBar
         step={s.step}
         researchQuestion={s.researchQuestion}
@@ -1565,7 +1565,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
       </div>
 
       {showActionBar && (
-        <div className="max-w-4xl mx-auto w-full px-8 mt-3">
+        <div className="max-w-4xl mx-auto w-full px-8 mt-3 mb-4">
           <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div className="flex items-center gap-2">
               <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
