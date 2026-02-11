@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { FolderOpen, Plus, Search, Edit, Trash2 } from 'lucide-react'
+import { FolderOpen, Plus, Search, Edit, Trash2, Globe } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore, AnalysisProject } from '@/lib/analysisProjectStore'
@@ -237,9 +237,14 @@ export default function ProjectsPage() {
                     <CardTitle className="flex items-center justify-between">
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         <FolderOpen className="h-5 w-5 text-blue-600 flex-shrink-0" />
-                        <span className="truncate max-w-[180px]">{project.title}</span>
+                        <span className="line-clamp-2 text-sm font-medium leading-tight" title={project.title}>{project.title}</span>
                       </div>
-                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {project.is_public && (
+                          <div className="p-1.5" title="Shared publicly">
+                            <Globe className="h-3.5 w-3.5 text-green-600" />
+                          </div>
+                        )}
                         {canModifyProject(project) && (
                           <Button 
                             variant="ghost" 

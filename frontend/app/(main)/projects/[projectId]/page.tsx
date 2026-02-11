@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/dialog'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
-import { useAuth } from '@clerk/nextjs'
+import { useAuth, useUser } from '@clerk/nextjs'
 import { SynthesisSummary } from '@/types/search'
 import { ExecutiveBriefing } from '../../results/ExecutiveBriefing'
 import { ChatInterface } from '@/components/chatbot/ChatInterface'
@@ -166,6 +166,22 @@ export default function ProjectResultsPage() {
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
   const { getToken } = useAuth()
+  const { user } = useUser()
+  
+  const isProjectOwner = useMemo(() => {
+    if (!user || !activeProject) return false
+    const currentUserId = user.id
+    const currentUserFullName = user.fullName || ''
+    const currentUserEmail = user.emailAddresses?.[0]?.emailAddress || ''
+    const currentUserEmailUsername = currentUserEmail.split('@')[0] || ''
+    
+    return (
+      activeProject.created_by_user_id === currentUserId ||
+      activeProject.created_by_name === currentUserFullName ||
+      activeProject.created_by_name === currentUserEmail ||
+      activeProject.created_by_name === currentUserEmailUsername
+    )
+  }, [user, activeProject])
 
   // Update URL when tab changes (without full navigation)
   const updateUrl = useCallback((tab: TabType, subtab?: EvidenceSubTabType) => {
@@ -963,8 +979,8 @@ export default function ProjectResultsPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
-            {/* Share Button */}
-            {projectId && activeProject && (
+            {/* Share Button - only visible to project owner */}
+            {projectId && activeProject && isProjectOwner && (
               <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
                 <DialogTrigger asChild>
                   <Button variant="outline" size="sm" className="flex items-center gap-2">
