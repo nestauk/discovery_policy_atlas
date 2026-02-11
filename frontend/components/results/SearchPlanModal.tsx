@@ -276,6 +276,15 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
               </div>
             </div>
             <div>
+              <span className="font-medium text-sm">Retrieval limit</span>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className={chipClassName}>{maxResults || 'Not specified'} per source</span>
+                <span className="text-xs text-gray-500">
+                  {searchQuery.sources?.length || 0} source{(searchQuery.sources?.length || 0) === 1 ? '' : 's'} selected
+                </span>
+              </div>
+            </div>
+            <div>
               <span className="font-medium text-sm">Time window</span>
               <div className="mt-2 flex flex-wrap gap-2">
                 <span className={chipClassName}>
@@ -301,16 +310,6 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
                   <span className="text-sm text-gray-500">Not specified</span>
                 )}
               </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3">
-            <div className="text-xs uppercase tracking-wide text-blue-700 mb-1">Retrieval limit</div>
-            <p className="text-sm text-gray-700">Maximum number of results retrieved from each selected source.</p>
-            <div className="mt-2 text-sm">
-              <span className="font-medium">Max results per source: </span>
-              <span className="font-semibold text-gray-900">{maxResults || 'Not specified'}</span>
-              <span className="text-gray-500"> ({searchQuery.sources?.length || 0} source{(searchQuery.sources?.length || 0) === 1 ? '' : 's'} selected)</span>
             </div>
           </div>
 

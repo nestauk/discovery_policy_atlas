@@ -926,6 +926,30 @@ function ScreenParameters() {
               Select at least one source to continue.
             </p>
           )}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+            <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Retrieval limit</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-medium">Max results screened per source:</span>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
+                  aria-label="Decrease results"
+                >–</button>
+                <span className="min-w-[2ch] text-center font-semibold">{s.maxResults}</span>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
+                  aria-label="Increase results"
+                >+</button>
+              </div>
+              <span className="text-xs text-gray-500">
+                {s.parameters.sources.length || 0} source{s.parameters.sources.length === 1 ? "" : "s"} selected
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Time window */}
@@ -1293,7 +1317,7 @@ function ScreenAdditionalQuestions() {
   );
 }
 
-function ScreenSummary({ isRunning = false }: { isRunning?: boolean }) {
+function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean }) {
   const s = useWizard();
   const context = s.buildContext();
   const goToStep = (step: Step) => s.set({ step });
@@ -1421,6 +1445,17 @@ function ScreenSummary({ isRunning = false }: { isRunning?: boolean }) {
                 </div>
               </button>
               <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+                <span className="font-medium">Retrieval limit</span>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    {s.maxResults} per source
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {context.parameters.sources.length || 0} source{context.parameters.sources.length === 1 ? "" : "s"} selected
+                  </span>
+                </div>
+              </button>
+              <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
                 <span className="font-medium">Time window</span>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
@@ -1448,36 +1483,6 @@ function ScreenSummary({ isRunning = false }: { isRunning?: boolean }) {
                   )}
                 </div>
               </button>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
-            <div className="text-xs uppercase tracking-wide text-blue-700 mb-1">Retrieval limit</div>
-            <p className="text-sm text-gray-700 mb-3">
-              Maximum number of results retrieved from each selected source.
-            </p>
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="font-medium">Max results per source:</span>
-              <div className="inline-flex items-center gap-2">
-                <button
-                  type="button"
-                  className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
-                  disabled={isRunning}
-                  aria-label="Decrease results"
-                >–</button>
-                <span className="min-w-[2ch] text-center font-semibold">{s.maxResults}</span>
-                <button
-                  type="button"
-                  className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
-                  disabled={isRunning}
-                  aria-label="Increase results"
-                >+</button>
-              </div>
-              <span className="text-xs text-gray-500">
-                {context.parameters.sources.length || 0} source{context.parameters.sources.length === 1 ? "" : "s"} selected
-              </span>
             </div>
           </div>
         </CardContent>
