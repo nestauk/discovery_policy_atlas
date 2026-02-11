@@ -501,7 +501,7 @@ function ScreenPopulation() {
   const customOptions = s.population.selected.filter(pop => !exampleOptions.includes(pop));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-8">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you targeting a particular population?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise evidence for the populations you care about.</p>
@@ -773,7 +773,7 @@ function ScreenOutcome() {
   const customOptions = s.outcome.selected.filter(outcome => !exampleOptions.includes(outcome));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-2">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular outcomes?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise evidence measuring your outcomes of interest.</p>
@@ -903,7 +903,7 @@ function ScreenParameters() {
   }, [s.parameters.access.academic, s.parameters.access.policy]);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-0">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
         <p className="text-gray-600 text-lg">We use these filters to narrow the evidence set before ranking.</p>
@@ -1309,7 +1309,7 @@ function ScreenSummary({ isRunning = false }: { isRunning?: boolean }) {
   const timeWindowLabel = TIME_PRESET_LABELS[context.parameters.timePreset];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
+    <div className="max-w-4xl mx-auto space-y-8 px-8 pt-16 pb-2">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Summary</h2>
       </div>
@@ -1548,7 +1548,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
         researchQuestion={s.researchQuestion}
         onStepClick={(step) => s.set({ step })}
       />
-      <div className="flex-1">
+      <div className={isSummaryStep ? "" : "flex-1"}>
         {s.step === "ASK" && <ScreenAsk />}
         {s.step === "POPULATION" && <ScreenPopulation />}
         {s.step === "INNER_SETTING" && <ScreenInnerSetting />}
@@ -1560,7 +1560,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
       </div>
 
       {showActionBar && (
-        <div className={cx("mt-auto max-w-4xl mx-auto w-full px-8", isSummaryStep && "mb-4")}>
+        <div className={cx("max-w-4xl mx-auto w-full px-8", isSummaryStep ? "mt-3 mb-4" : "mt-auto")}>
           <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div className="flex items-center gap-2">
               <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
