@@ -11,7 +11,7 @@ from datetime import datetime
 from .schemas import RunConfig, RunResult
 from .references import ReferencesService
 from .relevance import RelevanceService
-from .evidence.category import EvidenceCategoryService
+from .evidence.category import EvidenceCategoryService, NON_EVIDENCE_CATEGORY
 from .acquire import AcquisitionService
 from .parse import ParsingService
 from .normalize import normalize_text
@@ -137,23 +137,9 @@ class AnalysisService:
                     str(references_csv)
                 )
 
-                # Count relevant documents for reporting
-                try:
-                    df = pd.read_csv(references_csv)
-                    relevant_references = (
-                        df["is_relevant"].sum()
-                        if "is_relevant" in df.columns
-                        else total_references
-                    )
-                except Exception:
-                    relevant_references = total_references
-
-            monitor.record_metric("relevant_references", relevant_references)
             logger.info(
-                "Run %s completed relevance checking: %d relevant out of %d total",
+                "Run %s completed relevance checking",
                 run_id,
-                relevant_references,
-                total_references,
             )
 
             # Step 1.75: Evidence categorisation (only for relevant documents)
@@ -169,6 +155,32 @@ class AnalysisService:
                     str(references_csv)
                 )
                 logger.info("Run %s completed evidence categorisation", run_id)
+
+            # Count relevant documents AFTER evidence categorisation
+            # Exclude both is_relevant=False AND "Other (Non-evidence documents)"
+            try:
+                df = pd.read_csv(references_csv)
+                is_relevant_mask = (
+                    df["is_relevant"].fillna(False).astype(bool)
+                    if "is_relevant" in df.columns
+                    else pd.Series([True] * len(df))
+                )
+                is_evidence_mask = (
+                    df["evidence_category"] != NON_EVIDENCE_CATEGORY
+                    if "evidence_category" in df.columns
+                    else pd.Series([True] * len(df))
+                )
+                relevant_references = int((is_relevant_mask & is_evidence_mask).sum())
+            except Exception:
+                relevant_references = total_references
+
+            monitor.record_metric("relevant_references", relevant_references)
+            logger.info(
+                "Run %s completed screening: %d relevant evidence docs out of %d total",
+                run_id,
+                relevant_references,
+                total_references,
+            )
 
             # STEPWISE UPLOAD: Store initial documents after screening
             if project_id:

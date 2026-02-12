@@ -147,9 +147,9 @@ export default function AgentLayout({
                   } className="text-xs">
                     {activeProject.status}
                   </Badge>
-                  {activeProject.total_references > 0 && (
+                  {activeProject.relevant_references > 0 && (
                     <span className="text-xs text-slate-500">
-                      {activeProject.total_references} refs
+                      {activeProject.relevant_references} sources
                     </span>
                   )}
                 </div>

@@ -55,6 +55,9 @@ export interface SearchParams {
   impact_score?: number | null // 1-5 impact score (document-level), null when unassessable
   impact_score_label?: string
   impact_score_breakdown?: Record<string, unknown>
+  // Relevance/evidence filtering fields
+  is_evidence?: boolean  // true if not "Other (Non-evidence documents)"
+  is_relevant_evidence?: boolean  // true if is_relevant AND is_evidence
     // Extracted fields (dynamically added based on extraction_fields parameter)
     [key: string]:
       | string

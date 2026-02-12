@@ -998,7 +998,14 @@ async def rerun_synthesis_for_project(
 async def get_project_documents(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Get all documents for an analysis project"""
+    """Get all documents for an analysis project.
+
+    Returns all documents including non-relevant and non-evidence documents.
+    Each document includes:
+    - is_relevant: whether it passed relevance screening
+    - is_evidence: whether it's an evidence document (not "Other (Non-evidence documents)")
+    - is_relevant_evidence: convenience flag combining both checks
+    """
     try:
         # Check authorization
         get_project_with_auth_check(project_id, current_user, "id, organization_id")
@@ -1011,14 +1018,9 @@ async def get_project_documents(
         )
         # Map database field names to frontend expectations
         documents = []
-        filtered_other_count = 0
+        relevant_evidence_count = 0
 
         for doc in docs_result.data:
-            # Filter out "Other (Non-evidence documents)" - these shouldn't reach the UI
-            if is_non_evidence_document(doc):
-                filtered_other_count += 1
-                continue
-
             doc_copy = doc.copy()
             # Map citation_count (database) to cited_by_count (frontend)
             if "citation_count" in doc_copy:
@@ -1042,15 +1044,25 @@ async def get_project_documents(
             doc_copy["predicted_impact_justification"] = predicted_impact.get(
                 "justification"
             )
+
+            # Add is_evidence flag for frontend filtering
+            is_evidence = not is_non_evidence_document(doc)
+            doc_copy["is_evidence"] = is_evidence
+
+            # Add convenience flag combining is_relevant and is_evidence
+            is_relevant = doc_copy.get("is_relevant", True)
+            doc_copy["is_relevant_evidence"] = is_relevant and is_evidence
+
+            if is_relevant and is_evidence:
+                relevant_evidence_count += 1
+
             documents.append(doc_copy)
 
-        if filtered_other_count > 0:
-            logger.info(
-                f"Filtered {filtered_other_count} 'Other (Non-evidence)' documents from project {project_id} "
-                f"(returning {len(documents)} documents to UI)"
-            )
-
-        return {"documents": documents, "total": len(documents)}
+        return {
+            "documents": documents,
+            "total": len(documents),
+            "relevant_evidence_count": relevant_evidence_count,
+        }
 
     except Exception as e:
         logger.error(f"Error fetching documents for project {project_id}: {e}")

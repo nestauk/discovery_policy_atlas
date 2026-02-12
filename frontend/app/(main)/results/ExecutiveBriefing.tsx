@@ -211,10 +211,7 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
         <div>
           <div className="text-slate-500 text-xs uppercase tracking-wide mb-1">Sources</div>
           <div className="font-semibold text-slate-800">
-            {coverage.total_synthesised} synthesised
-          </div>
-          <div className="text-slate-600 text-xs mt-0.5">
-            Screened: {coverage.total_screened}
+            {coverage.total_synthesised} sources
           </div>
         </div>
         <div>
@@ -753,7 +750,6 @@ export function ExecutiveBriefing({
       const countryEntries = Object.entries(evidenceCoverage.countries || {}).sort((a, b) => b[1] - a[1]);
       const topCountries = countryEntries.slice(0, 3).map(([c]) => sanitize(c)).join(", ") || "Unknown";
       const synthesised = evidenceCoverage.total_synthesised;
-      const screened = evidenceCoverage.total_screened;
       return `
         <div class="card">
           <div class="card-title">Evidence Base</div>
@@ -761,8 +757,7 @@ export function ExecutiveBriefing({
           <div class="snapshot-grid">
             <div>
               <div class="label">Sources</div>
-              <div class="value">${synthesised} synthesised</div>
-              <div class="value" style="font-size:10px;color:#64748b;">Screened: ${screened}</div>
+              <div class="value">${synthesised} sources</div>
             </div>
             <div>
               <div class="label">Evidence Types</div>
