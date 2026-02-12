@@ -1,8 +1,8 @@
 'use client'
 
+import { useState, useEffect } from "react";
 import {
   SignInButton,
-  SignUpButton,
   SignedIn,
   SignedOut,
   UserButton,
@@ -10,21 +10,26 @@ import {
 import { Button } from "@/components/ui/button";
 
 export function AuthButtons() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return <div className="h-9 w-20" aria-hidden />;
+  }
+
   return (
     <>
       <SignedOut>
-        <div className="space-x-4">
-          <SignInButton mode="modal">
-            <Button variant="ghost">Sign In</Button>
-          </SignInButton>
-          <SignUpButton mode="modal">
-            <Button>Sign Up</Button>
-          </SignUpButton>
-        </div>
+        <SignInButton mode="modal">
+          <Button variant="ghost">Sign In</Button>
+        </SignInButton>
       </SignedOut>
       <SignedIn>
         <UserButton />
       </SignedIn>
     </>
   );
-} 
+}

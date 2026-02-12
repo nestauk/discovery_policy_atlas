@@ -11,6 +11,7 @@ import httpx
 load_dotenv()
 
 security = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)
 
 # Clerk configuration
 CLERK_JWT_ISSUER = os.getenv("CLERK_JWT_ISSUER")
@@ -202,3 +203,15 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
+) -> Optional[CurrentUser]:
+    """Optional authentication - returns None if no token provided, user if valid token."""
+    if not credentials:
+        return None
+    try:
+        return await get_current_user(credentials)
+    except HTTPException:
+        return None

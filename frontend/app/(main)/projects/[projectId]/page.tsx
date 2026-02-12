@@ -16,11 +16,24 @@ import {
   BookOpen,
   Target,
   Bot,
-  Download
+  Download,
+  Share2,
+  Copy,
+  Check,
+  Globe,
+  Lock,
 } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
-import { useAuth } from '@clerk/nextjs'
+import { useAuth, useUser } from '@clerk/nextjs'
 import { SynthesisSummary } from '@/types/search'
 import { ExecutiveBriefing } from '../../results/ExecutiveBriefing'
 import { ChatInterface } from '@/components/chatbot/ChatInterface'
@@ -135,6 +148,11 @@ export default function ProjectResultsPage() {
   // Interventions view state
   const [isPreparingInterventionsDownload, setIsPreparingInterventionsDownload] = useState(false)
   
+  // Share dialog state
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [isTogglingVisibility, setIsTogglingVisibility] = useState(false)
+  const [copied, setCopied] = useState(false)
+  
   // Data states
   const [documents, setDocuments] = useState<AnalysisDocument[]>([])
   const [interventions, setInterventions] = useState<InterventionData[]>([])
@@ -148,6 +166,22 @@ export default function ProjectResultsPage() {
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
   const { getToken } = useAuth()
+  const { user } = useUser()
+  
+  const isProjectOwner = useMemo(() => {
+    if (!user || !activeProject) return false
+    const currentUserId = user.id
+    const currentUserFullName = user.fullName || ''
+    const currentUserEmail = user.emailAddresses?.[0]?.emailAddress || ''
+    const currentUserEmailUsername = currentUserEmail.split('@')[0] || ''
+    
+    return (
+      activeProject.created_by_user_id === currentUserId ||
+      activeProject.created_by_name === currentUserFullName ||
+      activeProject.created_by_name === currentUserEmail ||
+      activeProject.created_by_name === currentUserEmailUsername
+    )
+  }, [user, activeProject])
 
   // Update URL when tab changes (without full navigation)
   const updateUrl = useCallback((tab: TabType, subtab?: EvidenceSubTabType) => {
@@ -869,6 +903,37 @@ export default function ProjectResultsPage() {
     }
   }, [documents, studyStrengthMapping, sampleSizeMapping])
 
+  const publicUrl = typeof window !== 'undefined' 
+    ? `${window.location.origin}/public/projects/${projectId}` 
+    : `/public/projects/${projectId}`
+
+  const handleToggleVisibility = useCallback(async () => {
+    if (!projectId || isTogglingVisibility) return
+    
+    setIsTogglingVisibility(true)
+    try {
+      const newIsPublic = !activeProject?.is_public
+      await fetchWithAuth(`/api/analysis-projects/${projectId}/visibility`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_public: newIsPublic }),
+      })
+      setActiveProject({
+        ...activeProject!,
+        is_public: newIsPublic,
+      })
+    } catch (err) {
+      console.error('Failed to toggle visibility:', err)
+    } finally {
+      setIsTogglingVisibility(false)
+    }
+  }, [projectId, activeProject, isTogglingVisibility, fetchWithAuth, setActiveProject])
+
+  const handleCopyLink = useCallback(() => {
+    navigator.clipboard.writeText(publicUrl)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [publicUrl])
+
   // Show loading state while fetching project
   if (projectLoading) {
     return (
@@ -913,10 +978,91 @@ export default function ProjectResultsPage() {
               </div>
             )}
           </div>
-          {/* Search Plan Settings Button */}
-          {projectId && activeProject?.search_query && (
-            <SearchPlanModal project={activeProject} />
-          )}
+          <div className="flex items-center gap-3">
+            {/* Share Button - only visible to project owner */}
+            {projectId && activeProject && isProjectOwner && (
+              <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="flex items-center gap-2">
+                    <Share2 className="h-4 w-4" />
+                    Share
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Share Project</DialogTitle>
+                    <DialogDescription>
+                      Make this project publicly accessible via a shareable link.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 pt-4">
+                    {/* Visibility Toggle */}
+                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        {activeProject.is_public ? (
+                          <Globe className="h-5 w-5 text-green-600" />
+                        ) : (
+                          <Lock className="h-5 w-5 text-slate-500" />
+                        )}
+                        <div>
+                          <div className="font-medium text-sm">
+                            {activeProject.is_public ? 'Public' : 'Private'}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            {activeProject.is_public 
+                              ? 'Anyone with the link can view' 
+                              : 'Only you can access this project'}
+                          </div>
+                        </div>
+                      </div>
+                      <Switch
+                        checked={activeProject.is_public || false}
+                        onCheckedChange={handleToggleVisibility}
+                        disabled={isTogglingVisibility}
+                      />
+                    </div>
+                    
+                    {/* Share Link */}
+                    {activeProject.is_public && (
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Public Link</Label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={publicUrl}
+                            readOnly
+                            className="flex-1 px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-md"
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleCopyLink}
+                            className="flex items-center gap-2"
+                          >
+                            {copied ? (
+                              <>
+                                <Check className="h-4 w-4 text-green-600" />
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-4 w-4" />
+                                Copy
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
+            {/* Search Plan Settings Button */}
+            {projectId && activeProject?.search_query && (
+              <SearchPlanModal project={activeProject} />
+            )}
+          </div>
         </div>
       </div>
 

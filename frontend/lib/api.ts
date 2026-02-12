@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { AnalysisProject } from "./analysisProjectStore";
 
@@ -81,7 +82,7 @@ export const fetchWithAuthExternal = async (
 export function useAPI() {
   const { getToken } = useAuth();
   
-  const fetchWithAuth = async (url: string, options: RequestInit = {}, isStreaming: boolean = false) => {
+  const fetchWithAuth = useCallback(async (url: string, options: RequestInit = {}, isStreaming: boolean = false) => {
     const token = await getToken();
     
     if (!token) {
@@ -94,19 +95,13 @@ export function useAPI() {
     }
     
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    // Remove trailing slash from baseUrl and leading slash from url if present
     const cleanBaseUrl = baseUrl.replace(/\/$/, '');
     const cleanUrl = url.replace(/^\//, '');
     const fullUrl = `${cleanBaseUrl}/${cleanUrl}`;
     
-    console.log(`API call: ${options.method || 'GET'} ${fullUrl}`);
-    console.log(`Token length: ${token.length}`);
-    console.log(`Request headers:`, options.headers);
-    // Don't set Content-Type for FormData - let browser set it with boundary
     const headers = new Headers(options.headers as HeadersInit);
     headers.set('Authorization', `Bearer ${token}`);
     if (!(options.body instanceof FormData)) {
-      // Set JSON content type only when not sending FormData
       headers.set('Content-Type', 'application/json');
     }
 
@@ -120,8 +115,6 @@ export function useAPI() {
       console.error('Network fetch error:', fetchError);
       throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Unknown network error'}`);
     }
-    console.log(`Response status: ${response.status}`);
-    console.log(`Response headers:`, [...response.headers.entries()]);
     
     if (!response.ok) {
       const errorText = await response.text();
@@ -133,10 +126,8 @@ export function useAPI() {
       throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
     
-    // For streaming responses, return the raw response
-    // For regular API calls, parse as JSON
     return isStreaming ? response : response.json();
-  };
+  }, [getToken]);
 
   // Analysis Project API functions
   const getAnalysisProjects = async (): Promise<{ projects: AnalysisProject[], total: number }> => {
