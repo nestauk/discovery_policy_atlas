@@ -83,7 +83,8 @@ def filter_prevalence_only_extractions(extractions: List[Dict]) -> List[Dict]:
 def transform_document_for_api(doc: Dict) -> Dict:
     """Transform a document from database format to API response format.
 
-    Adds computed fields like evidence_category_rank, evidence_strength, etc.
+    Adds computed fields like evidence_category_rank, evidence_strength,
+    is_evidence, is_relevant_evidence, etc.
     """
     doc_copy = doc.copy()
 
@@ -107,14 +108,25 @@ def transform_document_for_api(doc: Dict) -> Dict:
     doc_copy["predicted_impact"] = predicted_impact.get("stars")
     doc_copy["predicted_impact_justification"] = predicted_impact.get("justification")
 
+    is_evidence = not is_non_evidence_document(doc)
+    doc_copy["is_evidence"] = is_evidence
+    is_relevant = doc_copy.get("is_relevant", True)
+    doc_copy["is_relevant_evidence"] = is_relevant and is_evidence
+
     return doc_copy
 
 
 def get_project_documents_data(project_id: str) -> Dict:
     """Get processed documents for a project.
 
+    Returns all documents including non-relevant and non-evidence documents.
+    Each document includes:
+    - is_relevant: whether it passed relevance screening
+    - is_evidence: whether it's an evidence document (not "Other (Non-evidence documents)")
+    - is_relevant_evidence: convenience flag combining both checks
+
     Returns:
-        Dict with 'documents' list and 'total' count
+        Dict with 'documents' list, 'total' count, and 'relevant_evidence_count'
     """
     docs_result = (
         vectorization_service.supabase.table("analysis_documents")
@@ -124,22 +136,19 @@ def get_project_documents_data(project_id: str) -> Dict:
     )
 
     documents = []
-    filtered_other_count = 0
+    relevant_evidence_count = 0
 
-    for doc in docs_result.data:
-        if is_non_evidence_document(doc):
-            filtered_other_count += 1
-            continue
-
+    for doc in docs_result.data or []:
         doc_copy = transform_document_for_api(doc)
+        if doc_copy.get("is_relevant_evidence"):
+            relevant_evidence_count += 1
         documents.append(doc_copy)
 
-    if filtered_other_count > 0:
-        logger.info(
-            f"Filtered {filtered_other_count} 'Other (Non-evidence)' documents from project {project_id}"
-        )
-
-    return {"documents": documents, "total": len(documents)}
+    return {
+        "documents": documents,
+        "total": len(documents),
+        "relevant_evidence_count": relevant_evidence_count,
+    }
 
 
 INSTITUTIONAL_KEYWORDS = [
