@@ -177,8 +177,12 @@ export default function ProjectResultsPage() {
         return
       }
       
-      // If we already have this project in store, no need to fetch
-      if (activeProject?.id === projectId) return
+      // If we already have this project in store with full payload, no need to fetch.
+      // The projects list endpoint omits search_query, so we must refetch when that field is missing.
+      const hasSearchQueryField =
+        !!activeProject &&
+        Object.prototype.hasOwnProperty.call(activeProject, 'search_query')
+      if (activeProject?.id === projectId && hasSearchQueryField) return
       
       setProjectLoading(true)
       setError(null)
@@ -864,7 +868,7 @@ export default function ProjectResultsPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col bg-slate-50">
       {/* Header */}
       <div className="border-b border-slate-200 bg-white px-8 py-6">
         <div className="flex items-center justify-between">
@@ -903,7 +907,7 @@ export default function ProjectResultsPage() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 bg-slate-50">
+      <div className="flex-1">
 
         {/* Show error state */}
         {error && (
@@ -935,7 +939,7 @@ export default function ProjectResultsPage() {
 
         {/* Show empty state if no project */}
         {!projectId && !error && (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex items-center justify-center min-h-[200px] py-12">
             <div className="text-center p-8">
               <FileText className="h-16 w-16 text-slate-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-slate-900 mb-2">No Project Selected</h3>
@@ -958,7 +962,7 @@ export default function ProjectResultsPage() {
 
         {/* Show results tabs */}
         {projectId && !error && (
-          <Tabs value={urlTab} onValueChange={handleTabChange} className="h-full flex flex-col">
+          <Tabs value={urlTab} onValueChange={handleTabChange} className="flex flex-col">
             <div className="px-6 pt-4">
               <TabsList className="!grid w-full grid-cols-3">
                 <TabsTrigger value="summary" className="flex items-center gap-2">
@@ -976,7 +980,7 @@ export default function ProjectResultsPage() {
               </TabsList>
             </div>
 
-            <div className="flex-1 overflow-auto">
+            <div>
               <TabsContent value="summary" className="p-6 m-0">
                 <div className="max-w-6xl mx-auto">
                   {/* Stat Cards Row */}

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Settings, Search, Copy, CheckCircle, Info } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import type { AnalysisProject } from '@/lib/analysisProjectStore'
+import { useWizard } from '@/components/search/SearchWizard'
 
 interface SearchPlanModalProps {
   project: AnalysisProject
@@ -21,11 +22,17 @@ const SOURCE_LABELS: Record<string, string> = {
 
 const TIME_PRESET_LABELS: Record<string, string> = {
   LAST_YEAR: 'Last year',
+  LAST_2_YEARS: 'Last 2 years',
   LAST_5_YEARS: 'Last 5 years',
   LAST_10_YEARS: 'Last 10 years',
   SINCE_2000: 'Since 2000',
   ANY: 'Any time',
   CUSTOM: 'Custom range',
+}
+
+const GEO_LABELS: Record<string, string> = {
+  All: 'Anywhere',
+  'All but UK': 'Anywhere but UK',
 }
 
 type SearchQueryExtended = {
@@ -35,6 +42,7 @@ type SearchQueryExtended = {
   boolean_queries?: string[]
   boolean_query?: string
   population?: string[]
+  inner_setting?: string[]
   outcome?: string[]
   geography?: string[]
   geography_filter?: string[]
@@ -50,6 +58,11 @@ type SearchQueryExtended = {
   sub_questions?: string[]
   additional_questions?: string[]
   screening_factors?: string[]
+  implementation_constraints?: {
+    cost?: string
+    staffing?: string
+    implementation_complexity?: string
+  } | null
   scope?: string[]
   custom_focus?: string[]
   excludes?: string[]
@@ -69,12 +82,30 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
   const semanticQuery = searchQuery.semantic_query
   const booleanQueries = searchQuery.boolean_queries || (searchQuery.boolean_query ? [searchQuery.boolean_query] : [])
   const population = searchQuery.population || []
+  const innerSetting = searchQuery.inner_setting || []
   const outcome = searchQuery.outcome || []
   const geography = searchQuery.geography || searchQuery.geography_filter || []
   const timePreset = searchQuery.time_preset
   const timeFrom = searchQuery.time_from
   const timeTo = searchQuery.time_to
   const maxResults = searchQuery.max_results || searchQuery.limit
+  const implementationConstraints = searchQuery.implementation_constraints
+  const hasImplementationConstraints = !!implementationConstraints && [
+    implementationConstraints.cost,
+    implementationConstraints.staffing,
+    implementationConstraints.implementation_complexity,
+  ].some((value) => value && value.toLowerCase() !== 'any')
+  const hasCustomTimeRange = timePreset === 'CUSTOM' || !!(timeFrom || timeTo)
+  const chipClassName = 'inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800'
+  const formatConstraintValue = (value?: string) => {
+    if (!value) return null
+    const normalised = value.trim()
+    if (!normalised || normalised.toLowerCase() === 'any') return null
+    return normalised.charAt(0).toUpperCase() + normalised.slice(1)
+  }
+  const constraintCost = formatConstraintValue(implementationConstraints?.cost)
+  const constraintStaffing = formatConstraintValue(implementationConstraints?.staffing)
+  const constraintComplexity = formatConstraintValue(implementationConstraints?.implementation_complexity)
 
   const copyBooleanQuery = async (query: string) => {
     if (!query) return
@@ -88,6 +119,7 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
   }
 
   const startNewSearch = () => {
+    useWizard.getState().reset()
     setIsOpen(false)
     router.push('/search')
   }
@@ -99,7 +131,7 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="flex items-center gap-2">
           <Settings className="h-4 w-4" />
-          Search Settings
+          View search settings
         </Button>
       </DialogTrigger>
       
@@ -170,94 +202,116 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
             </div>
           )}
 
-          {/* Key Parameters */}
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            {searchQuery.sources && searchQuery.sources.length > 0 && (
-              <div>
-                <span className="font-medium">Sources:</span>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {searchQuery.sources.map((source: string) => (
-                    <Badge key={source} variant="outline">
-                      {SOURCE_LABELS[source] || source}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {timePreset && (
-              <div>
-                <span className="font-medium">Time window:</span>
-                <div className="mt-1">
-                  <Badge variant="outline">
-                    {TIME_PRESET_LABELS[timePreset] || timePreset.replaceAll('_', ' ')}
-                  </Badge>
-                  {(timePreset === 'CUSTOM' || (timeFrom && timeTo)) && (
-                    <div className="text-xs text-gray-600 mt-1">
-                      {timeFrom && new Date(timeFrom).toLocaleDateString()} - {timeTo && new Date(timeTo).toLocaleDateString()}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {geography.length > 0 && (
-              <div>
-                <span className="font-medium">Geography:</span>
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {geography.map((geo: string) => (
-                    <Badge key={geo} variant="outline">
-                      {geo}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {maxResults && (
-              <div>
-                <span className="font-medium">Max results:</span>
-                <div className="mt-1">{maxResults}</div>
-              </div>
-            )}
-
-            {searchQuery.mode && (
-              <div>
-                <span className="font-medium">Search mode:</span>
-                <div className="mt-1">
-                  <Badge variant="outline">{searchQuery.mode}</Badge>
-                </div>
-              </div>
-            )}
+          <div className="grid gap-3">
+            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Population</div>
+              {population.length > 0 ? (
+                <p className="text-sm text-gray-900">{population.join(', ')}</p>
+              ) : (
+                <p className="text-sm text-gray-500">Not specified</p>
+              )}
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Setting</div>
+              {innerSetting.length > 0 ? (
+                <p className="text-sm text-gray-900">{innerSetting.join(', ')}</p>
+              ) : (
+                <p className="text-sm text-gray-500">No preference</p>
+              )}
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Outcome</div>
+              {outcome.length > 0 ? (
+                <p className="text-sm text-gray-900">{outcome.join(', ')}</p>
+              ) : (
+                <p className="text-sm text-gray-500">Not specified</p>
+              )}
+            </div>
           </div>
 
-          {/* Population */}
-          {population.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+            <div className="text-xs uppercase tracking-wide text-gray-500">Refinement</div>
             <div>
-              <h4 className="font-medium mb-1 text-xs">Population</h4>
-              <div className="flex flex-wrap gap-1">
-                {population.map((item: string, idx: number) => (
-                  <Badge key={idx} variant="outline" className="text-xs py-0">
-                    {item}
-                  </Badge>
-                ))}
-              </div>
+              <span className="font-medium text-sm">Implementation constraints</span>
+              {hasImplementationConstraints ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {constraintCost && <span className={chipClassName}>Cost: {constraintCost}</span>}
+                  {constraintStaffing && <span className={chipClassName}>Staffing: {constraintStaffing}</span>}
+                  {constraintComplexity && <span className={chipClassName}>Complexity: {constraintComplexity}</span>}
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-gray-500">Not specified</div>
+              )}
             </div>
-          )}
+            <div>
+              <span className="font-medium text-sm">Screening factors</span>
+              {searchQuery.screening_factors && searchQuery.screening_factors.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {searchQuery.screening_factors.map((item, idx) => (
+                    <span key={`${item}-${idx}`} className={chipClassName}>
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-gray-500">None added</div>
+              )}
+            </div>
+          </div>
 
-          {/* Outcome */}
-          {outcome.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+            <div className="text-xs uppercase tracking-wide text-gray-500">Filters</div>
             <div>
-              <h4 className="font-medium mb-1 text-xs">Outcome</h4>
-              <div className="flex flex-wrap gap-1">
-                {outcome.map((item: string, idx: number) => (
-                  <Badge key={idx} variant="outline" className="text-xs py-0">
-                    {item}
-                  </Badge>
-                ))}
+              <span className="font-medium text-sm">Search sources</span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {searchQuery.sources && searchQuery.sources.length > 0 ? (
+                  searchQuery.sources.map((source: string) => (
+                    <span key={source} className={chipClassName}>
+                      {SOURCE_LABELS[source] || source}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-sm text-gray-500">Not specified</span>
+                )}
               </div>
             </div>
-          )}
+            <div>
+              <span className="font-medium text-sm">Retrieval limit</span>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className={chipClassName}>{maxResults || 'Not specified'} per source</span>
+                <span className="text-xs text-gray-500">
+                  {searchQuery.sources?.length || 0} source{(searchQuery.sources?.length || 0) === 1 ? '' : 's'} selected
+                </span>
+              </div>
+            </div>
+            <div>
+              <span className="font-medium text-sm">Time window</span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className={chipClassName}>
+                  {timePreset ? (TIME_PRESET_LABELS[timePreset] || timePreset.replaceAll('_', ' ')) : 'Not specified'}
+                </span>
+                {hasCustomTimeRange && (
+                  <span className={chipClassName}>
+                    {timeFrom || 'No start date'} to {timeTo || 'No end date'}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div>
+              <span className="font-medium text-sm">Geography</span>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {geography.length > 0 ? (
+                  geography.map((geo: string) => (
+                    <span key={geo} className={chipClassName}>
+                      {GEO_LABELS[geo] || geo}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-sm text-gray-500">Not specified</span>
+                )}
+              </div>
+            </div>
+          </div>
 
           {/* Sub Questions */}
           {searchQuery.sub_questions && searchQuery.sub_questions.length > 0 && (
@@ -271,35 +325,12 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
             </div>
           )}
 
-          {/* Additional Questions */}
-          {searchQuery.additional_questions && searchQuery.additional_questions.length > 0 && (
-            <div>
-              <h4 className="font-medium mb-1 text-xs">Additional questions</h4>
-              <ul className="text-xs text-gray-700 space-y-0.5 list-disc list-inside">
-                {searchQuery.additional_questions.map((q, idx) => (
-                  <li key={idx}>{q}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Screening Factors */}
-          {searchQuery.screening_factors && searchQuery.screening_factors.length > 0 && (
-            <div>
-              <h4 className="font-medium mb-1 text-xs">Screening factors</h4>
-              <div className="flex flex-wrap gap-1">
-                {searchQuery.screening_factors.map((item, idx) => (
-                  <Badge key={idx} variant="outline" className="text-xs py-0">
-                    {item}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Scope */}
-          {searchQuery.scope && searchQuery.scope.length > 0 && (
-            <div>
+          {/* Advanced options */}
+          {(searchQuery.scope?.length || searchQuery.custom_focus?.length || searchQuery.excludes?.length) ? (
+            <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+              <div className="text-xs uppercase tracking-wide text-gray-500">Advanced options</div>
+              {searchQuery.scope && searchQuery.scope.length > 0 && (
+                <div>
               <h4 className="font-medium mb-1 text-xs">Scope</h4>
               <div className="flex flex-wrap gap-1">
                 {searchQuery.scope.map((item) => (
@@ -308,12 +339,11 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
                   </Badge>
                 ))}
               </div>
-            </div>
-          )}
+                </div>
+              )}
 
-          {/* Custom Focus */}
-          {searchQuery.custom_focus && searchQuery.custom_focus.length > 0 && (
-            <div>
+              {searchQuery.custom_focus && searchQuery.custom_focus.length > 0 && (
+                <div>
               <h4 className="font-medium mb-1 text-xs">Custom focus</h4>
               <div className="flex flex-wrap gap-1">
                 {searchQuery.custom_focus.map((item) => (
@@ -322,12 +352,11 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
                   </Badge>
                 ))}
               </div>
-            </div>
-          )}
+                </div>
+              )}
 
-          {/* Excludes */}
-          {searchQuery.excludes && searchQuery.excludes.length > 0 && (
-            <div>
+              {searchQuery.excludes && searchQuery.excludes.length > 0 && (
+                <div>
               <h4 className="font-medium mb-1 text-xs">Exclusions</h4>
               <div className="flex flex-wrap gap-1">
                 {searchQuery.excludes.map((item) => (
@@ -336,8 +365,10 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
                   </Badge>
                 ))}
               </div>
+                </div>
+              )}
             </div>
-          )}
+          ) : null}
 
           {/* Start New Search Button */}
           <div className="pt-2 border-t">

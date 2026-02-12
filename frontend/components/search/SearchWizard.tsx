@@ -35,8 +35,17 @@ const Chip = ({ active, children, onClick }: { active?: boolean; children: React
 
 // ---------------- TYPES & CONSTANTS ----------------
 type Step = "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
-type TimePreset = "LAST_YEAR" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
+type TimePreset = "LAST_YEAR" | "LAST_2_YEARS" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
+const TIME_PRESET_LABELS: Record<TimePreset, string> = {
+  LAST_YEAR: "Last year",
+  LAST_2_YEARS: "Last 2 years",
+  LAST_5_YEARS: "Last 5 years",
+  LAST_10_YEARS: "Last 10 years",
+  SINCE_2000: "Since 2000",
+  ANY: "Any time",
+  CUSTOM: "Custom range",
+};
 const SOURCE_LABELS: Record<"openalex" | "overton", string> = {
   openalex: "Academic literature",
   overton: "Grey literature",
@@ -95,15 +104,9 @@ const GEO_LABELS: Record<string, string> = {
 // Search context type - stores all the structured data
 export type SearchContext = {
   researchQuestion: string;
-  population: {
-    selected: string[]; // Selected population options (examples + custom)
-    keepBroad: boolean; // "Keep it broad" option
-  };
+  population: string[];
   innerSetting: string[];
-  outcome: {
-    selected: string[]; // Selected outcome options (examples + custom)
-    keepBroad: boolean; // "Keep it broad" option
-  };
+  outcome: string[];
   implementationConstraints: {
     cost: string;
     staffing: string;
@@ -126,9 +129,9 @@ export type SearchContext = {
 interface WizardState {
   step: Step;
   researchQuestion: string;
-  population: { selected: string[]; keepBroad: boolean };
+  population: { selected: string[]; noPreference: boolean };
   innerSetting: { selected: string[]; noPreference: boolean };
-  outcome: { selected: string[]; keepBroad: boolean };
+  outcome: { selected: string[]; noPreference: boolean };
   implementationConstraints: {
     cost: string;
     staffing: string;
@@ -151,6 +154,7 @@ interface WizardState {
   additionalQuestions: string[];
   maxResults: number;
   set: (p: Partial<WizardState>) => void;
+  reset: () => void;
   next: () => void;
   back: () => void;
   buildContext: () => SearchContext;
@@ -159,9 +163,9 @@ interface WizardState {
 export const useWizard = create<WizardState>((set, get) => ({
   step: "ASK",
   researchQuestion: "",
-  population: { selected: [], keepBroad: false },
+  population: { selected: [], noPreference: true },
   innerSetting: { selected: [], noPreference: true },
-  outcome: { selected: [], keepBroad: false },
+  outcome: { selected: [], noPreference: true },
   implementationConstraints: {
     cost: "Any",
     staffing: "Any",
@@ -184,10 +188,39 @@ export const useWizard = create<WizardState>((set, get) => ({
   additionalQuestions: [],
   maxResults: 30,
   set: (p) => set(p),
+  reset: () =>
+    set({
+      step: "ASK",
+      researchQuestion: "",
+      population: { selected: [], noPreference: true },
+      innerSetting: { selected: [], noPreference: true },
+      outcome: { selected: [], noPreference: true },
+      implementationConstraints: {
+        cost: "Any",
+        staffing: "Any",
+        implementationComplexity: "Any",
+      },
+      generatedPopulationOptions: [],
+      generatedInnerSettingOptions: [],
+      generatedOutcomeOptions: [],
+      generatedAdditionalQuestions: [],
+      isGeneratingOptions: false,
+      parameters: {
+        sources: [],
+        access: { academic: true, policy: true },
+        geography: [ANYWHERE_VALUE],
+        timePreset: "LAST_10_YEARS",
+        customFrom: undefined,
+        customTo: undefined,
+      },
+      screeningFactors: [],
+      additionalQuestions: [],
+      maxResults: 30,
+    }),
   next: () => {
     const s = get();
-    // Skip ADDITIONAL_QUESTIONS step - go directly from SCREENING to SUMMARY
-    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+    // Skip ADDITIONAL_QUESTIONS step - go directly from PARAMETERS to SUMMARY
+    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
     const currentIdx = steps.indexOf(s.step);
     if (currentIdx < steps.length - 1) {
       const nextStep = steps[currentIdx + 1];
@@ -201,14 +234,14 @@ export const useWizard = create<WizardState>((set, get) => ({
   },
   back: () => {
     const s = get();
-    // Skip ADDITIONAL_QUESTIONS step - go directly from SUMMARY to SCREENING
-    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "PARAMETERS", "SCREENING", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+    // Skip ADDITIONAL_QUESTIONS step - go directly from SUMMARY to PARAMETERS
+    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
     const currentIdx = steps.indexOf(s.step);
     if (currentIdx > 0) {
       const prevStep = steps[currentIdx - 1];
-      // Skip ADDITIONAL_QUESTIONS - go directly to SCREENING
+      // Skip ADDITIONAL_QUESTIONS - go directly to PARAMETERS
       if (prevStep === "ADDITIONAL_QUESTIONS") {
-        set({ step: "SCREENING" });
+        set({ step: "PARAMETERS" });
       } else {
         set({ step: prevStep });
       }
@@ -218,9 +251,9 @@ export const useWizard = create<WizardState>((set, get) => ({
     const s = get();
     return {
       researchQuestion: s.researchQuestion,
-      population: s.population,
+      population: s.population.noPreference ? [] : s.population.selected,
       innerSetting: s.innerSetting.noPreference ? [] : s.innerSetting.selected,
-      outcome: s.outcome,
+      outcome: s.outcome.noPreference ? [] : s.outcome.selected,
       implementationConstraints: s.implementationConstraints,
       parameters: s.parameters,
       screeningFactors: s.screeningFactors,
@@ -231,14 +264,78 @@ export const useWizard = create<WizardState>((set, get) => ({
 }));
 
 // ---------------- HELPERS ----------------
-function ProgressBar({ step }: { step: Step }) {
-  // Skip ADDITIONAL_QUESTIONS in progress calculation
-  const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "PARAMETERS", "SCREENING", "SUMMARY"];
-  const currentIdx = steps.indexOf(step);
-  const pct = Math.round(((currentIdx + 1) / steps.length) * 100);
+function ProgressBar({
+  step,
+  researchQuestion,
+  onStepClick,
+}: {
+  step: Step;
+  researchQuestion: string;
+  onStepClick: (s: Step) => void;
+}) {
+  const steps: { id: Step; label: string }[] = [
+    { id: "ASK", label: "Question" },
+    { id: "POPULATION", label: "Population" },
+    { id: "INNER_SETTING", label: "Setting" },
+    { id: "OUTCOME", label: "Outcome" },
+    { id: "SCREENING", label: "Refinement" },
+    { id: "PARAMETERS", label: "Filters" },
+    { id: "SUMMARY", label: "Summary" },
+  ];
+  const currentIdx = steps.findIndex((s) => s.id === step);
+  const canJump = !!researchQuestion.trim();
+
   return (
-    <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-      <div className="h-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
+    <div className="w-full border-b border-gray-100 bg-white px-4 py-3">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-2">
+        {steps.map((item, idx) => {
+          const isCompleted = idx < currentIdx;
+          const isCurrent = idx === currentIdx;
+          const isClickable = canJump;
+          return (
+            <React.Fragment key={item.id}>
+              <button
+                type="button"
+                onClick={() => isClickable && onStepClick(item.id)}
+                disabled={!isClickable}
+                className={cx(
+                  "min-w-0 flex items-center gap-2 text-left transition",
+                  isClickable
+                    ? "cursor-pointer hover:opacity-80"
+                    : "cursor-default"
+                )}
+              >
+                <div
+                  className={cx(
+                    "flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ring-1",
+                    isCompleted || isCurrent
+                      ? "bg-blue-600 !text-white ring-blue-600"
+                      : "bg-white text-gray-500 ring-gray-300"
+                  )}
+                >
+                  {idx + 1}
+                </div>
+                <span
+                  className={cx(
+                    "hidden text-xs sm:inline",
+                    isCurrent ? "font-semibold text-gray-900" : "text-gray-500"
+                  )}
+                >
+                  {item.label}
+                </span>
+              </button>
+              {idx < steps.length - 1 && (
+                <div
+                  className={cx(
+                    "h-px flex-1",
+                    idx < currentIdx ? "bg-blue-600" : "bg-gray-200"
+                  )}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -254,18 +351,18 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
   }
   
   // Add population context
-  if (context.population.selected.length > 0) {
-    const popText = context.population.selected.length === 1 
-      ? context.population.selected[0]
-      : context.population.selected.join(", ");
+  if (context.population.length > 0) {
+    const popText = context.population.length === 1 
+      ? context.population[0]
+      : context.population.join(", ");
     parts.push(`for ${popText}`);
   }
   
   // Add outcome context
-  if (context.outcome.selected.length > 0) {
-    const outcomeText = context.outcome.selected.length === 1
-      ? context.outcome.selected[0]
-      : context.outcome.selected.join(", ");
+  if (context.outcome.length > 0) {
+    const outcomeText = context.outcome.length === 1
+      ? context.outcome[0]
+      : context.outcome.join(", ");
     parts.push(`could achieve ${outcomeText}`);
   }
   
@@ -341,13 +438,20 @@ function ScreenAsk() {
           value={s.researchQuestion} 
           onChange={(e) => s.set({ researchQuestion: e.target.value })} 
         />
-        <div className="flex justify-end">
+        <div className="flex justify-end items-center mt-6">
           <Button 
+            variant="secondary"
+            className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
             full 
             disabled={!s.researchQuestion.trim() || s.isGeneratingOptions} 
             onClick={handleNext}
           >
-            {s.isGeneratingOptions ? 'Generating options...' : 'Continue'}
+            {s.isGeneratingOptions ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-black/30 border-t-black" />
+                Generating options...
+              </span>
+            ) : 'Continue'}
           </Button>
         </div>
       </div>
@@ -361,51 +465,69 @@ function ScreenPopulation() {
 
   const togglePopulation = (pop: string) => {
     const current = s.population.selected;
-    if (current.includes(pop)) {
-      s.set({ population: { ...s.population, selected: current.filter(p => p !== pop) } });
-    } else {
-      s.set({ population: { ...s.population, selected: [...current, pop] } });
+    if (s.population.noPreference) {
+      s.set({ population: { selected: [pop], noPreference: false } });
+      return;
     }
+    if (current.includes(pop)) {
+      const next = current.filter(p => p !== pop);
+      s.set({ population: { selected: next, noPreference: next.length === 0 } });
+    } else {
+      s.set({ population: { selected: [...current, pop], noPreference: false } });
+    }
+  };
+
+  const selectNoPreference = () => {
+    s.set({ population: { selected: [], noPreference: true } });
   };
 
   const addCustom = () => {
     const trimmed = customInput.trim();
-    // Use generated options or fallback to defaults
-    const exampleOptions = s.generatedPopulationOptions.length > 0
-      ? ["Anyone", ...s.generatedPopulationOptions] as string[]
-      : ["Anyone", ...FALLBACK_POPULATION_EXAMPLES] as string[];
-    if (trimmed && !s.population.selected.includes(trimmed) && !exampleOptions.includes(trimmed)) {
-      s.set({ population: { ...s.population, selected: [...s.population.selected, trimmed] } });
-      setCustomInput("");
+    if (!trimmed) return;
+    if (!s.population.selected.includes(trimmed)) {
+      s.set({ population: { selected: [...s.population.selected, trimmed], noPreference: false } });
     }
+    setCustomInput("");
   };
 
   const removePopulation = (pop: string) => {
-    s.set({ population: { ...s.population, selected: s.population.selected.filter(p => p !== pop) } });
+    const next = s.population.selected.filter(p => p !== pop);
+    s.set({ population: { selected: next, noPreference: next.length === 0 } });
   };
 
-  // Use generated options or fallback to defaults
   const exampleOptions = s.generatedPopulationOptions.length > 0
-    ? ["Anyone", ...s.generatedPopulationOptions] as string[]
-    : ["Anyone", ...FALLBACK_POPULATION_EXAMPLES] as string[];
+    ? s.generatedPopulationOptions
+    : [...FALLBACK_POPULATION_EXAMPLES];
   const customOptions = s.population.selected.filter(pop => !exampleOptions.includes(pop));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you targeting a particular population?</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
+        <p className="text-gray-600 text-lg">We use this to prioritise evidence for the populations you care about.</p>
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
-        {/* Options in single column */}
         <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={selectNoPreference}
+            className={cx(
+              "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
+              s.population.noPreference
+                ? "bg-blue-600 !text-white ring-blue-600"
+                : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+            )}
+          >
+            No preference
+          </button>
+
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Or select specific populations</span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
+
           {exampleOptions.map((pop) => {
             const isSelected = s.population.selected.includes(pop);
             return (
@@ -457,6 +579,7 @@ function ScreenPopulation() {
           <Button onClick={addCustom}>+ Add</Button>
         </div>
       </div>
+
     </div>
   );
 }
@@ -525,15 +648,10 @@ function ScreenInnerSetting() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular settings?</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information and assess transferability.</p>
+        <p className="text-gray-600 text-lg">We use this to prioritise context-matched evidence and assess transferability.</p>
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
@@ -550,6 +668,12 @@ function ScreenInnerSetting() {
           >
             No preference
           </button>
+
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Or select specific settings</span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
 
           {exampleOptions.map((setting) => {
             const isSelected = s.innerSetting.selected.includes(setting);
@@ -602,6 +726,7 @@ function ScreenInnerSetting() {
           <Button onClick={addCustom}>+ Add</Button>
         </div>
       </div>
+
     </div>
   );
 }
@@ -612,51 +737,69 @@ function ScreenOutcome() {
 
   const toggleOutcome = (outcome: string) => {
     const current = s.outcome.selected;
-    if (current.includes(outcome)) {
-      s.set({ outcome: { ...s.outcome, selected: current.filter(o => o !== outcome) } });
-    } else {
-      s.set({ outcome: { ...s.outcome, selected: [...current, outcome] } });
+    if (s.outcome.noPreference) {
+      s.set({ outcome: { selected: [outcome], noPreference: false } });
+      return;
     }
+    if (current.includes(outcome)) {
+      const next = current.filter(o => o !== outcome);
+      s.set({ outcome: { selected: next, noPreference: next.length === 0 } });
+    } else {
+      s.set({ outcome: { selected: [...current, outcome], noPreference: false } });
+    }
+  };
+
+  const selectNoPreference = () => {
+    s.set({ outcome: { selected: [], noPreference: true } });
   };
 
   const addCustom = () => {
     const trimmed = customInput.trim();
-    // Use generated options or fallback to defaults
-    const exampleOptions = s.generatedOutcomeOptions.length > 0
-      ? ["I don't have a particular outcome in mind", ...s.generatedOutcomeOptions] as string[]
-      : ["I don't have a particular outcome in mind", ...FALLBACK_OUTCOME_EXAMPLES] as string[];
-    if (trimmed && !s.outcome.selected.includes(trimmed) && !exampleOptions.includes(trimmed)) {
-      s.set({ outcome: { ...s.outcome, selected: [...s.outcome.selected, trimmed] } });
-      setCustomInput("");
+    if (!trimmed) return;
+    if (!s.outcome.selected.includes(trimmed)) {
+      s.set({ outcome: { selected: [...s.outcome.selected, trimmed], noPreference: false } });
     }
+    setCustomInput("");
   };
 
   const removeOutcome = (outcome: string) => {
-    s.set({ outcome: { ...s.outcome, selected: s.outcome.selected.filter(o => o !== outcome) } });
+    const next = s.outcome.selected.filter(o => o !== outcome);
+    s.set({ outcome: { selected: next, noPreference: next.length === 0 } });
   };
 
-  // Use generated options or fallback to defaults
   const exampleOptions = s.generatedOutcomeOptions.length > 0
-    ? ["I don't have a particular outcome in mind", ...s.generatedOutcomeOptions] as string[]
-    : ["I don't have a particular outcome in mind", ...FALLBACK_OUTCOME_EXAMPLES] as string[];
+    ? s.generatedOutcomeOptions
+    : [...FALLBACK_OUTCOME_EXAMPLES];
   const customOptions = s.outcome.selected.filter(outcome => !exampleOptions.includes(outcome));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular outcomes?</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
+        <p className="text-gray-600 text-lg">We use this to prioritise evidence measuring your outcomes of interest.</p>
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
-        {/* Options in single column */}
         <div className="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={selectNoPreference}
+            className={cx(
+              "w-full text-left px-4 py-4 rounded-xl transition ring-1 whitespace-normal break-words",
+              s.outcome.noPreference
+                ? "bg-blue-600 !text-white ring-blue-600"
+                : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+            )}
+          >
+            No preference
+          </button>
+
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Or select specific outcomes</span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
+
           {exampleOptions.map((outcome) => {
             const isSelected = s.outcome.selected.includes(outcome);
             return (
@@ -708,6 +851,7 @@ function ScreenOutcome() {
           <Button onClick={addCustom}>+ Add</Button>
         </div>
       </div>
+
     </div>
   );
 }
@@ -715,7 +859,13 @@ function ScreenOutcome() {
 function ScreenParameters() {
   const s = useWizard();
   const [selectedCountry, setSelectedCountry] = useState("");
-  const constraintOptions = ["Any", "Low", "Moderate", "High"];
+  const hasSelectedSource =
+    s.parameters.access.academic || s.parameters.access.policy;
+  const hasInvalidCustomDateRange =
+    s.parameters.timePreset === "CUSTOM" &&
+    !!s.parameters.customFrom &&
+    !!s.parameters.customTo &&
+    s.parameters.customFrom > s.parameters.customTo;
 
   const toggleAccess = (k: keyof Access) => {
     s.set({ parameters: { ...s.parameters, access: { ...s.parameters.access, [k]: !s.parameters.access[k] } } });
@@ -734,7 +884,13 @@ function ScreenParameters() {
   };
 
   const removeGeo = (g: string) => {
-    s.set({ parameters: { ...s.parameters, geography: s.parameters.geography.filter(x => x !== g) } });
+    const next = s.parameters.geography.filter(x => x !== g);
+    s.set({
+      parameters: {
+        ...s.parameters,
+        geography: next.length > 0 ? next : [ANYWHERE_VALUE],
+      },
+    });
   };
 
   // Update sources based on access
@@ -747,19 +903,13 @@ function ScreenParameters() {
   }, [s.parameters.access.academic, s.parameters.access.policy]);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
-        <p className="text-gray-600 text-lg">We will use this filter only the most relevant information</p>
+        <p className="text-gray-600 text-lg">We use these filters to narrow the evidence set before ranking.</p>
       </div>
 
-      <div className="space-y-8">
+      <div className="space-y-8 max-w-2xl mx-auto">
         {/* Sources */}
         <div className="space-y-4">
           <h3 className="font-semibold text-lg">Which sources should we use?</h3>
@@ -771,46 +921,83 @@ function ScreenParameters() {
               Grey literature (think tanks and governments)
             </Chip>
           </div>
+          {!hasSelectedSource && (
+            <p className="text-sm text-red-600">
+              Select at least one source to continue.
+            </p>
+          )}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+            <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Retrieval limit</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-medium">Max results to screen per source:</span>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
+                  aria-label="Decrease results"
+                >–</button>
+                <span className="min-w-[2ch] text-center font-semibold">{s.maxResults}</span>
+                <button
+                  type="button"
+                  className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
+                  aria-label="Increase results"
+                >+</button>
+              </div>
+              <span className="text-xs text-gray-500">
+                {s.parameters.sources.length || 0} source{s.parameters.sources.length === 1 ? "" : "s"} selected
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Time window */}
         <div className="space-y-4">
           <h3 className="font-semibold text-lg">When should the evidence be published?</h3>
           <div className="flex flex-wrap gap-3">
-            {["LAST_YEAR", "LAST_5_YEARS", "LAST_10_YEARS", "SINCE_2000", "ANY", "CUSTOM"].map((p) => (
+            {["LAST_YEAR", "LAST_2_YEARS", "LAST_5_YEARS", "LAST_10_YEARS", "SINCE_2000", "ANY", "CUSTOM"].map((p) => (
               <Chip
                 key={p}
                 active={s.parameters.timePreset === p}
                 onClick={() => s.set({ parameters: { ...s.parameters, timePreset: p as TimePreset } })}
               >
-                {p.replaceAll("_", " ")}
+                {TIME_PRESET_LABELS[p as TimePreset]}
               </Chip>
             ))}
           </div>
           {s.parameters.timePreset === "CUSTOM" && (
-            <div className="flex gap-3 max-w-lg">
-              <div className="flex-1">
-                <div className="text-xs text-gray-500 mb-2">From</div>
-                <Input
-                  type="date"
-                  value={s.parameters.customFrom || ""}
-                  onChange={(e) => s.set({ parameters: { ...s.parameters, customFrom: e.target.value } })}
-                />
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
+              <p className="text-sm text-gray-600">Select a start and end date for your custom range.</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="flex-1">
+                  <div className="text-xs text-gray-500 mb-2">From</div>
+                  <Input
+                    type="date"
+                    value={s.parameters.customFrom || ""}
+                    onChange={(e) => s.set({ parameters: { ...s.parameters, customFrom: e.target.value } })}
+                  />
+                </div>
+                <div className="flex-1">
+                  <div className="text-xs text-gray-500 mb-2">To</div>
+                  <Input
+                    type="date"
+                    value={s.parameters.customTo || ""}
+                    onChange={(e) => s.set({ parameters: { ...s.parameters, customTo: e.target.value } })}
+                  />
+                </div>
               </div>
-              <div className="flex-1">
-                <div className="text-xs text-gray-500 mb-2">To</div>
-                <Input
-                  type="date"
-                  value={s.parameters.customTo || ""}
-                  onChange={(e) => s.set({ parameters: { ...s.parameters, customTo: e.target.value } })}
-                />
-              </div>
+              {hasInvalidCustomDateRange && (
+                <p className="text-sm text-red-600">
+                  End date must be the same as or later than the start date.
+                </p>
+              )}
             </div>
           )}
         </div>
 
         {/* Geography */}
-        <div className="space-y-4 max-w-2xl">
+        <div className="space-y-4">
           <h3 className="font-semibold text-lg">In which countries should we look for evidence?</h3>
           <div>
             {/* Selected options */}
@@ -864,86 +1051,8 @@ function ScreenParameters() {
           </div>
         </div>
 
-        {/* Implementation constraints (optional) */}
-        <div className="max-w-2xl">
-          <details className="rounded-xl border border-gray-200 bg-gray-50/40 p-4">
-            <summary className="cursor-pointer text-sm font-medium text-gray-800">
-              Implementation constraints (optional)
-            </summary>
-            <div className="mt-4 space-y-4">
-              <p className="text-sm text-gray-600">
-                Share resource or complexity limits if relevant. Leave as “Any” to skip matching.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <div className="text-xs text-gray-500">Cost tolerance</div>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    value={s.implementationConstraints.cost}
-                    onChange={(e) =>
-                      s.set({
-                        implementationConstraints: {
-                          ...s.implementationConstraints,
-                          cost: e.target.value,
-                        },
-                      })
-                    }
-                  >
-                    {constraintOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-xs text-gray-500">Staffing capacity</div>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    value={s.implementationConstraints.staffing}
-                    onChange={(e) =>
-                      s.set({
-                        implementationConstraints: {
-                          ...s.implementationConstraints,
-                          staffing: e.target.value,
-                        },
-                      })
-                    }
-                  >
-                    {constraintOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <div className="text-xs text-gray-500">Complexity tolerance</div>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    value={s.implementationConstraints.implementationComplexity}
-                    onChange={(e) =>
-                      s.set({
-                        implementationConstraints: {
-                          ...s.implementationConstraints,
-                          implementationComplexity: e.target.value,
-                        },
-                      })
-                    }
-                  >
-                    {constraintOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-          </details>
-        </div>
-
       </div>
+
     </div>
   );
 }
@@ -951,6 +1060,7 @@ function ScreenParameters() {
 function ScreenScreening() {
   const s = useWizard();
   const [customInput, setCustomInput] = useState("");
+  const constraintOptions = ["Any", "Low", "Moderate", "High"];
 
   const addFactor = () => {
     if (customInput.trim() && !s.screeningFactors.includes(customInput.trim())) {
@@ -963,57 +1073,114 @@ function ScreenScreening() {
     s.set({ screeningFactors: s.screeningFactors.filter(f => f !== factor) });
   };
 
-  const handleNext = async () => {
-    // Skip ADDITIONAL_QUESTIONS step - go directly to SUMMARY
-    // (Keeping generation code commented out for future use)
-    // s.set({ isGeneratingOptions: true });
-    // 
-    // try {
-    //   const response = await generateAdditionalQuestions(
-    //     s.researchQuestion,
-    //     s.population.selected,
-    //     s.outcome.selected
-    //   ).catch(() => ({ additional_questions: [] }));
-    //
-    //   const generatedQuestions = response?.additional_questions || [];
-    //   
-    //   // Preselect generated questions
-    //   s.set({ 
-    //     generatedAdditionalQuestions: generatedQuestions,
-    //     additionalQuestions: generatedQuestions,
-    //     step: "ADDITIONAL_QUESTIONS"
-    //   });
-    // } catch (error) {
-    //   console.error('Failed to generate additional questions:', error);
-    //   // Continue with empty questions if generation fails
-    //   s.set({ 
-    //     generatedAdditionalQuestions: [],
-    //     step: "ADDITIONAL_QUESTIONS" 
-    //   });
-    // } finally {
-    //   s.set({ isGeneratingOptions: false });
-    // }
-    
-    // Go directly to SUMMARY
-    s.set({ step: "SUMMARY" });
-  };
-
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={handleNext} disabled={s.isGeneratingOptions}>
-          {s.isGeneratingOptions ? "Generating..." : "Next"}
-        </Button>
-      </div>
-
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
-        <h2 className="text-2xl font-semibold">Anything else to consider when screening the evidence?</h2>
-        <p className="text-gray-600 text-lg">We will use this to filter only the most relevant information</p>
+        <h2 className="text-2xl font-semibold">Additional criteria</h2>
+        <p className="text-gray-600 text-lg">
+          Optional additional considerations for evidence assessment.
+        </p>
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
+        <div className="space-y-4">
+          <h3 className="font-semibold text-lg">Implementation constraints</h3>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <span>Set your tolerance on implementation factors. This will be used during impact and transferability assessment.</span>
+            <Tooltip
+              content={
+                <div className="max-w-xs text-sm space-y-1">
+                  <p><span className="font-medium">Low</span>: minimal resources or operational effort capacity.</p>
+                  <p><span className="font-medium">Moderate</span>: manageable resources and coordination capacity.</p>
+                  <p><span className="font-medium">High</span>: substantial resources, staffing, or delivery capacity.</p>
+                </div>
+              }
+            >
+              <button
+                type="button"
+                className="inline-flex items-center justify-center h-5 w-5 rounded-full border border-gray-300 text-xs text-gray-600 hover:bg-gray-50"
+                aria-label="How level values are interpreted"
+              >
+                ?
+              </button>
+            </Tooltip>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500">Cost tolerance</div>
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                value={s.implementationConstraints.cost}
+                onChange={(e) =>
+                  s.set({
+                    implementationConstraints: {
+                      ...s.implementationConstraints,
+                      cost: e.target.value,
+                    },
+                  })
+                }
+              >
+                {constraintOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500">Staffing capacity</div>
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                value={s.implementationConstraints.staffing}
+                onChange={(e) =>
+                  s.set({
+                    implementationConstraints: {
+                      ...s.implementationConstraints,
+                      staffing: e.target.value,
+                    },
+                  })
+                }
+              >
+                {constraintOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs text-gray-500">Complexity tolerance</div>
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                value={s.implementationConstraints.implementationComplexity}
+                onChange={(e) =>
+                  s.set({
+                    implementationConstraints: {
+                      ...s.implementationConstraints,
+                      implementationComplexity: e.target.value,
+                    },
+                  })
+                }
+              >
+                {constraintOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="h-px bg-gray-100" />
+
+        <div className="space-y-3">
+          <h3 className="font-semibold text-lg">Additional screening factors</h3>
+          <p className="text-sm text-gray-600">
+            Add any other criteria that you think are important to consider when screening the evidence.
+          </p>
+        </div>
+
         {/* Selected factors as buttons */}
         {s.screeningFactors.length > 0 && (
           <div>
@@ -1049,6 +1216,7 @@ function ScreenScreening() {
           <Button onClick={addFactor}>+ Add</Button>
         </div>
       </div>
+
     </div>
   );
 }
@@ -1083,13 +1251,7 @@ function ScreenAdditionalQuestions() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()}>Back</Button>
-        <Button onClick={() => s.next()}>Next</Button>
-      </div>
-
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Specific research questions?</h2>
         <p className="text-gray-600 text-lg">We will use these to shape the summary write-up</p>
@@ -1150,30 +1312,28 @@ function ScreenAdditionalQuestions() {
           <Button onClick={addQuestion}>+ Add</Button>
         </div>
       </div>
+
     </div>
   );
 }
 
-function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (context: SearchContext) => void; isRunning?: boolean }) {
+function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean }) {
   const s = useWizard();
   const context = s.buildContext();
+  const goToStep = (step: Step) => s.set({ step });
   const impliedQuestion = generateImpliedResearchQuestion(context);
   const hasImplementationConstraints = [
     context.implementationConstraints.cost,
     context.implementationConstraints.staffing,
     context.implementationConstraints.implementationComplexity,
   ].some((value) => value && value !== "Any");
+  const hasCustomDateRange =
+    context.parameters.timePreset === "CUSTOM" &&
+    (context.parameters.customFrom || context.parameters.customTo);
+  const timeWindowLabel = TIME_PRESET_LABELS[context.parameters.timePreset];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 py-16">
-      {/* Navigation at top */}
-      <div className="flex justify-between items-center">
-        <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
-        <Button onClick={() => onRunAnalysis(context)} disabled={isRunning}>
-          {isRunning ? 'Starting up...' : 'Run Analysis'}
-        </Button>
-      </div>
-
+    <div className="max-w-4xl mx-auto space-y-8 px-8 pt-16 pb-2">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Summary</h2>
       </div>
@@ -1189,94 +1349,145 @@ function ScreenSummary({ onRunAnalysis, isRunning = false }: { onRunAnalysis: (c
 
       <Card>
         <CardHeader>
-          <CardTitle>Search parameters</CardTitle>
+          <CardTitle>Search settings</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <span className="font-medium">Population: </span>
-            {context.population.selected.length > 0 ? (
-              <span>{context.population.selected.join(", ")}</span>
-            ) : (
-              <span className="text-gray-500">Not specified</span>
-            )}
+        <CardContent className="space-y-6">
+          <div className="grid gap-4">
+            <button
+              type="button"
+              onClick={() => goToStep("POPULATION")}
+              className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-left transition hover:bg-gray-50"
+            >
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Population</div>
+              {context.population.length > 0 ? (
+                <p className="text-gray-900">{context.population.join(", ")}</p>
+              ) : (
+                <p className="text-gray-500">No preference</p>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => goToStep("INNER_SETTING")}
+              className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-left transition hover:bg-gray-50"
+            >
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Setting</div>
+              {context.innerSetting.length > 0 ? (
+                <p className="text-gray-900">{context.innerSetting.join(", ")}</p>
+              ) : (
+                <p className="text-gray-500">No preference</p>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => goToStep("OUTCOME")}
+              className="rounded-xl border border-gray-200 bg-gray-50/50 p-4 text-left transition hover:bg-gray-50"
+            >
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">Outcome</div>
+              {context.outcome.length > 0 ? (
+                <p className="text-gray-900">{context.outcome.join(", ")}</p>
+              ) : (
+                <p className="text-gray-500">No preference</p>
+              )}
+            </button>
           </div>
-          <div>
-            <span className="font-medium">Outcome: </span>
-            {context.outcome.selected.length > 0 ? (
-              <span>{context.outcome.selected.join(", ")}</span>
-            ) : (
-              <span className="text-gray-500">Not specified</span>
-            )}
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+            <div className="text-xs uppercase tracking-wide text-gray-500">Refinement</div>
+            <button type="button" onClick={() => goToStep("SCREENING")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+              <span className="font-medium">Implementation constraints</span>
+              {hasImplementationConstraints ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    Cost: {context.implementationConstraints.cost}
+                  </span>
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    Staffing: {context.implementationConstraints.staffing}
+                  </span>
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    Complexity: {context.implementationConstraints.implementationComplexity}
+                  </span>
+                </div>
+              ) : (
+                <div className="mt-2 text-gray-500">No preference</div>
+              )}
+            </button>
+            <button type="button" onClick={() => goToStep("SCREENING")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+              <span className="font-medium">Screening factors</span>
+              {context.screeningFactors.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {context.screeningFactors.map((factor) => (
+                    <span key={factor} className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                      {factor}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-2 text-gray-500">None added</div>
+              )}
+            </button>
           </div>
-          <div>
-            <span className="font-medium">Sources: </span>
-            <span>
-              {context.parameters.sources.length > 0
-                ? context.parameters.sources.map((src) => SOURCE_LABELS[src] ?? src).join(", ")
-                : "Not specified"}
-            </span>
-          </div>
-          {context.parameters.geography.length > 0 && (
-            <div>
-              <span className="font-medium">Where should we look for evidence? (options): </span>
-              <span>{context.parameters.geography.join(", ")}</span>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+            <div className="text-xs uppercase tracking-wide text-gray-500">Filters</div>
+            <div className="space-y-3">
+              <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+                <span className="font-medium">Search sources</span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {context.parameters.sources.length > 0 ? (
+                    context.parameters.sources.map((src) => (
+                      <span key={src} className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                        {SOURCE_LABELS[src] ?? src}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-gray-500">None selected</span>
+                  )}
+                </div>
+              </button>
+              <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+                <span className="font-medium">Retrieval limit</span>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    {s.maxResults} per source
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {context.parameters.sources.length || 0} source{context.parameters.sources.length === 1 ? "" : "s"} selected
+                  </span>
+                </div>
+              </button>
+              <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+                <span className="font-medium">Time window</span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                    {timeWindowLabel}
+                  </span>
+                  {hasCustomDateRange && (
+                    <span className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                      {context.parameters.customFrom || "No start date"} to{" "}
+                      {context.parameters.customTo || "No end date"}
+                    </span>
+                  )}
+                </div>
+              </button>
+              <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+                <span className="font-medium">Geography</span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {context.parameters.geography.length > 0 ? (
+                    context.parameters.geography.map((geo) => (
+                      <span key={geo} className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+                        {GEO_LABELS[geo] || geo}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-gray-500">No preference</span>
+                  )}
+                </div>
+              </button>
             </div>
-          )}
-          <div>
-            <span className="font-medium">Implementation constraints: </span>
-            {hasImplementationConstraints ? (
-              <span>
-                Cost: {context.implementationConstraints.cost}, Staffing:{" "}
-                {context.implementationConstraints.staffing}, Complexity:{" "}
-                {context.implementationConstraints.implementationComplexity}
-              </span>
-            ) : (
-              <span className="text-gray-500">Not specified</span>
-            )}
           </div>
-          <div>
-            <span className="font-medium">Time window: </span>
-            <span>{context.parameters.timePreset.replaceAll("_", " ")}</span>
-          </div>
-          {context.screeningFactors.length > 0 && (
-            <div>
-              <span className="font-medium">Screening factors: </span>
-              <span>{context.screeningFactors.join(", ")}</span>
-            </div>
-          )}
-          <div>
-            <span className="font-medium">Max results: </span>
-            <div className="inline-flex items-center gap-2 mt-1">
-              <button
-                type="button"
-                className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => s.set({ maxResults: Math.max(5, s.maxResults - 5) })}
-                disabled={isRunning}
-                aria-label="Decrease results"
-              >–</button>
-              <span className="min-w-[2ch] text-center">{s.maxResults}</span>
-              <button
-                type="button"
-                className="px-2 py-1 rounded-lg ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={() => s.set({ maxResults: Math.min(200, s.maxResults + 5) })}
-                disabled={isRunning}
-                aria-label="Increase results"
-              >+</button>
-            </div>
-          </div>
-          {/* Additional questions step is currently skipped */}
-          {/* {context.additionalQuestions.length > 0 && (
-            <div>
-              <span className="font-medium">Questions: </span>
-              <ul className="list-disc pl-6 mt-2 space-y-1">
-                {context.additionalQuestions.map((q, i) => (
-                  <li key={i}>{q}</li>
-                ))}
-              </ul>
-            </div>
-          )} */}
         </CardContent>
       </Card>
+
     </div>
   );
 }
@@ -1290,18 +1501,100 @@ interface SearchWizardProps {
 
 export default function SearchWizard({ onRunAnalysis, isRunning = false }: SearchWizardProps) {
   const s = useWizard();
+  const context = s.buildContext();
+  const hasSelectedSource = context.parameters.sources.length > 0;
+  const hasInvalidCustomDateRange =
+    context.parameters.timePreset === "CUSTOM" &&
+    !!context.parameters.customFrom &&
+    !!context.parameters.customTo &&
+    context.parameters.customFrom > context.parameters.customTo;
+
+  const isSummaryStep = s.step === "SUMMARY";
+  const showActionBar = s.step !== "ASK";
+
+  const getPrimaryAction = () => {
+    if (isSummaryStep) {
+      return {
+        label: isRunning ? "Starting up..." : "Run Analysis",
+        onClick: () => onRunAnalysis(context),
+        disabled: isRunning || !hasSelectedSource || hasInvalidCustomDateRange,
+      };
+    }
+
+    if (s.step === "SCREENING") {
+      return {
+        label: s.isGeneratingOptions ? "Generating..." : "Next",
+        onClick: () => s.next(),
+        disabled: s.isGeneratingOptions,
+      };
+    }
+
+    if (s.step === "PARAMETERS") {
+      return {
+        label: "Next",
+        onClick: () => s.next(),
+        disabled: !hasSelectedSource || hasInvalidCustomDateRange,
+      };
+    }
+
+    return {
+      label: "Next",
+      onClick: () => s.next(),
+      disabled: false,
+    };
+  };
+
+  const primaryAction = getPrimaryAction();
 
   return (
-    <div className="min-h-screen bg-white text-gray-900">
-      <ProgressBar step={s.step} />
-      {s.step === "ASK" && <ScreenAsk />}
-      {s.step === "POPULATION" && <ScreenPopulation />}
-      {s.step === "INNER_SETTING" && <ScreenInnerSetting />}
-      {s.step === "OUTCOME" && <ScreenOutcome />}
-      {s.step === "PARAMETERS" && <ScreenParameters />}
-      {s.step === "SCREENING" && <ScreenScreening />}
-      {s.step === "ADDITIONAL_QUESTIONS" && <ScreenAdditionalQuestions />}
-      {s.step === "SUMMARY" && <ScreenSummary onRunAnalysis={onRunAnalysis} isRunning={isRunning} />}
+    <div className="bg-white text-gray-900 flex-1 flex flex-col pb-4">
+      <ProgressBar
+        step={s.step}
+        researchQuestion={s.researchQuestion}
+        onStepClick={(step) => s.set({ step })}
+      />
+      <div className={isSummaryStep ? "" : "flex-1"}>
+        {s.step === "ASK" && <ScreenAsk />}
+        {s.step === "POPULATION" && <ScreenPopulation />}
+        {s.step === "INNER_SETTING" && <ScreenInnerSetting />}
+        {s.step === "OUTCOME" && <ScreenOutcome />}
+        {s.step === "SCREENING" && <ScreenScreening />}
+        {s.step === "PARAMETERS" && <ScreenParameters />}
+        {s.step === "ADDITIONAL_QUESTIONS" && <ScreenAdditionalQuestions />}
+        {s.step === "SUMMARY" && <ScreenSummary isRunning={isRunning} />}
+      </div>
+
+      {showActionBar && (
+        <div className="max-w-4xl mx-auto w-full px-8 mt-3 mb-4">
+          <div className="flex justify-between items-center rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={() => s.back()} disabled={isRunning}>Back</Button>
+              <Button variant="secondary" onClick={() => s.reset()} disabled={isRunning}>
+                {isSummaryStep ? "Start new search" : "Restart"}
+              </Button>
+            </div>
+            <Button
+              variant="secondary"
+              className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+              onClick={primaryAction.onClick}
+              disabled={primaryAction.disabled}
+            >
+              {primaryAction.label}
+            </Button>
+          </div>
+
+          {isSummaryStep && !hasSelectedSource && (
+            <p className="mt-2 text-sm text-red-600 text-right">
+              Select at least one search source before running analysis.
+            </p>
+          )}
+          {isSummaryStep && hasInvalidCustomDateRange && (
+            <p className="mt-2 text-sm text-red-600 text-right">
+              Fix your custom date range before running analysis.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

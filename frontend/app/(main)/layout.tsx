@@ -14,6 +14,7 @@ import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
 import { fetchEvidenceCategories } from '@/lib/evidenceCategories'
 import { OrganizationManager } from '@/components/OrganizationManager'
+import { Footer } from '@/components/Footer'
 
 const getResultsHref = (activeProjectId?: string) =>
   activeProjectId ? `/projects/${activeProjectId}` : '/projects'
@@ -261,8 +262,15 @@ export default function AgentLayout({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col ml-64">
-        {children}
+      <div className="flex-1 flex flex-col ml-64 min-h-0">
+        <div className="flex-1 min-h-0 overflow-auto">
+          <div className="min-h-full flex flex-col bg-white">
+            <div className="flex-1 min-h-0 flex flex-col">
+              {children}
+            </div>
+            <Footer />
+          </div>
+        </div>
       </div>
 
       {/* Feedback Modal */}

@@ -43,6 +43,10 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+html {
+  font-size: 85%;
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);

@@ -45,6 +45,9 @@ export default function SearchPage() {
           case "LAST_YEAR":
             dateFrom = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString().split('T')[0];
             break;
+          case "LAST_2_YEARS":
+            dateFrom = new Date(now.getFullYear() - 2, now.getMonth(), now.getDate()).toISOString().split('T')[0];
+            break;
           case "LAST_5_YEARS":
             dateFrom = new Date(now.getFullYear() - 5, now.getMonth(), now.getDate()).toISOString().split('T')[0];
             break;
@@ -76,9 +79,9 @@ export default function SearchPage() {
 
       const searchContext = {
         research_question: context.researchQuestion,
-        population: context.population.selected,
+        population: context.population,
         inner_setting: context.innerSetting,
-        outcome: context.outcome.selected,
+        outcome: context.outcome,
         screening_factors: context.screeningFactors,
         sources: context.parameters.sources,
         geography: context.parameters.geography,
