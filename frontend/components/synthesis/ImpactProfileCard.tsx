@@ -223,21 +223,22 @@ export function ImpactProfileCard({
     const next = !expanded
     setExpanded(next)
     setError(null)
-    if (!next || contributions || loading || !canLoadContributions || !effectiveProjectId) {
+    if (!next || contributions || loading || !canLoadContributions || !effectiveProjectId || !outcome.id) {
       return
     }
     setLoading(true)
+    const outcomeThemeId = outcome.id
     try {
       let response: ContributionPayload
       if (isPublic) {
         const { getPublicOutcomeContributions } = await import('@/lib/publicApi')
         response = (await getPublicOutcomeContributions(
           effectiveProjectId,
-          outcome.id
+          outcomeThemeId
         )) as ContributionPayload
       } else {
         response = (await fetchWithAuth(
-          `/api/analysis-projects/${effectiveProjectId}/synthesis/outcome-themes/${outcome.id}/contributions`
+          `/api/analysis-projects/${effectiveProjectId}/synthesis/outcome-themes/${outcomeThemeId}/contributions`
         )) as ContributionPayload
       }
       setContributions(response)
