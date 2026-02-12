@@ -14,6 +14,7 @@ from app.utils.project_data import (
     get_project_interventions_data,
     get_navigator_data,
     get_summary_with_counts,
+    get_outcome_contributions_data,
 )
 
 router = APIRouter(prefix="/api/public", tags=["public"])
@@ -117,3 +118,12 @@ async def get_public_issue_intervention_navigator(project_id: str):
     """Get issue-intervention navigator data for a public project."""
     get_public_project(project_id, "id, is_public")
     return get_navigator_data(project_id)
+
+
+@router.get(
+    "/projects/{project_id}/synthesis/outcome-themes/{outcome_theme_id}/contributions"
+)
+async def get_public_outcome_contributions(project_id: str, outcome_theme_id: str):
+    """Get contributing outcome extractions for a synthesis outcome theme."""
+    get_public_project(project_id, "id, is_public")
+    return get_outcome_contributions_data(project_id, outcome_theme_id)

@@ -66,7 +66,6 @@ interface ThemeDetailViewProps {
   avgEvidenceScore?: number
   interventions: InterventionTheme[]
   onBack: () => void
-  // Rich data from synthesis
   impactSummary?: string
   outcomeThemes?: OutcomeTheme[]
   riskThemes?: RiskTheme[]
@@ -76,6 +75,8 @@ interface ThemeDetailViewProps {
   displayEvidenceMix?: Record<string, number>
   evidenceStars?: number
   capMessage?: string | null
+  isPublic?: boolean
+  projectId?: string
 }
 
 function convertToCardData(detail: DetailedIntervention): InterventionCardData {
@@ -296,6 +297,8 @@ export function ThemeDetailView({
   displayEvidenceMix,
   evidenceStars,
   capMessage,
+  isPublic,
+  projectId,
 }: ThemeDetailViewProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [showInsufficientOutcomes, setShowInsufficientOutcomes] = useState(false)
@@ -484,6 +487,8 @@ export function ThemeDetailView({
               <ImpactProfileCard
                 key={outcome.outcome_name}
                 outcome={outcome}
+                isPublic={isPublic}
+                projectId={projectId}
               />
             ))}
           </div>
@@ -512,6 +517,8 @@ export function ThemeDetailView({
                     <ImpactProfileCard
                       key={outcome.outcome_name}
                       outcome={outcome}
+                      isPublic={isPublic}
+                      projectId={projectId}
                     />
                   ))}
                 </div>

@@ -64,3 +64,12 @@ export async function getPublicProjectChartsData(projectId: string) {
 export async function getPublicNavigator(projectId: string) {
   return fetchPublic(`api/public/projects/${projectId}/issue-intervention-navigator`);
 }
+
+export async function getPublicOutcomeContributions(
+  projectId: string,
+  outcomeThemeId: string
+) {
+  return fetchPublic(
+    `api/public/projects/${projectId}/synthesis/outcome-themes/${outcomeThemeId}/contributions`
+  );
+}

@@ -92,16 +92,44 @@ export default function PublicProjectPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const router = useRouter()
-  const { isSignedIn, isLoaded } = useAuth()
-  
+  const { isSignedIn, isLoaded, getToken } = useAuth()
+
   const projectId = params.projectId as string
-  
-  // Redirect signed-in users to the authenticated project page
+  const [accessChecked, setAccessChecked] = useState(false)
+
   useEffect(() => {
-    if (isLoaded && isSignedIn && projectId) {
-      router.replace(`/projects/${projectId}`)
+    if (!isLoaded || !projectId) return
+
+    if (!isSignedIn) {
+      setAccessChecked(true)
+      return
     }
-  }, [isLoaded, isSignedIn, projectId, router])
+
+    const checkAccessAndRedirect = async () => {
+      try {
+        const token = await getToken()
+        if (!token) {
+          setAccessChecked(true)
+          return
+        }
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
+        const res = await fetch(
+          `${cleanBaseUrl}/api/analysis-projects/${projectId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+        if (res.ok) {
+          router.replace(`/projects/${projectId}`)
+        } else {
+          setAccessChecked(true)
+        }
+      } catch {
+        setAccessChecked(true)
+      }
+    }
+
+    checkAccessAndRedirect()
+  }, [isLoaded, isSignedIn, projectId, router, getToken])
   
   const tabParam = searchParams.get('tab')
   const validTabs: TabType[] = ['summary', 'evidence']
@@ -382,8 +410,8 @@ export default function PublicProjectPage() {
     }
   }, [documents, studyStrengthMapping, sampleSizeMapping])
 
-  // Show loading while checking auth or redirecting
-  if (!isLoaded || (isSignedIn && projectId)) {
+  // Show loading while checking auth or access
+  if (!isLoaded || !accessChecked) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">

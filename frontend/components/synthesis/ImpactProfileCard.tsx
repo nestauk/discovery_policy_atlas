@@ -61,6 +61,8 @@ const classifyContribution = (result: ContributionResult) => {
 
 interface ImpactProfileCardProps {
   outcome: OutcomeTheme
+  isPublic?: boolean
+  projectId?: string
 }
 
 interface ContributionResult {
@@ -137,7 +139,11 @@ function DirectionBar({
   )
 }
 
-export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
+export function ImpactProfileCard({
+  outcome,
+  isPublic = false,
+  projectId,
+}: ImpactProfileCardProps) {
   const verdictLabel = outcome.verdict_label
   const verdictKey = verdictLabel
     ? verdictLabel.replace('_increase', '_positive').replace('_decrease', '_negative')
@@ -151,7 +157,8 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
   const [error, setError] = useState<string | null>(null)
   const [contributions, setContributions] = useState<ContributionPayload | null>(null)
 
-  const canLoadContributions = Boolean(activeProject?.id && outcome.id)
+  const effectiveProjectId = isPublic ? projectId : activeProject?.id
+  const canLoadContributions = Boolean(effectiveProjectId && outcome.id)
   const consensusTotal =
     (outcome.positive_count ?? 0) +
     (outcome.negative_count ?? 0) +
@@ -216,15 +223,24 @@ export function ImpactProfileCard({ outcome }: ImpactProfileCardProps) {
     const next = !expanded
     setExpanded(next)
     setError(null)
-    if (!next || contributions || loading || !canLoadContributions) {
+    if (!next || contributions || loading || !canLoadContributions || !effectiveProjectId) {
       return
     }
     setLoading(true)
     try {
-      const response = await fetchWithAuth(
-        `/api/analysis-projects/${activeProject?.id}/synthesis/outcome-themes/${outcome.id}/contributions`
-      )
-      setContributions(response as ContributionPayload)
+      let response: ContributionPayload
+      if (isPublic) {
+        const { getPublicOutcomeContributions } = await import('@/lib/publicApi')
+        response = (await getPublicOutcomeContributions(
+          effectiveProjectId,
+          outcome.id
+        )) as ContributionPayload
+      } else {
+        response = (await fetchWithAuth(
+          `/api/analysis-projects/${effectiveProjectId}/synthesis/outcome-themes/${outcome.id}/contributions`
+        )) as ContributionPayload
+      }
+      setContributions(response)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load contributions')
     } finally {

@@ -423,7 +423,6 @@ export function InterventionsNavigator({
           avgEvidenceScore={selectedThemeData.avg_evidence_score ?? selectedTheme.avg_evidence_score ?? undefined}
           interventions={selectedThemeInterventions}
           onBack={() => setSelectedTheme(null)}
-          // Pass through all the rich data
           impactSummary={selectedThemeData.impact_summary}
           outcomeThemes={selectedThemeData.outcome_themes}
           riskThemes={selectedThemeData.risk_themes}
@@ -433,6 +432,8 @@ export function InterventionsNavigator({
           displayEvidenceMix={selectedThemeData.display_evidence_mix}
           evidenceStars={selectedThemeData.stars}
           capMessage={selectedThemeData.cap_message}
+          isPublic={isPublic}
+          projectId={projectId ?? undefined}
         />
       </div>
     )
