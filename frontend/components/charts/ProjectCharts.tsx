@@ -14,6 +14,7 @@ import {
 import { Bar } from 'react-chartjs-2'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAPI } from '@/lib/api'
+import { useProjectDataCache } from '@/lib/projectDataCache'
 import { Loader2, AlertCircle, ChevronDown, ChevronUp, Download } from 'lucide-react'
 
 // Register once
@@ -77,6 +78,7 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
   const [showAuthorsData, setShowAuthorsData] = useState(false)
   const [showEvidenceData, setShowEvidenceData] = useState(false)
   const { fetchWithAuth } = useAPI()
+  const { getCached, setCache } = useProjectDataCache()
   const chartsLoadedProjectIdRef = useRef<string | null>(null)
 
   // Global minimal styling (Jobs-style: clean, high-contrast, no clutter)
@@ -88,10 +90,19 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
   useEffect(() => {
     const fetchChartData = async () => {
       if (!projectId) return
-      
+
       // Skip if we've already loaded charts for this project
       if (chartsLoadedProjectIdRef.current === projectId) return
-      
+
+      // Check cache (survives unmount/remount on tab switch)
+      const cached = getCached('charts', projectId) as ChartData | undefined
+      if (cached) {
+        setChartData(cached)
+        setLoading(false)
+        chartsLoadedProjectIdRef.current = projectId
+        return
+      }
+
       chartsLoadedProjectIdRef.current = projectId
       setLoading(true)
       setError(null)
@@ -104,10 +115,10 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
           data = await fetchWithAuth(`/api/analysis-projects/${projectId}/charts-data`)
         }
         setChartData(data)
+        setCache('charts', projectId, data)
       } catch (err) {
         console.error('Failed to fetch chart data:', err)
         setError('Failed to load chart data')
-        // Reset ref on error so we can retry
         chartsLoadedProjectIdRef.current = null
       } finally {
         setLoading(false)

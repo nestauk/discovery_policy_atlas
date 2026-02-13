@@ -41,6 +41,7 @@ from app.utils.project_data import (
     get_project_charts_data,
     get_project_interventions_data,
     get_navigator_data,
+    get_navigator_overview_data,
     get_outcome_contributions_data,
 )
 
@@ -377,36 +378,18 @@ async def create_analysis_project(
 async def get_analysis_project(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Get a specific analysis project with documents and extractions"""
+    """Get a specific analysis project metadata.
+
+    Returns only lightweight project metadata. Documents and extractions
+    are available via their dedicated endpoints.
+    """
     try:
-        # Get project with authorization check
-        project = get_project_with_auth_check(project_id, current_user)
-
-        # Get documents
-        docs_result = (
-            vectorization_service.supabase.table("analysis_documents")
-            .select("*")
-            .eq("analysis_project_id", project_id)
-            .execute()
+        select_fields = (
+            "id, run_id, title, description, query, total_references, "
+            "relevant_references, status, created_at, created_by_user_id, "
+            "created_by_name, organization_id, search_query, is_public"
         )
-
-        # Get extractions
-        extractions_result = (
-            vectorization_service.supabase.table("analysis_extractions")
-            .select("*")
-            .eq("analysis_project_id", project_id)
-            .execute()
-        )
-        extractions = filter_prevalence_only_extractions(extractions_result.data or [])
-
-        # Map database field names to frontend expectations for documents
-        documents = []
-        for doc in docs_result.data:
-            doc_copy = doc.copy()
-            # Map citation_count (database) to cited_by_count (frontend)
-            if "citation_count" in doc_copy:
-                doc_copy["cited_by_count"] = doc_copy["citation_count"]
-            documents.append(doc_copy)
+        project = get_project_with_auth_check(project_id, current_user, select_fields)
 
         return {
             "project": {
@@ -425,10 +408,6 @@ async def get_analysis_project(
                 "search_query": project.get("search_query"),
                 "is_public": project.get("is_public", False),
             },
-            "documents": documents,
-            "extractions": extractions,
-            "document_count": len(documents),
-            "extraction_count": len(extractions),
         }
 
     except HTTPException:
@@ -1296,6 +1275,24 @@ async def get_detailed_findings(
         raise HTTPException(status_code=500, detail="Failed to fetch findings")
 
 
+@router.get("/{project_id}/navigator-overview")
+async def get_navigator_overview(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Lightweight overview for the interventions navigator.
+
+    Returns theme names, impact/evidence scores, and study counts
+    using parallel DB queries. Much faster than the full navigator endpoint.
+    """
+    try:
+        return get_navigator_overview_data(project_id)
+    except Exception as e:
+        logger.error(f"Error fetching navigator overview for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Failed to fetch navigator overview"
+        )
+
+
 @router.get("/{project_id}/issue-intervention-navigator")
 async def get_issue_intervention_navigator(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)
@@ -1308,6 +1305,84 @@ async def get_issue_intervention_navigator(
             f"Error fetching issue-intervention navigator for project {project_id}: {e}"
         )
         raise HTTPException(status_code=500, detail="Failed to fetch navigator data")
+
+
+@router.get("/{project_id}/navigator-stats")
+async def get_navigator_stats(
+    project_id: str, current_user: CurrentUser = Depends(get_current_user)
+):
+    """Get lightweight navigator stats (intervention theme and extraction counts).
+
+    Much cheaper than the full navigator endpoint — queries only synthesis_themes
+    and theme_assignments + analysis_extractions for distinct label counts.
+    """
+    try:
+        sb = vectorization_service.supabase
+
+        runs_res = (
+            sb.table("synthesis_runs")
+            .select("id")
+            .eq("analysis_project_id", project_id)
+            .eq("status", "completed")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not runs_res.data:
+            return {"intervention_group_count": 0, "intervention_count": 0}
+
+        run_id = runs_res.data[0]["id"]
+
+        themes_res = (
+            sb.table("synthesis_themes")
+            .select("id, theme_type")
+            .eq("synthesis_run_id", run_id)
+            .eq("theme_type", "intervention")
+            .execute()
+        )
+        intervention_theme_count = len(themes_res.data or [])
+        intervention_theme_ids = [t["id"] for t in (themes_res.data or [])]
+
+        if not intervention_theme_ids:
+            return {
+                "intervention_group_count": 0,
+                "intervention_count": 0,
+            }
+
+        assignments_res = (
+            sb.table("theme_assignments")
+            .select("extraction_id")
+            .eq("synthesis_run_id", run_id)
+            .in_("synthesis_theme_id", intervention_theme_ids)
+            .execute()
+        )
+        extraction_ids = list(
+            {
+                a["extraction_id"]
+                for a in (assignments_res.data or [])
+                if a.get("extraction_id")
+            }
+        )
+
+        unique_labels: set[str] = set()
+        if extraction_ids:
+            extractions_res = (
+                sb.table("analysis_extractions")
+                .select("label")
+                .in_("id", extraction_ids)
+                .execute()
+            )
+            for e in extractions_res.data or []:
+                if e.get("label"):
+                    unique_labels.add(e["label"])
+
+        return {
+            "intervention_group_count": intervention_theme_count,
+            "intervention_count": len(unique_labels),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching navigator stats for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch navigator stats")
 
 
 @router.get("/{project_id}/synthesis/outcome-themes/{outcome_theme_id}/contributions")

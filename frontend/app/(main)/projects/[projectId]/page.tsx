@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/dialog'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
+import { useProjectDataCache } from '@/lib/projectDataCache'
 import { useAuth, useUser } from '@clerk/nextjs'
 import { SynthesisSummary } from '@/types/search'
 import { ExecutiveBriefing } from '../../results/ExecutiveBriefing'
@@ -324,6 +325,8 @@ export default function ProjectResultsPage() {
     }
   }, [projectId, fetchWithAuth, getProjectInterventions, hasLoadedData])
 
+  const { getCached, setCache: setProjectCache, invalidateProject: invalidateProjectCache } = useProjectDataCache()
+
   const handleRerunSynthesis = useCallback(async () => {
     if (!activeProject?.id || isRerunningSynthesis) return
 
@@ -344,6 +347,10 @@ export default function ProjectResultsPage() {
         invalidate_previous: true,
       })
 
+      invalidateProjectCache(activeProject.id)
+      summaryLoadedRef.current = null
+      setSummaryData(null)
+
       const updated = { ...activeProject, status: 'running' as const }
       setActiveProject(updated)
       setProjects(projects.map((p) => (p.id === updated.id ? { ...p, status: updated.status } : p)))
@@ -353,7 +360,7 @@ export default function ProjectResultsPage() {
     } finally {
       setIsRerunningSynthesis(false)
     }
-  }, [activeProject, isRerunningSynthesis, rerunSynthesisForProject, setActiveProject, setProjects, projects])
+  }, [activeProject, isRerunningSynthesis, rerunSynthesisForProject, setActiveProject, setProjects, projects, invalidateProjectCache])
 
   const handleDownloadDocumentsCSV = useCallback(async () => {
     if (!projectId) return
@@ -491,76 +498,47 @@ export default function ProjectResultsPage() {
     }
   }, [analysisComplete])
 
-  // Start polling when project ID is available and project is in a running state
+  // Start polling ONLY when the project is actively running/synthesising.
+  // The initial project load is handled by loadProjectIfNeeded above, so we
+  // wait until activeProject is populated to decide whether polling is needed.
   useEffect(() => {
-    if (!projectId) {
-      console.log('No project ID, skipping polling setup')
-      return
-    }
+    if (!projectId) return
 
-    // Only poll if we're viewing a project that is actually running
-    // Check the activeProject from store - if it's for a different project or not running, skip polling
     const currentProjectStatus = activeProject?.id === projectId ? activeProject.status : null
+
+    // Wait until the project is loaded before deciding
+    if (!currentProjectStatus) return
+
     const isProjectRunning = currentProjectStatus === 'running' || currentProjectStatus === 'synthesising'
-    
-    // If we know the project is not running (completed, failed, created), don't start polling
-    if (currentProjectStatus && !isProjectRunning) {
-      console.log(`Project ${projectId} status is '${currentProjectStatus}', no polling needed`)
+
+    if (!isProjectRunning) {
       setAnalysisComplete(currentProjectStatus === 'completed' || currentProjectStatus === 'created')
       return
     }
 
-    if (hasStartedPollingRef.current === projectId) {
-      console.log(`Already polling project ${projectId}, skipping duplicate setup`)
-      return
-    }
+    if (hasStartedPollingRef.current === projectId) return
+    if (analysisComplete) return
 
-    if (analysisComplete) {
-      console.log(`Analysis already complete for project ${projectId}, skipping polling setup`)
-      return
-    }
-
-    console.log(`Setting up polling for project: ${projectId}`)
+    hasStartedPollingRef.current = projectId
 
     if (pollingIntervalRef.current) {
-      console.log('Clearing existing polling interval')
       clearInterval(pollingIntervalRef.current)
       pollingIntervalRef.current = null
     }
 
-    hasStartedPollingRef.current = projectId
-
     const checkProjectStatus = async () => {
       try {
-        console.log(`Checking status for project: ${projectId}`)
         const projectData = await getAnalysisProject(projectId)
         const project = projectData.project
-
-        // Use project from API directly, not stale activeProject
         setActiveProject(project)
 
-        console.log(`Project status: ${project.status}`)
-        
-        if (project.status === 'completed') {
-          console.log('✅ Analysis COMPLETED - stopping polling')
-          setAnalysisComplete(true)
+        if (project.status === 'completed' || project.status === 'failed' || project.status === 'created') {
+          setAnalysisComplete(project.status === 'completed' || project.status === 'created')
+          if (project.status === 'failed') {
+            setError('Analysis failed. Please try again.')
+          }
           return true
-        } else if (project.status === 'failed') {
-          console.log('❌ Analysis FAILED - stopping polling')
-          setError('Analysis failed. Please try again.')
-          return true
-        } else if (project.status === 'created') {
-          console.log('📝 Project exists but analysis not started - stopping polling')
-          setAnalysisComplete(true)
-          return true
-        } else if (project.status === 'running') {
-          console.log('🔄 Analysis still RUNNING - continuing to poll')
-        } else if (project.status === 'synthesising') {
-          console.log('🔄 Analysis SYNTHESISING - continuing to poll')
-        } else {
-          console.log(`⚠️ Unknown status: ${project.status} - continuing to poll`)
         }
-
         return false
       } catch (error) {
         console.error('Failed to poll project status:', error)
@@ -568,51 +546,23 @@ export default function ProjectResultsPage() {
       }
     }
 
-    const startPolling = async () => {
-      console.log('Starting to check project status for:', projectId)
-      
-      console.log('Loading initial data...')
-      loadData()
-      
-      const isComplete = await checkProjectStatus()
-      
-      if (isComplete) {
-        console.log('Analysis already complete, no polling needed')
-      } else {
-        console.log('Analysis in progress, starting 20-second polling')
-        setIsPolling(true)
-        
-        pollingIntervalRef.current = setInterval(async () => {
-          if (!pollingIntervalRef.current) {
-            console.log('Polling interval already cleared, skipping...')
-            return
-          }
-          
-          console.log('Polling project status and refreshing data...')
-          
-          await refreshData()
-          
-          const isComplete = await checkProjectStatus()
-          if (isComplete) {
-            console.log('Analysis completed! Stopping polling immediately.')
-            
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current)
-              pollingIntervalRef.current = null
-            }
-            
-            setIsPolling(false)
-            hasStartedPollingRef.current = null
-            
-            await refreshData()
-          } else {
-            console.log('Analysis still running, will check again in 20 seconds...')
-          }
-        }, 20000)
-      }
-    }
+    setIsPolling(true)
+    pollingIntervalRef.current = setInterval(async () => {
+      if (!pollingIntervalRef.current) return
 
-    startPolling()
+      await refreshData()
+
+      const isComplete = await checkProjectStatus()
+      if (isComplete) {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+          pollingIntervalRef.current = null
+        }
+        setIsPolling(false)
+        hasStartedPollingRef.current = null
+        await refreshData()
+      }
+    }, 20000)
 
     return () => {
       if (pollingIntervalRef.current) {
@@ -632,43 +582,36 @@ export default function ProjectResultsPage() {
     }
   }, [projectId, hasLoadedData, loadingData, loadData])
 
-  // Track which project/tab combination we've loaded summary for
+  // Track which project we've loaded summary for
   const summaryLoadedRef = useRef<string | null>(null)
 
   // Fetch summary when Summary tab is opened
   useEffect(() => {
     const fetchSummary = async () => {
-      if (urlTab !== 'summary') {
-        // Reset ref when not on summary tab
-        summaryLoadedRef.current = null
+      if (urlTab !== 'summary') return
+      if (!projectId) return
+
+      // Skip if already loaded for this project
+      if (summaryLoadedRef.current === projectId) return
+      if (isLoadingSummary) return
+
+      // Check in-memory cache first
+      const cached = getCached('summary', projectId) as SynthesisSummary | undefined
+      if (cached) {
+        setSummaryData(cached)
+        summaryLoadedRef.current = projectId
         return
       }
-      if (!projectId) return
-      
-      // Create a unique key for this project/tab combination
-      const summaryKey = `${projectId}-${urlTab}`
-      
-      // Skip if we've already loaded summary for this project/tab
-      if (summaryLoadedRef.current === summaryKey) return
-      
-      if (isLoadingSummary) return
-      
-      summaryLoadedRef.current = summaryKey
+
+      summaryLoadedRef.current = projectId
       setIsLoadingSummary(true)
       try {
-        console.log('[ResultsPage] Fetching summary for project:', projectId)
         const data = await fetchWithAuth(`api/analysis-projects/${projectId}/summary`)
-        console.log('[ResultsPage] Summary data received:', {
-          hasExecutiveBriefing: !!data.executive_briefing,
-          briefingLength: data.executive_briefing?.length || 0,
-          issuesCount: data.key_issues?.length || 0,
-          interventionsCount: data.interventions?.length || 0
-        })
         setSummaryData(data as SynthesisSummary)
+        setProjectCache('summary', projectId, data)
       } catch (err) {
         console.error('Failed to fetch summary data', err)
         setSummaryData(null)
-        // Reset ref on error so we can retry
         summaryLoadedRef.current = null
       } finally {
         setIsLoadingSummary(false)
@@ -699,22 +642,10 @@ export default function ProjectResultsPage() {
       navigatorStatsProjectIdRef.current = projectId
       setNavigatorStats(prev => ({ ...prev, loading: true, error: null }))
       try {
-        const response = await fetchWithAuth(`/api/analysis-projects/${projectId}/issue-intervention-navigator`)
-        const interventionThemeNames = new Set<string>()
-        const interventionNames = new Set<string>()
-        if (response?.issue_themes) {
-          response.issue_themes.forEach((issue: { related_interventions?: { theme_name?: string; detailed_interventions?: { name?: string }[] }[] }) => {
-            issue.related_interventions?.forEach((intervention) => {
-              if (intervention.theme_name) interventionThemeNames.add(intervention.theme_name)
-              intervention.detailed_interventions?.forEach((d) => {
-                if (d.name) interventionNames.add(d.name)
-              })
-            })
-          })
-        }
+        const response = await fetchWithAuth(`/api/analysis-projects/${projectId}/navigator-stats`)
         setNavigatorStats({
-          interventionGroupCount: interventionThemeNames.size,
-          interventionCount: interventionNames.size,
+          interventionGroupCount: response.intervention_group_count ?? null,
+          interventionCount: response.intervention_count ?? null,
           loading: false,
           error: null,
         })

@@ -566,7 +566,10 @@ def get_project_interventions_data(project_id: str) -> Dict:
     """
     docs_result = (
         vectorization_service.supabase.table("analysis_documents")
-        .select("*")
+        .select(
+            "doc_id, title, source, landing_page_url, "
+            "evidence_category, evidence_confidence, extraction_results"
+        )
         .eq("analysis_project_id", project_id)
         .not_.is_("extraction_results", "null")
         .execute()
@@ -690,6 +693,128 @@ def get_project_interventions_data(project_id: str) -> Dict:
     return {"interventions": interventions_list, "total": len(interventions_list)}
 
 
+def get_navigator_overview_data(project_id: str) -> Dict:
+    """Lightweight overview for the interventions navigator.
+
+    Uses a single PostgREST embedded query that joins
+    themes → assignments → extractions → documents server-side via foreign keys.
+    This avoids multiple large table scans and lets the DB use FK indexes.
+
+    Args:
+        project_id: The analysis project ID.
+
+    Returns:
+        Dict with 'interventions' overview list and 'issue_themes' name list.
+    """
+    sb = vectorization_service.supabase
+
+    runs_res = (
+        sb.table("synthesis_runs")
+        .select("id")
+        .eq("analysis_project_id", project_id)
+        .eq("status", "completed")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not runs_res.data:
+        return {"interventions": [], "issue_themes": []}
+
+    run_id = runs_res.data[0]["id"]
+
+    # Single embedded query: themes → assignments → extractions → documents
+    # PostgREST follows FK relationships server-side, avoiding 4 separate round trips.
+    themes_res = (
+        sb.table("synthesis_themes")
+        .select(
+            "id, theme_type, theme_name, summary_description, frequency, "
+            "impact_score, impact_score_label, "
+            "theme_assignments("
+            "  extraction_id, "
+            "  analysis_extractions("
+            "    analysis_document_id, "
+            "    analysis_documents(doc_id, evidence_category, evidence_confidence)"
+            "  )"
+            ")"
+        )
+        .eq("synthesis_run_id", run_id)
+        .in_("theme_type", ["intervention", "issue"])
+        .execute()
+    )
+    themes = themes_res.data or []
+
+    # Total project docs for density cap calculation
+    docs_count_res = (
+        sb.table("analysis_documents")
+        .select("id", count="exact")
+        .eq("analysis_project_id", project_id)
+        .limit(0)
+        .execute()
+    )
+    total_docs = (
+        docs_count_res.count
+        if hasattr(docs_count_res, "count") and docs_count_res.count is not None
+        else 0
+    )
+
+    overview_interventions = []
+    issue_theme_names = []
+
+    for theme in themes:
+        theme_type = theme.get("theme_type")
+
+        if theme_type == "issue":
+            issue_theme_names.append(
+                {
+                    "theme_name": theme["theme_name"],
+                    "frequency": theme.get("frequency", 0),
+                }
+            )
+            continue
+
+        if theme_type != "intervention":
+            continue
+
+        # Walk the embedded assignments → extractions → documents
+        doc_evidence: Dict[str, Dict] = {}
+        for assignment in theme.get("theme_assignments") or []:
+            extraction = assignment.get("analysis_extractions")
+            if not extraction:
+                continue
+            doc = extraction.get("analysis_documents")
+            if not doc or not doc.get("doc_id"):
+                continue
+            did = doc["doc_id"]
+            if did not in doc_evidence:
+                doc_evidence[did] = {
+                    "doc_id": did,
+                    "evidence_category": doc.get("evidence_category"),
+                    "evidence_confidence": doc.get("evidence_confidence", 1.0),
+                }
+
+        if not doc_evidence:
+            continue
+
+        strength = calculate_evidence_strength(list(doc_evidence.values()), total_docs)
+        overview_interventions.append(
+            {
+                "theme_name": theme["theme_name"],
+                "description": theme.get("summary_description", ""),
+                "frequency": len(doc_evidence),
+                "avg_impact_score": theme.get("impact_score"),
+                "avg_evidence_score": strength["stars"],
+                "study_count": len(doc_evidence),
+            }
+        )
+
+    overview_interventions.sort(key=lambda x: x["frequency"], reverse=True)
+
+    return {
+        "interventions": overview_interventions,
+        "issue_themes": issue_theme_names,
+    }
+
+
 def get_navigator_data(project_id: str) -> Dict:
     """Get issue-intervention navigator data for a project.
 
@@ -698,7 +823,7 @@ def get_navigator_data(project_id: str) -> Dict:
     """
     runs_res = (
         vectorization_service.supabase.table("synthesis_runs")
-        .select("*")
+        .select("id")
         .eq("analysis_project_id", project_id)
         .eq("status", "completed")
         .order("created_at", desc=True)
@@ -741,7 +866,15 @@ def get_navigator_data(project_id: str) -> Dict:
 
     outcome_themes_res = (
         vectorization_service.supabase.table("synthesis_outcome_themes")
-        .select("*")
+        .select(
+            "id, synthesis_run_id, outcome_name, outcome_description, "
+            "effect_consensus, positive_count, negative_count, null_count, "
+            "sample_effect_sizes, frequency, source_doc_ids, "
+            "verdict_label, verdict_description, discord_flag, discord_reason, "
+            "predicted_magnitude, magnitude_detail, "
+            "primary_causal_mechanism, causal_mechanism_detail, "
+            "intervention_theme_id"
+        )
         .eq("synthesis_run_id", run_id)
         .execute()
     )
@@ -792,7 +925,7 @@ def get_navigator_data(project_id: str) -> Dict:
 
     assignments_res = (
         vectorization_service.supabase.table("theme_assignments")
-        .select("*")
+        .select("synthesis_theme_id, extraction_id")
         .eq("synthesis_run_id", run_id)
         .execute()
     )
@@ -811,7 +944,9 @@ def get_navigator_data(project_id: str) -> Dict:
 
     extractions_res = (
         vectorization_service.supabase.table("analysis_extractions")
-        .select("*")
+        .select(
+            "id, analysis_document_id, extraction_type, label, description, supporting_quote, raw_data"
+        )
         .eq("analysis_project_id", project_id)
         .execute()
     )
@@ -820,7 +955,13 @@ def get_navigator_data(project_id: str) -> Dict:
 
     docs_result = (
         vectorization_service.supabase.table("analysis_documents")
-        .select("*")
+        .select(
+            "id, doc_id, title, source, landing_page_url, year, evidence_category, "
+            "evidence_category_reasoning, evidence_confidence, extraction_results, "
+            "impact_score, impact_score_label, impact_score_breakdown, "
+            "transferability_score, transferability_breakdown, "
+            "has_harm_warning, harm_warning_reason"
+        )
         .eq("analysis_project_id", project_id)
         .execute()
     )

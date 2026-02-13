@@ -462,7 +462,7 @@ def calculate_evidence_strength(
     if should_penalize:
         final_rating = max(0, final_rating - 1)
         applied_cap = penalty_cap
-        logger.info(
+        logger.debug(
             f"Sample size penalty applied: base={base_rating}, "
             f"after_penalty={final_rating}, docs={len(qualifying_docs)}"
         )
@@ -493,9 +493,8 @@ def calculate_evidence_strength(
     # Build evidence mix for display (only non-zero counts)
     evidence_mix = {k: v for k, v in counts.items() if v > 0}
 
-    # Log if cap was applied (and not already logged for sample size)
     if applied_cap and applied_cap != "small_sample":
-        logger.info(
+        logger.debug(
             f"Evidence cap applied: base={base_rating}, final={final_rating}, "
             f"cap={applied_cap}, docs={len(qualifying_docs)}"
         )
