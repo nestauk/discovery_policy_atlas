@@ -549,47 +549,66 @@ async def update_project_visibility(
 async def delete_analysis_project(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)
 ):
-    """Delete an analysis project and all its data"""
+    """Delete an analysis project and all its data.
+
+    Pre-deletes high-volume child tables so the final CASCADE on the
+    project row is near-instant and won't hit the statement timeout.
+    """
     try:
-        # Check authorization (also verifies project exists)
         get_project_with_auth_check(project_id, current_user, "id, organization_id")
 
-        # Clean up chunks that reference analysis_documents from this project
-        try:
-            # First, get all analysis_documents.id values for this project
-            docs_result = (
-                vectorization_service.supabase.table("analysis_documents")
-                .select("id")
-                .eq("analysis_project_id", project_id)
-                .execute()
-            )
+        sb = vectorization_service.supabase
 
-            analysis_doc_ids = [doc["id"] for doc in docs_result.data]
+        # Collect IDs we'll need for targeted deletes
+        doc_ids = [
+            d["id"]
+            for d in sb.table("analysis_documents")
+            .select("id")
+            .eq("analysis_project_id", project_id)
+            .execute()
+            .data
+        ]
+        run_ids = [
+            r["id"]
+            for r in sb.table("synthesis_runs")
+            .select("id")
+            .eq("analysis_project_id", project_id)
+            .execute()
+            .data
+        ]
+        # 1. Chunks (no CASCADE path from project)
+        if doc_ids:
+            sb.table("chunks").delete().in_("document_id", doc_ids).execute()
+        sb.table("chunks").delete().eq("project_id", project_id).execute()
 
-            # Delete chunks that reference these analysis_documents
-            if analysis_doc_ids:
-                vectorization_service.supabase.table("chunks").delete().in_(
-                    "document_id", analysis_doc_ids
-                ).execute()
-                logger.info(
-                    f"Deleted chunks for {len(analysis_doc_ids)} analysis documents"
-                )
-
-            # Also delete any chunks by project_id (legacy/fallback)
-            vectorization_service.supabase.table("chunks").delete().eq(
-                "project_id", project_id
+        # 2. Synthesis leaf tables → parents (by run_id)
+        if run_ids:
+            for table in [
+                "outcome_theme_assignments",
+                "theme_assignments",
+                "synthesis_citations",
+                "synthesis_outcome_themes",
+                "synthesis_themes",
+            ]:
+                sb.table(table).delete().in_("synthesis_run_id", run_ids).execute()
+            sb.table("synthesis_runs").delete().eq(
+                "analysis_project_id", project_id
             ).execute()
 
-            logger.info(f"Cleaned up chunks for analysis project {project_id}")
-        except Exception as e:
-            logger.warning(f"Failed to clean up chunks for project {project_id}: {e}")
-            # Don't fail the deletion if chunk cleanup fails
-
-        # Delete project (cascading delete will handle documents and extractions)
-        vectorization_service.supabase.table("analysis_projects").delete().eq(
-            "id", project_id
+        # 3. Extractions (has direct project FK)
+        sb.table("analysis_extractions").delete().eq(
+            "analysis_project_id", project_id
         ).execute()
 
+        # 4. Documents
+        sb.table("analysis_documents").delete().eq(
+            "analysis_project_id", project_id
+        ).execute()
+
+        # 5. Delete project (CASCADE handles any remaining stragglers)
+        sb.table("analysis_projects").delete().eq("id", project_id).execute()
+
+        logger.info(f"Deleted analysis project {project_id}")
         return {"message": "Analysis project deleted successfully"}
 
     except HTTPException:
