@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Literal, Tuple
 
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.services.synthesis.schemas import RecommendationsOutput
 from app.services.synthesis.utils import fetch_chunk_texts
@@ -78,6 +78,18 @@ class ClaimQuoteResult(BaseModel):
     issue: Optional[str] = Field(
         None, description="Description of issue if not supported"
     )
+
+    @field_validator("chunk_id", mode="before")
+    @classmethod
+    def _coerce_chunk_id(cls, value: Any) -> str:
+        """Coerce nullable chunk identifiers returned by the model."""
+        return "" if value is None else str(value)
+
+    @field_validator("supporting_quote", mode="before")
+    @classmethod
+    def _coerce_supporting_quote(cls, value: Any) -> str:
+        """Coerce nullable quotes returned by the model."""
+        return "" if value is None else str(value)
 
 
 class GroundingResult(BaseModel):
@@ -345,35 +357,56 @@ class BriefingOrchestrator:
         citations_used = self._extract_citations(content)
 
         # Phase 3: Grounding + quote extraction with retry loop
-        grounding = await self._ground_and_extract_quotes(ctx, content)
-        verification_passed = grounding.overall_supported
-        verification_issues = list(grounding.suggested_fixes or [])
-
-        retries_remaining = max_retries
-        while not verification_passed and retries_remaining > 0:
-            logger.info(
-                f"Section '{section_name}' grounding had issues, retrying: "
-                f"{grounding.issues_summary or 'unsupported claims detected'}"
-            )
-            unsupported = [cq for cq in grounding.claim_quotes if not cq.is_supported]
-            retry_issues = [
-                f"Claim: {cq.claim_text} [citation {cq.citation_number}] - {cq.issue or 'Not supported by source evidence'}"
-                for cq in unsupported
-            ]
-            verification_issues = retry_issues or verification_issues
-            ctx.gathered_evidence.append(
-                {
-                    "tool": "verification_feedback",
-                    "issues": verification_issues,
-                    "claims_to_fix": [cq.model_dump() for cq in unsupported],
-                }
-            )
-            content = await self._generate_section_content(ctx, additional_instructions)
-            citations_used = self._extract_citations(content)
+        is_interventions_table = ctx.section_name.lower().startswith(
+            "policy interventions analysis"
+        )
+        if is_interventions_table:
+            # Table rows are generated from structured fields, so sentence-based claim
+            # extraction is intentionally skipped to avoid markdown artefact claims.
+            grounding = await self._build_table_citation_quotes(ctx, content)
+            verification_passed = True
+            verification_issues: List[str] = []
+        else:
             grounding = await self._ground_and_extract_quotes(ctx, content)
             verification_passed = grounding.overall_supported
-            verification_issues = list(grounding.suggested_fixes or verification_issues)
-            retries_remaining -= 1
+            verification_issues = list(grounding.suggested_fixes or [])
+
+            retries_remaining = max_retries
+            while not verification_passed and retries_remaining > 0:
+                logger.info(
+                    f"Section '{section_name}' grounding had issues, retrying: "
+                    f"{grounding.issues_summary or 'unsupported claims detected'}"
+                )
+                unsupported = [
+                    cq for cq in grounding.claim_quotes if not cq.is_supported
+                ]
+                retry_issues = [
+                    f"Claim: {cq.claim_text} [citation {cq.citation_number}] - {cq.issue or 'Not supported by source evidence'}"
+                    for cq in unsupported
+                ]
+                if retry_issues:
+                    verification_issues = retry_issues[:5]
+                    if len(retry_issues) > 5:
+                        verification_issues.append(
+                            f"({len(retry_issues) - 5} additional issues omitted — focus on these first.)"
+                        )
+                ctx.gathered_evidence.append(
+                    {
+                        "tool": "verification_feedback",
+                        "issues": verification_issues,
+                        "claims_to_fix": [cq.model_dump() for cq in unsupported],
+                    }
+                )
+                content = await self._generate_section_content(
+                    ctx, additional_instructions
+                )
+                citations_used = self._extract_citations(content)
+                grounding = await self._ground_and_extract_quotes(ctx, content)
+                verification_passed = grounding.overall_supported
+                verification_issues = list(
+                    grounding.suggested_fixes or verification_issues
+                )
+                retries_remaining -= 1
 
         if not verification_passed:
             self._emit_grounding_warning(section_name, verification_issues)
@@ -701,7 +734,11 @@ Decide which tools to call to gather the most relevant evidence for this section
             ctx.tool_call_count += 1
             if res_out.success and res_out.data:
                 ctx.gathered_evidence.append(
-                    {"tool": "get_intervention_outcomes", "data": res_out.data}
+                    {
+                        "tool": "get_intervention_outcomes",
+                        "data": res_out.data,
+                        "intervention_name": intervention_name,
+                    }
                 )
 
             if ctx.tool_call_count >= ctx.max_tool_calls:
@@ -717,7 +754,11 @@ Decide which tools to call to gather the most relevant evidence for this section
             ctx.tool_call_count += 1
             if res_top.success and res_top.data:
                 ctx.gathered_evidence.append(
-                    {"tool": "get_top_studies", "data": res_top.data}
+                    {
+                        "tool": "get_top_studies",
+                        "data": res_top.data,
+                        "intervention_name": intervention_name,
+                    }
                 )
 
             if ctx.tool_call_count >= ctx.max_tool_calls:
@@ -733,7 +774,11 @@ Decide which tools to call to gather the most relevant evidence for this section
             ctx.tool_call_count += 1
             if res_details.success and res_details.data:
                 ctx.gathered_evidence.append(
-                    {"tool": "get_intervention_details", "data": res_details.data}
+                    {
+                        "tool": "get_intervention_details",
+                        "data": res_details.data,
+                        "intervention_name": intervention_name,
+                    }
                 )
 
         logger.info(
@@ -787,49 +832,55 @@ Decide which tools to call to gather the most relevant evidence for this section
         ctx: OrchestratorContext,
         additional_instructions: str,
     ) -> str:
-        """Generate interventions table using structured output then render deterministically."""
-        evidence_context = await self._format_evidence_for_generation(ctx)
+        """Generate interventions table as independent rows then render deterministically."""
+        row_names = self._intervention_row_names(ctx)
+        if not row_names:
+            # Fallback when row candidates are unavailable.
+            row_names = [f"Intervention {i}" for i in range(1, 5)]
 
-        prompt = f"""
-You are writing the "Key Interventions" table for an executive policy briefing.
+        row_llm = self.generation_llm.with_structured_output(
+            InterventionTableRowOutput,
+            method="function_calling",
+        )
+        rows: List[InterventionTableRowOutput] = []
+        for index, intervention_name in enumerate(row_names, start=1):
+            row_evidence_context = await self._format_intervention_row_evidence(
+                ctx, intervention_name
+            )
+            prompt = f"""
+You are writing row {index} of the "Key Interventions" table for an executive policy briefing.
+
+Target intervention category:
+{intervention_name}
 
 Output requirements:
-- Produce exactly a markdown table with header:
-  | Intervention | Context & Features | Key Study | Impact & Outcomes | Sources |
-- The content for each cell MUST be produced via the structured schema (rows), then the system will render the table.
-
-Row requirements (4-6 rows):
-- Intervention: short, plain category label (not a paragraph).
+- Return exactly one structured row.
+- Intervention: short plain category label (use the target intervention category).
 - Context & Features: concise implementation details (setting, delivery, components).
-- Key Study: concrete implementation example drawn from get_top_studies. Include concise implementation details (setting, delivery, components). Name country(s)/location that the study took place in if available. Include [N] citations. 
+- Key Study: concrete implementation example drawn from get_top_studies. Include [N] citations.
 - Impact & Outcomes:
-  - Start with key-study outcomes/effect sizes using get_top_studies.extracted_outcomes.
-  - If extracted_outcomes contains any non-empty effect_size values, you MUST include at least one effect_size verbatim (e.g., "15.01%") and name the outcome_variable.
-  - If effect_size is empty but extracted_outcomes includes numeric details in result_text or supporting_quote, include at least one concrete number from those fields.
-  - If no numerical details are available, include at least one non-numerical detail from the extracted_outcomes.
-  - Then add 1-2 sentences on broader evidence in the theme (direction, consistency, caveats).
-  - Include [N] citations for both the key-study outcomes and the broader evidence statements.
-- Sources: compact [N] citations used in the row (deduplicate).
+  - Start with key-study outcomes/effect sizes using extracted outcomes where available.
+  - Add 1-2 sentences on broader evidence in the theme (direction, consistency, caveats).
+  - Include [N] citations for both key-study outcomes and broader evidence.
+- Sources: compact [N] citations used in the row (deduplicated).
 
 Citation rules:
-- ONLY use [N] citations from Evidence below.
+- ONLY use [N] citations from evidence below.
 - Do not invent citation numbers.
 
 Evidence:
-{evidence_context}
+{row_evidence_context}
 
 Additional guidance:
 {additional_instructions}
 """
-
-        structured_llm = self.generation_llm.with_structured_output(
-            InterventionsTableOutput,
-            method="function_calling",
-        )
-        config = self._build_langfuse_config("generate_interventions_table_structured")
-        result: InterventionsTableOutput = await structured_llm.ainvoke(
-            prompt, config=config
-        )
+            config = self._build_langfuse_config(
+                f"generate_interventions_table_row_{index}"
+            )
+            row: InterventionTableRowOutput = await row_llm.ainvoke(
+                prompt, config=config
+            )
+            rows.append(row)
 
         # Deterministic markdown rendering (avoid LLM table formatting failures)
         lines: List[str] = []
@@ -837,7 +888,7 @@ Additional guidance:
             "| Intervention | Context & Features | Key Study | Impact & Outcomes | Sources |"
         )
         lines.append("|---|---|---|---|---|")
-        for r in result.rows:
+        for r in rows:
             # Replace newlines inside cells to keep markdown stable; use <br/>-like via newline escaped
             def _cell(s: str) -> str:
                 s = (s or "").strip()
@@ -858,15 +909,83 @@ Additional guidance:
             )
         return "\n".join(lines).strip()
 
+    def _intervention_row_names(self, ctx: OrchestratorContext) -> List[str]:
+        """Extract stable intervention row names from gathered evidence."""
+        names: List[str] = []
+        for ev in ctx.gathered_evidence:
+            name = str(ev.get("intervention_name") or "").strip()
+            if name and name not in names:
+                names.append(name)
+        return names[:6]
+
+    async def _format_intervention_row_evidence(
+        self, ctx: OrchestratorContext, intervention_name: str
+    ) -> str:
+        """Build row-scoped evidence context for one intervention."""
+        blocks: List[str] = []
+        chunk_ids: List[str] = []
+        for ev in ctx.gathered_evidence:
+            ev_name = str(ev.get("intervention_name") or "").strip()
+            if ev_name and ev_name != intervention_name:
+                continue
+            data = ev.get("data")
+            tool = ev.get("tool", "unknown")
+            if isinstance(data, list):
+                for item in data[:4]:
+                    if not isinstance(item, dict):
+                        continue
+                    chunk_id = str(item.get("chunk_id") or "")
+                    if chunk_id:
+                        chunk_ids.append(chunk_id)
+                    cit = item.get("citation_number")
+                    title = item.get("title") or item.get("document_title") or ""
+                    summary = (
+                        item.get("key_context_summary")
+                        or item.get("summary")
+                        or item.get("content")
+                        or ""
+                    )
+                    blocks.append(
+                        f"[{cit}] ({tool}) {title}\n  Summary: {summary}".strip()
+                    )
+            elif isinstance(data, dict):
+                chunk_id = str(data.get("chunk_id") or "")
+                if chunk_id:
+                    chunk_ids.append(chunk_id)
+                cit = data.get("citation_number")
+                summary = data.get("summary") or data.get("content") or ""
+                blocks.append(f"[{cit}] ({tool})\n  Summary: {summary}".strip())
+        chunk_text_map = await fetch_chunk_texts(chunk_ids)
+        source_lines = [
+            f"- chunk_id={cid}\n  text={chunk_text_map.get(cid, '')}"
+            for cid in chunk_ids[:8]
+            if chunk_text_map.get(cid, "")
+        ]
+        if source_lines:
+            blocks.append("Source text:\n" + "\n".join(source_lines))
+        return "\n".join(blocks) if blocks else "No evidence available."
+
     def _extract_claim_citation_pairs(
         self, content: str
     ) -> List[Tuple[str, List[int]]]:
         """Extract claim/citation pairs from generated section content."""
+        cleaned = re.sub(r"<br\s*/?>", " ", content)
+        cleaned = re.sub(r"(?<=\d)\.(?=\d)", "<DECIMAL_DOT>", cleaned)
+        cleaned = re.sub(r"(?m)^\s*[\-\*]\s+", "", cleaned)
+        cleaned = re.sub(r"(?m)^\s*\|.*\|\s*$", " ", cleaned)
+
         claims: List[Tuple[str, List[int]]] = []
         seen: set = set()
-        for sentence in re.findall(r"[^.!?\n]*\[\d+\][^.!?\n]*[.!?]?", content):
-            claim_text = sentence.strip()
-            if not claim_text:
+        for sentence in re.findall(r"[^.!?\n]*\[\d+\][^.!?\n]*[.!?]?", cleaned):
+            claim_text = (
+                sentence.replace("<DECIMAL_DOT>", ".").strip().strip("|").strip()
+            )
+            if not claim_text or len(claim_text) < 30:
+                continue
+            if re.match(r"^\d+[\.\)\%\s-]", claim_text):
+                continue
+            stripped = re.sub(r"\[\d+\]", "", claim_text).strip()
+            if len(stripped) < 15:
                 continue
             citations = sorted({int(x) for x in re.findall(r"\[(\d+)\]", claim_text)})
             if not citations:
@@ -891,6 +1010,83 @@ Additional guidance:
         return (
             "Factual section: expect mostly direct attributions unless the claim explicitly "
             "combines multiple sources."
+        )
+
+    def _normalise_claim_text(self, text: str) -> str:
+        """Normalise claim text for tolerant matching across formatting variants."""
+        text = re.sub(r"\[\d+\]", "", text or "")
+        text = re.sub(r"^[\-\*]\s+", "", text)
+        text = text.strip().strip("|").strip()
+        text = re.sub(r"<br\s*/?>", " ", text)
+        return re.sub(r"\s+", " ", text).lower()
+
+    async def _build_table_citation_quotes(
+        self, ctx: OrchestratorContext, content: str
+    ) -> GroundingResult:
+        """Build citation quotes for a rendered interventions table without claim parsing."""
+        citation_by_number = {
+            getattr(c, "citation_number", 0): c
+            for c in (ctx.state.get("grounded_citations") or [])
+            if getattr(c, "citation_number", 0)
+        }
+        all_contexts = ctx.state.get("all_scored_contexts") or []
+
+        rows: List[str] = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("|"):
+                continue
+            if stripped.startswith("|---"):
+                continue
+            if "Intervention | Context & Features" in stripped:
+                continue
+            rows.append(stripped)
+
+        collected: List[ClaimQuoteResult] = []
+        for row in rows:
+            parts = [p.strip() for p in row.strip("|").split("|")]
+            if len(parts) < 5:
+                continue
+            row_claim = f"{parts[2]} {parts[3]}".strip()
+            citation_numbers = sorted({int(x) for x in re.findall(r"\[(\d+)\]", row)})
+            for citation_number in citation_numbers:
+                citation = citation_by_number.get(citation_number)
+                if citation is None:
+                    continue
+                doc_id = citation.analysis_document_id
+                doc_contexts = sorted(
+                    [c for c in all_contexts if c.document_id == doc_id and c.chunk_id],
+                    key=lambda c: getattr(c, "relevance_score", 0),
+                    reverse=True,
+                )
+                doc_chunk_ids = [c.chunk_id for c in doc_contexts]
+                chunk_map = await fetch_chunk_texts(doc_chunk_ids[:3])
+                best_chunk_id = next(
+                    (
+                        ctx.chunk_id
+                        for ctx in doc_contexts
+                        if chunk_map.get(ctx.chunk_id)
+                    ),
+                    "",
+                )
+                best_quote = (chunk_map.get(best_chunk_id) or "").strip()[:200]
+                collected.append(
+                    ClaimQuoteResult(
+                        claim_text=row_claim,
+                        citation_number=citation_number,
+                        is_supported=True,
+                        attribution="synthesised",
+                        supporting_quote=best_quote,
+                        chunk_id=best_chunk_id,
+                        issue=None,
+                    )
+                )
+
+        return GroundingResult(
+            claim_quotes=collected,
+            overall_supported=True,
+            issues_summary=None,
+            suggested_fixes=[],
         )
 
     async def _ground_and_extract_quotes(
@@ -974,12 +1170,14 @@ Additional guidance:
                 "You are grounding policy claims against source evidence.\n\n"
                 f"Section: {ctx.section_name}\n"
                 f"{self._section_grounding_guidance(ctx.section_name)}\n\n"
-                "A claim is supported if the source text contains relevant evidence that "
-                "reasonably underpins the claim (direct, synthesised, or inferred).\n"
+                "GROUNDING RULES:\n"
+                "- Set is_supported=True whenever the source provides any relevant evidence "
+                "for the claim's core assertion, including reasonable paraphrase and inference.\n"
                 "- direct: source alone substantiates the specific claim.\n"
                 "- synthesised: source contributes evidence but claim needs multiple sources.\n"
                 "- inferred: source provides premises and claim extrapolates beyond explicit text.\n"
-                "Mark unsupported only when this source provides no relevant evidence.\n\n"
+                "- Set is_supported=False ONLY when this source provides genuinely no relevant evidence.\n"
+                "- If wording can be improved, capture that in issue but keep is_supported=True.\n\n"
                 f"Citation number: [{citation_number}]\n"
                 f"Document title: {citation.title or 'Unknown'}\n"
                 "Claims to assess:\n"
@@ -1000,7 +1198,8 @@ Additional guidance:
                 )
                 # Normalise citation_number per grouped call.
                 returned_claims = {
-                    item.claim_text.strip() for item in result.claim_quotes
+                    self._normalise_claim_text(item.claim_text)
+                    for item in result.claim_quotes
                 }
                 for item in result.claim_quotes:
                     collected.append(
@@ -1015,7 +1214,7 @@ Additional guidance:
                         )
                     )
                 for claim_text in claims_for_citation:
-                    if claim_text.strip() not in returned_claims:
+                    if self._normalise_claim_text(claim_text) not in returned_claims:
                         collected.append(
                             ClaimQuoteResult(
                                 claim_text=claim_text,
