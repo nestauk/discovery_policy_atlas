@@ -129,43 +129,43 @@ export function useAPI() {
     return isStreaming ? response : response.json();
   }, [getToken]);
 
-  // Analysis Project API functions
-  const getAnalysisProjects = async (): Promise<{ projects: AnalysisProject[], total: number }> => {
+  // Analysis Project API functions – memoised so effect dependency arrays stay stable
+  const getAnalysisProjects = useCallback(async (): Promise<{ projects: AnalysisProject[], total: number }> => {
     return fetchWithAuth('api/analysis-projects');
-  };
+  }, [fetchWithAuth]);
 
-  const createAnalysisProject = async (project: { title: string; description?: string; query?: string }) => {
+  const createAnalysisProject = useCallback(async (project: { title: string; description?: string; query?: string }) => {
     return fetchWithAuth('api/analysis-projects', {
       method: 'POST',
       body: JSON.stringify(project),
     });
-  };
+  }, [fetchWithAuth]);
 
-  const getAnalysisProject = async (projectId: string) => {
+  const getAnalysisProject = useCallback(async (projectId: string) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}`);
-  };
+  }, [fetchWithAuth]);
 
-  const updateAnalysisProject = async (projectId: string, updates: Partial<AnalysisProject>) => {
+  const updateAnalysisProject = useCallback(async (projectId: string, updates: Partial<AnalysisProject>) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
-  };
+  }, [fetchWithAuth]);
 
-  const deleteAnalysisProject = async (projectId: string): Promise<void> => {
+  const deleteAnalysisProject = useCallback(async (projectId: string): Promise<void> => {
     return fetchWithAuth(`api/analysis-projects/${projectId}`, {
       method: 'DELETE',
     });
-  };
+  }, [fetchWithAuth]);
 
-  const runAnalysisForProject = async (projectId: string, config: Record<string, unknown>) => {
+  const runAnalysisForProject = useCallback(async (projectId: string, config: Record<string, unknown>) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}/run-analysis`, {
       method: 'POST',
       body: JSON.stringify(config),
     });
-  };
+  }, [fetchWithAuth]);
 
-  const rerunSynthesisForProject = async (
+  const rerunSynthesisForProject = useCallback(async (
     projectId: string,
     options: { force?: boolean; invalidate_previous?: boolean } = {}
   ) => {
@@ -176,36 +176,36 @@ export function useAPI() {
         invalidate_previous: options.invalidate_previous ?? true,
       }),
     });
-  };
+  }, [fetchWithAuth]);
 
-  const getDocumentExtraction = async (projectId: string, documentId: string) => {
+  const getDocumentExtraction = useCallback(async (projectId: string, documentId: string) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}/documents/${documentId}/extraction`);
-  };
+  }, [fetchWithAuth]);
 
-  const getProjectInterventions = async (projectId: string) => {
+  const getProjectInterventions = useCallback(async (projectId: string) => {
     return fetchWithAuth(`api/analysis-projects/${projectId}/interventions`);
-  };
+  }, [fetchWithAuth]);
 
-  const generatePopulationOptions = async (researchQuestion: string): Promise<{ research_question: string; population_options: string[] }> => {
+  const generatePopulationOptions = useCallback(async (researchQuestion: string): Promise<{ research_question: string; population_options: string[] }> => {
     return fetchWithAuth('api/analysis-projects/generate-population-options', {
       method: 'POST',
       body: JSON.stringify({ research_question: researchQuestion, max_options: 3 }),
     });
-  };
+  }, [fetchWithAuth]);
 
-  const generateOutcomeOptions = async (researchQuestion: string): Promise<{ research_question: string; outcome_options: string[] }> => {
+  const generateOutcomeOptions = useCallback(async (researchQuestion: string): Promise<{ research_question: string; outcome_options: string[] }> => {
     return fetchWithAuth('api/analysis-projects/generate-outcome-options', {
       method: 'POST',
       body: JSON.stringify({ research_question: researchQuestion, max_options: 3 }),
     });
-  };
+  }, [fetchWithAuth]);
 
-  const generateInnerSettingOptions = async (researchQuestion: string): Promise<{ research_question: string; inner_setting_options: string[] }> => {
+  const generateInnerSettingOptions = useCallback(async (researchQuestion: string): Promise<{ research_question: string; inner_setting_options: string[] }> => {
     return fetchWithAuth('api/analysis-projects/generate-inner-setting-options', {
       method: 'POST',
       body: JSON.stringify({ research_question: researchQuestion, max_options: 5 }),
     });
-  };
+  }, [fetchWithAuth]);
 
   return { 
     fetchWithAuth, 

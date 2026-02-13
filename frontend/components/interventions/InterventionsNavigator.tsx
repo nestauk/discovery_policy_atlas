@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
+import { useProjectDataCache } from '@/lib/projectDataCache'
 import { Button } from '@/components/ui/button'
 import { Loader2, Target, AlertTriangle } from 'lucide-react'
 import { ThemeList, type ThemeListItem } from './ThemeList'
@@ -104,6 +105,20 @@ interface NavigatorData {
   all_interventions?: InterventionTheme[]
 }
 
+interface OverviewItem {
+  theme_name: string
+  description: string
+  frequency: number
+  avg_impact_score: number | null
+  avg_evidence_score: number | null
+  study_count: number
+}
+
+interface OverviewData {
+  interventions: OverviewItem[]
+  issue_themes: { theme_name: string; frequency: number }[]
+}
+
 interface InterventionsNavigatorProps {
   showHeader?: boolean
   isPublic?: boolean
@@ -151,10 +166,14 @@ export function InterventionsNavigator({
 }: InterventionsNavigatorProps) {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth } = useAPI()
+  const { getCached, setCache } = useProjectDataCache()
   
   const projectId = isPublic ? publicProjectId : activeProject?.id
   
+  // Full navigator data (heavy, loaded in background)
   const [data, setData] = useState<NavigatorData | null>(null)
+  // Lightweight overview (fast, shown immediately)
+  const [overviewData, setOverviewData] = useState<OverviewData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   
@@ -164,43 +183,123 @@ export function InterventionsNavigator({
   const [minImpact, setMinImpact] = useState(1)
   const [minEvidence, setMinEvidence] = useState(1)
   const [issueThemeFilter, setIssueThemeFilter] = useState<string>('All')
+
+  const hasFullData = !!data
   
   const issueThemeOptions = useMemo(() => {
-    if (!data) return ['All']
-    const themes = data.issue_themes.map(t => t.theme_name)
-    return ['All', ...themes]
-  }, [data])
-
-  const loadNavigatorData = useCallback(async () => {
-    if (!projectId) return
-    
-    setLoading(true)
-    setError(null)
-    
-    try {
-      let response: NavigatorData
-      if (isPublic) {
-        const { getPublicNavigator } = await import('@/lib/publicApi')
-        response = await getPublicNavigator(projectId) as NavigatorData
-      } else {
-        response = await fetchWithAuth(`/api/analysis-projects/${projectId}/issue-intervention-navigator`) as NavigatorData
-      }
-      setData(response)
-    } catch (err) {
-      console.error('Failed to load navigator data:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load data')
-    } finally {
-      setLoading(false)
+    if (data) {
+      return ['All', ...data.issue_themes.map(t => t.theme_name)]
     }
-  }, [projectId, isPublic, fetchWithAuth])
+    if (overviewData) {
+      return ['All', ...overviewData.issue_themes.map(t => t.theme_name)]
+    }
+    return ['All']
+  }, [data, overviewData])
 
+  // Progressive loading: overview first, then full data in background
   useEffect(() => {
     if (!projectId) return
-    loadNavigatorData()
-  }, [projectId, loadNavigatorData])
+
+    let cancelled = false
+
+    const load = async () => {
+      // 1. Check cache for full data
+      const cachedFull = getCached('navigator', projectId) as NavigatorData | undefined
+      if (cachedFull) {
+        setData(cachedFull)
+        return
+      }
+
+      // 2. Check cache for overview
+      const cachedOverview = getCached('navigatorOverview', projectId) as OverviewData | undefined
+      if (cachedOverview) {
+        setOverviewData(cachedOverview)
+      } else {
+        // 3. Fetch lightweight overview (fast)
+        setLoading(true)
+        setError(null)
+        try {
+          let overview: OverviewData
+          if (isPublic) {
+            // Public projects fall back to full data (no overview endpoint)
+            const { getPublicNavigator } = await import('@/lib/publicApi')
+            const response = await getPublicNavigator(projectId) as NavigatorData
+            if (!cancelled) {
+              setData(response)
+              setCache('navigator', projectId, response)
+              setLoading(false)
+            }
+            return
+          } else {
+            overview = await fetchWithAuth(
+              `/api/analysis-projects/${projectId}/navigator-overview`
+            ) as OverviewData
+          }
+          if (!cancelled) {
+            setOverviewData(overview)
+            setCache('navigatorOverview', projectId, overview)
+            setLoading(false)
+          }
+        } catch (err) {
+          console.error('Failed to load navigator overview, falling back to full load:', err)
+          // Don't set error — fall through to load full data directly
+        }
+      }
+
+      // 4. Fetch full data (in background if overview loaded, or as primary if it failed)
+      try {
+        let response: NavigatorData
+        if (isPublic) {
+          const { getPublicNavigator } = await import('@/lib/publicApi')
+          response = await getPublicNavigator(projectId) as NavigatorData
+        } else {
+          response = await fetchWithAuth(
+            `/api/analysis-projects/${projectId}/issue-intervention-navigator`
+          ) as NavigatorData
+        }
+        if (!cancelled) {
+          setData(response)
+          setCache('navigator', projectId, response)
+          setLoading(false)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load full navigator data:', err)
+          setError(err instanceof Error ? err.message : 'Failed to load data')
+          setLoading(false)
+        }
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, isPublic])
 
   // Aggregate all intervention themes across issues (or from all_interventions if available)
   const allInterventionThemes = useMemo(() => {
+    // When full data hasn't arrived yet, use overview data for the list
+    if (!data && overviewData && issueThemeFilter === 'All') {
+      return overviewData.interventions.map(item => ({
+        theme_name: item.theme_name,
+        description: item.description,
+        frequency: item.study_count,
+        avg_impact_score: item.avg_impact_score ?? undefined,
+        avg_evidence_score: item.avg_evidence_score ?? undefined,
+        detailed_interventions: undefined,
+        impact_summary: undefined as string | undefined,
+        transferability_rating: undefined as string | null | undefined,
+        transferability_note: undefined as string | null | undefined,
+        transferability_breakdown: undefined as TransferabilityBreakdown | null | undefined,
+        outcome_themes: undefined as OutcomeTheme[] | undefined,
+        risk_themes: undefined as RiskTheme[] | undefined,
+        display_evidence_mix: undefined as Record<string, number> | undefined,
+        stars: undefined as number | undefined,
+        cap_message: undefined as string | null | undefined,
+        impact_score_breakdown: undefined as Record<string, unknown> | null | undefined,
+      }))
+    }
+
     if (!data) return []
     
     // If backend provides all_interventions directly, use that
@@ -371,7 +470,7 @@ export function InterventionsNavigator({
       cap_message: intervention.cap_message,
       impact_score_breakdown: intervention.impact_score_breakdown,
     }))
-  }, [data, issueThemeFilter])
+  }, [data, overviewData, issueThemeFilter])
 
   // Get the full intervention data for the selected theme
   const selectedThemeData = useMemo(() => {
@@ -413,28 +512,48 @@ export function InterventionsNavigator({
     )
   }
 
-  if (selectedTheme && selectedThemeData) {
+  if (selectedTheme) {
+    // Full data available — show detail view
+    if (selectedThemeData) {
+      return (
+        <div className="flex flex-col h-full">
+          <ThemeDetailView
+            themeName={selectedTheme.theme_name}
+            themeDescription={selectedThemeData.description || selectedTheme.description}
+            avgImpactScore={selectedThemeData.avg_impact_score ?? selectedTheme.avg_impact_score ?? undefined}
+            avgEvidenceScore={selectedThemeData.avg_evidence_score ?? selectedTheme.avg_evidence_score ?? undefined}
+            interventions={selectedThemeInterventions}
+            onBack={() => setSelectedTheme(null)}
+            impactSummary={selectedThemeData.impact_summary}
+            outcomeThemes={selectedThemeData.outcome_themes}
+            riskThemes={selectedThemeData.risk_themes}
+            transferabilityRating={selectedThemeData.transferability_rating}
+            transferabilityNote={selectedThemeData.transferability_note}
+            transferabilityBreakdown={selectedThemeData.transferability_breakdown}
+            displayEvidenceMix={selectedThemeData.display_evidence_mix}
+            evidenceStars={selectedThemeData.stars}
+            capMessage={selectedThemeData.cap_message}
+            isPublic={isPublic}
+            projectId={projectId ?? undefined}
+          />
+        </div>
+      )
+    }
+
+    // Full data still loading — show spinner for this theme
     return (
       <div className="flex flex-col h-full">
-        <ThemeDetailView
-          themeName={selectedTheme.theme_name}
-          themeDescription={selectedThemeData.description || selectedTheme.description}
-          avgImpactScore={selectedThemeData.avg_impact_score ?? selectedTheme.avg_impact_score ?? undefined}
-          avgEvidenceScore={selectedThemeData.avg_evidence_score ?? selectedTheme.avg_evidence_score ?? undefined}
-          interventions={selectedThemeInterventions}
-          onBack={() => setSelectedTheme(null)}
-          impactSummary={selectedThemeData.impact_summary}
-          outcomeThemes={selectedThemeData.outcome_themes}
-          riskThemes={selectedThemeData.risk_themes}
-          transferabilityRating={selectedThemeData.transferability_rating}
-          transferabilityNote={selectedThemeData.transferability_note}
-          transferabilityBreakdown={selectedThemeData.transferability_breakdown}
-          displayEvidenceMix={selectedThemeData.display_evidence_mix}
-          evidenceStars={selectedThemeData.stars}
-          capMessage={selectedThemeData.cap_message}
-          isPublic={isPublic}
-          projectId={projectId ?? undefined}
-        />
+        <div className="mb-4">
+          <Button variant="ghost" size="sm" onClick={() => setSelectedTheme(null)}>
+            ← Back
+          </Button>
+        </div>
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-slate-600">Loading details for {selectedTheme.theme_name}...</p>
+          </div>
+        </div>
       </div>
     )
   }
@@ -475,7 +594,7 @@ export function InterventionsNavigator({
       )}
       
       <div className="flex-1">
-        {loading && (
+        {loading && !overviewData && !data && (
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
@@ -484,20 +603,17 @@ export function InterventionsNavigator({
           </div>
         )}
 
-        {error && (
+        {error && !overviewData && !data && (
           <div className="text-center py-12">
             <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-slate-900 mb-2">Error Loading Data</h3>
             <p className="text-slate-600">{error}</p>
-            <Button onClick={loadNavigatorData} className="mt-4">
-              Try Again
-            </Button>
           </div>
         )}
 
-        {data && !loading && !error && (
+        {(data || overviewData) && !loading && !error && (
           <>
-            {data.issue_themes.length === 0 ? (
+            {allInterventionThemes.length === 0 ? (
               <div className="bg-white border border-gray-100 rounded-xl p-8 text-center">
                 <AlertTriangle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-slate-900 mb-2">No Interventions Found</h3>
@@ -506,13 +622,21 @@ export function InterventionsNavigator({
                 </p>
               </div>
             ) : (
-              <ThemeList
-                themes={allInterventionThemes}
-                onSelectTheme={setSelectedTheme}
-                sortBy={sortBy}
-                minImpact={minImpact}
-                minEvidence={minEvidence}
-              />
+              <>
+                <ThemeList
+                  themes={allInterventionThemes}
+                  onSelectTheme={setSelectedTheme}
+                  sortBy={sortBy}
+                  minImpact={minImpact}
+                  minEvidence={minEvidence}
+                />
+                {!hasFullData && (
+                  <div className="flex items-center justify-center py-3 text-xs text-slate-400">
+                    <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+                    Loading detailed data…
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
