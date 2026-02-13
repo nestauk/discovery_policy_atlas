@@ -9,6 +9,7 @@ import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, Chevro
 import ReactMarkdown from "react-markdown";
 import type {
   CitationInfo,
+  ClaimQuote,
   EvidenceCoverageSnapshot,
   StructuredBriefing,
   InterventionTableRow,
@@ -80,6 +81,18 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
       
       const citNum = parseInt(match[1], 10);
       const citInfo = lookupCitation(citNum);
+      const contextStart = Math.max(
+        text.lastIndexOf(".", match.index) + 1,
+        text.lastIndexOf("\n", match.index) + 1
+      );
+      const periodEnd = text.indexOf(".", match.index + match[0].length);
+      const newlineEnd = text.indexOf("\n", match.index + match[0].length);
+      const contextEndCandidates = [periodEnd, newlineEnd].filter((idx) => idx >= 0);
+      const contextEnd =
+        contextEndCandidates.length > 0
+          ? Math.min(...contextEndCandidates)
+          : text.length;
+      const claimContext = text.slice(contextStart, contextEnd).trim();
 
       // If citations are back-to-back like "...[3][4][5]", insert spacing between them
       const last = parts[parts.length - 1];
@@ -93,6 +106,7 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
           citationKey={`[${citNum}]`}
           citationNumber={citNum}
           citationInfo={citInfo}
+          claimContext={claimContext}
           onCitationClick={onCitationClick}
         />
       );
@@ -113,15 +127,51 @@ interface CitationLinkProps {
   citationKey: string;
   citationNumber?: number;
   citationInfo?: CitationInfo;
+  claimContext?: string;
   onCitationClick?: (docId: string) => void;
 }
 
-function CitationLink({ citationKey, citationNumber, citationInfo, onCitationClick }: CitationLinkProps) {
+function CitationLink({ citationKey, citationNumber, citationInfo, claimContext, onCitationClick }: CitationLinkProps) {
   const url = citationInfo?.url;
   const title = citationInfo?.title || "Unknown source";
-  const quote = citationInfo?.supporting_quote;
   const docId = citationInfo?.analysis_document_id;
   const displayText = citationNumber ? `[${citationNumber}]` : citationKey;
+
+  const matchedClaimQuote = useMemo<ClaimQuote | undefined>(() => {
+    const claimQuotes = citationInfo?.claim_quotes || [];
+    if (!claimContext || claimQuotes.length === 0) return undefined;
+
+    const contextLower = claimContext.toLowerCase();
+    const exact = claimQuotes.find((cq) => contextLower.includes(cq.claim_text.toLowerCase()));
+    if (exact) return exact;
+
+    const byOverlap = claimQuotes
+      .map((cq) => {
+        const claimWords = new Set(cq.claim_text.toLowerCase().split(/\s+/).filter(Boolean));
+        const contextWords = new Set(contextLower.split(/\s+/).filter(Boolean));
+        let overlap = 0;
+        claimWords.forEach((word) => {
+          if (contextWords.has(word)) overlap += 1;
+        });
+        return { cq, overlap };
+      })
+      .sort((a, b) => b.overlap - a.overlap);
+
+    return byOverlap[0]?.overlap ? byOverlap[0].cq : undefined;
+  }, [citationInfo?.claim_quotes, claimContext]);
+
+  const quote = matchedClaimQuote?.supporting_quote || citationInfo?.supporting_quote;
+  const attribution = matchedClaimQuote?.attribution;
+  const attributionLabel =
+    attribution === "direct"
+      ? "Direct evidence"
+      : attribution === "synthesised"
+      ? "Contributing evidence"
+      : attribution === "inferred"
+      ? "Supporting premise"
+      : null;
+  const attributionMarker =
+    attribution === "direct" ? "●" : attribution === "synthesised" ? "◐" : attribution === "inferred" ? "○" : null;
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (url) return;
@@ -145,6 +195,11 @@ function CitationLink({ citationKey, citationNumber, citationInfo, onCitationCli
               {quote.length > 200 ? quote.substring(0, 200) + "…" : quote}
             </div>
           </div>
+          {attributionLabel && attributionMarker && (
+            <div className="mt-2 text-[11px] opacity-80">
+              {attributionMarker} {attributionLabel}
+            </div>
+          )}
         </div>
       )}
       {url && (

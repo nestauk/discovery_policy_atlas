@@ -229,7 +229,6 @@ async def contextual_summarise_chunk(
         chunk_id=chunk.chunk_id,
         document_id=chunk.document_id,
         document_title=chunk.doc_title or "",
-        chunk_text=chunk_text[:500],  # Store truncated for reference
         citation_key=citation_key,
         full_citation=build_full_citation(chunk),
         theme_id=theme_id,

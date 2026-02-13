@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.schemas import ScoredContext
+from app.services.synthesis.utils import fetch_chunk_texts
 from app.services.synthesis.tools.base import (
     BaseTool,
     ToolResult,
@@ -69,7 +70,7 @@ class SearchExtractionsTool(BaseTool):
     )
     max_results = 5
 
-    def _rcs_search(
+    async def _rcs_search(
         self,
         query: str,
         contexts: List[ScoredContext],
@@ -92,8 +93,12 @@ class SearchExtractionsTool(BaseTool):
         scored_matches.sort(key=lambda x: x[1], reverse=True)
         results: List[SearchResultItem] = []
         seen_docs: set = set()
+        top_matches = scored_matches[: max_results * 2]
+        chunk_text_map = await fetch_chunk_texts(
+            [ctx.chunk_id for ctx, _ in top_matches if getattr(ctx, "chunk_id", "")]
+        )
 
-        for ctx, score in scored_matches[: max_results * 2]:
+        for ctx, score in top_matches:
             if ctx.document_id in seen_docs:
                 continue
             seen_docs.add(ctx.document_id)
@@ -107,7 +112,7 @@ class SearchExtractionsTool(BaseTool):
                     document_title=ctx.document_title,
                     document_id=ctx.document_id,
                     similarity_score=score / 10,
-                    content=ctx.chunk_text[:500] if ctx.chunk_text else "",
+                    content=chunk_text_map.get(ctx.chunk_id, ""),
                     chunk_id=ctx.chunk_id,
                 )
             )
@@ -154,7 +159,7 @@ class SearchExtractionsTool(BaseTool):
                     document_title=title,
                     document_id=doc_uuid,
                     similarity_score=float(chunk.get("similarity", 0)),
-                    content=str(chunk.get("content", ""))[:500],
+                    content=str(chunk.get("content", "")),
                     chunk_id=str(chunk.get("id", "")),
                 )
             )
@@ -199,7 +204,7 @@ class SearchExtractionsTool(BaseTool):
         # First, try to find relevant pre-computed RCS contexts
         rcs_results = []
         if all_scored_contexts:
-            rcs_results = self._rcs_search(
+            rcs_results = await self._rcs_search(
                 query, all_scored_contexts, doc_citation_map, max_results
             )
             if rcs_results:

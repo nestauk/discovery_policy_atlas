@@ -22,6 +22,7 @@ from app.services.synthesis.schemas import (
     CoreAnswer,
     SynthesisSectionProposal,
     CitationInfo,
+    ClaimQuote,
     EvidenceSnapshotRow,
     TopCitationItem,
 )
@@ -149,7 +150,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     Uses the BriefingOrchestrator to:
     1. Gather evidence using tools (get_theme_evidence, search_extractions, etc.)
     2. Generate each section with gpt-5-mini
-    3. Verify each section (soft verification with warnings)
+    3. Ground each section against source evidence (soft grounding with warnings)
 
     Args:
         state: Current synthesis state with RCS results.
@@ -325,6 +326,23 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     citation_map = {
         f"[{c.citation_number}]": c for c in grounded_citations if c.citation_number
     }
+
+    # Merge per-claim quotes from section outputs into citation map
+    for section_key, output in section_outputs.items():
+        for quote in output.claim_quotes:
+            citation_key = f"[{quote.citation_number}]"
+            citation = citation_map.get(citation_key)
+            if not citation:
+                continue
+            citation.claim_quotes.append(
+                ClaimQuote(
+                    claim_text=quote.claim_text,
+                    supporting_quote=quote.supporting_quote,
+                    attribution=quote.attribution,
+                    chunk_id=quote.chunk_id,
+                    section=section_key,
+                )
+            )
 
     print("\n  Briefing complete:")
     print(f"    - Total tool calls: {total_tool_calls}")

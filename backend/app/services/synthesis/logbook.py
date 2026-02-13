@@ -23,6 +23,7 @@ from app.services.synthesis.schemas import (
     OutcomeTheme,
     RiskTheme,
     CitationInfo,
+    ClaimQuote,
     EvidenceCoverageSnapshot,
     StructuredBriefing,
 )
@@ -34,6 +35,35 @@ from app.services.synthesis.nodes.impact_synthesis import (
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
+
+
+def _confidence_from_attribution(attribution: str) -> float:
+    """Map attribution label to legacy confidence values for compatibility."""
+    if attribution == "direct":
+        return 1.0
+    if attribution == "synthesised":
+        return 0.7
+    if attribution == "inferred":
+        return 0.4
+    return 1.0
+
+
+def _attribution_from_row(row: Dict) -> str:
+    """Read attribution from row, with legacy confidence fallback."""
+    attribution = row.get("attribution")
+    if attribution in {"direct", "synthesised", "inferred"}:
+        return attribution
+
+    confidence = row.get("confidence")
+    try:
+        conf = float(confidence)
+    except (TypeError, ValueError):
+        conf = 1.0
+    if conf >= 0.85:
+        return "direct"
+    if conf >= 0.55:
+        return "synthesised"
+    return "inferred"
 
 
 def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
@@ -208,23 +238,42 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                 )
             )
 
-    # Build citation map
+    # Build citation map (with per-claim quotes)
     citation_map: Dict[str, CitationInfo] = {}
+    citation_rows: Dict[str, List[Dict]] = {}
     for cit in citations_res.data or []:
         cit_key = cit.get("citation_key", "")
         if cit_key:
-            citation_map[cit_key] = CitationInfo(
-                citation_key=cit_key,
-                citation_number=cit.get("citation_index") or 0,
-                doc_id=cit.get("doc_id"),
-                analysis_document_id=str(cit.get("analysis_document_id", "")),
-                author_short=cit.get("author_short"),
-                year=cit.get("year"),
-                title=cit.get("title"),
-                url=cit.get("url"),
-                supporting_quote=cit.get("supporting_quote"),
-                chunk_id=cit.get("chunk_id"),
+            citation_rows.setdefault(cit_key, []).append(cit)
+
+    for cit_key, rows in citation_rows.items():
+        base_row = next((r for r in rows if not r.get("section")), rows[0])
+        claim_quotes: List[ClaimQuote] = []
+        for row in rows:
+            if not row.get("section") or not row.get("claim_text"):
+                continue
+            claim_quotes.append(
+                ClaimQuote(
+                    claim_text=row.get("claim_text") or "",
+                    supporting_quote=row.get("supporting_quote") or "",
+                    attribution=_attribution_from_row(row),
+                    chunk_id=row.get("chunk_id") or "",
+                    section=row.get("section") or "",
+                )
             )
+        citation_map[cit_key] = CitationInfo(
+            citation_key=cit_key,
+            citation_number=base_row.get("citation_index") or 0,
+            doc_id=base_row.get("doc_id"),
+            analysis_document_id=str(base_row.get("analysis_document_id", "")),
+            author_short=base_row.get("author_short"),
+            year=base_row.get("year"),
+            title=base_row.get("title"),
+            url=base_row.get("url"),
+            supporting_quote=base_row.get("supporting_quote"),
+            chunk_id=base_row.get("chunk_id"),
+            claim_quotes=claim_quotes,
+        )
 
     # Parse evidence coverage
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = None
@@ -317,6 +366,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             if not isinstance(info_dict, dict):
                 continue
 
+            # Document-level fallback citation row
             citations_to_insert.append(
                 {
                     "id": str(uuid.uuid4()),
@@ -330,9 +380,39 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "url": info_dict.get("url"),
                     "supporting_quote": info_dict.get("supporting_quote"),
                     "chunk_id": info_dict.get("chunk_id"),
+                    "section": None,
+                    "claim_text": None,
+                    "attribution": None,
+                    "confidence": None,
                     "created_at": datetime.utcnow().isoformat(),
                 }
             )
+
+            # Per-claim citation rows
+            for claim_quote in info_dict.get("claim_quotes") or []:
+                if not isinstance(claim_quote, dict):
+                    continue
+                attribution = str(claim_quote.get("attribution") or "direct")
+                citations_to_insert.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "synthesis_run_id": run_id,
+                        "analysis_document_id": info_dict.get("analysis_document_id"),
+                        "citation_key": cit_key,
+                        "citation_index": info_dict.get("citation_number") or i,
+                        "author_short": info_dict.get("author_short"),
+                        "year": info_dict.get("year"),
+                        "title": info_dict.get("title"),
+                        "url": info_dict.get("url"),
+                        "supporting_quote": claim_quote.get("supporting_quote"),
+                        "chunk_id": claim_quote.get("chunk_id"),
+                        "section": claim_quote.get("section"),
+                        "claim_text": claim_quote.get("claim_text"),
+                        "attribution": attribution,
+                        "confidence": _confidence_from_attribution(attribution),
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
 
         logger.info(f"Inserting {len(citations_to_insert)} citations")
         if citations_to_insert:

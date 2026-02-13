@@ -171,3 +171,39 @@ def build_langfuse_config(
             extra=extra,
         ),
     }
+
+
+async def fetch_chunk_texts(chunk_ids: List[str]) -> Dict[str, str]:
+    """Batch-fetch full chunk content from the chunks table.
+
+    Args:
+        chunk_ids: List of chunk UUIDs to fetch.
+
+    Returns:
+        Mapping of chunk_id to full content text.
+    """
+    unique_chunk_ids = [cid for cid in dict.fromkeys(chunk_ids) if cid]
+    if not unique_chunk_ids:
+        return {}
+
+    from app.core.config import settings
+    from supabase import create_client
+
+    supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    try:
+        res = (
+            supabase.table("chunks")
+            .select("id, content")
+            .in_("id", unique_chunk_ids)
+            .execute()
+        )
+    except Exception:
+        return {cid: "" for cid in unique_chunk_ids}
+
+    chunk_text_map: Dict[str, str] = {cid: "" for cid in unique_chunk_ids}
+    for row in res.data or []:
+        chunk_id = str(row.get("id") or "")
+        if chunk_id:
+            chunk_text_map[chunk_id] = str(row.get("content") or "")
+
+    return chunk_text_map

@@ -8,13 +8,15 @@ tool execution, section generation (gpt-5-mini), and verification.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal, Tuple
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.services.synthesis.schemas import RecommendationsOutput
+from app.services.synthesis.utils import fetch_chunk_texts
 from app.services.synthesis.tools.base import (
     get_tool_registry,
 )
@@ -60,24 +62,29 @@ class OrchestratorDecision(BaseModel):
     )
 
 
-class VerificationClaim(BaseModel):
-    """A single claim extracted during verification."""
+class ClaimQuoteResult(BaseModel):
+    """Grounding result for a single (claim, citation) pair."""
 
-    claim: str = Field(..., description="The claim text")
-    citations: List[int] = Field(
-        default_factory=list, description="Citation numbers used"
-    )
+    claim_text: str = Field(..., description="The claim text")
+    citation_number: int = Field(..., description="Citation number [N] for this claim")
     is_supported: bool = Field(..., description="Whether the claim is supported")
+    attribution: Literal["direct", "synthesised", "inferred"] = Field(
+        ..., description="Attribution relationship between claim and source"
+    )
+    supporting_quote: str = Field(
+        "", description="Verbatim supporting quote from source evidence"
+    )
+    chunk_id: str = Field("", description="Source chunk UUID for the quote")
     issue: Optional[str] = Field(
         None, description="Description of issue if not supported"
     )
 
 
-class VerificationResult(BaseModel):
-    """Structured verification output."""
+class GroundingResult(BaseModel):
+    """Structured grounding output."""
 
-    claims: List[VerificationClaim] = Field(
-        default_factory=list, description="Extracted claims with support status"
+    claim_quotes: List[ClaimQuoteResult] = Field(
+        default_factory=list, description="Per-claim grounding outcomes"
     )
     overall_supported: bool = Field(
         ..., description="Whether all claims are sufficiently supported"
@@ -194,37 +201,6 @@ Write the section content in markdown. Include citations inline.
 {additional_instructions}"""
 
 
-VERIFICATION_PROMPT = """You are verifying a section of a policy briefing for grounded citations.
-
-## Section Content
-{section_content}
-
-## Available Evidence
-{evidence_context}
-
-## Task
-1. Extract each major claim from the section
-2. Check if each claim is supported by the cited evidence
-3. Identify any unsupported claims or incorrect citations
-
-Respond with JSON:
-{{
-    "claims": [
-        {{
-            "claim": "claim text",
-            "citations": [1, 3],
-            "is_supported": true/false,
-            "issue": "description if not supported, null otherwise"
-        }}
-    ],
-    "overall_supported": true/false,
-    "issues_summary": "summary of issues if any, null otherwise",
-    "suggested_fixes": ["fix 1", "fix 2"] or []
-}}
-
-Only output JSON."""
-
-
 @dataclass
 class OrchestratorContext:
     """Context for orchestrator execution.
@@ -264,6 +240,7 @@ class SectionOutput(BaseModel):
     citations_used: List[int] = Field(default_factory=list)
     verification_passed: bool = True
     verification_issues: List[str] = Field(default_factory=list)
+    claim_quotes: List[ClaimQuoteResult] = Field(default_factory=list)
     tool_calls_made: int = 0
 
 
@@ -273,8 +250,8 @@ class BriefingOrchestrator:
     Uses a multi-phase approach:
     1. Evidence gathering (orchestrator decides which tools to call)
     2. Section generation (using gathered evidence)
-    3. Verification (checking claims against evidence)
-    4. Iteration if verification fails (up to 2 retries)
+    3. Grounding (checking claims against source evidence and extracting quotes)
+    4. Iteration if grounding finds unsupported claims (up to 2 retries)
     """
 
     def __init__(self, state: Dict[str, Any]):
@@ -294,26 +271,56 @@ class BriefingOrchestrator:
             model=GENERATION_MODEL,
         )
 
+    def _emit_grounding_warning(self, section_name: str, issues: List[str]) -> None:
+        """Emit grounding warnings to Langfuse handler when available."""
+        message = (
+            f"Grounding exhausted retries for section '{section_name}'. "
+            f"Unsupported issues: {issues[:10]}"
+        )
+        logger.warning(message)
+
+        handler = self.state.get("langfuse_handler")
+        if not handler:
+            return
+
+        try:
+            if hasattr(handler, "warning") and callable(handler.warning):
+                handler.warning(message)
+                return
+            if hasattr(handler, "log") and callable(handler.log):
+                handler.log(level="warning", message=message)
+                return
+            if hasattr(handler, "on_event") and callable(handler.on_event):
+                handler.on_event(
+                    {
+                        "level": "warning",
+                        "name": "grounding_retry_exhausted",
+                        "message": message,
+                    }
+                )
+        except Exception as e:
+            logger.debug(f"Langfuse warning emission failed: {e}")
+
     async def generate_section(
         self,
         section_name: str,
         section_instructions: str,
         additional_instructions: str = "",
-        max_retries: int = 1,
+        max_retries: int = 2,
     ) -> SectionOutput:
         """Generate a briefing section with tool-augmented evidence.
 
-        Uses soft verification - content is always returned even if
-        verification flags issues. This prevents cascade failures.
+        Uses soft grounding - content is always returned even if
+        grounding flags unsupported claims after retries.
 
         Args:
             section_name: Name of the section (e.g., "Background").
             section_instructions: What the section should cover.
             additional_instructions: Extra formatting/content guidance.
-            max_retries: Max verification retry attempts (reduced to 1 for soft verification).
+            max_retries: Max grounding retry attempts.
 
         Returns:
-            SectionOutput with content and verification warnings.
+            SectionOutput with content, grounding status, and claim-level quotes.
         """
         ctx = OrchestratorContext(
             state=self.state,
@@ -337,38 +344,39 @@ class BriefingOrchestrator:
         # Extract citations used
         citations_used = self._extract_citations(content)
 
-        # Phase 3: Soft verification - verify once, capture warnings
-        verification = await self._verify_section(ctx, content)
-        verification_passed = verification.get("overall_supported", True)
-        verification_issues = verification.get("suggested_fixes", [])
+        # Phase 3: Grounding + quote extraction with retry loop
+        grounding = await self._ground_and_extract_quotes(ctx, content)
+        verification_passed = grounding.overall_supported
+        verification_issues = list(grounding.suggested_fixes or [])
 
-        # If verification failed and we have retries, try once more
-        if not verification_passed and max_retries > 0:
+        retries_remaining = max_retries
+        while not verification_passed and retries_remaining > 0:
             logger.info(
-                f"Section '{section_name}' verification had issues, retrying once: "
-                f"{verification.get('issues_summary')}"
+                f"Section '{section_name}' grounding had issues, retrying: "
+                f"{grounding.issues_summary or 'unsupported claims detected'}"
             )
-            # Add verification feedback to context for retry
+            unsupported = [cq for cq in grounding.claim_quotes if not cq.is_supported]
+            retry_issues = [
+                f"Claim: {cq.claim_text} [citation {cq.citation_number}] - {cq.issue or 'Not supported by source evidence'}"
+                for cq in unsupported
+            ]
+            verification_issues = retry_issues or verification_issues
             ctx.gathered_evidence.append(
                 {
-                    "type": "verification_feedback",
+                    "tool": "verification_feedback",
                     "issues": verification_issues,
-                    "claims_to_fix": [
-                        c
-                        for c in verification.get("claims", [])
-                        if not c.get("is_supported", True)
-                    ],
+                    "claims_to_fix": [cq.model_dump() for cq in unsupported],
                 }
             )
-            # Regenerate
-            content = await self._generate_section_content(
-                ctx,
-                additional_instructions,
-            )
+            content = await self._generate_section_content(ctx, additional_instructions)
             citations_used = self._extract_citations(content)
-            verification = await self._verify_section(ctx, content)
-            verification_passed = verification.get("overall_supported", True)
-            verification_issues = verification.get("suggested_fixes", [])
+            grounding = await self._ground_and_extract_quotes(ctx, content)
+            verification_passed = grounding.overall_supported
+            verification_issues = list(grounding.suggested_fixes or verification_issues)
+            retries_remaining -= 1
+
+        if not verification_passed:
+            self._emit_grounding_warning(section_name, verification_issues)
 
         # Always return content - verification is informational only
         return SectionOutput(
@@ -376,6 +384,7 @@ class BriefingOrchestrator:
             citations_used=citations_used,
             verification_passed=verification_passed,
             verification_issues=verification_issues,
+            claim_quotes=grounding.claim_quotes,
             tool_calls_made=ctx.tool_call_count,
         )
 
@@ -585,8 +594,8 @@ Decide which tools to call to gather the most relevant evidence for this section
                 tool_name = tc.tool
                 arguments = _prepare_arguments(tool_name, tc.arguments or {})
 
-                # Phase 1 is evidence gathering only. Verification is handled separately
-                # in `_verify_section()`; do not allow verification tools here even if
+                # Phase 1 is evidence gathering only. Grounding is handled separately
+                # in `_ground_and_extract_quotes()`; do not allow verification tools here even if
                 # the LLM attempts to call them.
                 if tool_name in {"verify_claim_support", "verify_multiple_claims"}:
                     logger.warning(
@@ -759,7 +768,7 @@ Decide which tools to call to gather the most relevant evidence for this section
             )
 
         # Build evidence context
-        evidence_context = self._format_evidence_for_generation(ctx)
+        evidence_context = await self._format_evidence_for_generation(ctx)
 
         prompt = SECTION_GENERATION_PROMPT.format(
             section_name=ctx.section_name,
@@ -779,7 +788,7 @@ Decide which tools to call to gather the most relevant evidence for this section
         additional_instructions: str,
     ) -> str:
         """Generate interventions table using structured output then render deterministically."""
-        evidence_context = self._format_evidence_for_generation(ctx)
+        evidence_context = await self._format_evidence_for_generation(ctx)
 
         prompt = f"""
 You are writing the "Key Interventions" table for an executive policy briefing.
@@ -849,51 +858,218 @@ Additional guidance:
             )
         return "\n".join(lines).strip()
 
-    async def _verify_section(
+    def _extract_claim_citation_pairs(
+        self, content: str
+    ) -> List[Tuple[str, List[int]]]:
+        """Extract claim/citation pairs from generated section content."""
+        claims: List[Tuple[str, List[int]]] = []
+        seen: set = set()
+        for sentence in re.findall(r"[^.!?\n]*\[\d+\][^.!?\n]*[.!?]?", content):
+            claim_text = sentence.strip()
+            if not claim_text:
+                continue
+            citations = sorted({int(x) for x in re.findall(r"\[(\d+)\]", claim_text)})
+            if not citations:
+                continue
+            key = (claim_text, tuple(citations))
+            if key in seen:
+                continue
+            seen.add(key)
+            claims.append((claim_text, citations))
+        return claims
+
+    def _section_grounding_guidance(self, section_name: str) -> str:
+        """Return section-aware grounding guidance."""
+        section_lower = section_name.lower()
+        if "recommendation" in section_lower:
+            return (
+                "Recommendation section: inferred attributions are common when claims "
+                "logically extrapolate from the evidence."
+            )
+        if "synthesis" in section_lower:
+            return "Synthesis section: a mix of direct and synthesised attributions is expected."
+        return (
+            "Factual section: expect mostly direct attributions unless the claim explicitly "
+            "combines multiple sources."
+        )
+
+    async def _ground_and_extract_quotes(
         self,
         ctx: OrchestratorContext,
         content: str,
-    ) -> Dict[str, Any]:
-        """Verify section content against evidence using structured output.
+    ) -> GroundingResult:
+        """Verify claims against source text and extract per-claim supporting quotes."""
+        claim_pairs = self._extract_claim_citation_pairs(content)
+        if not claim_pairs:
+            return GroundingResult(
+                claim_quotes=[],
+                overall_supported=True,
+                issues_summary=None,
+                suggested_fixes=[],
+            )
 
-        Verification is now soft - it always returns a result and doesn't
-        block content generation. Issues are captured as warnings.
+        citation_by_number = {
+            getattr(c, "citation_number", 0): c
+            for c in (ctx.state.get("grounded_citations") or [])
+            if getattr(c, "citation_number", 0)
+        }
+        all_contexts = ctx.state.get("all_scored_contexts") or []
+        extraction_quotes = ctx.state.get("extraction_quotes") or {}
 
-        Args:
-            ctx: Context with gathered evidence.
-            content: Generated section content.
+        citation_to_claims: Dict[int, List[str]] = {}
+        for claim_text, citations in claim_pairs:
+            for citation_number in citations:
+                citation_to_claims.setdefault(citation_number, []).append(claim_text)
 
-        Returns:
-            Verification result dictionary.
-        """
-        evidence_context = self._format_evidence_for_generation(ctx)
-
-        prompt = VERIFICATION_PROMPT.format(
-            section_content=content,
-            evidence_context=evidence_context,
-        )
-
-        # Use structured output for verification (function_calling for compatibility)
-        structured_verifier = self.generation_llm.with_structured_output(
-            VerificationResult,
+        collected: List[ClaimQuoteResult] = []
+        suggested_fixes: List[str] = []
+        issue_messages: List[str] = []
+        structured_grounder = self.generation_llm.with_structured_output(
+            GroundingResult,
             method="function_calling",
         )
-        config = self._build_langfuse_config("verify_section")
 
-        try:
-            result: VerificationResult = await structured_verifier.ainvoke(
-                prompt, config=config
+        for citation_number, claims_for_citation in citation_to_claims.items():
+            citation = citation_by_number.get(citation_number)
+            if citation is None:
+                for claim_text in claims_for_citation:
+                    collected.append(
+                        ClaimQuoteResult(
+                            claim_text=claim_text,
+                            citation_number=citation_number,
+                            is_supported=False,
+                            attribution="direct",
+                            supporting_quote="",
+                            chunk_id="",
+                            issue="Citation not found in grounded citation map.",
+                        )
+                    )
+                suggested_fixes.append(
+                    f"Replace or remove unavailable citation [{citation_number}] for affected claims."
+                )
+                continue
+
+            doc_id = citation.analysis_document_id
+            doc_chunk_ids = [
+                context.chunk_id
+                for context in all_contexts
+                if context.document_id == doc_id and context.chunk_id
+            ]
+            chunk_text_map = await fetch_chunk_texts(doc_chunk_ids)
+            chunk_blocks = []
+            for chunk_id in doc_chunk_ids[:12]:
+                chunk_text = chunk_text_map.get(chunk_id, "")
+                if chunk_text:
+                    chunk_blocks.append(f"- chunk_id={chunk_id}\n  text={chunk_text}")
+
+            extraction_quote_blocks = [
+                f"- {q}" for q in (extraction_quotes.get(doc_id) or [])[:12] if q
+            ]
+            claims_block = "\n".join(f"- {c}" for c in claims_for_citation)
+            source_block = (
+                "\n".join(chunk_blocks + extraction_quote_blocks) or "- (none)"
             )
-            return result.model_dump()
-        except Exception as e:
-            logger.warning(f"Verification structured output failed: {e}")
-            # Soft failure - assume content is OK if verification itself fails
-            return {
-                "claims": [],
-                "overall_supported": True,
-                "issues_summary": None,
-                "suggested_fixes": [],
-            }
+
+            prompt = (
+                "You are grounding policy claims against source evidence.\n\n"
+                f"Section: {ctx.section_name}\n"
+                f"{self._section_grounding_guidance(ctx.section_name)}\n\n"
+                "A claim is supported if the source text contains relevant evidence that "
+                "reasonably underpins the claim (direct, synthesised, or inferred).\n"
+                "- direct: source alone substantiates the specific claim.\n"
+                "- synthesised: source contributes evidence but claim needs multiple sources.\n"
+                "- inferred: source provides premises and claim extrapolates beyond explicit text.\n"
+                "Mark unsupported only when this source provides no relevant evidence.\n\n"
+                f"Citation number: [{citation_number}]\n"
+                f"Document title: {citation.title or 'Unknown'}\n"
+                "Claims to assess:\n"
+                f"{claims_block}\n\n"
+                "Available source evidence (verbatim text):\n"
+                f"{source_block}\n\n"
+                "Return one claim_quotes entry per claim. "
+                "supporting_quote must be verbatim from the source text (<=200 chars). "
+                "chunk_id should match the supporting chunk when available."
+            )
+
+            try:
+                result: GroundingResult = await structured_grounder.ainvoke(
+                    prompt,
+                    config=self._build_langfuse_config(
+                        f"ground_section_citation_{citation_number}"
+                    ),
+                )
+                # Normalise citation_number per grouped call.
+                returned_claims = {
+                    item.claim_text.strip() for item in result.claim_quotes
+                }
+                for item in result.claim_quotes:
+                    collected.append(
+                        ClaimQuoteResult(
+                            claim_text=item.claim_text,
+                            citation_number=citation_number,
+                            is_supported=item.is_supported,
+                            attribution=item.attribution,
+                            supporting_quote=item.supporting_quote,
+                            chunk_id=item.chunk_id,
+                            issue=item.issue,
+                        )
+                    )
+                for claim_text in claims_for_citation:
+                    if claim_text.strip() not in returned_claims:
+                        collected.append(
+                            ClaimQuoteResult(
+                                claim_text=claim_text,
+                                citation_number=citation_number,
+                                is_supported=False,
+                                attribution="direct",
+                                supporting_quote="",
+                                chunk_id="",
+                                issue=(
+                                    "Grounding output omitted this claim; treated as unsupported."
+                                ),
+                            )
+                        )
+                        suggested_fixes.append(
+                            f"Re-ground omitted claim for citation [{citation_number}]."
+                        )
+                if result.suggested_fixes:
+                    suggested_fixes.extend(result.suggested_fixes)
+                if result.issues_summary:
+                    issue_messages.append(result.issues_summary)
+            except Exception as e:
+                logger.warning(
+                    f"Grounding failed for citation [{citation_number}]: {e}"
+                )
+                for claim_text in claims_for_citation:
+                    collected.append(
+                        ClaimQuoteResult(
+                            claim_text=claim_text,
+                            citation_number=citation_number,
+                            is_supported=False,
+                            attribution="direct",
+                            supporting_quote="",
+                            chunk_id="",
+                            issue="Grounding call failed; unable to verify against source evidence.",
+                        )
+                    )
+                suggested_fixes.append(
+                    f"Re-ground claim(s) citing [{citation_number}] due to grounding tool failure."
+                )
+
+        overall_supported = all(item.is_supported for item in collected)
+        if not overall_supported:
+            for item in collected:
+                if not item.is_supported:
+                    issue_messages.append(
+                        f"[{item.citation_number}] {item.claim_text}: {item.issue or 'Unsupported'}"
+                    )
+
+        return GroundingResult(
+            claim_quotes=collected,
+            overall_supported=overall_supported,
+            issues_summary="\n".join(issue_messages) if issue_messages else None,
+            suggested_fixes=list(dict.fromkeys(suggested_fixes)),
+        )
 
     def _build_tool_descriptions(self) -> str:
         """Build formatted tool descriptions for the orchestrator.
@@ -901,8 +1077,8 @@ Additional guidance:
         Returns:
             Formatted string of tool descriptions.
         """
-        # Phase 1 is evidence gathering only. Verification is handled separately
-        # in `_verify_section()` using structured output.
+        # Phase 1 is evidence gathering only. Grounding is handled separately
+        # in `_ground_and_extract_quotes()` using structured output.
         excluded_tools = {
             "verify_claim_support",
             "verify_multiple_claims",
@@ -926,7 +1102,7 @@ Additional guidance:
 
         return "\n".join(descriptions)
 
-    def _format_evidence_for_generation(self, ctx: OrchestratorContext) -> str:
+    async def _format_evidence_for_generation(self, ctx: OrchestratorContext) -> str:
         """Format gathered evidence for the generation prompt.
 
         Args:
@@ -936,6 +1112,20 @@ Additional guidance:
             Formatted evidence string.
         """
         parts: List[str] = []
+        all_chunk_ids: List[str] = []
+        for ev in ctx.gathered_evidence:
+            data = ev.get("data", {})
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        chunk_id = str(item.get("chunk_id") or "")
+                        if chunk_id:
+                            all_chunk_ids.append(chunk_id)
+            elif isinstance(data, dict):
+                chunk_id = str(data.get("chunk_id") or "")
+                if chunk_id:
+                    all_chunk_ids.append(chunk_id)
+        chunk_text_map = await fetch_chunk_texts(all_chunk_ids)
 
         # Build citation map fallback if missing
         doc_citation_map = ctx.state.get("doc_citation_map") or {}
@@ -965,6 +1155,13 @@ Additional guidance:
                 items = []
                 for item in data[:5]:  # Limit to 5 per tool call
                     if isinstance(item, dict):
+                        chunk_id = str(item.get("chunk_id") or "")
+                        source_text = (
+                            chunk_text_map.get(chunk_id)
+                            or str(item.get("chunk_text") or "")
+                            or str(item.get("key_context_chunk_text") or "")
+                            or str(item.get("content") or "")
+                        )
                         if tool == "get_intervention_outcomes":
                             # Rich formatting for aggregated intervention outcomes
                             name = item.get("intervention_name", "Unknown")
@@ -998,20 +1195,24 @@ Additional guidance:
                             evs = item.get("evidence_strength", "?")
                             imp = item.get("impact_score", "?")
                             rel = item.get("relevance_score", "?")
-                            summary = (item.get("key_context_summary") or "")[:260]
+                            summary = item.get("key_context_summary") or ""
                             prefix = f"[{cit}] " if cit else ""
                             items.append(
-                                f"{prefix}{title} (evidence={evs}/5, impact={imp}/5, relevance={rel}): {summary}..."
+                                f"{prefix}({title}; evidence={evs}/5, impact={imp}/5, relevance={rel})\n"
+                                f"  Summary: {summary}\n"
+                                f"  Source text: {source_text}"
                             )
                         else:
                             cit = item.get("citation_number", "?")
-                            summary = item.get("summary", item.get("content", ""))[:300]
+                            summary = item.get("summary", item.get("content", ""))
                             title = item.get("document_title", "Unknown")
                             rel = item.get(
                                 "relevance_score", item.get("similarity_score", "?")
                             )
                             items.append(
-                                f"[{cit}] ({title}): {summary}... (relevance: {rel})"
+                                f"[{cit}] ({title}; relevance: {rel})\n"
+                                f"  Summary: {summary}\n"
+                                f"  Source text: {source_text}"
                             )
                 if items:
                     parts.append(f"### Evidence from {tool}\n" + "\n".join(items))
@@ -1028,14 +1229,24 @@ Additional guidance:
             # Fallback to pre-computed RCS if no tool evidence
             parts.append("### Pre-computed Evidence (Fallback)")
             all_contexts = ctx.state.get("all_scored_contexts") or []
+            fallback_chunk_text_map = await fetch_chunk_texts(
+                [
+                    ctx_item.chunk_id
+                    for ctx_item in all_contexts[:10]
+                    if ctx_item.chunk_id
+                ]
+            )
             for ctx_item in all_contexts[:10]:
                 if hasattr(ctx_item, "summary"):
                     doc_cit_map = doc_citation_map or ctx.state.get(
                         "doc_citation_map", {}
                     )
                     cit = doc_cit_map.get(ctx_item.document_id, "?")
+                    source_text = fallback_chunk_text_map.get(ctx_item.chunk_id, "")
                     parts.append(
-                        f"[{cit}] {ctx_item.summary[:200]}... (relevance: {ctx_item.relevance_score})"
+                        f"[{cit}] (relevance: {ctx_item.relevance_score})\n"
+                        f"  Summary: {ctx_item.summary}\n"
+                        f"  Source text: {source_text}"
                     )
 
         return "\n\n".join(parts) if parts else "No evidence available."
@@ -1080,7 +1291,7 @@ Additional guidance:
         additional_instructions: str,
     ) -> str:
         """Generate recommendations using structured output to ensure format consistency."""
-        evidence_context = self._format_evidence_for_generation(ctx)
+        evidence_context = await self._format_evidence_for_generation(ctx)
 
         prompt = f"""
 You are writing policy recommendations for UK cabinet ministers.

@@ -19,6 +19,7 @@ from app.services.synthesis.schemas import (
     ThemeEvidence,
     InterventionDetails,
 )
+from app.services.synthesis.utils import fetch_chunk_texts
 from app.services.synthesis.tools.base import (
     BaseTool,
     ToolResult,
@@ -59,7 +60,7 @@ class ThemeEvidenceItem(BaseModel):
         document_title: Source document title.
         relevance_score: RCS relevance score (0-10).
         document_quality: Evidence strength score (1-5), None if unavailable.
-        chunk_text: Original chunk text (truncated).
+        chunk_text: Original chunk text.
     """
 
     summary: str
@@ -67,6 +68,7 @@ class ThemeEvidenceItem(BaseModel):
     document_title: str
     relevance_score: int
     document_quality: Optional[int] = None
+    chunk_id: str = ""
     chunk_text: str = ""
 
 
@@ -168,6 +170,9 @@ class GetThemeEvidenceTool(BaseTool):
         filtered = [
             ctx for ctx in matching_contexts if ctx.relevance_score >= min_relevance
         ]
+        chunk_text_map = await fetch_chunk_texts(
+            [ctx.chunk_id for ctx in filtered if getattr(ctx, "chunk_id", "")]
+        )
 
         # Optional: boost contexts that match the user's stated population/outcomes
         target_population = state.get("target_population") or []
@@ -179,7 +184,8 @@ class GetThemeEvidenceTool(BaseTool):
         def _intent_bonus(ctx: ScoredContext) -> int:
             if not (pop_terms or out_terms):
                 return 0
-            hay = f"{ctx.summary or ''} {ctx.chunk_text or ''}".lower()
+            chunk_text = chunk_text_map.get(ctx.chunk_id, "")
+            hay = f"{ctx.summary or ''} {chunk_text}".lower()
             bonus = 0
             # Small, bounded bonuses; relevance_score remains the primary ordering.
             if pop_terms and any(t in hay for t in pop_terms):
@@ -236,7 +242,8 @@ class GetThemeEvidenceTool(BaseTool):
                     document_title=doc_title,
                     relevance_score=ctx.relevance_score,
                     document_quality=evidence_strength,
-                    chunk_text=ctx.chunk_text[:500] if ctx.chunk_text else "",
+                    chunk_id=ctx.chunk_id,
+                    chunk_text=chunk_text_map.get(ctx.chunk_id, ""),
                 )
             )
 
@@ -402,10 +409,20 @@ class GetCitationContextTool(BaseTool):
         doc_meta = doc_metadata.get(doc_id, {})
         doc_score_info = doc_scores.get(doc_id, {})
 
-        # Get supporting quote from citation or chunk text from context
+        citation_chunk_id = getattr(citation_info, "chunk_id", "") or ""
+        context_chunk_id = matching_context.chunk_id if matching_context else ""
+        chunk_text_map = await fetch_chunk_texts(
+            [cid for cid in [citation_chunk_id, context_chunk_id] if cid]
+        )
+
+        # Get supporting quote from citation or chunk text from context/db
         full_text = getattr(citation_info, "supporting_quote", "") or ""
-        if not full_text and matching_context:
-            full_text = matching_context.chunk_text or ""
+        if not full_text:
+            full_text = (
+                chunk_text_map.get(citation_chunk_id)
+                or chunk_text_map.get(context_chunk_id)
+                or ""
+            )
 
         # Build author_year string
         author = doc_meta.get("author_short") or getattr(
@@ -679,6 +696,9 @@ class GetInterventionDetailsTool(BaseTool):
 
         aggregated_interventions = state.get("aggregated_interventions") or []
         all_contexts: List[ScoredContext] = state.get("all_scored_contexts") or []
+        all_chunk_text_map = await fetch_chunk_texts(
+            [ctx.chunk_id for ctx in all_contexts if getattr(ctx, "chunk_id", "")]
+        )
         doc_citation_map: Dict[str, int] = state.get("doc_citation_map") or {}
         doc_metadata: Dict[str, Dict[str, Any]] = state.get("doc_metadata") or {}
 
@@ -725,7 +745,7 @@ class GetInterventionDetailsTool(BaseTool):
                 if (not supporting_doc_uuids or ctx.document_id in supporting_doc_uuids)
                 and (
                     name.lower() in (ctx.summary or "").lower()
-                    or name.lower() in (ctx.chunk_text or "").lower()
+                    or name.lower() in all_chunk_text_map.get(ctx.chunk_id, "").lower()
                 )
             ]
 
@@ -735,18 +755,33 @@ class GetInterventionDetailsTool(BaseTool):
                     ctx
                     for ctx in all_contexts
                     if name.lower() in (ctx.summary or "").lower()
-                    or name.lower() in (ctx.chunk_text or "").lower()
+                    or name.lower() in all_chunk_text_map.get(ctx.chunk_id, "").lower()
                 ]
 
             matched_contexts = matched_contexts[: self.max_contexts_per_item]
+            context_chunk_map = await fetch_chunk_texts(
+                [
+                    ctx.chunk_id
+                    for ctx in matched_contexts
+                    if getattr(ctx, "chunk_id", "")
+                ]
+            )
 
-            delivery_features = self._extract_delivery_features(matched_contexts)
-            target_population = self._extract_population(matched_contexts)
-            subgroup_effects = self._extract_subgroups(matched_contexts)
+            delivery_features = self._extract_delivery_features(
+                matched_contexts, context_chunk_map
+            )
+            target_population = self._extract_population(
+                matched_contexts, context_chunk_map
+            )
+            subgroup_effects = self._extract_subgroups(
+                matched_contexts, context_chunk_map
+            )
 
             effect_sizes = list(getattr(intervention, "sample_effect_sizes", []) or [])
             if not effect_sizes:
-                effect_sizes = self._extract_effect_sizes(matched_contexts)
+                effect_sizes = self._extract_effect_sizes(
+                    matched_contexts, context_chunk_map
+                )
 
             supporting_citations = [
                 doc_citation_map[doc_id]
@@ -775,37 +810,45 @@ class GetInterventionDetailsTool(BaseTool):
 
         return ToolResult.ok([r.model_dump() for r in results])
 
-    def _extract_delivery_features(self, contexts: List[ScoredContext]) -> List[str]:
+    def _extract_delivery_features(
+        self, contexts: List[ScoredContext], chunk_text_map: Dict[str, str]
+    ) -> List[str]:
         feats: set = set()
         for ctx in contexts:
-            text = f"{ctx.summary} {ctx.chunk_text}".lower()
+            text = f"{ctx.summary} {chunk_text_map.get(ctx.chunk_id, '')}".lower()
             for kw, label in self.FEATURE_KEYWORDS.items():
                 if kw in text:
                     feats.add(label)
         return list(feats)[:5]
 
-    def _extract_population(self, contexts: List[ScoredContext]) -> List[str]:
+    def _extract_population(
+        self, contexts: List[ScoredContext], chunk_text_map: Dict[str, str]
+    ) -> List[str]:
         pops: set = set()
         for ctx in contexts:
-            text = f"{ctx.summary} {ctx.chunk_text}".lower()
+            text = f"{ctx.summary} {chunk_text_map.get(ctx.chunk_id, '')}".lower()
             for kw, label in self.POPULATION_KEYWORDS.items():
                 if kw in text:
                     pops.add(label)
         return list(pops)[:5]
 
-    def _extract_subgroups(self, contexts: List[ScoredContext]) -> List[str]:
+    def _extract_subgroups(
+        self, contexts: List[ScoredContext], chunk_text_map: Dict[str, str]
+    ) -> List[str]:
         subs: set = set()
         for ctx in contexts:
-            text = f"{ctx.summary} {ctx.chunk_text}".lower()
+            text = f"{ctx.summary} {chunk_text_map.get(ctx.chunk_id, '')}".lower()
             for kw, label in self.SUBGROUP_KEYWORDS.items():
                 if kw in text:
                     subs.add(label)
         return list(subs)[:5]
 
-    def _extract_effect_sizes(self, contexts: List[ScoredContext]) -> List[str]:
+    def _extract_effect_sizes(
+        self, contexts: List[ScoredContext], chunk_text_map: Dict[str, str]
+    ) -> List[str]:
         sizes: List[str] = []
         for ctx in contexts:
-            text = f"{ctx.summary} {ctx.chunk_text}"
+            text = f"{ctx.summary} {chunk_text_map.get(ctx.chunk_id, '')}"
             matches = re.findall(r"([-+]?\d+\.?\d*\s*(?:kg/m²|kg|%))", text)
             for m in matches:
                 snippet = m.strip()
@@ -852,7 +895,7 @@ class TopStudyItem(BaseModel):
         key_context_summary: Highest-relevance RCS summary for this document.
         relevance_score: RCS relevance score (0-10) for the selected context.
         url: Canonical URL/PDF URL, if available.
-        key_context_chunk_text: Truncated supporting text from the highest-relevance context.
+        key_context_chunk_text: Supporting text from the highest-relevance context.
         study_location: Where the study took place (country/city) if available from extracted intervention metadata.
     """
 
@@ -865,6 +908,7 @@ class TopStudyItem(BaseModel):
     key_context_summary: str = ""
     relevance_score: int = 0
     url: Optional[str] = None
+    chunk_id: str = ""
     key_context_chunk_text: str = ""
     study_location: str = ""
     extracted_outcomes: List[Dict[str, Any]] = Field(
@@ -923,6 +967,9 @@ class GetTopStudiesTool(BaseTool):
         doc_metadata: Dict[str, Dict[str, Any]] = state.get("doc_metadata") or {}
         doc_citation_map: Dict[str, int] = state.get("doc_citation_map") or {}
         all_contexts: List[ScoredContext] = state.get("all_scored_contexts") or []
+        chunk_text_map = await fetch_chunk_texts(
+            [ctx.chunk_id for ctx in all_contexts if getattr(ctx, "chunk_id", "")]
+        )
         raw_extractions = state.get("raw_extractions") or []
         final_intervention_themes = state.get("final_intervention_themes") or []
         # External doc_id -> internal doc_uuid (doc_metadata is keyed by doc_uuid)
@@ -965,7 +1012,7 @@ class GetTopStudiesTool(BaseTool):
             candidate_docs = []
             needle = intervention_name.lower()
             for ctx in all_contexts:
-                hay = f"{ctx.summary} {ctx.chunk_text}".lower()
+                hay = f"{ctx.summary} {chunk_text_map.get(ctx.chunk_id, '')}".lower()
                 if needle in hay:
                     candidate_docs.append(ctx.document_id)
             # Deduplicate while preserving order
@@ -1014,7 +1061,10 @@ class GetTopStudiesTool(BaseTool):
             target_outcomes = state.get("target_outcomes") or []
             pop_terms = [str(p).lower() for p in target_population if p]
             out_terms = [str(o).lower() for o in target_outcomes if o]
-            hay = f"{(ctx.summary if ctx else '')} {(ctx.chunk_text if ctx else '')}".lower()
+            hay = (
+                f"{(ctx.summary if ctx else '')} "
+                f"{(chunk_text_map.get(ctx.chunk_id, '') if ctx else '')}"
+            ).lower()
             intent_bonus = 0
             if pop_terms and any(t in hay for t in pop_terms):
                 intent_bonus += 1
@@ -1190,8 +1240,9 @@ class GetTopStudiesTool(BaseTool):
                     url=meta.get("url")
                     or meta.get("pdf_url")
                     or meta.get("landing_page_url"),
+                    chunk_id=(ctx.chunk_id if ctx else ""),
                     key_context_chunk_text=(
-                        (ctx.chunk_text or "")[:600] if ctx else ""
+                        chunk_text_map.get(ctx.chunk_id, "") if ctx else ""
                     ),
                     study_location=", ".join(doc_uuid_to_countries.get(doc_id, [])[:2]),
                     extracted_outcomes=_extract_key_study_outcomes(doc_id),

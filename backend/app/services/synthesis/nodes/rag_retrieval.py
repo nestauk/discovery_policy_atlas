@@ -172,11 +172,8 @@ async def _retrieve_for_theme(
             ctx.seen_chunks.add(chunk_id)
 
             info = extract_doc_info_from_chunk(chunk, ctx.doc_metadata)
-            content = str(chunk.get("content", ""))[:500]
+            content = str(chunk.get("content", ""))
             doc_uuid = info["doc_uuid"]
-
-            doc_quotes = ctx.extraction_quotes.get(doc_uuid, [])
-            supporting_quote = doc_quotes[0][:300] if doc_quotes else content[:300]
 
             retrieved.append(
                 RetrievedChunk(
@@ -209,7 +206,7 @@ async def _retrieve_for_theme(
                             year=info["year"],
                             title=info["title"],
                             url=info["url"],
-                            supporting_quote=supporting_quote,
+                            supporting_quote=None,
                             chunk_id=chunk_id,
                         )
                     )

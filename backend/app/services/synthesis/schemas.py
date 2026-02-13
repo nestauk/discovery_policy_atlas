@@ -48,6 +48,21 @@ class CitationInfo(BaseModel):
         None, description="Grounded quote from chunk"
     )
     chunk_id: Optional[str] = Field(None, description="Source chunk ID")
+    claim_quotes: List["ClaimQuote"] = Field(
+        default_factory=list, description="Per-claim grounded quotes for this citation"
+    )
+
+
+class ClaimQuote(BaseModel):
+    """Per-claim grounded quote tied to a citation."""
+
+    claim_text: str = Field(..., description="Claim text this quote supports")
+    supporting_quote: str = Field(..., description="Verbatim supporting quote")
+    attribution: Literal["direct", "synthesised", "inferred"] = Field(
+        ..., description="Attribution relationship between claim and source"
+    )
+    chunk_id: str = Field("", description="Chunk UUID for the supporting quote")
+    section: str = Field("", description="Briefing section where claim appears")
 
 
 # =============================================================================
@@ -77,7 +92,6 @@ class ScoredContext(BaseModel):
     chunk_id: str = Field(..., description="Reference to source document chunk")
     document_id: str = Field(..., description="Reference to source document UUID")
     document_title: str = Field("", description="Document title for citation")
-    chunk_text: str = Field("", description="Original chunk text (truncated)")
 
     # Citation metadata
     citation_key: str = Field(..., description="Short citation key e.g., 'pqa-abc123'")
