@@ -382,7 +382,13 @@ Risk concepts are derived from two sources:
 **Implementation**: `nodes/theme_discovery.py`
 **Models**: `THEME_MODEL` (gpt-5-mini), `MAPPING_MODEL` (gpt-5-nano)
 
-All four branches execute the same three-step pipeline in parallel:
+All four branches execute the same three-step pipeline in parallel.
+
+Downstream evidence gathering (Phases 4–6) is designed to:
+
+- **Constrain retrieval**: chunks are retrieved only from documents contributing to each theme.
+- **Quality-weight reranking**: prioritises documents by evidence strength and predicted impact.
+- **Handle chunk reuse by branch**: intervention/issue retrieval de-duplicates globally, while outcome retrieval allows chunk reuse so outcome RCS is not starved by earlier branches.
 
 ### Step 1: Discover themes (`_discover_themes`)
 
@@ -742,12 +748,11 @@ writing, and peer review.
 │ - get_top_studies(intervention_name)                    │
 │ - get_intervention_outcomes(intervention_name)          │
 │ - get_intervention_details(intervention_name)           │
+│ - retrieve_evidence(query)                              │
 │ - get_citation_context(citation_number)                 │
 │ - search_extractions(query)                             │
 │ - get_document_quality(citation_number)                 │
 │ - get_multiple_document_quality(citation_numbers)       │
-│ - verify_claim_support(claim, cited_numbers?)           │
-│ - verify_multiple_claims(claims=[...])                  │
 └─────────────────────────────────────────────────────────┘
         ↓
 ┌─────────────────────────────────────────────────────────┐
@@ -759,7 +764,8 @@ writing, and peer review.
 │ GROUNDER (gpt-5-mini) - MANDATORY                       │
 │ Verify each claim is grounded in cited source text      │
 │ Extract per-claim quotes and attribution type           │
-│ Flag unsupported claims → retry with corrections        │
+│ Flag unsupported claims → orchestrator regathers evidence│
+│ and generator retries with targeted feedback             │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -767,6 +773,18 @@ writing, and peer review.
 
 Sections are generated sequentially.  Each section's orchestrator sees
 the full pre-computed state but gathers evidence independently:
+
+#### Cross-section context
+
+Generation carries a compact running summary of previously generated
+sections into subsequent section prompts.  This improves coherence
+between Background, Interventions, Synthesis sections, Core Answer, and
+Recommendations without copying full section text into each prompt.
+
+#### Tool-call budgets
+
+Per-section tool calls are capped by the orchestrator, with expanded
+budgets for the interventions table.  See [Configuration reference](#configuration-reference).
 
 1. **Background** — 2–3 paragraphs, policy context, 120–180 words
 2. **Interventions table** — 4–6 rows with per-row tool evidence
@@ -1354,6 +1372,8 @@ precomputed `analysis_documents.top_line` field — no LLM is used for
 
 - Grounding is **soft**: content is always returned even if claims are
   flagged as unsupported or weakly supported.
+- When grounding fails, unsupported claims can trigger targeted
+  `retrieve_evidence` tool calls before regeneration.
 - If verification itself fails (parsing error, LLM failure), the
   section is assumed to be OK.
 - Maximum 1 regeneration retry on verification failure (reduced from 2
@@ -1373,6 +1393,7 @@ All three can be supported.  Unsupported means the cited source provides no rele
 
 - **RCS thresholds** are controlled via `RCSConfig`.
 - **Grounding retries** are controlled via `BriefingConfig.max_verification_retries` (3 total passes: initial + 2 retries).
+- **Retry behaviour**: when grounding fails, unsupported claims can trigger targeted `retrieve_evidence` tool calls before regeneration.
 
 ---
 
@@ -1394,6 +1415,8 @@ All LLM calls are traced via Langfuse:
   available
 - **Tool execution**: logged with durations and key result summaries.
 - **Grounding failures**: captured with suggested fixes and retry attempts.
+- **Project session linking**: briefing/orchestrator traces are attached
+  to the project session via `CallbackHandler(session_id=...)`.
 
 ---
 
@@ -1517,9 +1540,9 @@ backend/app/services/synthesis/
     ├── __init__.py                     # Tool exports and registry
     ├── base.py                         # BaseTool, ToolRegistry, ToolResult
     ├── models.py                       # Orchestrator/generation/verification/RCS model constants
-    ├── orchestrator.py                 # BriefingOrchestrator (evidence loop + generation + verification)
+    ├── orchestrator.py                 # BriefingOrchestrator (evidence loop + generation + grounding)
     ├── evidence.py                     # get_theme_evidence, get_citation_context, get_intervention_outcomes, get_intervention_details, get_top_studies
-    ├── search.py                       # search_extractions (RCS keyword + live vector fallback)
+    ├── search.py                       # search_extractions + retrieve_evidence (RCS keyword + live vector fallback)
     ├── quality.py                      # get_document_quality, get_multiple_document_quality
     └── verification.py                 # verify_claim_support, verify_multiple_claims
 ```
@@ -1528,7 +1551,7 @@ backend/app/services/synthesis/
 
 ## Changelog
 
-### Recent changes
+### Recent changes (February 2026)
 
 - **Evidence Base card**: shows both **screened** and **synthesised** counts.
 - **Key Sources**: removed LLM “why selected” generation; now uses `analysis_documents.top_line`.
@@ -1536,3 +1559,7 @@ backend/app/services/synthesis/
 - **Recommendations**: structured output includes a clearer `implementation_option` field for rendering.
 - **Tool budgets**: increased default per-section tool budget and expanded interventions-section budget.
 - **Grounding update**: verification replaced with source-grounded claim attribution with per-claim quote extraction and attribution labels.
+- **Retry loop update**: grounding failures now trigger targeted evidence re-gathering (`retrieve_evidence`) before regeneration.
+- **Interventions grounding**: interventions table is now row-grounded against cited sources (no hardcoded verification pass).
+- **Cross-section context**: later sections receive compact summaries of earlier sections for narrative consistency.
+- **Outcome retrieval fix**: outcome branch now avoids global seen-chunk starvation from earlier retrieval passes.

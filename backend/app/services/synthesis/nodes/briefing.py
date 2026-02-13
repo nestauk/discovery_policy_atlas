@@ -194,6 +194,27 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     synthesis_outputs: List[Tuple[str, SectionOutput]] = []
     total_tool_calls = 0
     verification_failures: List[str] = []
+    running_section_context: List[str] = []
+
+    def _current_prior_sections_summary() -> str:
+        # Keep prompt size bounded while preserving recent narrative flow.
+        return "\n".join(running_section_context[-6:])
+
+    def _summarise_section_for_context(
+        section_title: str,
+        output: SectionOutput,
+    ) -> str:
+        content = re.sub(r"(?m)^\\s*\\|.*\\|\\s*$", " ", output.content or "")
+        content = re.sub(r"<br\\s*/?>", " ", content)
+        content = re.sub(r"\\s+", " ", content).strip()
+        words = content.split()
+        if len(words) > 150:
+            content = " ".join(words[:150]).rstrip() + "..."
+        citations = sorted(set(output.citations_used))
+        citations_text = (
+            ", ".join(f"[{c}]" for c in citations[:8]) if citations else "none"
+        )
+        return f"- {section_title}: {content} (citations: {citations_text})"
 
     async def _run_section(section_key: str, additional_extra: str = "") -> None:
         nonlocal total_tool_calls
@@ -232,10 +253,14 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
                 section_instructions=instructions,
                 additional_instructions=additional,
                 max_retries=config.max_verification_retries,
+                prior_sections_summary=_current_prior_sections_summary(),
             )
 
             section_outputs[section_key] = output
             total_tool_calls += output.tool_calls_made
+            running_section_context.append(
+                _summarise_section_for_context(section_config["name"], output)
+            )
 
             if not output.verification_passed:
                 verification_failures.append(section_key)
@@ -285,10 +310,17 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
             research_question=research_question,
             section_index=idx + 1,
             max_retries=config.max_verification_retries,
+            prior_sections_summary=_current_prior_sections_summary(),
         )
         synthesis_outputs.append((proposal.section_title, synth_output))
         section_outputs[f"synthesis_{idx+1}"] = synth_output
         total_tool_calls += synth_output.tool_calls_made
+        running_section_context.append(
+            _summarise_section_for_context(
+                f"Synthesis {idx + 1}: {proposal.section_title}",
+                synth_output,
+            )
+        )
         if not synth_output.verification_passed:
             verification_failures.append(f"synthesis_{idx+1}")
 
@@ -590,6 +622,7 @@ async def _generate_synthesis_section(
     research_question: str,
     section_index: int,
     max_retries: int,
+    prior_sections_summary: str = "",
 ) -> SectionOutput:
     """Generate a single synthesis section via the orchestrator."""
     instructions = f"""Write a synthesis section titled "{proposal.section_title}" that supports the policy briefing.
@@ -616,6 +649,7 @@ Guidance:
         section_instructions=instructions,
         additional_instructions=additional,
         max_retries=max_retries,
+        prior_sections_summary=prior_sections_summary,
     )
 
 

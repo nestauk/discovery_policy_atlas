@@ -52,6 +52,19 @@ class SearchExtractionsInput(BaseModel):
     max_results: int = Field(5, description="Maximum results to return", ge=1, le=10)
 
 
+class DynamicRetrieveInput(BaseModel):
+    """Input parameters for retrieve_evidence tool."""
+
+    query: str = Field(..., description="Evidence search query")
+    max_results: int = Field(5, description="Maximum results to return", ge=1, le=10)
+    match_threshold: float = Field(
+        0.45,
+        description="Vector similarity threshold",
+        ge=0.0,
+        le=1.0,
+    )
+
+
 class SearchExtractionsTool(BaseTool):
     """Tool to perform semantic search across document chunks.
 
@@ -200,23 +213,6 @@ class SearchExtractionsTool(BaseTool):
         all_scored_contexts: List[ScoredContext] = (
             state.get("all_scored_contexts") or []
         )
-
-        # First, try to find relevant pre-computed RCS contexts
-        rcs_results = []
-        if all_scored_contexts:
-            rcs_results = await self._rcs_search(
-                query, all_scored_contexts, doc_citation_map, max_results
-            )
-            if rcs_results:
-                logger.info(
-                    f"search_extractions('{query[:50]}...'): "
-                    f"found {len(rcs_results)} from RCS contexts"
-                )
-                return ToolResult.ok(
-                    [r.model_dump() for r in rcs_results], fallback_used=False
-                )
-
-        # Fallback: perform live vector search
         try:
             results = await self._live_search(
                 query=query,
@@ -225,15 +221,45 @@ class SearchExtractionsTool(BaseTool):
                 doc_metadata=doc_metadata,
                 max_results=max_results,
             )
-            logger.info(
-                f"search_extractions('{query[:50]}...'): "
-                f"found {len(results)} from live search"
-            )
+            if results:
+                # Enrich semantic hits with RCS summary when chunk ids overlap.
+                summary_by_chunk = {
+                    str(ctx.chunk_id): (ctx.summary or "")
+                    for ctx in all_scored_contexts
+                    if getattr(ctx, "chunk_id", "")
+                }
+                for item in results:
+                    if not item.summary:
+                        item.summary = summary_by_chunk.get(item.chunk_id, "")
 
-            return ToolResult.ok(
-                [r.model_dump() for r in results],
-                fallback_used=True,
-            )
+                logger.info(
+                    f"search_extractions('{query[:50]}...'): "
+                    f"found {len(results)} from semantic vector search"
+                )
+                return ToolResult.ok(
+                    [r.model_dump() for r in results],
+                    fallback_used=False,
+                )
+
+            # Fallback to lexical-overlap search over pre-scored summaries.
+            if all_scored_contexts:
+                rcs_results = await self._rcs_search(
+                    query,
+                    all_scored_contexts,
+                    doc_citation_map,
+                    max_results,
+                )
+                logger.info(
+                    f"search_extractions('{query[:50]}...'): "
+                    f"found {len(rcs_results)} from RCS fallback"
+                )
+                return ToolResult.ok(
+                    [r.model_dump() for r in rcs_results],
+                    fallback_used=True,
+                )
+
+            logger.info(f"search_extractions('{query[:50]}...'): " "found 0 results")
+            return ToolResult.ok([], fallback_used=True)
 
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -264,6 +290,110 @@ class SearchExtractionsTool(BaseTool):
         }
 
 
+class DynamicRetrieveTool(BaseTool):
+    """Tool to retrieve fresh evidence with live vector search.
+
+    This bypasses pre-computed theme matching and is intended for
+    targeted gap-filling during retries.
+    """
+
+    name = "retrieve_evidence"
+    description = (
+        "Retrieve fresh evidence for a specific claim via live vector search "
+        "across project chunks. Use for targeted evidence gap-filling."
+    )
+    max_results = 5
+
+    async def execute(
+        self,
+        state: Dict[str, Any],
+        query: str,
+        max_results: Optional[int] = None,
+        match_threshold: float = 0.45,
+    ) -> ToolResult:
+        """Retrieve evidence with live semantic search."""
+        project_id = state.get("project_id", "")
+        if not project_id:
+            return ToolResult.fail("No project_id in state")
+        if not query.strip():
+            return ToolResult.fail("Empty query")
+
+        max_results = max_results or self.max_results
+        doc_citation_map: Dict[str, int] = state.get("doc_citation_map") or {}
+        doc_metadata: Dict[str, Dict[str, Any]] = state.get("doc_metadata") or {}
+
+        raw_chunks = await vectorization_service.search_similar_content(
+            query=query,
+            project_id=project_id,
+            match_threshold=match_threshold,
+            match_count=max_results * 4,
+        )
+        if not raw_chunks:
+            return ToolResult.ok([], fallback_used=True)
+
+        chunk_ids = [str(c.get("id", "")) for c in raw_chunks if c.get("id")]
+        chunk_text_map = await fetch_chunk_texts(chunk_ids)
+
+        results: List[SearchResultItem] = []
+        seen_docs: set = set()
+        for chunk in raw_chunks:
+            doc_uuid = str(chunk.get("document_id", ""))
+            if not doc_uuid or doc_uuid in seen_docs:
+                continue
+            seen_docs.add(doc_uuid)
+            meta = doc_metadata.get(doc_uuid, {})
+            title = meta.get("title") or chunk.get("title", "Unknown")
+            chunk_id = str(chunk.get("id", ""))
+            results.append(
+                SearchResultItem(
+                    summary="",
+                    citation_number=doc_citation_map.get(doc_uuid),
+                    document_title=title,
+                    document_id=doc_uuid,
+                    similarity_score=float(chunk.get("similarity", 0.0)),
+                    content=chunk_text_map.get(chunk_id)
+                    or str(chunk.get("content", "")),
+                    chunk_id=chunk_id,
+                )
+            )
+            if len(results) >= max_results:
+                break
+
+        logger.info(
+            "retrieve_evidence('%s...'): found %d results",
+            query[:50],
+            len(results),
+        )
+        return ToolResult.ok([r.model_dump() for r in results], fallback_used=False)
+
+    def _get_parameters_schema(self) -> Dict[str, Any]:
+        """Get JSON schema for tool parameters."""
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Claim or evidence need to search for.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return.",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 10,
+                },
+                "match_threshold": {
+                    "type": "number",
+                    "description": "Vector similarity threshold.",
+                    "default": 0.45,
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                },
+            },
+            "required": ["query"],
+        }
+
+
 # Functional interface
 async def search_extractions(
     state: Dict[str, Any],
@@ -286,5 +416,22 @@ async def search_extractions(
     return await tool.execute(state, query=query, max_results=max_results)
 
 
+async def retrieve_evidence(
+    state: Dict[str, Any],
+    query: str,
+    max_results: int = 5,
+    match_threshold: float = 0.45,
+) -> ToolResult:
+    """Retrieve fresh evidence via live vector search."""
+    tool = DynamicRetrieveTool()
+    return await tool.execute(
+        state,
+        query=query,
+        max_results=max_results,
+        match_threshold=match_threshold,
+    )
+
+
 # Register tool
 register_tool(SearchExtractionsTool())
+register_tool(DynamicRetrieveTool())

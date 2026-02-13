@@ -329,6 +329,21 @@ async def _apply_rcs_to_evidence(
     evidence = state.get(evidence_key) or {}
     research_question = state.get("research_question", "")
     rcs_config = state.get("rcs_config") or RCSConfig()
+    chunk_counts = {
+        theme_id: len(chunks or []) for theme_id, chunks in evidence.items()
+    }
+    non_empty_theme_count = sum(1 for count in chunk_counts.values() if count > 0)
+    logger.info(
+        "RCS input '%s': %d themes (%d with chunks).",
+        evidence_key,
+        len(chunk_counts),
+        non_empty_theme_count,
+    )
+    if chunk_counts:
+        preview = list(chunk_counts.items())[:10]
+        logger.info(
+            "RCS input '%s' theme chunk-count preview: %s", evidence_key, preview
+        )
 
     item_lookup = {
         getattr(item, name_attr): item
@@ -397,6 +412,12 @@ async def _apply_rcs_to_evidence(
             all_scored_contexts.extend(filtered_contexts)
 
     response: Dict[str, Any] = {result_key: results}
+    if evidence and not results:
+        logger.warning(
+            "RCS produced zero results for '%s' despite %d themes in input.",
+            evidence_key,
+            len(evidence),
+        )
     if collect_all_contexts:
         response["all_scored_contexts"] = all_scored_contexts
         response["themes_with_gaps"] = themes_with_gaps

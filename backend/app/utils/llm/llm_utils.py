@@ -25,8 +25,8 @@ def get_langfuse_handler(session_id: str = None) -> CallbackHandler:
     if session_id is None:
         session_id = f"{datetime.today().isoformat()}"
 
-    # The Langfuse LangChain CallbackHandler reads configuration from environment variables.
-    # It does not accept user/session/keys as init kwargs.
+    # Session scoping is passed through LangChain metadata (`langfuse_session_id`).
+    # This SDK version does not support a direct `session_id` constructor arg.
     return CallbackHandler()
 
 
