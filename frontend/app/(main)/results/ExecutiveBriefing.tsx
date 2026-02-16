@@ -51,6 +51,7 @@ interface CitationInspectPayload {
   citationInfo: CitationInfo;
   chunkId: string;
   quote: string;
+  citationInstanceId: string;
 }
 
 
@@ -79,7 +80,8 @@ function buildCitationLookup(citationMap?: Record<string, CitationInfo>): Citati
 function useRenderCitations(
   lookupCitation: CitationLookupFn,
   onCitationClick?: (docId: string) => void,
-  onCitationInspect?: (payload: CitationInspectPayload) => void
+  onCitationInspect?: (payload: CitationInspectPayload) => void,
+  activeCitationInstanceId?: string
 ) {
   return useCallback((text: string, keyPrefix: string): React.ReactNode[] => {
     const parts: React.ReactNode[] = [];
@@ -112,15 +114,18 @@ function useRenderCitations(
         parts.push(' ');
       }
       
+      const citationInstanceId = `${keyPrefix}-${keyIdx++}`;
       parts.push(
         <CitationLink
-          key={`${keyPrefix}-${keyIdx++}`}
+          key={citationInstanceId}
+          citationInstanceId={citationInstanceId}
           citationKey={`[${citNum}]`}
           citationNumber={citNum}
           citationInfo={citInfo}
           claimContext={claimContext}
           onCitationClick={onCitationClick}
           onCitationInspect={onCitationInspect}
+          activeCitationInstanceId={activeCitationInstanceId}
         />
       );
       
@@ -129,7 +134,7 @@ function useRenderCitations(
     
     if (lastIndex < text.length) parts.push(text.slice(lastIndex));
     return parts;
-  }, [lookupCitation, onCitationClick, onCitationInspect]);
+  }, [lookupCitation, onCitationClick, onCitationInspect, activeCitationInstanceId]);
 }
 
 // ============================================================================
@@ -137,15 +142,26 @@ function useRenderCitations(
 // ============================================================================
 
 interface CitationLinkProps {
+  citationInstanceId: string;
   citationKey: string;
   citationNumber?: number;
   citationInfo?: CitationInfo;
   claimContext?: string;
   onCitationClick?: (docId: string) => void;
   onCitationInspect?: (payload: CitationInspectPayload) => void;
+  activeCitationInstanceId?: string;
 }
 
-function CitationLink({ citationKey, citationNumber, citationInfo, claimContext, onCitationClick, onCitationInspect }: CitationLinkProps) {
+function CitationLink({
+  citationInstanceId,
+  citationKey,
+  citationNumber,
+  citationInfo,
+  claimContext,
+  onCitationClick,
+  onCitationInspect,
+  activeCitationInstanceId,
+}: CitationLinkProps) {
   const url = citationInfo?.url;
   const title = citationInfo?.title || "Unknown source";
   const docId = citationInfo?.analysis_document_id;
@@ -189,6 +205,7 @@ function CitationLink({ citationKey, citationNumber, citationInfo, claimContext,
   const canInspectInContext = Boolean(
     onCitationInspect && citationInfo && (matchedClaimQuote?.chunk_id || citationInfo?.chunk_id)
   );
+  const isActiveCitation = Boolean(activeCitationInstanceId && activeCitationInstanceId === citationInstanceId);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     const inspectChunkId = matchedClaimQuote?.chunk_id || citationInfo?.chunk_id;
@@ -199,6 +216,7 @@ function CitationLink({ citationKey, citationNumber, citationInfo, claimContext,
         citationInfo,
         chunkId: inspectChunkId,
         quote: inspectQuote,
+        citationInstanceId,
       });
       return;
     }
@@ -206,7 +224,7 @@ function CitationLink({ citationKey, citationNumber, citationInfo, claimContext,
       e.preventDefault();
       onCitationClick(docId);
     }
-  }, [onCitationClick, docId, url, onCitationInspect, citationInfo, matchedClaimQuote, canInspectInContext]);
+  }, [onCitationClick, docId, url, onCitationInspect, citationInfo, matchedClaimQuote, canInspectInContext, citationInstanceId]);
 
   const tooltipContent = (
     <div className="space-y-2 max-w-sm">
@@ -243,12 +261,20 @@ function CitationLink({ citationKey, citationNumber, citationInfo, claimContext,
 
   const linkElement = url ? (
     <a href={url} target="_blank" rel="noopener noreferrer" onClick={handleClick}
-       className="inline-flex items-center text-blue-600 hover:text-blue-800 hover:underline cursor-pointer font-medium transition-colors mx-0.5">
+       className={`inline-flex items-center cursor-pointer font-medium transition-colors mx-0.5 ${
+         isActiveCitation
+           ? "bg-blue-700 text-white hover:text-white hover:bg-blue-800 rounded px-1.5 ring-1 ring-blue-800"
+           : "text-blue-600 hover:text-blue-800 hover:underline"
+       }`}>
       {displayText}
     </a>
   ) : (
     <span onClick={handleClick}
-          className={`inline-flex items-center text-blue-600 font-medium mx-0.5 ${(canInspectInContext || (onCitationClick && docId)) ? 'cursor-pointer hover:underline' : ''}`}>
+          className={`inline-flex items-center font-medium mx-0.5 ${
+            isActiveCitation
+              ? "bg-blue-700 text-white rounded px-1.5 ring-1 ring-blue-800"
+              : "text-blue-600"
+          } ${(canInspectInContext || (onCitationClick && docId)) ? 'cursor-pointer hover:underline' : ''}`}>
       {displayText}
     </span>
   );
@@ -365,12 +391,13 @@ function BackgroundSectionComponent({ background, renderCitations }: {
   );
 }
 
-function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations, onCitationInspect }: { 
+function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations, onCitationInspect, activeCitationInstanceId }: { 
   interventions: InterventionTableRow[];
   lookupCitation: CitationLookupFn;
   onCitationClick?: (docId: string) => void;
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
   onCitationInspect?: (payload: CitationInspectPayload) => void;
+  activeCitationInstanceId?: string;
 }) {
   if (!interventions.length) return null;
 
@@ -467,11 +494,13 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                         && !row.key_study_description.includes(`[${row.key_study_citation}]`) && (
                           <span className="ml-1">
                             <CitationLink
+                              citationInstanceId={`ks-${idx}-${row.key_study_citation}`}
                               citationKey={`[${row.key_study_citation}]`}
                               citationNumber={row.key_study_citation}
                               citationInfo={lookupCitation(row.key_study_citation)}
                               onCitationClick={onCitationClick}
                               onCitationInspect={onCitationInspect}
+                              activeCitationInstanceId={activeCitationInstanceId}
                             />
                           </span>
                         )}
@@ -517,11 +546,13 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                     {[...(new Set(row.citation_numbers || []))].map((num, citIdx) => (
                       <CitationLink
                         key={`int-${idx}-${citIdx}-${num}`}
+                        citationInstanceId={`int-${idx}-${citIdx}-${num}`}
                         citationKey={`[${num}]`}
                         citationNumber={num}
                         citationInfo={lookupCitation(num)}
                         onCitationClick={onCitationClick}
                         onCitationInspect={onCitationInspect}
+                        activeCitationInstanceId={activeCitationInstanceId}
                       />
                     ))}
                   </div>
@@ -608,11 +639,12 @@ function SynthesisSections({ sections, renderCitations }: {
   );
 }
 
-function TopCitationsList({ citations, lookupCitation, onCitationClick, onCitationInspect }: { 
+function TopCitationsList({ citations, lookupCitation, onCitationClick, onCitationInspect, activeCitationInstanceId }: { 
   citations: TopCitationItem[];
   lookupCitation: CitationLookupFn;
   onCitationClick?: (docId: string) => void;
   onCitationInspect?: (payload: CitationInspectPayload) => void;
+  activeCitationInstanceId?: string;
 }) {
   if (!citations.length) return null;
 
@@ -626,11 +658,13 @@ function TopCitationsList({ citations, lookupCitation, onCitationClick, onCitati
         {citations.map((cit) => (
           <div key={cit.citation_number} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-slate-200 hover:border-blue-300 transition-colors">
             <CitationLink
+              citationInstanceId={`top-${cit.citation_number}`}
               citationKey={`[${cit.citation_number}]`}
               citationNumber={cit.citation_number}
               citationInfo={lookupCitation(cit.citation_number)}
               onCitationClick={onCitationClick}
               onCitationInspect={onCitationInspect}
+              activeCitationInstanceId={activeCitationInstanceId}
             />
             <div className="flex-1 min-w-0">
               <div className="font-medium text-slate-800 truncate">{cit.title}</div>
@@ -665,8 +699,14 @@ export function ExecutiveBriefing({
   rerunError,
 }: ExecutiveBriefingProps) {
   const [inspectedCitation, setInspectedCitation] = useState<CitationInspectPayload | null>(null);
+  const activeCitationInstanceId = inspectedCitation?.citationInstanceId;
   const lookupCitation = useMemo(() => buildCitationLookup(citationMap), [citationMap]);
-  const renderCitations = useRenderCitations(lookupCitation, onCitationClick, setInspectedCitation);
+  const renderCitations = useRenderCitations(
+    lookupCitation,
+    onCitationClick,
+    setInspectedCitation,
+    activeCitationInstanceId
+  );
   const synthesisSections = useMemo<SynthesisSectionType[]>(() => {
     if (!structuredBriefing) return [];
     const snake = structuredBriefing.synthesis_sections;
@@ -1095,6 +1135,7 @@ export function ExecutiveBriefing({
               onCitationClick={onCitationClick}
               renderCitations={renderCitations}
               onCitationInspect={setInspectedCitation}
+              activeCitationInstanceId={activeCitationInstanceId}
             />
 
             <SynthesisSections 
@@ -1112,6 +1153,7 @@ export function ExecutiveBriefing({
               lookupCitation={lookupCitation}
               onCitationClick={onCitationClick}
               onCitationInspect={setInspectedCitation}
+              activeCitationInstanceId={activeCitationInstanceId}
             />
             
             {structuredBriefing.follow_up_suggestions.length > 0 && (
