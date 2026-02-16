@@ -4,9 +4,10 @@ import asyncio
 from datetime import datetime
 import logging
 import os
-from typing import Optional, List
+from typing import Optional, List, Any
 import uuid
 import pandas as pd
+from pydantic import BaseModel, Field
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.search_wizard import SearchWizardService
@@ -56,9 +57,51 @@ router = APIRouter(prefix="/api/analysis-projects", tags=["analysis-projects"])
 ADMIN_ORG_SLUG = "nesta-dev"
 
 
+class DocumentContextInfo(BaseModel):
+    """Metadata for a source document shown in citation context."""
+
+    analysis_document_id: str = Field(..., description="Internal document UUID")
+    title: str = Field(..., description="Document title")
+    author_short: Optional[str] = Field(None, description="Short author reference")
+    year: Optional[int] = Field(None, description="Publication year")
+    url: Optional[str] = Field(None, description="Canonical source URL")
+    document_type: Optional[str] = Field(None, description="Document/study type")
+    evidence_score: Optional[int] = Field(None, description="Evidence strength score")
+    impact_score: Optional[float] = Field(None, description="Impact score")
+
+
+class ChunkContextResponse(BaseModel):
+    """Chunk context payload for citation inspection sidebar."""
+
+    chunk_id: str = Field(..., description="Target chunk UUID")
+    chunk_content: str = Field(..., description="Target chunk content")
+    chunk_index: int = Field(..., description="Target chunk index within document")
+    previous_chunk_content: Optional[str] = Field(
+        None, description="Immediate previous chunk content"
+    )
+    next_chunk_content: Optional[str] = Field(
+        None, description="Immediate next chunk content"
+    )
+    document: DocumentContextInfo
+
+
 def can_access_all_projects(user: CurrentUser) -> bool:
     """Check if user belongs to an admin org that can see all projects."""
     return user.organization_slug == ADMIN_ORG_SLUG
+
+
+def _author_short_from_authors(authors: Any) -> Optional[str]:
+    """Extract a compact author label from analysis_documents.authors."""
+    if not isinstance(authors, list) or not authors:
+        return None
+    first_author = authors[0]
+    if not isinstance(first_author, str) or not first_author.strip():
+        return None
+
+    author_text = first_author.strip()
+    if "," in author_text:
+        return author_text.split(",", 1)[0].strip() or None
+    return author_text.split(" ", 1)[0].strip() or None
 
 
 def can_access_project(
@@ -266,6 +309,110 @@ async def get_synthesis_summary(
     except Exception as e:
         logger.error(f"Error in synthesis summary for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get synthesis summary")
+
+
+@router.get(
+    "/{project_id}/chunks/{chunk_id}/context",
+    response_model=ChunkContextResponse,
+    summary="Get citation chunk context",
+)
+async def get_chunk_context(
+    project_id: str,
+    chunk_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get target chunk and adjacent context for citation inspection."""
+    try:
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
+        target_res = (
+            vectorization_service.supabase.table("chunks")
+            .select("id, content, chunk_index, document_id, project_id")
+            .eq("id", chunk_id)
+            .eq("project_id", project_id)
+            .limit(1)
+            .execute()
+        )
+        if not target_res.data:
+            raise HTTPException(
+                status_code=404, detail="Chunk not found for this project"
+            )
+
+        target_chunk = target_res.data[0]
+        target_index = int(target_chunk.get("chunk_index") or 0)
+        document_id = str(target_chunk.get("document_id") or "")
+        if not document_id:
+            raise HTTPException(status_code=404, detail="Chunk has no source document")
+
+        adjacent_indices = [target_index - 1, target_index + 1]
+        adjacent_res = (
+            vectorization_service.supabase.table("chunks")
+            .select("content, chunk_index")
+            .eq("document_id", document_id)
+            .eq("project_id", project_id)
+            .in_("chunk_index", adjacent_indices)
+            .order("chunk_index")
+            .execute()
+        )
+
+        previous_chunk_content: Optional[str] = None
+        next_chunk_content: Optional[str] = None
+        for row in adjacent_res.data or []:
+            idx = int(row.get("chunk_index") or 0)
+            content = str(row.get("content") or "")
+            if idx == target_index - 1:
+                previous_chunk_content = content
+            elif idx == target_index + 1:
+                next_chunk_content = content
+
+        doc_res = (
+            vectorization_service.supabase.table("analysis_documents")
+            .select(
+                "id, title, authors, year, document_type, evidence_category, extraction_results, impact_score, pdf_url, landing_page_url, overton_url"
+            )
+            .eq("id", document_id)
+            .eq("analysis_project_id", project_id)
+            .limit(1)
+            .execute()
+        )
+        if not doc_res.data:
+            raise HTTPException(
+                status_code=404, detail="Source document not found for this chunk"
+            )
+
+        doc = doc_res.data[0]
+        evidence_info = get_or_calculate_document_evidence(doc)
+        stars = evidence_info.get("stars")
+        evidence_score = int(stars) if isinstance(stars, (int, float)) else None
+
+        document = DocumentContextInfo(
+            analysis_document_id=str(doc.get("id") or document_id),
+            title=str(doc.get("title") or "Unknown source"),
+            author_short=_author_short_from_authors(doc.get("authors")),
+            year=doc.get("year"),
+            url=doc.get("pdf_url")
+            or doc.get("landing_page_url")
+            or doc.get("overton_url"),
+            document_type=doc.get("document_type"),
+            evidence_score=evidence_score,
+            impact_score=doc.get("impact_score"),
+        )
+
+        return ChunkContextResponse(
+            chunk_id=str(target_chunk.get("id") or chunk_id),
+            chunk_content=str(target_chunk.get("content") or ""),
+            chunk_index=target_index,
+            previous_chunk_content=previous_chunk_content,
+            next_chunk_content=next_chunk_content,
+            document=document,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error getting chunk context project={project_id} chunk={chunk_id}: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to get chunk context")
 
 
 @router.get("")

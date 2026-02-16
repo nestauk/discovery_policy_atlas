@@ -176,6 +176,9 @@ export interface CausalityDetail {
     year?: number
     title?: string
     url?: string
+    document_type?: string
+    evidence_score?: number
+    impact_score?: number
     supporting_quote?: string
     chunk_id?: string
     claim_quotes?: ClaimQuote[]

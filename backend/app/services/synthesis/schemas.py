@@ -44,6 +44,9 @@ class CitationInfo(BaseModel):
     year: Optional[int] = Field(None, description="Publication year")
     title: Optional[str] = Field(None, description="Document title")
     url: Optional[str] = Field(None, description="Canonical URL or PDF URL")
+    document_type: Optional[str] = Field(None, description="Document/study type")
+    evidence_score: Optional[int] = Field(None, description="Evidence strength score")
+    impact_score: Optional[float] = Field(None, description="Impact score")
     supporting_quote: Optional[str] = Field(
         None, description="Grounded quote from chunk"
     )

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +23,10 @@ import {
   getEvidenceCategoryRank
 } from "@/lib/evidenceCategories";
 import { FOOTER_DISCLAIMER_TEXT } from "@/components/Footer";
+import { CitationContextPanel } from "@/components/synthesis/CitationContextPanel";
 
 interface ExecutiveBriefingProps {
+  projectId: string;
   briefing: string;
   structuredBriefing?: StructuredBriefing;
   citationMap?: Record<string, CitationInfo>;
@@ -43,6 +45,12 @@ interface ExecutiveBriefingProps {
   onRerunSynthesis?: () => void | Promise<void>;
   isRerunningSynthesis?: boolean;
   rerunError?: string | null;
+}
+
+interface CitationInspectPayload {
+  citationInfo: CitationInfo;
+  chunkId: string;
+  quote: string;
 }
 
 
@@ -68,7 +76,11 @@ function buildCitationLookup(citationMap?: Record<string, CitationInfo>): Citati
 }
 
 // Shared citation rendering utility
-function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: (docId: string) => void) {
+function useRenderCitations(
+  lookupCitation: CitationLookupFn,
+  onCitationClick?: (docId: string) => void,
+  onCitationInspect?: (payload: CitationInspectPayload) => void
+) {
   return useCallback((text: string, keyPrefix: string): React.ReactNode[] => {
     const parts: React.ReactNode[] = [];
     const pattern = /\[(\d+)\]/g;
@@ -108,6 +120,7 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
           citationInfo={citInfo}
           claimContext={claimContext}
           onCitationClick={onCitationClick}
+          onCitationInspect={onCitationInspect}
         />
       );
       
@@ -116,7 +129,7 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
     
     if (lastIndex < text.length) parts.push(text.slice(lastIndex));
     return parts;
-  }, [lookupCitation, onCitationClick]);
+  }, [lookupCitation, onCitationClick, onCitationInspect]);
 }
 
 // ============================================================================
@@ -129,9 +142,10 @@ interface CitationLinkProps {
   citationInfo?: CitationInfo;
   claimContext?: string;
   onCitationClick?: (docId: string) => void;
+  onCitationInspect?: (payload: CitationInspectPayload) => void;
 }
 
-function CitationLink({ citationKey, citationNumber, citationInfo, claimContext, onCitationClick }: CitationLinkProps) {
+function CitationLink({ citationKey, citationNumber, citationInfo, claimContext, onCitationClick, onCitationInspect }: CitationLinkProps) {
   const url = citationInfo?.url;
   const title = citationInfo?.title || "Unknown source";
   const docId = citationInfo?.analysis_document_id;
@@ -172,14 +186,27 @@ function CitationLink({ citationKey, citationNumber, citationInfo, claimContext,
       : null;
   const attributionMarker =
     attribution === "direct" ? "●" : attribution === "synthesised" ? "◐" : attribution === "inferred" ? "○" : null;
+  const canInspectInContext = Boolean(
+    onCitationInspect && citationInfo && (matchedClaimQuote?.chunk_id || citationInfo?.chunk_id)
+  );
 
   const handleClick = useCallback((e: React.MouseEvent) => {
-    if (url) return;
-    if (onCitationClick && docId) {
+    const inspectChunkId = matchedClaimQuote?.chunk_id || citationInfo?.chunk_id;
+    const inspectQuote = matchedClaimQuote?.supporting_quote || citationInfo?.supporting_quote || "";
+    if (canInspectInContext && onCitationInspect && citationInfo && inspectChunkId) {
+      e.preventDefault();
+      onCitationInspect({
+        citationInfo,
+        chunkId: inspectChunkId,
+        quote: inspectQuote,
+      });
+      return;
+    }
+    if (!url && onCitationClick && docId) {
       e.preventDefault();
       onCitationClick(docId);
     }
-  }, [onCitationClick, docId, url]);
+  }, [onCitationClick, docId, url, onCitationInspect, citationInfo, matchedClaimQuote, canInspectInContext]);
 
   const tooltipContent = (
     <div className="space-y-2 max-w-sm">
@@ -202,7 +229,10 @@ function CitationLink({ citationKey, citationNumber, citationInfo, claimContext,
           )}
         </div>
       )}
-      {url && (
+      {canInspectInContext && (
+        <div className="text-xs text-blue-300 pt-1">Click to view in context</div>
+      )}
+      {!canInspectInContext && url && (
         <div className="text-xs text-blue-300 flex items-center gap-1 pt-1">
           <ExternalLink className="h-3 w-3" />
           Click to view source
@@ -218,7 +248,7 @@ function CitationLink({ citationKey, citationNumber, citationInfo, claimContext,
     </a>
   ) : (
     <span onClick={handleClick}
-          className={`inline-flex items-center text-blue-600 font-medium mx-0.5 ${onCitationClick && docId ? 'cursor-pointer hover:underline' : ''}`}>
+          className={`inline-flex items-center text-blue-600 font-medium mx-0.5 ${(canInspectInContext || (onCitationClick && docId)) ? 'cursor-pointer hover:underline' : ''}`}>
       {displayText}
     </span>
   );
@@ -335,11 +365,12 @@ function BackgroundSectionComponent({ background, renderCitations }: {
   );
 }
 
-function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations }: { 
+function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations, onCitationInspect }: { 
   interventions: InterventionTableRow[];
   lookupCitation: CitationLookupFn;
   onCitationClick?: (docId: string) => void;
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
+  onCitationInspect?: (payload: CitationInspectPayload) => void;
 }) {
   if (!interventions.length) return null;
 
@@ -440,6 +471,7 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                               citationNumber={row.key_study_citation}
                               citationInfo={lookupCitation(row.key_study_citation)}
                               onCitationClick={onCitationClick}
+                              onCitationInspect={onCitationInspect}
                             />
                           </span>
                         )}
@@ -489,6 +521,7 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                         citationNumber={num}
                         citationInfo={lookupCitation(num)}
                         onCitationClick={onCitationClick}
+                        onCitationInspect={onCitationInspect}
                       />
                     ))}
                   </div>
@@ -575,10 +608,11 @@ function SynthesisSections({ sections, renderCitations }: {
   );
 }
 
-function TopCitationsList({ citations, lookupCitation, onCitationClick }: { 
+function TopCitationsList({ citations, lookupCitation, onCitationClick, onCitationInspect }: { 
   citations: TopCitationItem[];
   lookupCitation: CitationLookupFn;
   onCitationClick?: (docId: string) => void;
+  onCitationInspect?: (payload: CitationInspectPayload) => void;
 }) {
   if (!citations.length) return null;
 
@@ -596,6 +630,7 @@ function TopCitationsList({ citations, lookupCitation, onCitationClick }: {
               citationNumber={cit.citation_number}
               citationInfo={lookupCitation(cit.citation_number)}
               onCitationClick={onCitationClick}
+              onCitationInspect={onCitationInspect}
             />
             <div className="flex-1 min-w-0">
               <div className="font-medium text-slate-800 truncate">{cit.title}</div>
@@ -619,6 +654,7 @@ function TopCitationsList({ citations, lookupCitation, onCitationClick }: {
 // ============================================================================
 
 export function ExecutiveBriefing({ 
+  projectId,
   briefing, 
   structuredBriefing,
   citationMap, 
@@ -628,8 +664,9 @@ export function ExecutiveBriefing({
   isRerunningSynthesis,
   rerunError,
 }: ExecutiveBriefingProps) {
+  const [inspectedCitation, setInspectedCitation] = useState<CitationInspectPayload | null>(null);
   const lookupCitation = useMemo(() => buildCitationLookup(citationMap), [citationMap]);
-  const renderCitations = useRenderCitations(lookupCitation, onCitationClick);
+  const renderCitations = useRenderCitations(lookupCitation, onCitationClick, setInspectedCitation);
   const synthesisSections = useMemo<SynthesisSectionType[]>(() => {
     if (!structuredBriefing) return [];
     const snake = structuredBriefing.synthesis_sections;
@@ -1057,6 +1094,7 @@ export function ExecutiveBriefing({
               lookupCitation={lookupCitation}
               onCitationClick={onCitationClick}
               renderCitations={renderCitations}
+              onCitationInspect={setInspectedCitation}
             />
 
             <SynthesisSections 
@@ -1073,6 +1111,7 @@ export function ExecutiveBriefing({
               citations={structuredBriefing.top_citations}
               lookupCitation={lookupCitation}
               onCitationClick={onCitationClick}
+              onCitationInspect={setInspectedCitation}
             />
             
             {structuredBriefing.follow_up_suggestions.length > 0 && (
@@ -1100,6 +1139,15 @@ export function ExecutiveBriefing({
           </div>
         )}
       </CardContent>
+      <CitationContextPanel
+        isOpen={Boolean(inspectedCitation)}
+        projectId={projectId}
+        citationInfo={inspectedCitation?.citationInfo ?? null}
+        chunkId={inspectedCitation?.chunkId}
+        supportingQuote={inspectedCitation?.quote}
+        onClose={() => setInspectedCitation(null)}
+        onViewEvidence={onCitationClick}
+      />
     </Card>
   );
 }

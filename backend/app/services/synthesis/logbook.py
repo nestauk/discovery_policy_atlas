@@ -32,6 +32,7 @@ from app.services.synthesis.nodes.impact_synthesis import (
     detect_scale_type,
     _normalise_unit_key,
 )
+from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
@@ -270,10 +271,46 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
             year=base_row.get("year"),
             title=base_row.get("title"),
             url=base_row.get("url"),
+            document_type=None,
+            evidence_score=None,
+            impact_score=None,
             supporting_quote=base_row.get("supporting_quote"),
             chunk_id=base_row.get("chunk_id"),
             claim_quotes=claim_quotes,
         )
+
+    doc_ids = list(
+        {
+            cit.analysis_document_id
+            for cit in citation_map.values()
+            if cit.analysis_document_id
+        }
+    )
+    doc_meta_by_id: Dict[str, Dict] = {}
+    if doc_ids:
+        docs_meta_res = (
+            supabase.table("analysis_documents")
+            .select(
+                "id, document_type, evidence_category, extraction_results, impact_score"
+            )
+            .in_("id", doc_ids)
+            .execute()
+        )
+        doc_meta_by_id = {
+            str(row.get("id")): row
+            for row in (docs_meta_res.data or [])
+            if row.get("id")
+        }
+
+    for cit in citation_map.values():
+        doc_meta = doc_meta_by_id.get(cit.analysis_document_id)
+        if not doc_meta:
+            continue
+        evidence_info = get_or_calculate_document_evidence(doc_meta)
+        stars = evidence_info.get("stars")
+        cit.evidence_score = int(stars) if isinstance(stars, (int, float)) else None
+        cit.impact_score = doc_meta.get("impact_score")
+        cit.document_type = doc_meta.get("document_type")
 
     # Parse evidence coverage
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = None
