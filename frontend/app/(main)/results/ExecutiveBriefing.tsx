@@ -1078,7 +1078,11 @@ export function ExecutiveBriefing({
   }), [processText]);
 
   return (
-    <Card className="shadow-sm">
+    <Card
+      className={`shadow-sm transition-[margin] duration-300 ${
+        inspectedCitation ? "mr-[calc(clamp(360px,30vw,500px)-240px)]" : "mr-0"
+      }`}
+    >
       <CardHeader className="pb-2">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <CardTitle className="flex items-center gap-2">
