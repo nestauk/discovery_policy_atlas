@@ -89,6 +89,65 @@ def normalize_source_type(source: str, document_type: str) -> str:
     return document_type.title() if document_type else "Other"
 
 
+def extract_author_short(authors: Any) -> Optional[str]:
+    """Extract compact author label from an authors field.
+
+    Args:
+        authors: Authors value from metadata, typically a list of strings.
+
+    Returns:
+        Short author label (usually surname of first author), or None when unavailable.
+    """
+    if isinstance(authors, str):
+        author_items = [authors]
+    elif isinstance(authors, list):
+        author_items = authors
+    else:
+        return None
+
+    if not author_items:
+        return None
+
+    first_author = author_items[0]
+    if not isinstance(first_author, str) or not first_author.strip():
+        return None
+
+    author_text = first_author.strip()
+    if "," in author_text:
+        return author_text.split(",", 1)[0].strip() or None
+
+    parts = [part for part in author_text.split() if part]
+    if not parts:
+        return None
+    return parts[-1].strip(".,") or None
+
+
+def extract_author_display(authors: Any) -> Optional[str]:
+    """Extract first author as stored for UI display.
+
+    Args:
+        authors: Authors value from metadata, typically a list of strings.
+
+    Returns:
+        First author string exactly as stored (trimmed), or None when unavailable.
+    """
+    if isinstance(authors, str):
+        author_items = [authors]
+    elif isinstance(authors, list):
+        author_items = authors
+    else:
+        return None
+
+    if not author_items:
+        return None
+
+    first_author = author_items[0]
+    if not isinstance(first_author, str):
+        return None
+
+    return first_author.strip() or None
+
+
 def escape_braces(text: str) -> str:
     """Escape braces for ChatPromptTemplate.
 

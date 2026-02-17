@@ -1080,7 +1080,7 @@ export function ExecutiveBriefing({
   return (
     <Card
       className={`shadow-sm transition-[margin] duration-300 ${
-        inspectedCitation ? "mr-[calc(clamp(360px,30vw,500px)-240px)]" : "mr-0"
+        inspectedCitation ? "mr-[clamp(120px,10vw,200px)]" : "mr-0"
       }`}
     >
       <CardHeader className="pb-2">

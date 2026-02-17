@@ -57,6 +57,14 @@ class DocumentEvidenceDetailsResult(TypedDict):
     sample_size: Optional[int]
 
 
+class DocumentEvidenceSummaryResult(TypedDict):
+    """Return type for get_or_calculate_document_evidence()."""
+
+    stars: int
+    justification: str
+    sample_size: Optional[int]
+
+
 class EvidenceStrengthResult(TypedDict):
     """Return type for calculate_evidence_strength()."""
 
@@ -199,6 +207,25 @@ def get_document_evidence_details(doc: dict) -> DocumentEvidenceDetailsResult:
         "score": calculated["score"],
         "justification": calculated["justification"],
         "sample_size": calculated["sample_size"],
+    }
+
+
+def get_or_calculate_document_evidence(doc: dict) -> DocumentEvidenceSummaryResult:
+    """Get document evidence in star format with DB-first fallback.
+
+    Args:
+        doc: Document dictionary that may include persisted evidence fields.
+
+    Returns:
+        Evidence payload with star rating, justification text, and sample size.
+    """
+    details = get_document_evidence_details(doc)
+    score = details.get("score")
+    stars = int(score) if isinstance(score, (int, float)) else 0
+    return {
+        "stars": stars,
+        "justification": details.get("justification") or "",
+        "sample_size": details.get("sample_size"),
     }
 
 

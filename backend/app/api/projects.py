@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 import logging
 import os
-from typing import Optional, List, Any
+from typing import Optional, List
 import uuid
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -34,8 +34,11 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
-from app.services.analysis.evidence.strength import (
-    get_document_evidence_details,
+from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
+from app.services.synthesis.utils import (
+    normalize_source_type,
+    extract_author_short,
+    extract_author_display,
 )
 from app.utils.project_data import (
     filter_prevalence_only_results,
@@ -62,10 +65,17 @@ class DocumentContextInfo(BaseModel):
 
     analysis_document_id: str = Field(..., description="Internal document UUID")
     title: str = Field(..., description="Document title")
+    author_display: Optional[str] = Field(
+        None, description="First author as stored in metadata"
+    )
     author_short: Optional[str] = Field(None, description="Short author reference")
     year: Optional[int] = Field(None, description="Publication year")
     url: Optional[str] = Field(None, description="Canonical source URL")
+    source_type: Optional[str] = Field(None, description="Normalised source type")
     document_type: Optional[str] = Field(None, description="Document/study type")
+    evidence_category: Optional[str] = Field(
+        None, description="Evidence category classification"
+    )
     evidence_score: Optional[int] = Field(None, description="Evidence strength score")
     impact_score: Optional[float] = Field(None, description="Impact score")
 
@@ -88,20 +98,6 @@ class ChunkContextResponse(BaseModel):
 def can_access_all_projects(user: CurrentUser) -> bool:
     """Check if user belongs to an admin org that can see all projects."""
     return user.organization_slug == ADMIN_ORG_SLUG
-
-
-def _author_short_from_authors(authors: Any) -> Optional[str]:
-    """Extract a compact author label from analysis_documents.authors."""
-    if not isinstance(authors, list) or not authors:
-        return None
-    first_author = authors[0]
-    if not isinstance(first_author, str) or not first_author.strip():
-        return None
-
-    author_text = first_author.strip()
-    if "," in author_text:
-        return author_text.split(",", 1)[0].strip() or None
-    return author_text.split(" ", 1)[0].strip() or None
 
 
 def can_access_project(
@@ -368,7 +364,7 @@ async def get_chunk_context(
         doc_res = (
             vectorization_service.supabase.table("analysis_documents")
             .select(
-                "id, title, authors, year, document_type, evidence_category, extraction_results, impact_score, pdf_url, landing_page_url, overton_url"
+                "id, title, authors, year, source, document_type, evidence_category, extraction_results, impact_score, pdf_url, landing_page_url, overton_url"
             )
             .eq("id", document_id)
             .eq("analysis_project_id", project_id)
@@ -388,12 +384,17 @@ async def get_chunk_context(
         document = DocumentContextInfo(
             analysis_document_id=str(doc.get("id") or document_id),
             title=str(doc.get("title") or "Unknown source"),
-            author_short=_author_short_from_authors(doc.get("authors")),
+            author_display=extract_author_display(doc.get("authors")),
+            author_short=extract_author_short(doc.get("authors")),
             year=doc.get("year"),
             url=doc.get("pdf_url")
             or doc.get("landing_page_url")
             or doc.get("overton_url"),
+            source_type=normalize_source_type(
+                str(doc.get("source") or ""), str(doc.get("document_type") or "")
+            ),
             document_type=doc.get("document_type"),
+            evidence_category=doc.get("evidence_category"),
             evidence_score=evidence_score,
             impact_score=doc.get("impact_score"),
         )
@@ -1773,7 +1774,8 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 extraction_results = doc.get("extraction_results", {})
                 impact_score = doc.get("impact_score")
-                evidence_score = get_document_evidence_details(doc)["score"]
+                evidence_info = get_or_calculate_document_evidence(doc)
+                evidence_score = evidence_info.get("stars")
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
@@ -1872,9 +1874,9 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     continue
 
                 evidence_category = doc.get("evidence_category", "")
-                evidence_details = get_document_evidence_details(doc)
-                evidence_score = evidence_details["score"]
-                evidence_justification = evidence_details["justification"]
+                evidence_info = get_or_calculate_document_evidence(doc)
+                evidence_score = evidence_info.get("stars")
+                evidence_justification = evidence_info.get("justification") or ""
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])
