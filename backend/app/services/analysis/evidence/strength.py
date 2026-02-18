@@ -49,6 +49,14 @@ class DocumentEvidenceScoreResult(TypedDict):
     sample_size: Optional[int]
 
 
+class DocumentEvidenceDetailsResult(TypedDict):
+    """Return type for get_document_evidence_details()."""
+
+    score: int
+    justification: str
+    sample_size: Optional[int]
+
+
 class EvidenceStrengthResult(TypedDict):
     """Return type for calculate_evidence_strength()."""
 
@@ -170,7 +178,7 @@ def build_evidence_info_for_docs(
 
 
 def get_document_evidence_score(doc: dict) -> int:
-    """Get evidence score for a document: DB column first, fallback to calculation.
+    """Get evidence score for a document: DB details first, fallback to calculation.
 
     Args:
         doc: Document dict with optional 'evidence_score' column
@@ -179,10 +187,41 @@ def get_document_evidence_score(doc: dict) -> int:
     Returns:
         Integer evidence score (0-5).
     """
-    stored = doc.get("evidence_score")
-    if stored is not None:
-        return stored
-    return calculate_document_evidence_score(doc)["score"]
+    return get_document_evidence_details(doc)["score"]
+
+
+def get_document_evidence_details(doc: dict) -> DocumentEvidenceDetailsResult:
+    """Get document evidence details: DB columns first, fallback for missing fields.
+
+    Args:
+        doc: Document dict with optional 'evidence_score',
+             'evidence_justification', and 'evidence_sample_size' columns.
+
+    Returns:
+        Dict with score, justification, and sample_size.
+    """
+    score = doc.get("evidence_score")
+    justification = doc.get("evidence_justification")
+    sample_size = doc.get("evidence_sample_size")
+
+    missing_score = score is None
+    missing_justification = justification is None
+    missing_sample_size = sample_size is None
+
+    if missing_score or missing_justification or missing_sample_size:
+        calculated = calculate_document_evidence_score(doc)
+        if missing_score:
+            score = calculated["score"]
+        if missing_justification:
+            justification = calculated["justification"]
+        if missing_sample_size:
+            sample_size = calculated["sample_size"]
+
+    return {
+        "score": score,
+        "justification": justification,
+        "sample_size": sample_size,
+    }
 
 
 def build_evidence_info_from_detailed_interventions(

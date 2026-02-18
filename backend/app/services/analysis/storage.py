@@ -306,6 +306,8 @@ class AnalysisStorageService:
 
             return {
                 "evidence_score": evidence_result["score"],
+                "evidence_justification": evidence_result["justification"],
+                "evidence_sample_size": evidence_result["sample_size"],
                 "impact_score": score,
                 "impact_score_label": label,
                 "impact_score_breakdown": breakdown,

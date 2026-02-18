@@ -34,8 +34,7 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsResponse,
 )
 from app.services.analysis.evidence.strength import (
-    get_document_evidence_score,
-    calculate_document_evidence_score,
+    get_document_evidence_details,
 )
 from app.utils.project_data import (
     filter_prevalence_only_results,
@@ -1626,11 +1625,8 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                 raw_data = extraction.get("raw_data", {})
 
                 extraction_results = doc.get("extraction_results", {})
-                conclusion = extraction_results.get("conclusion", {}) or {}
-                evidence_strength = conclusion.get("evidence_strength", {}) or {}
-
                 impact_score = doc.get("impact_score")
-                evidence_score = evidence_strength.get("stars")
+                evidence_score = get_document_evidence_details(doc)["score"]
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
@@ -1729,9 +1725,9 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     continue
 
                 evidence_category = doc.get("evidence_category", "")
-                evidence_score = get_document_evidence_score(doc)
-                evidence_result = calculate_document_evidence_score(doc)
-                evidence_justification = evidence_result.get("justification", "")
+                evidence_details = get_document_evidence_details(doc)
+                evidence_score = evidence_details["score"]
+                evidence_justification = evidence_details["justification"]
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])

@@ -6,6 +6,7 @@ from .category import (
 from .strength import (
     calculate_document_evidence_score,
     calculate_evidence_strength,
+    get_document_evidence_details,
     get_document_evidence_score,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "get_evidence_categories_for_api",
     "calculate_document_evidence_score",
     "calculate_evidence_strength",
+    "get_document_evidence_details",
     "get_document_evidence_score",
 ]

@@ -23,9 +23,7 @@ from app.services.analysis.evidence.strength import (
     parse_sample_size,
     calculate_evidence_strength,
     get_document_max_sample_size,
-    get_document_evidence_score,
-    get_document_sample_size,
-    calculate_document_evidence_score,
+    get_document_evidence_details,
     build_document_evidence_info,
 )
 from app.services.analysis.utils.navigator import (
@@ -100,11 +98,11 @@ def transform_document_for_api(doc: Dict) -> Dict:
         evidence_category, UNKNOWN_RANK
     )
 
-    doc_copy["evidence_strength"] = get_document_evidence_score(doc)
-    evidence_result = calculate_document_evidence_score(doc)
-    if evidence_result["justification"]:
-        doc_copy["evidence_strength_justification"] = evidence_result["justification"]
-    doc_copy["sample_size"] = get_document_sample_size(doc)
+    evidence_details = get_document_evidence_details(doc)
+    doc_copy["evidence_strength"] = evidence_details["score"]
+    if evidence_details["justification"]:
+        doc_copy["evidence_strength_justification"] = evidence_details["justification"]
+    doc_copy["sample_size"] = evidence_details["sample_size"]
 
     conclusion = (doc.get("extraction_results") or {}).get("conclusion") or {}
 
@@ -484,7 +482,7 @@ def get_outcome_contributions_data(project_id: str, outcome_theme_id: str) -> Di
     for doc_id, entry in documents_map.items():
         doc = docs_by_id.get(doc_id)
         if doc:
-            entry["evidence_score"] = get_document_evidence_score(doc)
+            entry["evidence_score"] = get_document_evidence_details(doc)["score"]
 
     documents = list(documents_map.values())
     documents.sort(key=lambda doc: (doc.get("title") or ""))

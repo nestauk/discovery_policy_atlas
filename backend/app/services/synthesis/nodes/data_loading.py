@@ -12,8 +12,7 @@ from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState, Concept
 from app.services.synthesis.utils import normalize_study_type
 from app.services.analysis.evidence.strength import (
-    get_document_evidence_score,
-    calculate_document_evidence_score,
+    get_document_evidence_details,
 )
 
 
@@ -90,7 +89,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     docs_res = (
         supabase.table("analysis_documents")
         .select(
-            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, top_line, is_relevant, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, has_harm_warning, harm_warning_reason"
+            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, evidence_score, evidence_justification, evidence_sample_size, top_line, is_relevant, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, has_harm_warning, harm_warning_reason"
         )
         .eq("analysis_project_id", project_id)
         .execute()
@@ -122,20 +121,17 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             else None,
         }
 
-        # Get evidence and impact scores (DB column preferred, fallback to calculation)
-        evidence_result = calculate_document_evidence_score(doc)
+        evidence_details = get_document_evidence_details(doc)
 
         doc_scores[doc_uuid] = {
-            "evidence_score": get_document_evidence_score(
-                doc
-            ),  # 0-5 with sample size penalty
+            "evidence_score": evidence_details["score"],  # 0-5 with sample size penalty
             "impact_score": doc.get("impact_score"),
             "impact_score_label": doc.get("impact_score_label"),
             "impact_score_breakdown": doc.get("impact_score_breakdown"),
             "transferability_score": doc.get("transferability_score"),
             "transferability_breakdown": doc.get("transferability_breakdown"),
             "evidence_category": doc.get("evidence_category"),
-            "evidence_justification": evidence_result["justification"],
+            "evidence_justification": evidence_details["justification"],
             "impact_justification": "",
             "has_harm_warning": bool(doc.get("has_harm_warning")),
             "harm_warning_reason": doc.get("harm_warning_reason"),
