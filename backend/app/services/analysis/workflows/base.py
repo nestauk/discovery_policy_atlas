@@ -31,8 +31,6 @@ from ..schemas_langchain import (
     MappingItem,
     ResultItem,
     ConclusionItem,
-    ConclusionsExtraction,
-    ImpactRating,
 )
 from ..evidence.category import EVIDENCE_CATEGORY_EXPLANATIONS
 from ..evidence.strength import calculate_document_evidence_score
@@ -252,9 +250,9 @@ class BaseExtractionWorkflow(ABC):
                 stage_name="conclusions",
                 extra={"paper_id": paper_id},
             )
-            extraction = ConclusionsExtraction(**result)
+            conclusion = ConclusionItem(**result["conclusion"])
             logger.info(f"[{self.workflow_type.upper()}] Extracted conclusion")
-            return {"conclusion": extraction.conclusion}
+            return {"conclusion": conclusion}
         except Exception as e:
             logger.error(f"[{self.workflow_type.upper()}] Conclusions failed: {e}")
             return {"conclusion": None, "error": str(e)}
@@ -296,26 +294,6 @@ class BaseExtractionWorkflow(ABC):
                 return self._empty_bundle(paper_id)
 
             conclusion = final_state.get("conclusion")
-            if conclusion:
-                interventions = final_state.get("interventions") or []
-                extraction_results = {
-                    "interventions": [
-                        intervention.model_dump() for intervention in interventions
-                    ]
-                }
-                doc_stub = {
-                    "evidence_category": evidence_category,
-                    "extraction_results": extraction_results,
-                }
-                evidence_result = calculate_document_evidence_score(doc_stub)
-                evidence_strength = ImpactRating(
-                    stars=evidence_result["score"],
-                    justification=evidence_result.get("justification", ""),
-                    evidence_gap=None,
-                )
-                conclusion = conclusion.model_copy(
-                    update={"evidence_strength": evidence_strength}
-                )
 
             return DocumentExtractionBundle(
                 paper_id=paper_id,

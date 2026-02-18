@@ -169,28 +169,20 @@ def build_evidence_info_for_docs(
     return result
 
 
-def get_or_calculate_document_evidence(doc: dict) -> dict:
-    """Get stored evidence strength or calculate it.
+def get_document_evidence_score(doc: dict) -> int:
+    """Get evidence score for a document: DB column first, fallback to calculation.
 
-    Returns dict with 'stars', 'justification', 'sample_size' keys.
+    Args:
+        doc: Document dict with optional 'evidence_score' column
+             and 'evidence_category' for fallback calculation.
+
+    Returns:
+        Integer evidence score (0-5).
     """
-    extraction_results = doc.get("extraction_results") or {}
-    conclusion = extraction_results.get("conclusion") or {}
-    stored = conclusion.get("evidence_strength") or {}
-
-    if stored:
-        return {
-            "stars": stored.get("stars"),
-            "justification": stored.get("justification", ""),
-            "sample_size": get_document_sample_size(doc),
-        }
-
-    result = calculate_document_evidence_score(doc)
-    return {
-        "stars": result["score"],
-        "justification": result.get("justification", ""),
-        "sample_size": result.get("sample_size"),
-    }
+    stored = doc.get("evidence_score")
+    if stored is not None:
+        return stored
+    return calculate_document_evidence_score(doc)["score"]
 
 
 def build_evidence_info_from_detailed_interventions(
