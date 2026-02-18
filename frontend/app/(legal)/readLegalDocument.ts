@@ -4,8 +4,9 @@ import path from 'path'
 function resolveDocumentPath(fileName: string): string {
   const workingDirectory = process.cwd()
   const candidatePaths = [
-    path.join(workingDirectory, 'docs', 'legal', fileName),
-    path.join(workingDirectory, '..', 'docs', 'legal', fileName),
+    path.join(workingDirectory, 'legal', fileName),
+    path.join(workingDirectory, 'frontend', 'legal', fileName),
+    path.join(workingDirectory, '..', 'frontend', 'legal', fileName),
   ]
 
   const resolvedPath = candidatePaths.find((candidatePath) => existsSync(candidatePath))
