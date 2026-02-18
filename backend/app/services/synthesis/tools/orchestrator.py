@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Literal, Tuple
 
@@ -1085,6 +1086,62 @@ Additional guidance:
         text = re.sub(r"<br\s*/?>", " ", text)
         return re.sub(r"\s+", " ", text).lower()
 
+    def _normalise_text_for_quote_match(self, text: str) -> str:
+        """Normalise text for robust quote-in-chunk matching.
+
+        Args:
+            text: Raw text from model output or chunk content.
+
+        Returns:
+            Canonicalised text with unicode variants and spacing normalised.
+        """
+        value = unicodedata.normalize("NFKC", text or "")
+        value = value.replace("\u00AD", "")
+        value = re.sub(r"[\u200B-\u200D\u2060\uFEFF]", "", value)
+        value = re.sub(r"[\u2018\u2019]", "'", value)
+        value = re.sub(r"[\u201C\u201D]", '"', value)
+        value = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]", "-", value)
+        value = re.sub(r"[\u00A0\u202F]", " ", value)
+        value = (
+            value.replace("\u00B2", "2").replace("\u00B3", "3").replace("\u00B9", "1")
+        )
+        value = re.sub(r"\s+", " ", value).strip()
+        return value
+
+    def _find_best_matching_chunk_id(
+        self,
+        supporting_quote: str,
+        candidate_chunk_ids: List[str],
+        chunk_text_map: Dict[str, str],
+    ) -> str:
+        """Find the best candidate chunk containing the supporting quote.
+
+        Args:
+            supporting_quote: Verbatim quote returned by grounding.
+            candidate_chunk_ids: Candidate chunk identifiers for the citation document.
+            chunk_text_map: Mapping of chunk identifiers to raw chunk text.
+
+        Returns:
+            Best matching chunk identifier, or empty string when no match is found.
+        """
+        quote = self._normalise_text_for_quote_match(supporting_quote)
+        if not quote:
+            return ""
+
+        best_chunk_id = ""
+        best_position = 10**9
+        for chunk_id in candidate_chunk_ids:
+            chunk_text = self._normalise_text_for_quote_match(
+                chunk_text_map.get(chunk_id, "")
+            )
+            if not chunk_text:
+                continue
+            pos = chunk_text.lower().find(quote.lower())
+            if pos >= 0 and pos < best_position:
+                best_position = pos
+                best_chunk_id = chunk_id
+        return best_chunk_id
+
     async def _ground_and_extract_quotes(
         self,
         ctx: OrchestratorContext,
@@ -1142,11 +1199,15 @@ Additional guidance:
                 continue
 
             doc_id = citation.analysis_document_id
-            doc_chunk_ids = [
-                context.chunk_id
-                for context in all_contexts
-                if context.document_id == doc_id and context.chunk_id
-            ]
+            doc_chunk_ids = list(
+                dict.fromkeys(
+                    [
+                        context.chunk_id
+                        for context in all_contexts
+                        if context.document_id == doc_id and context.chunk_id
+                    ]
+                )
+            )
             chunk_text_map = await fetch_chunk_texts(doc_chunk_ids)
             chunk_blocks = []
             for chunk_id in doc_chunk_ids[:12]:
@@ -1198,6 +1259,32 @@ Additional guidance:
                     for item in result.claim_quotes
                 }
                 for item in result.claim_quotes:
+                    resolved_chunk_id = str(item.chunk_id or "")
+                    resolved_issue = item.issue
+                    if item.supporting_quote:
+                        # Enforce quote->chunk consistency for downstream highlight UX.
+                        if resolved_chunk_id:
+                            existing_text = chunk_text_map.get(resolved_chunk_id, "")
+                            existing_matches = self._find_best_matching_chunk_id(
+                                supporting_quote=item.supporting_quote,
+                                candidate_chunk_ids=[resolved_chunk_id],
+                                chunk_text_map={resolved_chunk_id: existing_text},
+                            )
+                            if not existing_matches:
+                                resolved_chunk_id = ""
+                        if not resolved_chunk_id:
+                            resolved_chunk_id = self._find_best_matching_chunk_id(
+                                supporting_quote=item.supporting_quote,
+                                candidate_chunk_ids=doc_chunk_ids,
+                                chunk_text_map=chunk_text_map,
+                            )
+                        if not resolved_chunk_id:
+                            mismatch_note = "Could not resolve a chunk containing the supporting quote."
+                            resolved_issue = (
+                                f"{resolved_issue} {mismatch_note}".strip()
+                                if resolved_issue
+                                else mismatch_note
+                            )
                     collected.append(
                         ClaimQuoteResult(
                             claim_text=item.claim_text,
@@ -1205,8 +1292,8 @@ Additional guidance:
                             is_supported=item.is_supported,
                             attribution=item.attribution,
                             supporting_quote=item.supporting_quote,
-                            chunk_id=item.chunk_id,
-                            issue=item.issue,
+                            chunk_id=resolved_chunk_id,
+                            issue=resolved_issue,
                         )
                     )
                 for claim_text in claims_for_citation:

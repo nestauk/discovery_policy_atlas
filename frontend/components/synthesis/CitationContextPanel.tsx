@@ -63,9 +63,16 @@ function partialRatio(str1: string, str2: string): number {
 
 function canonicaliseText(text: string): string {
   return text
+    .normalize("NFKC")
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
-    .replace(/[\u2013\u2014]/g, "-");
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
+    .replace(/[\u00A0\u202F]/g, " ")
+    .replace(/\u00AD/g, "")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/\u00B2/g, "2")
+    .replace(/\u00B3/g, "3")
+    .replace(/\u00B9/g, "1");
 }
 
 type NormalisedText = { text: string; indexMap: number[] };
@@ -147,7 +154,7 @@ type TokenSpan = { token: string; start: number; end: number };
 
 function extractTokenSpans(text: string): TokenSpan[] {
   const spans: TokenSpan[] = [];
-  const regex = /[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*/g;
+  const regex = /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
     spans.push({
@@ -161,7 +168,10 @@ function extractTokenSpans(text: string): TokenSpan[] {
 
 function findQuoteRange(content: string, quote: string): { start: number; end: number } | null {
   const trimmedContent = content.trim();
-  const trimmedQuote = quote.trim();
+  const trimmedQuote = quote
+    .trim()
+    .replace(/^quote:\s*/i, "")
+    .replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, "");
   if (!trimmedContent || !trimmedQuote) return null;
 
   const exactLikeMatch = findExactLikeRange(trimmedContent, trimmedQuote);
@@ -197,7 +207,7 @@ function findQuoteRange(content: string, quote: string): { start: number; end: n
       const lengthSimilarity =
         Math.min(quoteNormalised.length, windowNormalised.length) /
         Math.max(quoteNormalised.length, windowNormalised.length);
-      if (lengthSimilarity < 0.88) continue;
+      if (lengthSimilarity < 0.84) continue;
 
       const score = ratio(quoteNormalised, windowNormalised);
       const pScore = partialRatio(quoteNormalised, windowNormalised);
@@ -216,7 +226,7 @@ function findQuoteRange(content: string, quote: string): { start: number; end: n
   }
 
   // Require strong ordered similarity and comparable span length.
-  if (bestScore < 90 || bestPartial < 92 || bestLengthSimilarity < 0.9 || bestStart < 0) return null;
+  if (bestScore < 86 || bestPartial < 90 || bestLengthSimilarity < 0.84 || bestStart < 0) return null;
   return { start: bestStart, end: bestEnd };
 }
 
