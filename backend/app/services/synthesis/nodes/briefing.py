@@ -334,6 +334,28 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     )
     await _run_section("recommendations", additional_extra=f" {rec_extra}")
 
+    # Enforce strict citation token style so downstream quote/detail features can
+    # always resolve citations reliably.
+    for output in section_outputs.values():
+        output.content = _normalise_compound_citation_brackets(output.content or "")
+        for claim in output.claim_quotes:
+            claim.claim_text = _normalise_compound_citation_brackets(
+                claim.claim_text or ""
+            )
+
+    # Pre-sort interventions table rows to match frontend display order *before*
+    # renumbering so the scan order equals the rendered order.
+    int_out = section_outputs.get("interventions")
+    if int_out and int_out.content:
+        int_out.content = _sort_interventions_table_markdown(int_out.content)
+
+    # Renumber citations by order of first appearance in final briefing content.
+    _renumber_citations_by_appearance(
+        section_outputs=section_outputs,
+        synthesis_outputs=synthesis_outputs,
+        state=state,
+    )
+
     # Build structured briefing from sections
     structured_briefing = await _build_structured_briefing(
         section_outputs,
@@ -423,6 +445,182 @@ def _extract_research_question(state: SynthesisState) -> str:
         )
 
     return ""
+
+
+def _sort_interventions_table_markdown(content: str) -> str:
+    """Sort markdown table data rows by citation count (most first).
+
+    Matches the display-order sort applied later in _build_structured_briefing
+    so that _renumber_citations_by_appearance scans rows in the same order
+    the frontend renders them.
+    """
+    if not content or "|" not in content:
+        return content
+
+    lines = content.strip().split("\n")
+    header_lines: List[str] = []
+    data_lines: List[str] = []
+    past_separator = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not past_separator:
+            header_lines.append(line)
+            if (
+                set(stripped.replace("|", "").replace("-", "").replace(" ", ""))
+                == set()
+            ):
+                past_separator = True
+        else:
+            data_lines.append(line)
+
+    if len(data_lines) <= 1:
+        return content
+
+    data_lines.sort(
+        key=lambda row: len(re.findall(r"\[\d+\]", row)),
+        reverse=True,
+    )
+    return "\n".join(header_lines + data_lines)
+
+
+def _normalise_compound_citation_brackets(text: str) -> str:
+    """Rewrite bracketed citation lists into strict `[N] [N]` format.
+
+    Args:
+        text: Free text that may contain bracketed citation lists such as
+            ``[1, 3, 12]``.
+
+    Returns:
+        Text with citation lists expanded to individual bracketed citations.
+    """
+    if not text:
+        return text
+
+    def _expand(match: re.Match[str]) -> str:
+        numbers = [int(n) for n in re.findall(r"\d+", match.group(1))]
+        if not numbers:
+            return match.group(0)
+        seen = set()
+        ordered = []
+        for num in numbers:
+            if num <= 0 or num in seen:
+                continue
+            seen.add(num)
+            ordered.append(num)
+        return " ".join(f"[{num}]" for num in ordered) if ordered else match.group(0)
+
+    return re.sub(r"\[([0-9][0-9,\s;]*)\]", _expand, text)
+
+
+def _apply_citation_mapping(text: str, mapping: Dict[int, int]) -> str:
+    """Replace [old] citation tokens with [new] tokens safely."""
+    if not text or not mapping:
+        return text
+    text = _normalise_compound_citation_brackets(text)
+    placeholder_prefix = "__CIT_PLACEHOLDER_"
+    updated = text
+    for old_num in mapping:
+        updated = updated.replace(f"[{old_num}]", f"[{placeholder_prefix}{old_num}__]")
+    for old_num, new_num in mapping.items():
+        updated = updated.replace(
+            f"[{placeholder_prefix}{old_num}__]",
+            f"[{new_num}]",
+        )
+    return updated
+
+
+def _normalise_inline_citation_groups(text: str) -> str:
+    """Sort adjacent inline citation groups numerically (e.g., [3] [1] -> [1] [3])."""
+    if not text:
+        return text
+    text = _normalise_compound_citation_brackets(text)
+
+    def _sort_group(match: re.Match[str]) -> str:
+        citations = [int(num) for num in re.findall(r"\[(\d+)\]", match.group(0))]
+        ordered = sorted(set(citations))
+        return " ".join(f"[{num}]" for num in ordered)
+
+    return re.sub(r"(?:\[\d+\]\s*){2,}", _sort_group, text)
+
+
+def _renumber_citations_by_appearance(
+    section_outputs: Dict[str, SectionOutput],
+    synthesis_outputs: List[Tuple[str, SectionOutput]],
+    state: SynthesisState,
+) -> Dict[int, int]:
+    """Renumber citations sequentially by first appearance order in briefing output."""
+    # Must match frontend display order in ExecutiveBriefing.tsx.
+    ordered_section_keys: List[str] = ["core_answer", "background", "interventions"]
+    ordered_section_keys.extend(
+        [f"synthesis_{i+1}" for i in range(len(synthesis_outputs))]
+    )
+    ordered_section_keys.extend(["recommendations"])
+
+    seen_in_order: List[int] = []
+    seen_set = set()
+    for key in ordered_section_keys:
+        output = section_outputs.get(key)
+        if not output or not output.content:
+            continue
+        normalised_content = _normalise_compound_citation_brackets(output.content)
+        for match in re.findall(r"\[(\d+)\]", normalised_content):
+            num = int(match)
+            if num not in seen_set:
+                seen_set.add(num)
+                seen_in_order.append(num)
+
+    grounded_citations = state.get("grounded_citations") or []
+    for citation in grounded_citations:
+        num = getattr(citation, "citation_number", 0) or 0
+        if num > 0 and num not in seen_set:
+            seen_set.add(num)
+            seen_in_order.append(num)
+
+    mapping = {old_num: idx for idx, old_num in enumerate(seen_in_order, start=1)}
+    if not mapping:
+        return {}
+
+    for output in section_outputs.values():
+        output.content = _normalise_inline_citation_groups(
+            _apply_citation_mapping(output.content or "", mapping)
+        )
+        output.citations_used = sorted(
+            {
+                mapping.get(int(c), int(c))
+                for c in (output.citations_used or [])
+                if int(c) > 0
+            }
+        )
+        for claim in output.claim_quotes:
+            claim.citation_number = mapping.get(
+                int(claim.citation_number), int(claim.citation_number)
+            )
+            claim.claim_text = _normalise_inline_citation_groups(
+                _apply_citation_mapping(claim.claim_text or "", mapping)
+            )
+
+    new_doc_citation_map: Dict[str, int] = {}
+    for doc_id, old_num in (state.get("doc_citation_map") or {}).items():
+        old_int = int(old_num) if old_num else 0
+        if old_int <= 0:
+            continue
+        new_doc_citation_map[doc_id] = mapping.get(old_int, old_int)
+    state["doc_citation_map"] = new_doc_citation_map
+
+    for citation in grounded_citations:
+        old_num = int(getattr(citation, "citation_number", 0) or 0)
+        if old_num <= 0:
+            continue
+        new_num = mapping.get(old_num, old_num)
+        citation.citation_number = new_num
+        citation.citation_key = f"[{new_num}]"
+        for cq in citation.claim_quotes:
+            cq.claim_text = _normalise_inline_citation_groups(
+                _apply_citation_mapping(cq.claim_text or "", mapping)
+            )
+
+    return mapping
 
 
 async def _build_structured_briefing(

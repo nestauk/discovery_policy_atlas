@@ -1031,7 +1031,9 @@ Additional guidance:
 
         claims: List[Tuple[str, List[int]]] = []
         seen: set = set()
-        for sentence in re.findall(r"[^.!?\n]*\[\d+\][^.!?\n]*[.!?]?", cleaned):
+        for sentence in re.findall(
+            r"[^.!?\n]*\[[0-9][0-9,\s;]*\][^.!?\n]*[.!?]?", cleaned
+        ):
             claim_text = (
                 sentence.replace("<DECIMAL_DOT>", ".").strip().strip("|").strip()
             )
@@ -1039,10 +1041,18 @@ Additional guidance:
                 continue
             if re.match(r"^\d+[\.\)\%\s-]", claim_text):
                 continue
-            stripped = re.sub(r"\[\d+\]", "", claim_text).strip()
+            stripped = re.sub(r"\[[0-9][0-9,\s;]*\]", "", claim_text).strip()
             if len(stripped) < 15:
                 continue
-            citations = sorted({int(x) for x in re.findall(r"\[(\d+)\]", claim_text)})
+            bracket_groups = re.findall(r"\[([0-9][0-9,\s;]*)\]", claim_text)
+            citations = sorted(
+                {
+                    int(x)
+                    for group in bracket_groups
+                    for x in re.findall(r"\d+", group)
+                    if int(x) > 0
+                }
+            )
             if not citations:
                 continue
             key = (claim_text, tuple(citations))
@@ -1069,7 +1079,7 @@ Additional guidance:
 
     def _normalise_claim_text(self, text: str) -> str:
         """Normalise claim text for tolerant matching across formatting variants."""
-        text = re.sub(r"\[\d+\]", "", text or "")
+        text = re.sub(r"\[[0-9][0-9,\s;]*\]", "", text or "")
         text = re.sub(r"^[\-\*]\s+", "", text)
         text = text.strip().strip("|").strip()
         text = re.sub(r"<br\s*/?>", " ", text)
@@ -1447,9 +1457,14 @@ Additional guidance:
         """
         import re
 
-        pattern = r"\[(\d+)\]"
-        matches = re.findall(pattern, content)
-        return sorted(set(int(m) for m in matches))
+        bracket_groups = re.findall(r"\[([0-9][0-9,\s;]*)\]", content or "")
+        numbers = {
+            int(num)
+            for group in bracket_groups
+            for num in re.findall(r"\d+", group)
+            if int(num) > 0
+        }
+        return sorted(numbers)
 
     def _build_langfuse_config(self, run_name: str) -> Dict[str, Any]:
         """Build Langfuse config for LLM calls.
