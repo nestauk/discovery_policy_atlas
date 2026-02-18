@@ -781,7 +781,12 @@ export default function ProjectResultsPage() {
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
       const conclusion = doc.extraction_results?.conclusion
-      const evidenceStrength = conclusion?.evidence_strength
+      const legacyEvidenceStrength = conclusion?.evidence_strength
+      const evidenceStrength =
+        doc.evidence_strength ?? legacyEvidenceStrength?.stars
+      const evidenceStrengthJustification =
+        doc.evidence_strength_justification ??
+        legacyEvidenceStrength?.justification
       const isRelevant = Boolean(doc.is_relevant !== false)
       const isEvidence = Boolean(doc.is_evidence !== false)
       const isRelevantEvidence = isRelevant && isEvidence
@@ -810,8 +815,8 @@ export default function ProjectResultsPage() {
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
-        evidence_strength: evidenceStrength?.stars || undefined,
-        evidence_strength_justification: evidenceStrength?.justification,
+        evidence_strength: evidenceStrength ?? undefined,
+        evidence_strength_justification: evidenceStrengthJustification,
         impact_score: doc.impact_score,
         impact_score_label: doc.impact_score_label,
         impact_score_breakdown: doc.impact_score_breakdown,

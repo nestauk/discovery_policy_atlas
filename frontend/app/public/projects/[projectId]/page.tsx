@@ -365,7 +365,12 @@ export default function PublicProjectPage() {
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
       const conclusion = doc.extraction_results?.conclusion
-      const evidenceStrength = conclusion?.evidence_strength
+      const legacyEvidenceStrength = conclusion?.evidence_strength
+      const evidenceStrength =
+        doc.evidence_strength ?? legacyEvidenceStrength?.stars
+      const evidenceStrengthJustification =
+        doc.evidence_strength_justification ??
+        legacyEvidenceStrength?.justification
       return {
         id: String(doc.id || doc.doc_id || `doc-${Math.random()}`),
         title: String(doc.title || 'Untitled'),
@@ -388,8 +393,8 @@ export default function PublicProjectPage() {
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
-        evidence_strength: evidenceStrength?.stars || undefined,
-        evidence_strength_justification: evidenceStrength?.justification,
+        evidence_strength: evidenceStrength ?? undefined,
+        evidence_strength_justification: evidenceStrengthJustification,
         impact_score: doc.impact_score,
         impact_score_label: doc.impact_score_label,
         impact_score_breakdown: doc.impact_score_breakdown,
