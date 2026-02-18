@@ -1748,7 +1748,9 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                         "Relevance Reason": doc.get("relevance_reason", ""),
                         "Confidence": doc.get("relevance_confidence", ""),
                         "Evidence Category": evidence_category,
-                        "Evidence Score": evidence_score or "",
+                        "Evidence Score": (
+                            evidence_score if evidence_score is not None else ""
+                        ),
                         "Evidence Justification": evidence_justification,
                         "Impact Score": doc.get("impact_score", ""),
                         "Impact Justification": doc.get("impact_score_label", ""),
