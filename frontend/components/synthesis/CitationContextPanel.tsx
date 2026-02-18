@@ -20,6 +20,7 @@ interface ChunkContextResponse {
     author_display?: string | null;
     author_short?: string | null;
     year?: number | null;
+    country?: string | null;
     url?: string | null;
     source_type?: string | null;
     document_type?: string | null;
@@ -293,6 +294,7 @@ export function CitationContextPanel({
   const effectiveAuthor =
     freshData?.document.author_display || freshData?.document.author_short || citationInfo?.author_short;
   const effectiveYear = freshData?.document.year || citationInfo?.year;
+  const effectiveCountry = freshData?.document.country;
   const effectiveUrl = freshData?.document.url || citationInfo?.url;
   const effectiveSourceType =
     freshData?.document.source_type || freshData?.document.document_type || citationInfo?.document_type;
@@ -375,6 +377,11 @@ export function CitationContextPanel({
                 {formatOutOfFive(impactScore)}
               </span>
             </div>
+            {effectiveCountry && (
+              <div className="text-slate-500">
+                Country: <span className="font-medium text-slate-700">{effectiveCountry}</span>
+              </div>
+            )}
           </div>
         </div>
 

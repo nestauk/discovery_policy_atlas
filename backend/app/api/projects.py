@@ -70,6 +70,7 @@ class DocumentContextInfo(BaseModel):
     )
     author_short: Optional[str] = Field(None, description="Short author reference")
     year: Optional[int] = Field(None, description="Publication year")
+    country: Optional[str] = Field(None, description="Source country")
     url: Optional[str] = Field(None, description="Canonical source URL")
     source_type: Optional[str] = Field(None, description="Normalised source type")
     document_type: Optional[str] = Field(None, description="Document/study type")
@@ -364,7 +365,7 @@ async def get_chunk_context(
         doc_res = (
             vectorization_service.supabase.table("analysis_documents")
             .select(
-                "id, title, authors, year, source, document_type, evidence_category, extraction_results, impact_score, pdf_url, landing_page_url, overton_url"
+                "id, title, authors, year, source_country, source, document_type, evidence_category, extraction_results, impact_score, pdf_url, landing_page_url, overton_url"
             )
             .eq("id", document_id)
             .eq("analysis_project_id", project_id)
@@ -387,6 +388,7 @@ async def get_chunk_context(
             author_display=extract_author_display(doc.get("authors")),
             author_short=extract_author_short(doc.get("authors")),
             year=doc.get("year"),
+            country=doc.get("source_country"),
             url=doc.get("pdf_url")
             or doc.get("landing_page_url")
             or doc.get("overton_url"),
