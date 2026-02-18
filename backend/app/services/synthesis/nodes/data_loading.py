@@ -11,7 +11,10 @@ from typing import Dict, List
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState, Concept
 from app.services.synthesis.utils import normalize_study_type
-from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
+from app.services.analysis.evidence.strength import (
+    get_document_evidence_score,
+    calculate_document_evidence_score,
+)
 
 
 def clean_null_string(value: object) -> str:
@@ -119,18 +122,20 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             else None,
         }
 
-        # Get evidence and impact scores from conclusion (prefer stored, fallback to recompute)
-        evidence_info = get_or_calculate_document_evidence(doc)
+        # Get evidence and impact scores (DB column preferred, fallback to calculation)
+        evidence_result = calculate_document_evidence_score(doc)
 
         doc_scores[doc_uuid] = {
-            "evidence_score": evidence_info["stars"],  # 0-5 with sample size penalty
+            "evidence_score": get_document_evidence_score(
+                doc
+            ),  # 0-5 with sample size penalty
             "impact_score": doc.get("impact_score"),
             "impact_score_label": doc.get("impact_score_label"),
             "impact_score_breakdown": doc.get("impact_score_breakdown"),
             "transferability_score": doc.get("transferability_score"),
             "transferability_breakdown": doc.get("transferability_breakdown"),
             "evidence_category": doc.get("evidence_category"),
-            "evidence_justification": evidence_info["justification"],
+            "evidence_justification": evidence_result["justification"],
             "impact_justification": "",
             "has_harm_warning": bool(doc.get("has_harm_warning")),
             "harm_warning_reason": doc.get("harm_warning_reason"),
