@@ -71,11 +71,6 @@ interface DocumentDetailResult {
       top_line_summary?: string
       detailed_explanation?: string
       supporting_quote?: string
-      evidence_strength?: {
-        stars?: number | null
-        justification?: string
-        evidence_gap?: string
-      }
     }
     metadata?: Record<string, unknown>
   }
@@ -84,9 +79,11 @@ interface DocumentDetailResult {
 interface DocumentDetailViewProps {
   extraction: DocumentDetailResult['extraction']
   isSystematicReview?: boolean
+  evidenceStrength?: number
+  evidenceStrengthJustification?: string
 }
 
-export function DocumentDetailView({ extraction, isSystematicReview = false }: DocumentDetailViewProps) {
+export function DocumentDetailView({ extraction, isSystematicReview = false, evidenceStrength, evidenceStrengthJustification }: DocumentDetailViewProps) {
   const [openSections, setOpenSections] = useState({
     issues: true,
     interventions: true,
@@ -360,28 +357,18 @@ export function DocumentDetailView({ extraction, isSystematicReview = false }: D
                     </div>
                   )}
 
-                  {conclusion.evidence_strength && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {conclusion.evidence_strength && (
-                        <div>
-                          <h6 className="font-medium text-purple-900 text-sm mb-1">Evidence strength</h6>
-                          <div className="text-sm text-gray-700">
-                            {typeof conclusion.evidence_strength.stars === 'number' && (
-                              <div className="mb-1">
-                                <span className="font-medium">Stars: </span>
-                                {"★".repeat(Math.max(0, Math.min(5, conclusion.evidence_strength.stars)))}
-                                {"☆".repeat(Math.max(0, 5 - Math.max(0, Math.min(5, conclusion.evidence_strength.stars))))}
-                              </div>
-                            )}
-                            {conclusion.evidence_strength.justification && (
-                              <p className="text-sm text-gray-700">{conclusion.evidence_strength.justification}</p>
-                            )}
-                            {conclusion.evidence_strength.stars == null && conclusion.evidence_strength.evidence_gap && (
-                              <p className="text-xs text-gray-500 mt-1">Evidence gap: {conclusion.evidence_strength.evidence_gap}</p>
-                            )}
-                          </div>
+                  {typeof evidenceStrength === 'number' && evidenceStrength > 0 && (
+                    <div>
+                      <h6 className="font-medium text-purple-900 text-sm mb-1">Evidence Strength</h6>
+                      <div className="text-sm text-gray-700">
+                        <div className="mb-1" title={evidenceStrengthJustification}>
+                          {"★".repeat(Math.min(5, evidenceStrength))}
+                          {"☆".repeat(Math.max(0, 5 - evidenceStrength))}
                         </div>
-                      )}
+                        {evidenceStrengthJustification && (
+                          <p className="text-sm text-gray-500">{evidenceStrengthJustification}</p>
+                        )}
+                      </div>
                     </div>
                   )}
 
