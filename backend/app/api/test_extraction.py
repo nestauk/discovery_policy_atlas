@@ -259,7 +259,7 @@ async def run_extraction_with_custom_prompts(
     conclusions_result = await chain.ainvoke(
         {"full_text": text, "interventions_json": interventions_json}
     )
-    conclusions_extraction = ConclusionItem(**conclusions_result["conclusion"])
+    conclusions_extraction = ConclusionItem(**conclusions_result.get("conclusion", {}))
 
     return (
         DocumentExtractionBundle(

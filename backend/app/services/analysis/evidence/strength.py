@@ -177,21 +177,8 @@ def build_evidence_info_for_docs(
     return result
 
 
-def get_document_evidence_score(doc: dict) -> int:
-    """Get evidence score for a document: DB details first, fallback to calculation.
-
-    Args:
-        doc: Document dict with optional 'evidence_score' column
-             and 'evidence_category' for fallback calculation.
-
-    Returns:
-        Integer evidence score (0-5).
-    """
-    return get_document_evidence_details(doc)["score"]
-
-
 def get_document_evidence_details(doc: dict) -> DocumentEvidenceDetailsResult:
-    """Get document evidence details: DB columns first, fallback for missing fields.
+    """Get document evidence details: DB columns first, fallback to calculation.
 
     Args:
         doc: Document dict with optional 'evidence_score',
@@ -201,26 +188,17 @@ def get_document_evidence_details(doc: dict) -> DocumentEvidenceDetailsResult:
         Dict with score, justification, and sample_size.
     """
     score = doc.get("evidence_score")
-    justification = doc.get("evidence_justification")
-    sample_size = doc.get("evidence_sample_size")
-
-    missing_score = score is None
-    missing_justification = justification is None
-    missing_sample_size = sample_size is None
-
-    if missing_score or missing_justification or missing_sample_size:
-        calculated = calculate_document_evidence_score(doc)
-        if missing_score:
-            score = calculated["score"]
-        if missing_justification:
-            justification = calculated["justification"]
-        if missing_sample_size:
-            sample_size = calculated["sample_size"]
-
+    if score is not None:
+        return {
+            "score": score,
+            "justification": doc.get("evidence_justification") or "",
+            "sample_size": doc.get("evidence_sample_size"),
+        }
+    calculated = calculate_document_evidence_score(doc)
     return {
-        "score": score,
-        "justification": justification,
-        "sample_size": sample_size,
+        "score": calculated["score"],
+        "justification": calculated["justification"],
+        "sample_size": calculated["sample_size"],
     }
 
 

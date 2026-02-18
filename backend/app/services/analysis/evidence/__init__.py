@@ -7,7 +7,6 @@ from .strength import (
     calculate_document_evidence_score,
     calculate_evidence_strength,
     get_document_evidence_details,
-    get_document_evidence_score,
 )
 
 __all__ = [
@@ -17,5 +16,4 @@ __all__ = [
     "calculate_document_evidence_score",
     "calculate_evidence_strength",
     "get_document_evidence_details",
-    "get_document_evidence_score",
 ]

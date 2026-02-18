@@ -7,7 +7,6 @@ from app.services.analysis.evidence.strength import (
     calculate_document_evidence_score,
     calculate_evidence_strength,
     get_document_evidence_details,
-    get_document_evidence_score,
 )
 
 
@@ -223,36 +222,6 @@ class TestEvidenceStrengthBasics:
         assert result["stars"] == 0
 
 
-class TestGetDocumentEvidenceScore:
-    """Tests for get_document_evidence_score helper."""
-
-    def test_db_column_path(self):
-        """When evidence_score DB column is set, return it directly."""
-        doc = {
-            "evidence_score": 3,
-            "evidence_category": "Observational Research Studies",
-        }
-        assert get_document_evidence_score(doc) == 3
-
-    def test_fallback_path(self):
-        """When evidence_score is None, fall back to calculation from evidence_category."""
-        doc = {
-            "evidence_score": None,
-            "evidence_category": "Policy Syntheses & Guidance Documents",
-        }
-        assert get_document_evidence_score(doc) == 2
-
-    def test_no_category(self):
-        """When both evidence_score and evidence_category are None, return 0."""
-        doc = {"evidence_score": None, "evidence_category": None}
-        assert get_document_evidence_score(doc) == 0
-
-    def test_missing_evidence_score_key(self):
-        """When evidence_score key is missing entirely, fall back to calculation."""
-        doc = {"evidence_category": "RCTs and Quasi-Experimental Studies"}
-        assert get_document_evidence_score(doc) == 4
-
-
 class TestGetDocumentEvidenceDetails:
     """Tests for get_document_evidence_details helper."""
 
@@ -268,35 +237,6 @@ class TestGetDocumentEvidenceDetails:
             "score": 2,
             "justification": "",
             "sample_size": 45,
-        }
-
-    def test_missing_justification_only(self):
-        """When only justification is missing, keep DB score/sample and compute justification."""
-        doc = {
-            "evidence_score": 4,
-            "evidence_justification": None,
-            "evidence_sample_size": 150,
-            "evidence_category": "RCTs and Quasi-Experimental Studies",
-            "extraction_results": {"interventions": [{"sample_size": 150}]},
-        }
-        result = get_document_evidence_details(doc)
-        assert result["score"] == 4
-        assert result["sample_size"] == 150
-        assert "Based on evidence category" in result["justification"]
-
-    def test_missing_sample_size_only(self):
-        """When sample size is missing, keep DB score/justification and compute sample."""
-        doc = {
-            "evidence_score": 3,
-            "evidence_justification": "Stored justification",
-            "evidence_sample_size": None,
-            "evidence_category": "RCTs and Quasi-Experimental Studies",
-            "extraction_results": {"interventions": [{"sample_size": 80}]},
-        }
-        assert get_document_evidence_details(doc) == {
-            "score": 3,
-            "justification": "Stored justification",
-            "sample_size": 80,
         }
 
     def test_missing_all_fields(self):

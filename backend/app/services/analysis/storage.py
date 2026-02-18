@@ -648,8 +648,7 @@ class AnalysisStorageService:
 
         # Update documents with extraction results
         updates = []
-        doc_source_lookup: Dict[str, Optional[str]] = {}
-        doc_category_lookup: Dict[str, Optional[str]] = {}
+        doc_meta_lookup: Dict[str, Dict] = {}
         try:
             source_rows = await self._async_supabase_query(
                 lambda: self.supabase.table("analysis_documents")
@@ -658,25 +657,18 @@ class AnalysisStorageService:
                 .execute()
             )
             if source_rows.data:
-                doc_source_lookup = {
-                    row.get("doc_id"): row.get("source_country")
-                    for row in source_rows.data
-                }
-                doc_category_lookup = {
-                    row.get("doc_id"): row.get("evidence_category")
-                    for row in source_rows.data
-                }
+                doc_meta_lookup = {row.get("doc_id"): row for row in source_rows.data}
         except Exception as exc:
-            logger.warning(f"Failed to build source_country lookup: {exc}")
+            logger.warning(f"Failed to build doc metadata lookup: {exc}")
         for extraction in extractions_data.get("extractions", []):
             doc_id = extraction.get("paper_id")
             if doc_id:
-                source_country = doc_source_lookup.get(doc_id)
+                doc_meta = doc_meta_lookup.get(doc_id, {})
                 scoring_fields = await self._compute_document_scoring_fields(
                     project_id,
                     extraction,
-                    doc_source_country=source_country,
-                    evidence_category=doc_category_lookup.get(doc_id),
+                    doc_source_country=doc_meta.get("source_country"),
+                    evidence_category=doc_meta.get("evidence_category"),
                 )
                 updates.append(
                     {
