@@ -12,6 +12,8 @@ Briefing generation uses the agentic approach with:
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Optional
 
 from langgraph.graph import StateGraph, END
@@ -39,6 +41,52 @@ from app.services.synthesis.nodes import (
 )
 from app.services.synthesis.schemas import RCSConfig
 
+logger = logging.getLogger(__name__)
+
+
+def _timed_node(node_fn, node_name: str):
+    """Wrap a LangGraph node function so it persists its wall-clock duration
+    and creates a Langfuse span whose name matches the timing stage_name.
+
+    Timing is written directly to the ``pipeline_timings`` table (not via
+    state) so that parallel nodes don't clobber each other.
+
+    The Langfuse span uses ``start_as_current_span`` so that any LLM calls
+    made inside the node are automatically nested as children.
+    """
+
+    async def wrapper(state):
+        from langfuse import Langfuse
+
+        langfuse = Langfuse()
+        start = time.time()
+
+        with langfuse.start_as_current_span(
+            name=node_name,
+            metadata={"project_id": state.get("project_id")},
+        ):
+            result = await node_fn(state)
+
+        duration = time.time() - start
+
+        project_id = state.get("project_id")
+        if project_id:
+            try:
+                from app.services.timing import persist_timing
+
+                persist_timing(project_id, "synthesis", node_name, duration)
+            except Exception as e:
+                logger.warning(
+                    "Failed to persist synthesis timing for %s: %s", node_name, e
+                )
+
+        return result
+
+    # Preserve the original function name for LangGraph introspection
+    wrapper.__name__ = node_fn.__name__
+    wrapper.__qualname__ = node_fn.__qualname__
+    return wrapper
+
 
 def create_synthesis_workflow():
     """Create the synthesis workflow graph.
@@ -57,32 +105,78 @@ def create_synthesis_workflow():
     workflow = StateGraph(SynthesisState)
 
     # Phase 1: Load
-    workflow.add_node("load_raw_extractions", load_raw_extractions)
-    workflow.add_node("create_canonical_concepts", create_canonical_concepts)
+    workflow.add_node(
+        "load_raw_extractions",
+        _timed_node(load_raw_extractions, "load_raw_extractions"),
+    )
+    workflow.add_node(
+        "create_canonical_concepts",
+        _timed_node(create_canonical_concepts, "create_canonical_concepts"),
+    )
 
     # Phase 2: Theme discovery (parallel processing)
-    workflow.add_node("process_issue_themes", process_issue_themes)
-    workflow.add_node("process_intervention_themes", process_intervention_themes)
-    workflow.add_node("process_outcome_themes", process_outcome_themes)
-    workflow.add_node("process_risk_themes", process_risk_themes)
+    workflow.add_node(
+        "process_issue_themes",
+        _timed_node(process_issue_themes, "process_issue_themes"),
+    )
+    workflow.add_node(
+        "process_intervention_themes",
+        _timed_node(process_intervention_themes, "process_intervention_themes"),
+    )
+    workflow.add_node(
+        "process_outcome_themes",
+        _timed_node(process_outcome_themes, "process_outcome_themes"),
+    )
+    workflow.add_node(
+        "process_risk_themes", _timed_node(process_risk_themes, "process_risk_themes")
+    )
 
     # Phase 3: Aggregation
-    workflow.add_node("compute_evidence_coverage", compute_evidence_coverage)
-    workflow.add_node("build_aggregated_tables", build_aggregated_tables)
-    workflow.add_node("compute_impact_syntheses", compute_impact_syntheses)
+    workflow.add_node(
+        "compute_evidence_coverage",
+        _timed_node(compute_evidence_coverage, "compute_evidence_coverage"),
+    )
+    workflow.add_node(
+        "build_aggregated_tables",
+        _timed_node(build_aggregated_tables, "build_aggregated_tables"),
+    )
+    workflow.add_node(
+        "compute_impact_syntheses",
+        _timed_node(compute_impact_syntheses, "compute_impact_syntheses"),
+    )
 
     # Phase 4: RAG Retrieval
-    workflow.add_node("retrieve_evidence_for_themes", retrieve_evidence_for_themes)
-    workflow.add_node("retrieve_evidence_for_issues", retrieve_evidence_for_issues)
-    workflow.add_node("retrieve_evidence_for_outcomes", retrieve_evidence_for_outcomes)
+    workflow.add_node(
+        "retrieve_evidence_for_themes",
+        _timed_node(retrieve_evidence_for_themes, "retrieve_evidence_for_themes"),
+    )
+    workflow.add_node(
+        "retrieve_evidence_for_issues",
+        _timed_node(retrieve_evidence_for_issues, "retrieve_evidence_for_issues"),
+    )
+    workflow.add_node(
+        "retrieve_evidence_for_outcomes",
+        _timed_node(retrieve_evidence_for_outcomes, "retrieve_evidence_for_outcomes"),
+    )
 
     # Phase 5: Contextual Summarisation (RCS)
-    workflow.add_node("apply_rcs_to_theme_evidence", apply_rcs_to_theme_evidence)
-    workflow.add_node("apply_rcs_to_issue_evidence", apply_rcs_to_issue_evidence)
-    workflow.add_node("apply_rcs_to_outcome_evidence", apply_rcs_to_outcome_evidence)
+    workflow.add_node(
+        "apply_rcs_to_theme_evidence",
+        _timed_node(apply_rcs_to_theme_evidence, "apply_rcs_to_theme_evidence"),
+    )
+    workflow.add_node(
+        "apply_rcs_to_issue_evidence",
+        _timed_node(apply_rcs_to_issue_evidence, "apply_rcs_to_issue_evidence"),
+    )
+    workflow.add_node(
+        "apply_rcs_to_outcome_evidence",
+        _timed_node(apply_rcs_to_outcome_evidence, "apply_rcs_to_outcome_evidence"),
+    )
 
     # Phase 6: Briefing (tool-augmented with mandatory verification)
-    workflow.add_node("generate_briefing", generate_briefing)
+    workflow.add_node(
+        "generate_briefing", _timed_node(generate_briefing, "generate_briefing")
+    )
 
     # Define edges
     workflow.set_entry_point("load_raw_extractions")

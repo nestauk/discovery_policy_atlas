@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
@@ -188,6 +189,31 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         "max_synthesis_sections": 2,
     }
 
+    # Sub-stage timing + Langfuse span helper
+    project_id = state.get("project_id")
+
+    from langfuse import Langfuse
+
+    _langfuse = Langfuse()
+
+    def _persist_substage(
+        stage_name: str,
+        duration: float,
+        metadata: Dict[str, Any] | None = None,
+    ) -> None:
+        if not project_id:
+            return
+        try:
+            from app.services.timing import persist_timing
+
+            persist_timing(
+                project_id, "synthesis", stage_name, duration, metadata=metadata
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist briefing sub-stage timing %s: %s", stage_name, exc
+            )
+
     # Track results
     section_outputs: Dict[str, SectionOutput] = {}
     synthesis_outputs: List[Tuple[str, SectionOutput]] = []
@@ -259,8 +285,26 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
                 tool_calls_made=0,
             )
 
+    def _section_meta(key: str) -> Dict[str, Any] | None:
+        """Extract metadata from a section output for timing persistence."""
+        out = section_outputs.get(key)
+        if not out:
+            return None
+        return {
+            "tool_calls": out.tool_calls_made,
+            "citations_used": len(out.citations_used),
+            "verification_passed": out.verification_passed,
+        }
+
     # Background
-    await _run_section("background")
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/background", metadata={"project_id": project_id}
+    ):
+        await _run_section("background")
+    _persist_substage(
+        "briefing/background", time.time() - t0, metadata=_section_meta("background")
+    )
 
     # Interventions with dynamic limits and tool guidance
     inter_extra = (
@@ -268,52 +312,103 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         "Use get_intervention_outcomes for effect sizes; get_top_studies for concrete key-study implementation examples; "
         "and get_intervention_details for delivery features and subgroups."
     )
-    await _run_section("interventions", additional_extra=f" {inter_extra}")
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/interventions", metadata={"project_id": project_id}
+    ):
+        await _run_section("interventions", additional_extra=f" {inter_extra}")
+    _persist_substage(
+        "briefing/interventions",
+        time.time() - t0,
+        metadata=_section_meta("interventions"),
+    )
 
     # Decide and generate synthesis sections (always propose up to 2)
-    proposals = await _decide_synthesis_sections(
-        orchestrator=orchestrator,
-        research_question=research_question,
-        max_sections=limits["max_synthesis_sections"],
-        num_sources=num_docs,
-    )
-    for idx, proposal in enumerate(proposals[: limits["max_synthesis_sections"]]):
-        synth_output = await _generate_synthesis_section(
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/synthesis_proposal", metadata={"project_id": project_id}
+    ):
+        proposals = await _decide_synthesis_sections(
             orchestrator=orchestrator,
-            proposal=proposal,
             research_question=research_question,
-            section_index=idx + 1,
-            max_retries=config.max_verification_retries,
+            max_sections=limits["max_synthesis_sections"],
+            num_sources=num_docs,
         )
+    _persist_substage(
+        "briefing/synthesis_proposal",
+        time.time() - t0,
+        metadata={"proposals": len(proposals)},
+    )
+
+    for idx, proposal in enumerate(proposals[: limits["max_synthesis_sections"]]):
+        stage_name = f"briefing/synthesis_{idx + 1}"
+        section_key = f"synthesis_{idx + 1}"
+        t0 = time.time()
+        with _langfuse.start_as_current_span(
+            name=stage_name, metadata={"project_id": project_id}
+        ):
+            synth_output = await _generate_synthesis_section(
+                orchestrator=orchestrator,
+                proposal=proposal,
+                research_question=research_question,
+                section_index=idx + 1,
+                max_retries=config.max_verification_retries,
+            )
         synthesis_outputs.append((proposal.section_title, synth_output))
-        section_outputs[f"synthesis_{idx+1}"] = synth_output
+        section_outputs[section_key] = synth_output
         total_tool_calls += synth_output.tool_calls_made
         if not synth_output.verification_passed:
-            verification_failures.append(f"synthesis_{idx+1}")
+            verification_failures.append(section_key)
+        _persist_substage(
+            stage_name, time.time() - t0, metadata=_section_meta(section_key)
+        )
 
     # Core Findings
-    await _run_section("core_answer")
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/core_answer", metadata={"project_id": project_id}
+    ):
+        await _run_section("core_answer")
+    _persist_substage(
+        "briefing/core_answer",
+        time.time() - t0,
+        metadata=_section_meta("core_answer"),
+    )
 
     # Recommendations with adaptive count
     rec_extra = (
         f"Provide {limits['max_recommendations']} concise recommendations unless evidence is sparse. "
         "Each must include [N] citations."
     )
-    await _run_section("recommendations", additional_extra=f" {rec_extra}")
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/recommendations", metadata={"project_id": project_id}
+    ):
+        await _run_section("recommendations", additional_extra=f" {rec_extra}")
+    _persist_substage(
+        "briefing/recommendations",
+        time.time() - t0,
+        metadata=_section_meta("recommendations"),
+    )
 
     # Build structured briefing from sections
-    structured_briefing = await _build_structured_briefing(
-        section_outputs,
-        grounded_citations,
-        state.get("aggregated_interventions") or [],
-        research_question,
-        state.get("doc_scores") or {},
-        state.get("all_scored_contexts") or [],
-        state.get("doc_citation_map") or {},
-        state.get("doc_metadata") or {},
-        synthesis_outputs,
-        limits,
-    )
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/build_structured", metadata={"project_id": project_id}
+    ):
+        structured_briefing = await _build_structured_briefing(
+            section_outputs,
+            grounded_citations,
+            state.get("aggregated_interventions") or [],
+            research_question,
+            state.get("doc_scores") or {},
+            state.get("all_scored_contexts") or [],
+            state.get("doc_citation_map") or {},
+            state.get("doc_metadata") or {},
+            synthesis_outputs,
+            limits,
+        )
+    _persist_substage("briefing/build_structured", time.time() - t0)
 
     # Collect all citations used
     all_citations_used = set()
@@ -524,7 +619,7 @@ async def _decide_synthesis_sections(
     """Use the orchestrator LLM to propose synthesis sections."""
     prompt = f"""You are designing synthesis sections for an executive policy briefing.
 
-Research question: {research_question or 'Not provided'}
+Research question: {research_question or "Not provided"}
 Evidence base: {num_sources} cited sources
 
 Always propose 1-2 sections to include between the interventions table and recommendations.

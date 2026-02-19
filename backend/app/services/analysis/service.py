@@ -336,6 +336,52 @@ class AnalysisService:
         monitor.log_snapshot("Pipeline complete")
         monitor.log_summary()
 
+        # Persist stage timings to pipeline_timings table
+        if project_id:
+            try:
+                from app.services.timing import persist_timings_batch
+
+                summary = monitor.get_summary()
+                metrics = summary.get("custom_metrics", {})
+
+                # Map stage durations to document counts where available
+                doc_count_map = {
+                    "references": metrics.get("total_references"),
+                    "relevance": metrics.get("relevant_references"),
+                    "evidence_categorisation": metrics.get("relevant_references"),
+                    "acquisition": metrics.get("acquired_count"),
+                    "parsing": metrics.get("parsed_count"),
+                    "extraction": metrics.get("relevant_references"),
+                    "storage": None,
+                }
+
+                rows = []
+                for key, value in metrics.items():
+                    if key.endswith("_duration_seconds"):
+                        stage = key.removesuffix("_duration_seconds")
+                        rows.append(
+                            {
+                                "stage_name": stage,
+                                "duration_seconds": value,
+                                "document_count": doc_count_map.get(stage),
+                            }
+                        )
+
+                # Add a _total row from the summary
+                total_time = summary.get("total_time_seconds")
+                if total_time is not None:
+                    rows.append(
+                        {
+                            "stage_name": "_total",
+                            "duration_seconds": total_time,
+                            "document_count": metrics.get("total_references"),
+                        }
+                    )
+
+                persist_timings_batch(project_id, "analysis", rows)
+            except Exception as e:
+                logger.warning("Failed to persist analysis timings: %s", e)
+
         return result
 
     def _update_acquisition_status(
