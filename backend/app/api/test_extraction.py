@@ -143,7 +143,7 @@ async def run_extraction_with_custom_prompts(
         InterventionsExtraction,
         MappingsExtraction,
         ResultsExtraction,
-        ConclusionsExtraction,
+        ConclusionItem,
         DocumentExtractionBundle,
     )
     from app.services.analysis.workflows.rct import RCTExtractionWorkflow
@@ -259,7 +259,7 @@ async def run_extraction_with_custom_prompts(
     conclusions_result = await chain.ainvoke(
         {"full_text": text, "interventions_json": interventions_json}
     )
-    conclusions_extraction = ConclusionsExtraction(**conclusions_result)
+    conclusions_extraction = ConclusionItem(**conclusions_result.get("conclusion", {}))
 
     return (
         DocumentExtractionBundle(
@@ -268,7 +268,7 @@ async def run_extraction_with_custom_prompts(
             interventions=interventions_extraction.interventions,
             mappings=mappings_extraction.mappings,
             results=all_results,
-            conclusion=conclusions_extraction.conclusion,
+            conclusion=conclusions_extraction,
         ),
         evidence_category,
         confidence,

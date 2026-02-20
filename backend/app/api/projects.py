@@ -33,7 +33,9 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
-from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
+from app.services.analysis.evidence.strength import (
+    get_document_evidence_details,
+)
 from app.utils.project_data import (
     filter_prevalence_only_results,
     filter_prevalence_only_extractions,
@@ -1623,11 +1625,8 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
                 raw_data = extraction.get("raw_data", {})
 
                 extraction_results = doc.get("extraction_results", {})
-                conclusion = extraction_results.get("conclusion", {}) or {}
-                evidence_strength = conclusion.get("evidence_strength", {}) or {}
-
                 impact_score = doc.get("impact_score")
-                evidence_score = evidence_strength.get("stars")
+                evidence_score = get_document_evidence_details(doc)["score"]
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
@@ -1725,16 +1724,10 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     logger.warning(f"Skipping None document at index {i}")
                     continue
 
-                extraction_results = doc.get("extraction_results", {}) or {}
-                conclusion = extraction_results.get("conclusion", {}) or {}
-                evidence_strength = conclusion.get("evidence_strength", {}) or {}
                 evidence_category = doc.get("evidence_category", "")
-                evidence_score = evidence_strength.get("stars")
-                evidence_justification = evidence_strength.get("justification", "")
-                if evidence_score is None and evidence_category:
-                    evidence_info = get_or_calculate_document_evidence(doc)
-                    evidence_score = evidence_info["stars"]
-                    evidence_justification = evidence_info.get("justification", "")
+                evidence_details = get_document_evidence_details(doc)
+                evidence_score = evidence_details["score"]
+                evidence_justification = evidence_details["justification"]
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])
@@ -1755,7 +1748,9 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                         "Relevance Reason": doc.get("relevance_reason", ""),
                         "Confidence": doc.get("relevance_confidence", ""),
                         "Evidence Category": evidence_category,
-                        "Evidence Score": evidence_score or "",
+                        "Evidence Score": (
+                            evidence_score if evidence_score is not None else ""
+                        ),
                         "Evidence Justification": evidence_justification,
                         "Impact Score": doc.get("impact_score", ""),
                         "Impact Justification": doc.get("impact_score_label", ""),

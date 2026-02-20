@@ -84,11 +84,6 @@ interface AnalysisDocument {
       top_line_summary?: string
       detailed_explanation?: string
       supporting_quote?: string
-      evidence_strength?: {
-        stars: number | null
-        justification: string
-        evidence_gap?: string | null
-      }
     }
     issues?: unknown[]
     interventions?: unknown[]
@@ -780,8 +775,6 @@ export default function ProjectResultsPage() {
   // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
-      const conclusion = doc.extraction_results?.conclusion
-      const evidenceStrength = conclusion?.evidence_strength
       const isRelevant = Boolean(doc.is_relevant !== false)
       const isEvidence = Boolean(doc.is_evidence !== false)
       const isRelevantEvidence = isRelevant && isEvidence
@@ -810,8 +803,8 @@ export default function ProjectResultsPage() {
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
-        evidence_strength: evidenceStrength?.stars || undefined,
-        evidence_strength_justification: evidenceStrength?.justification,
+        evidence_strength: doc.evidence_strength ?? undefined,
+        evidence_strength_justification: doc.evidence_strength_justification,
         impact_score: doc.impact_score,
         impact_score_label: doc.impact_score_label,
         impact_score_breakdown: doc.impact_score_breakdown,

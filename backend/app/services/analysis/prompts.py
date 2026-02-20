@@ -324,10 +324,10 @@ CONCLUSIONS_PROMPT = ChatPromptTemplate.from_messages(
         ("system", EXTRACTION_SYSTEM_PROMPT),
         (
             "human",
-            """Task: Extract the KEY CONCLUSION of this study AND assess evidence strength, risk assessment, and study context.
+            """Task: Extract the KEY CONCLUSION of this study AND assess risk assessment and study context.
 
 Schema:
-{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","evidence_strength":{{"stars":1-5,"justification":"...","evidence_gap":"...|null"}},"risk_assessment":{{"risks_identified":["Risk 1","Risk 2"],"unintended_consequences_detected":true|false}},"study_context":{{"country":"...|null","population":"...|null","inner_setting":"...|null","cost_level":"High|Moderate|Low|null","staffing_level":"High|Moderate|Low|null","implementation_complexity_level":"High|Moderate|Low|null"}}}}}}
+{{"conclusion":{{"top_line_summary":"...","detailed_explanation":"...","supporting_quote":"...","risk_assessment":{{"risks_identified":["Risk 1","Risk 2"],"unintended_consequences_detected":true|false}},"study_context":{{"country":"...|null","population":"...|null","inner_setting":"...|null","cost_level":"High|Moderate|Low|null","staffing_level":"High|Moderate|Low|null","implementation_complexity_level":"High|Moderate|Low|null"}}}}}}
 
 Rules for Conclusion:
 - top_line_summary: ONE direct sentence stating the main conclusion (e.g., "The intervention significantly reduced behavioral problems in children").
