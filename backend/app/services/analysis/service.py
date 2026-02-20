@@ -464,6 +464,7 @@ class AnalysisService:
                 "pdf_url": self._safe_str(row.get("pdf_url")),
                 "is_oa": self._safe_bool(row.get("is_oa")),
                 "type": self._safe_str(row.get("type")),
+                "venue": self._safe_str(row.get("venue")),
                 "author_institution_countries": self._parse_list(
                     row.get("author_institution_countries")
                 ),

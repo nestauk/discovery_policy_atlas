@@ -1115,6 +1115,7 @@ class AnalysisStorageService:
             "pdf_url": ref.pdf_url,
             "is_oa": ref.is_oa,
             "document_type": ref.type,
+            "venue": ref.venue,
             "author_institution_countries": ref.author_institution_countries,
             # Relevance fields
             "relevance_confidence": ref.relevance_confidence,

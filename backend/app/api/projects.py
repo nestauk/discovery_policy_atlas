@@ -330,7 +330,7 @@ async def get_chunk_context(
         doc_res = (
             vectorization_service.supabase.table("analysis_documents")
             .select(
-                "id, title, authors, year, source_country, source, document_type, evidence_category, evidence_category_reasoning, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, pdf_url, landing_page_url, overton_url"
+                "id, title, authors, year, venue, source_country, source, document_type, evidence_category, evidence_category_reasoning, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, pdf_url, landing_page_url, overton_url"
             )
             .eq("id", document_id)
             .eq("analysis_project_id", project_id)
@@ -353,6 +353,7 @@ async def get_chunk_context(
             author_display=extract_author_display(doc.get("authors")),
             author_short=extract_author_short(doc.get("authors")),
             year=doc.get("year"),
+            venue=doc.get("venue"),
             country=doc.get("source_country"),
             url=doc.get("pdf_url")
             or doc.get("landing_page_url")

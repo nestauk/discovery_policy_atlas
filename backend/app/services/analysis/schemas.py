@@ -17,6 +17,7 @@ class UnifiedReference(BaseModel):
     pdf_url: str | None = None
     is_oa: bool | None = None
     type: str | None = None
+    venue: str | None = None
     author_institution_countries: List[str] | None = None
     cited_by_count: Optional[int] = None  # Number of citations
     source_country: Optional[

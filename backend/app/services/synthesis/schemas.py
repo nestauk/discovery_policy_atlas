@@ -78,6 +78,7 @@ class DocumentContextInfo(BaseModel):
     )
     author_short: Optional[str] = Field(None, description="Short author reference")
     year: Optional[int] = Field(None, description="Publication year")
+    venue: Optional[str] = Field(None, description="Journal or publication venue")
     country: Optional[str] = Field(None, description="Source country")
     url: Optional[str] = Field(None, description="Canonical source URL")
     source_type: Optional[str] = Field(None, description="Normalised source type")

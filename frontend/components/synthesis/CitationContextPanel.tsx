@@ -25,6 +25,7 @@ interface ChunkContextResponse {
     author_display?: string | null;
     author_short?: string | null;
     year?: number | null;
+    venue?: string | null;
     country?: string | null;
     url?: string | null;
     source_type?: string | null;
@@ -315,6 +316,7 @@ export function CitationContextPanel({
   const effectiveAuthor =
     freshData?.document.author_display || freshData?.document.author_short || citationInfo?.author_short;
   const effectiveYear = freshData?.document.year || citationInfo?.year;
+  const effectiveVenue = freshData?.document.venue;
   const effectiveCountry = freshData?.document.country;
   const effectiveUrl = freshData?.document.url || citationInfo?.url;
   const effectiveSourceType =
@@ -384,6 +386,9 @@ export function CitationContextPanel({
           <div className="mt-1 text-xs text-slate-600">
             {[effectiveAuthor, effectiveYear].filter(Boolean).join(", ") || "Unknown metadata"}
           </div>
+          {effectiveVenue && (
+            <div className="mt-1 text-xs text-slate-500">{effectiveVenue}</div>
+          )}
           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
             {effectiveSourceType && (
               <span className="rounded bg-slate-100 px-2 py-1 font-medium text-slate-700">
