@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 import logging
 import os
-from typing import Optional, List
+from typing import Optional, List, Any
 import uuid
 import pandas as pd
 
@@ -330,7 +330,7 @@ async def get_chunk_context(
         doc_res = (
             vectorization_service.supabase.table("analysis_documents")
             .select(
-                "id, title, authors, year, source_country, source, document_type, evidence_category, extraction_results, impact_score, pdf_url, landing_page_url, overton_url"
+                "id, title, authors, year, source_country, source, document_type, evidence_category, evidence_category_reasoning, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, pdf_url, landing_page_url, overton_url"
             )
             .eq("id", document_id)
             .eq("analysis_project_id", project_id)
@@ -362,8 +362,14 @@ async def get_chunk_context(
             ),
             document_type=doc.get("document_type"),
             evidence_category=doc.get("evidence_category"),
+            evidence_category_reasoning=doc.get("evidence_category_reasoning"),
             evidence_score=evidence_score,
+            evidence_strength_justification=evidence_info.get("justification"),
             impact_score=doc.get("impact_score"),
+            impact_score_label=doc.get("impact_score_label"),
+            impact_score_breakdown=doc.get("impact_score_breakdown"),
+            transferability_score=doc.get("transferability_score"),
+            transferability_breakdown=doc.get("transferability_breakdown"),
         )
 
         return ChunkContextResponse(

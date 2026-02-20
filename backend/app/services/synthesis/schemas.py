@@ -10,7 +10,7 @@ These models define the data structures for:
 
 from __future__ import annotations
 
-from typing import List, Optional, Dict, Literal
+from typing import Any, List, Optional, Dict, Literal
 from pydantic import BaseModel, Field
 
 
@@ -85,8 +85,24 @@ class DocumentContextInfo(BaseModel):
     evidence_category: Optional[str] = Field(
         None, description="Evidence category classification"
     )
+    evidence_category_reasoning: Optional[str] = Field(
+        None, description="Evidence category reasoning"
+    )
     evidence_score: Optional[int] = Field(None, description="Evidence strength score")
+    evidence_strength_justification: Optional[str] = Field(
+        None, description="Evidence strength justification"
+    )
     impact_score: Optional[float] = Field(None, description="Impact score")
+    impact_score_label: Optional[str] = Field(None, description="Impact score label")
+    impact_score_breakdown: Optional[Dict[str, Any]] = Field(
+        None, description="Impact score calculation breakdown"
+    )
+    transferability_score: Optional[float] = Field(
+        None, description="Transferability score"
+    )
+    transferability_breakdown: Optional[Dict[str, Any]] = Field(
+        None, description="Transferability breakdown"
+    )
 
 
 class ChunkContextResponse(BaseModel):

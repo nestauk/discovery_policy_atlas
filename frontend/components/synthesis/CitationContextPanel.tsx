@@ -6,6 +6,11 @@ import * as fuzz from "fuzzball";
 import { fetchWithAuthExternal } from "@/lib/api";
 import { Tooltip } from "@/components/ui/tooltip";
 import { getEvidenceCategoryColors, getEvidenceCategoryShortName } from "@/lib/evidenceCategories";
+import {
+  getEvidenceCategoryTooltipContent,
+  getEvidenceStrengthTooltipContent,
+  getImpactScoreTooltipContent,
+} from "@/lib/documentTooltips";
 import type { CitationInfo } from "@/types/search";
 
 interface ChunkContextResponse {
@@ -25,8 +30,14 @@ interface ChunkContextResponse {
     source_type?: string | null;
     document_type?: string | null;
     evidence_category?: string | null;
+    evidence_category_reasoning?: string | null;
     evidence_score?: number | null;
+    evidence_strength_justification?: string | null;
     impact_score?: number | null;
+    impact_score_label?: string | null;
+    impact_score_breakdown?: Record<string, unknown> | null;
+    transferability_score?: number | null;
+    transferability_breakdown?: Record<string, unknown> | null;
   };
 }
 
@@ -309,8 +320,22 @@ export function CitationContextPanel({
   const effectiveSourceType =
     freshData?.document.source_type || freshData?.document.document_type || citationInfo?.document_type;
   const effectiveEvidenceCategory = freshData?.document.evidence_category;
+  const effectiveEvidenceCategoryReasoning = freshData?.document.evidence_category_reasoning;
   const evidenceScore = freshData?.document.evidence_score ?? citationInfo?.evidence_score;
+  const evidenceStrengthTooltip = getEvidenceStrengthTooltipContent(
+    freshData?.document.evidence_strength_justification
+  );
+  const evidenceCategoryTooltip = getEvidenceCategoryTooltipContent(
+    effectiveEvidenceCategory,
+    effectiveEvidenceCategoryReasoning
+  );
   const impactScore = freshData?.document.impact_score ?? citationInfo?.impact_score;
+  const impactTooltip = getImpactScoreTooltipContent({
+    impact_score_label: freshData?.document.impact_score_label,
+    impact_score_breakdown: freshData?.document.impact_score_breakdown,
+    transferability_score: freshData?.document.transferability_score,
+    transferability_breakdown: freshData?.document.transferability_breakdown,
+  });
   const quote = supportingQuote || citationInfo?.supporting_quote || "";
 
   const quoteRange = useMemo(() => {
@@ -366,7 +391,7 @@ export function CitationContextPanel({
               </span>
             )}
             {effectiveEvidenceCategory && (
-              <Tooltip content={effectiveEvidenceCategory}>
+              <Tooltip content={evidenceCategoryTooltip}>
                 <span
                   className="inline-block cursor-help whitespace-normal rounded px-2 py-1 text-xs font-medium leading-tight"
                   style={{
@@ -378,15 +403,17 @@ export function CitationContextPanel({
                 </span>
               </Tooltip>
             )}
-            <div className="text-slate-500">
-              Evidence: <span className="font-medium text-slate-700">{formatOutOfFive(evidenceScore)}</span>
-            </div>
-            <div className="text-slate-500">
-              Impact:{" "}
-              <span className="font-medium text-slate-700">
-                {formatOutOfFive(impactScore)}
-              </span>
-            </div>
+            <Tooltip content={evidenceStrengthTooltip}>
+              <div className="cursor-help text-slate-500">
+                Evidence:{" "}
+                <span className="font-medium text-slate-700">{formatOutOfFive(evidenceScore)}</span>
+              </div>
+            </Tooltip>
+            <Tooltip content={impactTooltip}>
+              <div className="cursor-help text-slate-500">
+                Impact: <span className="font-medium text-slate-700">{formatOutOfFive(impactScore)}</span>
+              </div>
+            </Tooltip>
             {effectiveCountry && (
               <div className="text-slate-500">
                 Country: <span className="font-medium text-slate-700">{effectiveCountry}</span>
