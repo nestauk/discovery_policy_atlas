@@ -1208,9 +1208,12 @@ Additional guidance:
                     ]
                 )
             )
-            chunk_text_map = await fetch_chunk_texts(doc_chunk_ids)
+            # Keep grounding context bounded: prompt currently includes at most 12 chunks.
+            # Fetching every chunk for a document can explode latency on large reviews.
+            prompt_chunk_ids = doc_chunk_ids[:12]
+            chunk_text_map = await fetch_chunk_texts(prompt_chunk_ids)
             chunk_blocks = []
-            for chunk_id in doc_chunk_ids[:12]:
+            for chunk_id in prompt_chunk_ids:
                 chunk_text = chunk_text_map.get(chunk_id, "")
                 if chunk_text:
                     chunk_blocks.append(f"- chunk_id={chunk_id}\n  text={chunk_text}")
@@ -1275,7 +1278,7 @@ Additional guidance:
                         if not resolved_chunk_id:
                             resolved_chunk_id = self._find_best_matching_chunk_id(
                                 supporting_quote=item.supporting_quote,
-                                candidate_chunk_ids=doc_chunk_ids,
+                                candidate_chunk_ids=prompt_chunk_ids,
                                 chunk_text_map=chunk_text_map,
                             )
                         if not resolved_chunk_id:
