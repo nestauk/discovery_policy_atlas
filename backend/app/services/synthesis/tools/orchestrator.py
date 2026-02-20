@@ -7,6 +7,7 @@ tool execution, section generation (gpt-5-mini), and verification.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import unicodedata
@@ -290,6 +291,30 @@ class BriefingOrchestrator:
         self.generation_llm = ChatOpenAI(
             model=GENERATION_MODEL,
         )
+        self.chunk_text_cache: Dict[str, str] = {}
+
+    async def _cached_fetch_chunk_texts(self, chunk_ids: List[str]) -> Dict[str, str]:
+        """Fetch chunk text with an in-run cache.
+
+        Args:
+            chunk_ids: Chunk identifiers to fetch.
+
+        Returns:
+            Mapping from chunk identifier to chunk content text.
+        """
+        unique_chunk_ids = [cid for cid in dict.fromkeys(chunk_ids) if cid]
+        if not unique_chunk_ids:
+            return {}
+
+        missing_ids = [
+            cid for cid in unique_chunk_ids if cid not in self.chunk_text_cache
+        ]
+        if missing_ids:
+            fetched = await fetch_chunk_texts(missing_ids)
+            for cid in missing_ids:
+                self.chunk_text_cache[cid] = fetched.get(cid, "")
+
+        return {cid: self.chunk_text_cache.get(cid, "") for cid in unique_chunk_ids}
 
     def _emit_grounding_warning(self, section_name: str, issues: List[str]) -> None:
         """Emit grounding warnings to Langfuse handler when available."""
@@ -895,8 +920,10 @@ Decide which tools to call to gather the most relevant evidence for this section
             InterventionTableRowOutput,
             method="function_calling",
         )
-        rows: List[InterventionTableRowOutput] = []
-        for index, intervention_name in enumerate(row_names, start=1):
+
+        async def _generate_row(
+            index: int, intervention_name: str
+        ) -> Tuple[int, InterventionTableRowOutput]:
             row_evidence_context = await self._format_intervention_row_evidence(
                 ctx, intervention_name
             )
@@ -935,7 +962,16 @@ Additional guidance:
             row: InterventionTableRowOutput = await row_llm.ainvoke(
                 prompt, config=config
             )
-            rows.append(row)
+            return index, row
+
+        row_tasks = [
+            _generate_row(index, intervention_name)
+            for index, intervention_name in enumerate(row_names, start=1)
+        ]
+        row_results = await asyncio.gather(*row_tasks)
+        rows: List[InterventionTableRowOutput] = [
+            row for _, row in sorted(row_results, key=lambda result: result[0])
+        ]
 
         # Deterministic markdown rendering (avoid LLM table formatting failures)
         lines: List[str] = []
@@ -1011,7 +1047,7 @@ Additional guidance:
                 cit = data.get("citation_number")
                 summary = data.get("summary") or data.get("content") or ""
                 blocks.append(f"[{cit}] ({tool})\n  Summary: {summary}".strip())
-        chunk_text_map = await fetch_chunk_texts(chunk_ids)
+        chunk_text_map = await self._cached_fetch_chunk_texts(chunk_ids)
         source_lines = [
             f"- chunk_id={cid}\n  text={chunk_text_map.get(cid, '')}"
             for cid in chunk_ids[:12]
@@ -1113,6 +1149,7 @@ Additional guidance:
         supporting_quote: str,
         candidate_chunk_ids: List[str],
         chunk_text_map: Dict[str, str],
+        normalised_chunk_text_map: Optional[Dict[str, str]] = None,
     ) -> str:
         """Find the best candidate chunk containing the supporting quote.
 
@@ -1120,23 +1157,27 @@ Additional guidance:
             supporting_quote: Verbatim quote returned by grounding.
             candidate_chunk_ids: Candidate chunk identifiers for the citation document.
             chunk_text_map: Mapping of chunk identifiers to raw chunk text.
+            normalised_chunk_text_map: Optional pre-normalised chunk text map.
 
         Returns:
             Best matching chunk identifier, or empty string when no match is found.
         """
-        quote = self._normalise_text_for_quote_match(supporting_quote)
+        quote = self._normalise_text_for_quote_match(supporting_quote).lower()
         if not quote:
             return ""
 
         best_chunk_id = ""
         best_position = 10**9
         for chunk_id in candidate_chunk_ids:
-            chunk_text = self._normalise_text_for_quote_match(
-                chunk_text_map.get(chunk_id, "")
-            )
+            if normalised_chunk_text_map is not None:
+                chunk_text = normalised_chunk_text_map.get(chunk_id, "")
+            else:
+                chunk_text = self._normalise_text_for_quote_match(
+                    chunk_text_map.get(chunk_id, "")
+                ).lower()
             if not chunk_text:
                 continue
-            pos = chunk_text.lower().find(quote.lower())
+            pos = chunk_text.find(quote)
             if pos >= 0 and pos < best_position:
                 best_position = pos
                 best_chunk_id = chunk_id
@@ -1178,11 +1219,16 @@ Additional guidance:
             method="function_calling",
         )
 
-        for citation_number, claims_for_citation in citation_to_claims.items():
+        async def _ground_single_citation(
+            citation_number: int, claims_for_citation: List[str]
+        ) -> Tuple[List[ClaimQuoteResult], List[str], List[str]]:
+            local_collected: List[ClaimQuoteResult] = []
+            local_suggested_fixes: List[str] = []
+            local_issue_messages: List[str] = []
             citation = citation_by_number.get(citation_number)
             if citation is None:
                 for claim_text in claims_for_citation:
-                    collected.append(
+                    local_collected.append(
                         ClaimQuoteResult(
                             claim_text=claim_text,
                             citation_number=citation_number,
@@ -1193,10 +1239,10 @@ Additional guidance:
                             issue="Citation not found in grounded citation map.",
                         )
                     )
-                suggested_fixes.append(
+                local_suggested_fixes.append(
                     f"Replace or remove unavailable citation [{citation_number}] for affected claims."
                 )
-                continue
+                return local_collected, local_suggested_fixes, local_issue_messages
 
             doc_id = citation.analysis_document_id
             doc_chunk_ids = list(
@@ -1211,7 +1257,12 @@ Additional guidance:
             # Keep grounding context bounded: prompt currently includes at most 12 chunks.
             # Fetching every chunk for a document can explode latency on large reviews.
             prompt_chunk_ids = doc_chunk_ids[:12]
-            chunk_text_map = await fetch_chunk_texts(prompt_chunk_ids)
+            chunk_text_map = await self._cached_fetch_chunk_texts(prompt_chunk_ids)
+            normalised_chunk_text_map = {
+                cid: self._normalise_text_for_quote_match(text).lower()
+                for cid, text in chunk_text_map.items()
+                if text
+            }
             chunk_blocks = []
             for chunk_id in prompt_chunk_ids:
                 chunk_text = chunk_text_map.get(chunk_id, "")
@@ -1267,11 +1318,11 @@ Additional guidance:
                     if item.supporting_quote:
                         # Enforce quote->chunk consistency for downstream highlight UX.
                         if resolved_chunk_id:
-                            existing_text = chunk_text_map.get(resolved_chunk_id, "")
                             existing_matches = self._find_best_matching_chunk_id(
                                 supporting_quote=item.supporting_quote,
                                 candidate_chunk_ids=[resolved_chunk_id],
-                                chunk_text_map={resolved_chunk_id: existing_text},
+                                chunk_text_map=chunk_text_map,
+                                normalised_chunk_text_map=normalised_chunk_text_map,
                             )
                             if not existing_matches:
                                 resolved_chunk_id = ""
@@ -1280,6 +1331,7 @@ Additional guidance:
                                 supporting_quote=item.supporting_quote,
                                 candidate_chunk_ids=prompt_chunk_ids,
                                 chunk_text_map=chunk_text_map,
+                                normalised_chunk_text_map=normalised_chunk_text_map,
                             )
                         if not resolved_chunk_id:
                             mismatch_note = "Could not resolve a chunk containing the supporting quote."
@@ -1288,7 +1340,7 @@ Additional guidance:
                                 if resolved_issue
                                 else mismatch_note
                             )
-                    collected.append(
+                    local_collected.append(
                         ClaimQuoteResult(
                             claim_text=item.claim_text,
                             citation_number=citation_number,
@@ -1301,7 +1353,7 @@ Additional guidance:
                     )
                 for claim_text in claims_for_citation:
                     if self._normalise_claim_text(claim_text) not in returned_claims:
-                        collected.append(
+                        local_collected.append(
                             ClaimQuoteResult(
                                 claim_text=claim_text,
                                 citation_number=citation_number,
@@ -1314,19 +1366,19 @@ Additional guidance:
                                 ),
                             )
                         )
-                        suggested_fixes.append(
+                        local_suggested_fixes.append(
                             f"Re-ground omitted claim for citation [{citation_number}]."
                         )
                 if result.suggested_fixes:
-                    suggested_fixes.extend(result.suggested_fixes)
+                    local_suggested_fixes.extend(result.suggested_fixes)
                 if result.issues_summary:
-                    issue_messages.append(result.issues_summary)
+                    local_issue_messages.append(result.issues_summary)
             except Exception as e:
                 logger.warning(
                     f"Grounding failed for citation [{citation_number}]: {e}"
                 )
                 for claim_text in claims_for_citation:
-                    collected.append(
+                    local_collected.append(
                         ClaimQuoteResult(
                             claim_text=claim_text,
                             citation_number=citation_number,
@@ -1337,9 +1389,25 @@ Additional guidance:
                             issue="Grounding call failed; unable to verify against source evidence.",
                         )
                     )
-                suggested_fixes.append(
+                local_suggested_fixes.append(
                     f"Re-ground claim(s) citing [{citation_number}] due to grounding tool failure."
                 )
+            return local_collected, local_suggested_fixes, local_issue_messages
+
+        grounding_tasks = [
+            _ground_single_citation(citation_number, claims_for_citation)
+            for citation_number, claims_for_citation in citation_to_claims.items()
+        ]
+        grounding_results = await asyncio.gather(*grounding_tasks)
+
+        for (
+            local_collected,
+            local_suggested_fixes,
+            local_issue_messages,
+        ) in grounding_results:
+            collected.extend(local_collected)
+            suggested_fixes.extend(local_suggested_fixes)
+            issue_messages.extend(local_issue_messages)
 
         overall_supported = all(item.is_supported for item in collected)
         if not overall_supported:
@@ -1410,7 +1478,7 @@ Additional guidance:
                 chunk_id = str(data.get("chunk_id") or "")
                 if chunk_id:
                     all_chunk_ids.append(chunk_id)
-        chunk_text_map = await fetch_chunk_texts(all_chunk_ids)
+        chunk_text_map = await self._cached_fetch_chunk_texts(all_chunk_ids)
 
         # Build citation map fallback if missing
         doc_citation_map = ctx.state.get("doc_citation_map") or {}
@@ -1514,7 +1582,7 @@ Additional guidance:
             # Fallback to pre-computed RCS if no tool evidence
             parts.append("### Pre-computed Evidence (Fallback)")
             all_contexts = ctx.state.get("all_scored_contexts") or []
-            fallback_chunk_text_map = await fetch_chunk_texts(
+            fallback_chunk_text_map = await self._cached_fetch_chunk_texts(
                 [
                     ctx_item.chunk_id
                     for ctx_item in all_contexts[:10]

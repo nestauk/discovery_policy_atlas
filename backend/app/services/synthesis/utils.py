@@ -245,10 +245,9 @@ async def fetch_chunk_texts(chunk_ids: List[str]) -> Dict[str, str]:
     if not unique_chunk_ids:
         return {}
 
-    from app.core.config import settings
-    from supabase import create_client
+    from app.services.vectorization import vectorization_service
 
-    supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    supabase = vectorization_service.supabase
     try:
         res = (
             supabase.table("chunks")
