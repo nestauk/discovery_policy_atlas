@@ -861,6 +861,38 @@ export function ExecutiveBriefing({
       `;
     };
 
+    const renderTopCitations = () => {
+      if (!structuredBriefing?.top_citations?.length) return "";
+      const items = structuredBriefing.top_citations
+        .map((cit) => {
+          const citationPill = `<span class="pill">[${cit.citation_number}]</span>`;
+          const title = sanitize(cit.title || "");
+          const authorYear = sanitize(cit.author_year || "");
+          const reason = cit.reason ? `<div class="chip-impl">${sanitize(cit.reason)}</div>` : "";
+          const externalLink = cit.url
+            ? `<a href="${sanitize(cit.url)}" target="_blank" rel="noopener noreferrer" class="pill-inline">Open source ↗</a>`
+            : "";
+          return `
+            <div class="chip-row">
+              <div>${citationPill}</div>
+              <div>
+                <div class="chip-title">${title}</div>
+                <div class="chip-body">${authorYear}</div>
+                ${reason}
+                ${externalLink ? `<div style="margin-top:8px;">${externalLink}</div>` : ""}
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+      return `
+        <div class="card">
+          <div class="card-title">Key Sources for Review</div>
+          ${items}
+        </div>
+      `;
+    };
+
     const renderEvidenceSnapshot = () => {
       if (!evidenceCoverage) return "";
       const strengths: Record<string, string> = {
@@ -975,6 +1007,7 @@ export function ExecutiveBriefing({
         ${renderInterventions()}
         ${renderSynthesisSections()}
         ${renderRecommendations()}
+        ${renderTopCitations()}
       `
       : `<div style="white-space: pre-wrap;">${sanitize(briefing)}</div>`;
 
