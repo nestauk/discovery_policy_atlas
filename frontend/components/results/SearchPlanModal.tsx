@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Settings, Search, Copy, CheckCircle, Info } from 'lucide-react'
+import { Settings, Copy, CheckCircle, Info, RefreshCw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import type { AnalysisProject } from '@/lib/analysisProjectStore'
 import { useWizard } from '@/components/search/SearchWizard'
@@ -118,8 +118,8 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
     }
   }
 
-  const startNewSearch = () => {
-    useWizard.getState().reset()
+  const refineSearch = () => {
+    useWizard.getState().initFromSearchQuery(searchQuery as Record<string, unknown>, project.id)
     setIsOpen(false)
     router.push('/search')
   }
@@ -370,13 +370,15 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
             </div>
           ) : null}
 
-          {/* Start New Search Button */}
-          <div className="pt-2 border-t">
-            <Button onClick={startNewSearch} className="w-full h-9" variant="default">
-              <Search className="h-3.5 w-3.5 mr-2" />
-              Start new search
-            </Button>
-          </div>
+          {/* Refine & Re-search Button */}
+          {(project.status === 'completed' || project.status === 'failed') && (
+            <div className="pt-2 border-t">
+              <Button onClick={refineSearch} className="w-full h-9" variant="default">
+                <RefreshCw className="h-3.5 w-3.5 mr-2" />
+                Refine &amp; re-search
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
