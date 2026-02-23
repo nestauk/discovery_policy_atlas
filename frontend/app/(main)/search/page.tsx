@@ -20,13 +20,16 @@ export default function SearchPage() {
     try {
       // Read refine state from wizard store
       const { parentProjectId } = useWizard.getState()
-      const baseTitle = context.researchQuestion || 'New Analysis Project'
+      const baseTitle = (context.researchQuestion || 'New Analysis Project').replace(/ \(refined\)$/, '')
 
       // Create analysis project from search context
       const project = await createAnalysisProject({
         title: parentProjectId ? `${baseTitle} (refined)` : baseTitle,
         parent_project_id: parentProjectId ?? undefined,
       })
+
+      // Reset wizard state so a fresh visit to /search starts clean
+      useWizard.getState().reset()
 
       // Set as active project
       setActiveProject(project)

@@ -86,7 +86,7 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
   }
 
   const refineSearch = () => {
-    useWizard.getState().initFromSearchQuery(searchQuery as Record<string, unknown>, project.id)
+    useWizard.getState().initFromSearchQuery(searchQuery, project.id)
     setIsOpen(false)
     router.push('/search')
   }
@@ -342,7 +342,7 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
             <div className="pt-2 border-t">
               <Button onClick={refineSearch} className="w-full h-9" variant="default">
                 <RefreshCw className="h-3.5 w-3.5 mr-2" />
-                Refine &amp; re-search
+                Refine & re-search
               </Button>
             </div>
           )}

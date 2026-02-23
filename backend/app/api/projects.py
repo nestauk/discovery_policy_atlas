@@ -329,6 +329,15 @@ async def create_analysis_project(
         if not title:
             raise HTTPException(status_code=400, detail="Title is required")
 
+        parent_project_id = request.get("parent_project_id")
+        if parent_project_id:
+            try:
+                get_project_with_auth_check(parent_project_id, current_user, "id")
+            except HTTPException:
+                raise HTTPException(
+                    status_code=400, detail="Invalid or inaccessible parent project"
+                )
+
         project_data = {
             "id": str(uuid.uuid4()),
             "title": title,
@@ -341,7 +350,7 @@ async def create_analysis_project(
             "created_by_user_id": current_user.user_id,
             "created_by_name": current_user.name,
             "organization_id": current_user.organization_id,
-            "parent_project_id": request.get("parent_project_id"),
+            "parent_project_id": parent_project_id,
         }
 
         result = (

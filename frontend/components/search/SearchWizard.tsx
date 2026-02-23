@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { create } from "zustand";
 import { useAPI } from '@/lib/api';
+import type { AnalysisProject } from '@/lib/analysisProjectStore';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
 
@@ -160,7 +161,7 @@ interface WizardState {
   next: () => void;
   back: () => void;
   buildContext: () => SearchContext;
-  initFromSearchQuery: (sq: Record<string, unknown>, parentProjectId: string) => void;
+  initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => void;
 }
 
 export const useWizard = create<WizardState>((set, get) => ({
@@ -268,15 +269,15 @@ export const useWizard = create<WizardState>((set, get) => ({
       maxResults: s.maxResults,
     };
   },
-  initFromSearchQuery: (sq: Record<string, unknown>, parentProjectId: string) => {
-    const population = (sq.population as string[]) || [];
-    const innerSetting = (sq.inner_setting as string[]) || [];
-    const outcome = (sq.outcome as string[]) || [];
-    const screeningFactors = (sq.screening_factors as string[]) || [];
-    const sources = ((sq.sources as string[]) || []) as ("openalex" | "overton")[];
-    const geography = (sq.geography_filter as string[]) || (sq.geography as string[]) || [ANYWHERE_VALUE];
-    const timePreset = ((sq.time_preset as string) || "LAST_10_YEARS") as TimePreset;
-    const constraints = sq.implementation_constraints as { cost?: string; staffing?: string; implementation_complexity?: string } | null | undefined;
+  initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => {
+    const population = sq.population || [];
+    const innerSetting = sq.inner_setting || [];
+    const outcome = sq.outcome || [];
+    const screeningFactors = sq.screening_factors || [];
+    const sources = (sq.sources || []) as ("openalex" | "overton")[];
+    const geography = sq.geography_filter || sq.geography || [ANYWHERE_VALUE];
+    const timePreset = (sq.time_preset || "LAST_10_YEARS") as TimePreset;
+    const constraints = sq.implementation_constraints;
 
     const capitalise = (v?: string) => {
       if (!v) return "Any";
@@ -292,7 +293,7 @@ export const useWizard = create<WizardState>((set, get) => ({
 
     set({
       step: "SUMMARY",
-      researchQuestion: (sq.research_question as string) || (sq.original_query as string) || "",
+      researchQuestion: sq.research_question || sq.original_query || "",
       population: toSelection(population),
       innerSetting: toSelection(innerSetting),
       outcome: toSelection(outcome),
@@ -310,11 +311,11 @@ export const useWizard = create<WizardState>((set, get) => ({
         access: { academic: true, policy: true },
         geography,
         timePreset,
-        customFrom: (sq.time_from as string) || undefined,
-        customTo: (sq.time_to as string) || undefined,
+        customFrom: sq.time_from || undefined,
+        customTo: sq.time_to || undefined,
       },
-      additionalQuestions: (sq.additional_questions as string[]) || [],
-      maxResults: (sq.max_results as number) || (sq.limit as number) || 30,
+      additionalQuestions: sq.additional_questions || [],
+      maxResults: sq.max_results || sq.limit || 30,
       allStepsVisited: true,
       parentProjectId,
     });
