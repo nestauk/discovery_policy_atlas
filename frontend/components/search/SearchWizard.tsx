@@ -153,11 +153,14 @@ interface WizardState {
   screeningFactors: string[];
   additionalQuestions: string[];
   maxResults: number;
+  allStepsVisited: boolean;
+  parentProjectId: string | null;
   set: (p: Partial<WizardState>) => void;
   reset: () => void;
   next: () => void;
   back: () => void;
   buildContext: () => SearchContext;
+  initFromSearchQuery: (sq: Record<string, unknown>, parentProjectId: string) => void;
 }
 
 export const useWizard = create<WizardState>((set, get) => ({
@@ -187,6 +190,8 @@ export const useWizard = create<WizardState>((set, get) => ({
   screeningFactors: [],
   additionalQuestions: [],
   maxResults: 30,
+  allStepsVisited: false,
+  parentProjectId: null,
   set: (p) => set(p),
   reset: () =>
     set({
@@ -216,6 +221,8 @@ export const useWizard = create<WizardState>((set, get) => ({
       screeningFactors: [],
       additionalQuestions: [],
       maxResults: 30,
+      allStepsVisited: false,
+      parentProjectId: null,
     }),
   next: () => {
     const s = get();
@@ -261,6 +268,58 @@ export const useWizard = create<WizardState>((set, get) => ({
       maxResults: s.maxResults,
     };
   },
+  initFromSearchQuery: (sq: Record<string, unknown>, parentProjectId: string) => {
+    const population = (sq.population as string[]) || [];
+    const innerSetting = (sq.inner_setting as string[]) || [];
+    const outcome = (sq.outcome as string[]) || [];
+    const screeningFactors = (sq.screening_factors as string[]) || [];
+    const sources = ((sq.sources as string[]) || []) as ("openalex" | "overton")[];
+    const geography = (sq.geography_filter as string[]) || (sq.geography as string[]) || [ANYWHERE_VALUE];
+    const timePreset = ((sq.time_preset as string) || "LAST_10_YEARS") as TimePreset;
+    const constraints = sq.implementation_constraints as { cost?: string; staffing?: string; implementation_complexity?: string } | null | undefined;
+
+    const capitalise = (v?: string) => {
+      if (!v) return "Any";
+      const trimmed = v.trim();
+      if (!trimmed || trimmed.toLowerCase() === "any") return "Any";
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+    };
+
+    set({
+      step: "SUMMARY",
+      researchQuestion: (sq.research_question as string) || (sq.original_query as string) || "",
+      population: population.length > 0
+        ? { selected: population, noPreference: false }
+        : { selected: [], noPreference: true },
+      innerSetting: innerSetting.length > 0
+        ? { selected: innerSetting, noPreference: false }
+        : { selected: [], noPreference: true },
+      outcome: outcome.length > 0
+        ? { selected: outcome, noPreference: false }
+        : { selected: [], noPreference: true },
+      implementationConstraints: {
+        cost: capitalise(constraints?.cost),
+        staffing: capitalise(constraints?.staffing),
+        implementationComplexity: capitalise(constraints?.implementation_complexity),
+      },
+      generatedPopulationOptions: population,
+      generatedInnerSettingOptions: innerSetting,
+      generatedOutcomeOptions: outcome,
+      screeningFactors,
+      parameters: {
+        sources,
+        access: { academic: true, policy: true },
+        geography,
+        timePreset,
+        customFrom: (sq.time_from as string) || undefined,
+        customTo: (sq.time_to as string) || undefined,
+      },
+      additionalQuestions: (sq.additional_questions as string[]) || [],
+      maxResults: (sq.max_results as number) || (sq.limit as number) || 30,
+      allStepsVisited: true,
+      parentProjectId,
+    });
+  },
 }));
 
 // ---------------- HELPERS ----------------
@@ -268,10 +327,12 @@ function ProgressBar({
   step,
   researchQuestion,
   onStepClick,
+  allStepsVisited,
 }: {
   step: Step;
   researchQuestion: string;
   onStepClick: (s: Step) => void;
+  allStepsVisited: boolean;
 }) {
   const steps: { id: Step; label: string }[] = [
     { id: "ASK", label: "Question" },
@@ -289,7 +350,7 @@ function ProgressBar({
     <div className="w-full border-b border-gray-100 bg-white px-4 py-3">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2">
         {steps.map((item, idx) => {
-          const isCompleted = idx < currentIdx;
+          const isCompleted = allStepsVisited || idx < currentIdx;
           const isCurrent = idx === currentIdx;
           const isClickable = canJump;
           return (
@@ -1552,6 +1613,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
         step={s.step}
         researchQuestion={s.researchQuestion}
         onStepClick={(step) => s.set({ step })}
+        allStepsVisited={s.allStepsVisited}
       />
       <div className={isSummaryStep ? "" : "flex-1"}>
         {s.step === "ASK" && <ScreenAsk />}
