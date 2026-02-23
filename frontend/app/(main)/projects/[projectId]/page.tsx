@@ -255,6 +255,12 @@ export default function ProjectResultsPage() {
       setParentProjectTitle(null)
       return
     }
+    // Check local store first to avoid an API call
+    const cached = projects.find(p => p.id === parentId)
+    if (cached) {
+      setParentProjectTitle(cached.title)
+      return
+    }
     getAnalysisProject(parentId)
       .then((data: { project?: { title?: string } }) => {
         setParentProjectTitle(data?.project?.title || null)
@@ -262,7 +268,7 @@ export default function ProjectResultsPage() {
       .catch(() => {
         setParentProjectTitle(null)
       })
-  }, [activeProject?.parent_project_id, getAnalysisProject])
+  }, [activeProject?.parent_project_id, projects, getAnalysisProject])
 
   // Define data loading functions
   const loadData = useCallback(async () => {
