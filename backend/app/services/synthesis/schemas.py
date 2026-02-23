@@ -68,6 +68,42 @@ class ClaimQuote(BaseModel):
     section: str = Field("", description="Briefing section where claim appears")
 
 
+class DocumentContextInfo(BaseModel):
+    """Metadata for a source document shown in citation context."""
+
+    analysis_document_id: str = Field(..., description="Internal document UUID")
+    title: str = Field(..., description="Document title")
+    author_display: Optional[str] = Field(
+        None, description="First author as stored in metadata"
+    )
+    author_short: Optional[str] = Field(None, description="Short author reference")
+    year: Optional[int] = Field(None, description="Publication year")
+    country: Optional[str] = Field(None, description="Source country")
+    url: Optional[str] = Field(None, description="Canonical source URL")
+    source_type: Optional[str] = Field(None, description="Normalised source type")
+    document_type: Optional[str] = Field(None, description="Document/study type")
+    evidence_category: Optional[str] = Field(
+        None, description="Evidence category classification"
+    )
+    evidence_score: Optional[int] = Field(None, description="Evidence strength score")
+    impact_score: Optional[float] = Field(None, description="Impact score")
+
+
+class ChunkContextResponse(BaseModel):
+    """Chunk context payload for citation inspection sidebar."""
+
+    chunk_id: str = Field(..., description="Target chunk UUID")
+    chunk_content: str = Field(..., description="Target chunk content")
+    chunk_index: int = Field(..., description="Target chunk index within document")
+    previous_chunk_content: Optional[str] = Field(
+        None, description="Immediate previous chunk content"
+    )
+    next_chunk_content: Optional[str] = Field(
+        None, description="Immediate next chunk content"
+    )
+    document: DocumentContextInfo
+
+
 # =============================================================================
 # CONTEXTUAL SUMMARISATION (RCS) - paper-qa inspired
 # =============================================================================

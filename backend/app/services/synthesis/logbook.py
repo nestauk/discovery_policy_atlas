@@ -12,7 +12,7 @@ Handles reading/writing synthesis results to:
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional, List, Set
 
 from app.core.config import settings
@@ -421,7 +421,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "claim_text": None,
                     "attribution": None,
                     "confidence": None,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -447,7 +447,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                         "claim_text": claim_quote.get("claim_text"),
                         "attribution": attribution,
                         "confidence": _confidence_from_attribution(attribution),
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
                     }
                 )
 
@@ -528,7 +528,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "summary_description": issue_dict.get("summary_description"),
                 "frequency": issue_dict.get("frequency", 0),
                 "source_doc_ids": issue_dict.get("source_doc_ids", []),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ).execute()
 
@@ -539,7 +539,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "synthesis_run_id": run_id,
                     "synthesis_theme_id": theme_id,
                     "extraction_id": ex_id,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -572,7 +572,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "impact_score": intv_dict.get("impact_score"),
                 "impact_score_label": intv_dict.get("impact_score_label"),
                 "impact_score_breakdown": intv_dict.get("impact_score_breakdown"),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ).execute()
 
@@ -586,7 +586,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "synthesis_run_id": run_id,
                     "synthesis_theme_id": theme_id,
                     "extraction_id": ex_id,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -620,7 +620,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "primary_causal_mechanism": out_dict.get("primary_causal_mechanism"),
                 "causal_mechanism_detail": out_dict.get("causal_mechanism_detail"),
                 "intervention_theme_id": intervention_link,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ).execute()
 
@@ -634,7 +634,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "calibrated_magnitude": calibrated_magnitude_by_extraction_id.get(
                         ex_id
                     ),
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -665,7 +665,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "source_doc_ids": risk_dict.get("source_doc_ids", []),
                 "has_harm_warning": risk_dict.get("has_harm_warning", False),
                 "linked_intervention_theme_id": linked,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ).execute()
 
@@ -681,7 +681,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                             intervention_name
                         ],
                         "link_strength": link_strength,
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).execute()
 
@@ -765,7 +765,7 @@ async def create_synthesis_run_placeholder(project_id: str) -> str:
         "version": 4,
         "executive_briefing": "",
         "model_info": {},
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     supabase.table("synthesis_runs").insert(run_data).execute()
     return run_id
