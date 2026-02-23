@@ -158,6 +158,7 @@ export default function ProjectResultsPage() {
   const [rerunError, setRerunError] = useState<string | null>(null)
 
   const [projectLoading, setProjectLoading] = useState(false)
+  const [parentProjectTitle, setParentProjectTitle] = useState<string | null>(null)
 
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
@@ -246,6 +247,22 @@ export default function ProjectResultsPage() {
     
     loadProjectIfNeeded()
   }, [projectId, activeProject?.id, getAnalysisProject, setActiveProject, router])
+
+  // Fetch parent project title for "Refined from" indicator
+  useEffect(() => {
+    const parentId = activeProject?.parent_project_id
+    if (!parentId) {
+      setParentProjectTitle(null)
+      return
+    }
+    getAnalysisProject(parentId)
+      .then((data: { project?: { title?: string } }) => {
+        setParentProjectTitle(data?.project?.title || null)
+      })
+      .catch(() => {
+        setParentProjectTitle(null)
+      })
+  }, [activeProject?.parent_project_id, getAnalysisProject])
 
   // Define data loading functions
   const loadData = useCallback(async () => {
@@ -882,6 +899,19 @@ export default function ProjectResultsPage() {
                 <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
               )}
             </h1>
+            {/* Refined from indicator */}
+            {activeProject?.parent_project_id && parentProjectTitle && (
+              <p className="text-sm text-slate-500 mt-1">
+                Refined from:{' '}
+                <button
+                  type="button"
+                  onClick={() => router.push(`/projects/${activeProject.parent_project_id}`)}
+                  className="text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  {parentProjectTitle}
+                </button>
+              </p>
+            )}
             {/* Progress Indicator */}
             {projectId && activeProject && (
               <div className="flex items-center gap-3 mt-2 mb-3">
