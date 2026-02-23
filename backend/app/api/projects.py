@@ -19,6 +19,8 @@ from app.services.synthesis.schemas import (
     Finding,
     ThematicGroup,
     EvidenceItem,
+    DocumentContextInfo,
+    ChunkContextResponse,
 )
 from app.services.synthesis.findings import get_findings
 from app.services.synthesis.logbook import read_cached_summary
@@ -33,8 +35,11 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
-from app.services.analysis.evidence.strength import (
-    get_document_evidence_details,
+from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
+from app.services.synthesis.utils import (
+    normalize_source_type,
+    extract_author_short,
+    extract_author_display,
 )
 from app.utils.project_data import (
     filter_prevalence_only_results,
@@ -266,6 +271,116 @@ async def get_synthesis_summary(
     except Exception as e:
         logger.error(f"Error in synthesis summary for project {project_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get synthesis summary")
+
+
+@router.get(
+    "/{project_id}/chunks/{chunk_id}/context",
+    response_model=ChunkContextResponse,
+    summary="Get citation chunk context",
+)
+async def get_chunk_context(
+    project_id: str,
+    chunk_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get target chunk and adjacent context for citation inspection."""
+    try:
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
+        target_res = (
+            vectorization_service.supabase.table("chunks")
+            .select("id, content, chunk_index, document_id, project_id")
+            .eq("id", chunk_id)
+            .eq("project_id", project_id)
+            .limit(1)
+            .execute()
+        )
+        if not target_res.data:
+            raise HTTPException(
+                status_code=404, detail="Chunk not found for this project"
+            )
+
+        target_chunk = target_res.data[0]
+        target_index = int(target_chunk.get("chunk_index") or 0)
+        document_id = str(target_chunk.get("document_id") or "")
+        if not document_id:
+            raise HTTPException(status_code=404, detail="Chunk has no source document")
+
+        adjacent_indices = [target_index - 1, target_index + 1]
+        adjacent_res = (
+            vectorization_service.supabase.table("chunks")
+            .select("content, chunk_index")
+            .eq("document_id", document_id)
+            .eq("project_id", project_id)
+            .in_("chunk_index", adjacent_indices)
+            .order("chunk_index")
+            .execute()
+        )
+
+        previous_chunk_content: Optional[str] = None
+        next_chunk_content: Optional[str] = None
+        for row in adjacent_res.data or []:
+            idx = int(row.get("chunk_index") or 0)
+            content = str(row.get("content") or "")
+            if idx == target_index - 1:
+                previous_chunk_content = content
+            elif idx == target_index + 1:
+                next_chunk_content = content
+
+        doc_res = (
+            vectorization_service.supabase.table("analysis_documents")
+            .select(
+                "id, title, authors, year, source_country, source, document_type, evidence_category, extraction_results, impact_score, pdf_url, landing_page_url, overton_url"
+            )
+            .eq("id", document_id)
+            .eq("analysis_project_id", project_id)
+            .limit(1)
+            .execute()
+        )
+        if not doc_res.data:
+            raise HTTPException(
+                status_code=404, detail="Source document not found for this chunk"
+            )
+
+        doc = doc_res.data[0]
+        evidence_info = get_or_calculate_document_evidence(doc)
+        stars = evidence_info.get("stars")
+        evidence_score = int(stars) if isinstance(stars, (int, float)) else None
+
+        document = DocumentContextInfo(
+            analysis_document_id=str(doc.get("id") or document_id),
+            title=str(doc.get("title") or "Unknown source"),
+            author_display=extract_author_display(doc.get("authors")),
+            author_short=extract_author_short(doc.get("authors")),
+            year=doc.get("year"),
+            country=doc.get("source_country"),
+            url=doc.get("pdf_url")
+            or doc.get("landing_page_url")
+            or doc.get("overton_url"),
+            source_type=normalize_source_type(
+                str(doc.get("source") or ""), str(doc.get("document_type") or "")
+            ),
+            document_type=doc.get("document_type"),
+            evidence_category=doc.get("evidence_category"),
+            evidence_score=evidence_score,
+            impact_score=doc.get("impact_score"),
+        )
+
+        return ChunkContextResponse(
+            chunk_id=str(target_chunk.get("id") or chunk_id),
+            chunk_content=str(target_chunk.get("content") or ""),
+            chunk_index=target_index,
+            previous_chunk_content=previous_chunk_content,
+            next_chunk_content=next_chunk_content,
+            document=document,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error getting chunk context project={project_id} chunk={chunk_id}: {e}"
+        )
+        raise HTTPException(status_code=500, detail="Failed to get chunk context")
 
 
 @router.get("")
@@ -1626,7 +1741,8 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
 
                 extraction_results = doc.get("extraction_results", {})
                 impact_score = doc.get("impact_score")
-                evidence_score = get_document_evidence_details(doc)["score"]
+                evidence_info = get_or_calculate_document_evidence(doc)
+                evidence_score = evidence_info.get("stars")
 
                 # Extract results from document's extraction_results
                 interventions_data = extraction_results.get("interventions", [])
@@ -1725,9 +1841,9 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                     continue
 
                 evidence_category = doc.get("evidence_category", "")
-                evidence_details = get_document_evidence_details(doc)
-                evidence_score = evidence_details["score"]
-                evidence_justification = evidence_details["justification"]
+                evidence_info = get_or_calculate_document_evidence(doc)
+                evidence_score = evidence_info.get("stars")
+                evidence_justification = evidence_info.get("justification") or ""
 
                 # Handle authors field safely
                 authors = doc.get("authors", [])

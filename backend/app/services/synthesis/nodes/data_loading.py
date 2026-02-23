@@ -10,10 +10,8 @@ from typing import Dict, List
 
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState, Concept
-from app.services.synthesis.utils import normalize_study_type
-from app.services.analysis.evidence.strength import (
-    get_document_evidence_details,
-)
+from app.services.synthesis.utils import normalize_study_type, extract_author_short
+from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
 
 
 def clean_null_string(value: object) -> str:
@@ -100,11 +98,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     for doc in docs_res.data or []:
         doc_uuid = str(doc.get("id"))
         authors = doc.get("authors") or []
-        author_short = None
-        if authors and isinstance(authors, list):
-            parts = str(authors[0]).strip().split()
-            if parts:
-                author_short = parts[-1]
+        author_short = extract_author_short(authors)
         doc_metadata[doc_uuid] = {
             "doc_id": doc.get("doc_id"),
             "title": doc.get("title") or "",
@@ -121,17 +115,17 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             else None,
         }
 
-        evidence_details = get_document_evidence_details(doc)
+        evidence_info = get_or_calculate_document_evidence(doc)
 
         doc_scores[doc_uuid] = {
-            "evidence_score": evidence_details["score"],  # 0-5 with sample size penalty
+            "evidence_score": evidence_info["stars"],  # 0-5 with sample size penalty
             "impact_score": doc.get("impact_score"),
             "impact_score_label": doc.get("impact_score_label"),
             "impact_score_breakdown": doc.get("impact_score_breakdown"),
             "transferability_score": doc.get("transferability_score"),
             "transferability_breakdown": doc.get("transferability_breakdown"),
             "evidence_category": doc.get("evidence_category"),
-            "evidence_justification": evidence_details["justification"],
+            "evidence_justification": evidence_info["justification"],
             "impact_justification": "",
             "has_harm_warning": bool(doc.get("has_harm_warning")),
             "harm_warning_reason": doc.get("harm_warning_reason"),
