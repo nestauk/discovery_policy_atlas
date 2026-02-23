@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
-import SearchWizard, { SearchContext } from '@/components/search/SearchWizard'
+import SearchWizard, { SearchContext, useWizard } from '@/components/search/SearchWizard'
 
 export default function SearchPage() {
   const router = useRouter()
@@ -18,13 +18,15 @@ export default function SearchPage() {
     
     setIsRunning(true);
     try {
+      // Read refine state from wizard store
+      const { parentProjectId } = useWizard.getState()
+      const baseTitle = context.researchQuestion || 'New Analysis Project'
+      const title = parentProjectId ? `${baseTitle} (refined)` : baseTitle
+
       // Create analysis project from search context
       const project = await createAnalysisProject({
-        title: context.researchQuestion || 'New Analysis Project',
-        // Additional questions step is currently skipped
-        // description: context.additionalQuestions.length > 0 
-        //   ? `Additional questions: ${context.additionalQuestions.join('; ')}` 
-        //   : undefined
+        title,
+        ...(parentProjectId ? { parent_project_id: parentProjectId } : {}),
       })
 
       // Set as active project
