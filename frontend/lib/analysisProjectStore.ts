@@ -16,16 +16,32 @@ export interface AnalysisProject {
   organization_id?: string
   is_demo?: boolean
   is_public?: boolean
+  parent_project_id?: string
   search_query?: {
+    research_question?: string
     original_query?: string
+    semantic_query?: string
     boolean_query?: string
+    boolean_queries?: string[]
+    population?: string[]
+    inner_setting?: string[]
+    outcome?: string[]
+    screening_factors?: string[]
+    implementation_constraints?: {
+      cost?: string
+      staffing?: string
+      implementation_complexity?: string
+    } | null
     sub_questions?: string[]
+    additional_questions?: string[]
     sources?: string[]
     access_types?: string[]
+    geography?: string[]
     geography_filter?: string[]
     time_preset?: string
     time_from?: string
     time_to?: string
+    max_results?: number
     limit?: number
     mode?: string
     scope?: string[]
