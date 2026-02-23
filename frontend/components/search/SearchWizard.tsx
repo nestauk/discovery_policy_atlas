@@ -285,18 +285,17 @@ export const useWizard = create<WizardState>((set, get) => ({
       return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
     };
 
+    const toSelection = (items: string[]) => ({
+      selected: items,
+      noPreference: items.length === 0,
+    });
+
     set({
       step: "SUMMARY",
       researchQuestion: (sq.research_question as string) || (sq.original_query as string) || "",
-      population: population.length > 0
-        ? { selected: population, noPreference: false }
-        : { selected: [], noPreference: true },
-      innerSetting: innerSetting.length > 0
-        ? { selected: innerSetting, noPreference: false }
-        : { selected: [], noPreference: true },
-      outcome: outcome.length > 0
-        ? { selected: outcome, noPreference: false }
-        : { selected: [], noPreference: true },
+      population: toSelection(population),
+      innerSetting: toSelection(innerSetting),
+      outcome: toSelection(outcome),
       implementationConstraints: {
         cost: capitalise(constraints?.cost),
         staffing: capitalise(constraints?.staffing),

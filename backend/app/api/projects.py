@@ -329,8 +329,6 @@ async def create_analysis_project(
         if not title:
             raise HTTPException(status_code=400, detail="Title is required")
 
-        parent_project_id = request.get("parent_project_id")
-
         project_data = {
             "id": str(uuid.uuid4()),
             "title": title,
@@ -343,7 +341,7 @@ async def create_analysis_project(
             "created_by_user_id": current_user.user_id,
             "created_by_name": current_user.name,
             "organization_id": current_user.organization_id,
-            **({"parent_project_id": parent_project_id} if parent_project_id else {}),
+            "parent_project_id": request.get("parent_project_id"),
         }
 
         result = (

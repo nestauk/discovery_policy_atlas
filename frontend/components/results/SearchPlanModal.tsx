@@ -35,46 +35,13 @@ const GEO_LABELS: Record<string, string> = {
   'All but UK': 'Anywhere but UK',
 }
 
-type SearchQueryExtended = {
-  research_question?: string
-  original_query?: string
-  semantic_query?: string
-  boolean_queries?: string[]
-  boolean_query?: string
-  population?: string[]
-  inner_setting?: string[]
-  outcome?: string[]
-  geography?: string[]
-  geography_filter?: string[]
-  time_preset?: string
-  time_from?: string
-  time_to?: string
-  max_results?: number
-  limit?: number
-  sources?: string[]
-  mode?: string
-  relevance_enabled?: boolean
-  use_abstracts_only?: boolean
-  sub_questions?: string[]
-  additional_questions?: string[]
-  screening_factors?: string[]
-  implementation_constraints?: {
-    cost?: string
-    staffing?: string
-    implementation_complexity?: string
-  } | null
-  scope?: string[]
-  custom_focus?: string[]
-  excludes?: string[]
-}
-
 export function SearchPlanModal({ project }: SearchPlanModalProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [selectedQueryIndex, setSelectedQueryIndex] = useState(0)
   const router = useRouter()
 
-  const searchQuery = project.search_query as SearchQueryExtended | undefined
+  const searchQuery = project.search_query
   if (!searchQuery) return null
 
   // Handle both old and new formats
