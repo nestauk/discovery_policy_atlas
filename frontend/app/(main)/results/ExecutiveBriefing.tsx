@@ -777,7 +777,7 @@ function ReferencesList({
                 : "text-slate-600 hover:text-slate-800"
             }`}
           >
-            Most cited
+            Most used
           </button>
         </div>
       </div>
@@ -841,7 +841,7 @@ function ReferencesList({
                   {presentation.institutions.length > 0 && !presentation.institutionsDuplicateVenue && (
                     <Tooltip content={presentation.institutionsText}>
                       <div className="mt-2 inline-flex max-w-full cursor-help text-xs text-slate-600">
-                        <span className="font-medium text-slate-700">Institutions:</span> {presentation.institutionsDisplay}
+                        <span className="font-medium text-slate-700">Institutions: </span>{presentation.institutionsDisplay}
                       </div>
                     </Tooltip>
                   )}
@@ -1178,7 +1178,7 @@ export function ExecutiveBriefing({
                 <div class="chip-title">${title}</div>
                 <div class="chip-meta">${authorYear}</div>
                 ${venue ? `<div class="chip-meta">${venue}</div>` : ""}
-                ${institutions && !presentation.institutionsDuplicateVenue ? `<div class="chip-meta"><span class="chip-key">Institutions:</span> ${institutions}</div>` : ""}
+                ${institutions && !presentation.institutionsDuplicateVenue ? `<div class="chip-meta"><span class="chip-key">Institutions: </span>${institutions}</div>` : ""}
                 ${topLine ? `<div class="chip-impl"><span class="chip-bulb">💡</span>${topLine}</div>` : ""}
                 <div class="chip-pills">
                   ${sourceType ? `<span class="pill-subtle">${sourceType}</span>` : ""}
