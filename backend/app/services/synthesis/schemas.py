@@ -80,6 +80,9 @@ class DocumentContextInfo(BaseModel):
     authors: Optional[List[str]] = Field(
         None, description="Full list of authors when available"
     )
+    author_institutions: Optional[List[str]] = Field(
+        None, description="Flat list of author institutions when available"
+    )
     author_short: Optional[str] = Field(None, description="Short author reference")
     year: Optional[int] = Field(None, description="Publication year")
     venue: Optional[str] = Field(None, description="Journal or publication venue")

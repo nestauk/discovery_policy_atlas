@@ -679,6 +679,7 @@ class ReferencesService:
                     "venue",
                     "doi",
                     "authors",
+                    "author_institutions",
                     "landing_page_url",
                     "pdf_url",
                     "is_oa",
@@ -739,6 +740,10 @@ class ReferencesService:
                         "venue": df.get(venue_col, pd.Series([None] * len(df))),
                         "doi": df.get(doi_col, pd.Series([None] * len(df))),
                         "authors": df.get(authors_col, pd.Series([None] * len(df))),
+                        "author_institutions": df.get(
+                            "author_institutions",
+                            pd.Series([[] for _ in range(len(df))]),
+                        ),
                         "landing_page_url": df.get(
                             landing_col, pd.Series([None] * len(df))
                         ),
@@ -814,6 +819,7 @@ class ReferencesService:
                             "venue",
                             "doi",
                             "authors",
+                            "author_institutions",
                             "landing_page_url",
                             "pdf_url",
                             "is_oa",

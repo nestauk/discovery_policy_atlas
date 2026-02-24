@@ -1111,6 +1111,7 @@ class AnalysisStorageService:
             "source_id": ref.source_id,
             "doi": ref.doi,
             "authors": ref.authors,
+            "author_institutions": ref.author_institutions,
             "landing_page_url": ref.landing_page_url,
             "pdf_url": ref.pdf_url,
             "is_oa": ref.is_oa,

@@ -460,6 +460,7 @@ class AnalysisService:
                 "year": self._safe_int(row.get("year")),
                 "doi": self._safe_str(row.get("doi")),
                 "authors": self._parse_authors(row.get("authors")),
+                "author_institutions": self._parse_list(row.get("author_institutions")),
                 "landing_page_url": self._safe_str(row.get("landing_page_url")),
                 "pdf_url": self._safe_str(row.get("pdf_url")),
                 "is_oa": self._safe_bool(row.get("is_oa")),

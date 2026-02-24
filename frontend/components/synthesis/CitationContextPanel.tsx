@@ -24,6 +24,7 @@ interface ChunkContextResponse {
     title: string;
     author_display?: string | null;
     authors?: string[] | null;
+    author_institutions?: string[] | null;
     author_short?: string | null;
     year?: number | null;
     venue?: string | null;
@@ -322,6 +323,14 @@ export function CitationContextPanel({
     : [];
   const fullAuthorsText = fullAuthors.join(", ");
   const shouldShowAuthorsTooltip = !!effectiveAuthor && fullAuthors.length > 1 && !!fullAuthorsText;
+  const institutions = Array.isArray(freshData?.document.author_institutions)
+    ? freshData.document.author_institutions.filter(
+        (institution): institution is string => typeof institution === "string" && !!institution.trim()
+      )
+    : [];
+  const institutionsText = institutions.join(", ");
+  const institutionsDisplay =
+    institutions.length > 2 ? `${institutions.slice(0, 2).join(", ")} +${institutions.length - 2} more` : institutionsText;
   const effectiveVenue = freshData?.document.venue;
   const effectiveCountry = freshData?.document.country;
   const effectiveUrl = freshData?.document.url || citationInfo?.url;
@@ -402,6 +411,13 @@ export function CitationContextPanel({
           </div>
           {effectiveVenue && (
             <div className="mt-1 text-xs text-slate-500">{effectiveVenue}</div>
+          )}
+          {institutions.length > 0 && (
+            <Tooltip content={institutionsText}>
+              <div className="mt-1 cursor-help text-xs text-slate-500">
+                Institutions: {institutionsDisplay}
+              </div>
+            </Tooltip>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
             {effectiveSourceType && (

@@ -13,6 +13,7 @@ class UnifiedReference(BaseModel):
     year: int | None = None
     doi: str | None = None
     authors: List[str] | None = None
+    author_institutions: List[str] | None = None
     landing_page_url: str | None = None
     pdf_url: str | None = None
     is_oa: bool | None = None
