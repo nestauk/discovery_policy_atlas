@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { create } from "zustand";
 import { useAPI } from '@/lib/api';
 import type { AnalysisProject } from '@/lib/analysisProjectStore';
+import { RefineTutorial } from './RefineTutorial';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
 
@@ -347,7 +348,7 @@ function ProgressBar({
   const canJump = !!researchQuestion.trim();
 
   return (
-    <div className="w-full border-b border-gray-100 bg-white px-4 py-3">
+    <div data-tutorial="progress-bar" className="w-full border-b border-gray-100 bg-white px-4 py-3">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2">
         {steps.map((item, idx) => {
           const isCompleted = allStepsVisited || idx < currentIdx;
@@ -1488,7 +1489,7 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
             </button>
           </div>
 
-          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+          <div data-tutorial="filters-section" className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
             <div className="text-xs uppercase tracking-wide text-gray-500">Filters</div>
             <div className="space-y-3">
               <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
@@ -1635,14 +1636,16 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
                 {isSummaryStep ? "Start new search" : "Restart"}
               </Button>
             </div>
-            <Button
-              variant="secondary"
-              className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
-              onClick={primaryAction.onClick}
-              disabled={primaryAction.disabled}
-            >
-              {primaryAction.label}
-            </Button>
+            <div data-tutorial="run-button">
+              <Button
+                variant="secondary"
+                className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+                onClick={primaryAction.onClick}
+                disabled={primaryAction.disabled}
+              >
+                {primaryAction.label}
+              </Button>
+            </div>
           </div>
 
           {isSummaryStep && !hasSelectedSource && (
@@ -1657,6 +1660,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
           )}
         </div>
       )}
+      <RefineTutorial />
     </div>
   );
 }
