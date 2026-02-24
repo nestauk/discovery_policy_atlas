@@ -40,6 +40,7 @@ from app.services.synthesis.utils import (
     normalize_source_type,
     extract_author_short,
     extract_author_display,
+    extract_author_list,
 )
 from app.utils.project_data import (
     filter_prevalence_only_results,
@@ -361,6 +362,7 @@ async def get_chunk_context(
             analysis_document_id=str(doc.get("id") or document_id),
             title=str(doc.get("title") or "Unknown source"),
             author_display=extract_author_display(doc.get("authors")),
+            authors=extract_author_list(doc.get("authors")),
             author_short=extract_author_short(doc.get("authors")),
             year=doc.get("year"),
             venue=doc.get("venue"),

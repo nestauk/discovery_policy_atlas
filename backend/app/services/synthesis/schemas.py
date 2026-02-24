@@ -74,7 +74,11 @@ class DocumentContextInfo(BaseModel):
     analysis_document_id: str = Field(..., description="Internal document UUID")
     title: str = Field(..., description="Document title")
     author_display: Optional[str] = Field(
-        None, description="First author as stored in metadata"
+        None,
+        description="Display author label (first author with et al. when applicable)",
+    )
+    authors: Optional[List[str]] = Field(
+        None, description="Full list of authors when available"
     )
     author_short: Optional[str] = Field(None, description="Short author reference")
     year: Optional[int] = Field(None, description="Publication year")

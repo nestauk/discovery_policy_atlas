@@ -676,6 +676,7 @@ class ReferencesService:
                     "title",
                     "abstract_or_summary",
                     "year",
+                    "venue",
                     "doi",
                     "authors",
                     "landing_page_url",
@@ -702,6 +703,7 @@ class ReferencesService:
                     source_id_col = "id"
                     doi_col = "doi"
                     year_col = "publication_year"
+                    venue_col = "venue"
                     title_col = "title"
                     abs_col = "abstract"
                     landing_col = "landing_page_url"
@@ -714,6 +716,7 @@ class ReferencesService:
                     source_id_col = "id"
                     doi_col = "doi"
                     year_col = "publication_year"
+                    venue_col = "venue"
                     title_col = "title"
                     abs_col = "abstract"
                     landing_col = "landing_page_url"
@@ -733,6 +736,7 @@ class ReferencesService:
                             abs_col, pd.Series([None] * len(df))
                         ),
                         "year": df.get(year_col, pd.Series([None] * len(df))),
+                        "venue": df.get(venue_col, pd.Series([None] * len(df))),
                         "doi": df.get(doi_col, pd.Series([None] * len(df))),
                         "authors": df.get(authors_col, pd.Series([None] * len(df))),
                         "landing_page_url": df.get(
@@ -807,6 +811,7 @@ class ReferencesService:
                             "title",
                             "abstract_or_summary",
                             "year",
+                            "venue",
                             "doi",
                             "authors",
                             "landing_page_url",

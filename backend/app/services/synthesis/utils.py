@@ -122,14 +122,14 @@ def extract_author_short(authors: Any) -> Optional[str]:
     return parts[-1].strip(".,") or None
 
 
-def extract_author_display(authors: Any) -> Optional[str]:
-    """Extract first author as stored for UI display.
+def extract_author_list(authors: Any) -> Optional[List[str]]:
+    """Extract a cleaned list of author names from metadata.
 
     Args:
         authors: Authors value from metadata, typically a list of strings.
 
     Returns:
-        First author string exactly as stored (trimmed), or None when unavailable.
+        Cleaned list of author names, or None when unavailable.
     """
     if isinstance(authors, str):
         author_items = [authors]
@@ -138,14 +138,30 @@ def extract_author_display(authors: Any) -> Optional[str]:
     else:
         return None
 
+    cleaned = [
+        author.strip()
+        for author in author_items
+        if isinstance(author, str) and author.strip()
+    ]
+    return cleaned or None
+
+
+def extract_author_display(authors: Any) -> Optional[str]:
+    """Extract a compact author label for UI display.
+
+    Args:
+        authors: Authors value from metadata, typically a list of strings.
+
+    Returns:
+        First author name, with ``et al.`` appended when multiple authors exist.
+    """
+    author_items = extract_author_list(authors)
     if not author_items:
         return None
 
-    first_author = author_items[0]
-    if not isinstance(first_author, str):
-        return None
-
-    return first_author.strip() or None
+    if len(author_items) > 1:
+        return f"{author_items[0]} et al."
+    return author_items[0]
 
 
 def escape_braces(text: str) -> str:

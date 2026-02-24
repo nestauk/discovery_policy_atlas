@@ -23,6 +23,7 @@ interface ChunkContextResponse {
     analysis_document_id: string;
     title: string;
     author_display?: string | null;
+    authors?: string[] | null;
     author_short?: string | null;
     year?: number | null;
     venue?: string | null;
@@ -316,6 +317,11 @@ export function CitationContextPanel({
   const effectiveAuthor =
     freshData?.document.author_display || freshData?.document.author_short || citationInfo?.author_short;
   const effectiveYear = freshData?.document.year || citationInfo?.year;
+  const fullAuthors = Array.isArray(freshData?.document.authors)
+    ? freshData.document.authors.filter((author): author is string => typeof author === "string" && !!author.trim())
+    : [];
+  const fullAuthorsText = fullAuthors.join(", ");
+  const shouldShowAuthorsTooltip = !!effectiveAuthor && fullAuthors.length > 1 && !!fullAuthorsText;
   const effectiveVenue = freshData?.document.venue;
   const effectiveCountry = freshData?.document.country;
   const effectiveUrl = freshData?.document.url || citationInfo?.url;
@@ -384,7 +390,15 @@ export function CitationContextPanel({
           </button>
           <h3 className="pr-8 text-sm font-semibold text-slate-900">{effectiveTitle}</h3>
           <div className="mt-1 text-xs text-slate-600">
-            {[effectiveAuthor, effectiveYear].filter(Boolean).join(", ") || "Unknown metadata"}
+            {shouldShowAuthorsTooltip ? (
+              <Tooltip content={fullAuthorsText}>
+                <span className="cursor-help">
+                  {[effectiveAuthor, effectiveYear].filter(Boolean).join(", ")}
+                </span>
+              </Tooltip>
+            ) : (
+              <>{[effectiveAuthor, effectiveYear].filter(Boolean).join(", ") || "Unknown metadata"}</>
+            )}
           </div>
           {effectiveVenue && (
             <div className="mt-1 text-xs text-slate-500">{effectiveVenue}</div>
