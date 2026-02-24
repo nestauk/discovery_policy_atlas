@@ -165,67 +165,41 @@ interface WizardState {
   initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => void;
 }
 
-export const useWizard = create<WizardState>((set, get) => ({
-  step: "ASK",
+const INITIAL_WIZARD_STATE = {
+  step: "ASK" as Step,
   researchQuestion: "",
-  population: { selected: [], noPreference: true },
-  innerSetting: { selected: [], noPreference: true },
-  outcome: { selected: [], noPreference: true },
+  population: { selected: [] as string[], noPreference: true },
+  innerSetting: { selected: [] as string[], noPreference: true },
+  outcome: { selected: [] as string[], noPreference: true },
   implementationConstraints: {
     cost: "Any",
     staffing: "Any",
     implementationComplexity: "Any",
   },
-  generatedPopulationOptions: [],
-  generatedInnerSettingOptions: [],
-  generatedOutcomeOptions: [],
-  generatedAdditionalQuestions: [],
+  generatedPopulationOptions: [] as string[],
+  generatedInnerSettingOptions: [] as string[],
+  generatedOutcomeOptions: [] as string[],
+  generatedAdditionalQuestions: [] as string[],
   isGeneratingOptions: false,
   parameters: {
-    sources: [],
+    sources: [] as ("openalex" | "overton")[],
     access: { academic: true, policy: true },
     geography: [ANYWHERE_VALUE],
-    timePreset: "LAST_10_YEARS",
-    customFrom: undefined,
-    customTo: undefined,
+    timePreset: "LAST_10_YEARS" as TimePreset,
+    customFrom: undefined as string | undefined,
+    customTo: undefined as string | undefined,
   },
-  screeningFactors: [],
-  additionalQuestions: [],
+  screeningFactors: [] as string[],
+  additionalQuestions: [] as string[],
   maxResults: 30,
   allStepsVisited: false,
-  parentProjectId: null,
+  parentProjectId: null as string | null,
+};
+
+export const useWizard = create<WizardState>((set, get) => ({
+  ...INITIAL_WIZARD_STATE,
   set: (p) => set(p),
-  reset: () =>
-    set({
-      step: "ASK",
-      researchQuestion: "",
-      population: { selected: [], noPreference: true },
-      innerSetting: { selected: [], noPreference: true },
-      outcome: { selected: [], noPreference: true },
-      implementationConstraints: {
-        cost: "Any",
-        staffing: "Any",
-        implementationComplexity: "Any",
-      },
-      generatedPopulationOptions: [],
-      generatedInnerSettingOptions: [],
-      generatedOutcomeOptions: [],
-      generatedAdditionalQuestions: [],
-      isGeneratingOptions: false,
-      parameters: {
-        sources: [],
-        access: { academic: true, policy: true },
-        geography: [ANYWHERE_VALUE],
-        timePreset: "LAST_10_YEARS",
-        customFrom: undefined,
-        customTo: undefined,
-      },
-      screeningFactors: [],
-      additionalQuestions: [],
-      maxResults: 30,
-      allStepsVisited: false,
-      parentProjectId: null,
-    }),
+  reset: () => set({ ...INITIAL_WIZARD_STATE }),
   next: () => {
     const s = get();
     // Skip ADDITIONAL_QUESTIONS step - go directly from PARAMETERS to SUMMARY

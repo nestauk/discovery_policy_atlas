@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 
@@ -909,13 +910,12 @@ export default function ProjectResultsPage() {
             {activeProject?.parent_project_id && parentProjectTitle && (
               <p className="text-sm text-slate-500 mt-1">
                 Refined from:{' '}
-                <button
-                  type="button"
-                  onClick={() => router.push(`/projects/${activeProject.parent_project_id}`)}
+                <Link
+                  href={`/projects/${activeProject.parent_project_id}`}
                   className="text-blue-600 hover:text-blue-800 hover:underline"
                 >
                   {parentProjectTitle}
-                </button>
+                </Link>
               </p>
             )}
             {/* Progress Indicator */}

@@ -23,10 +23,9 @@ const TOOLTIP_GAP = 16
 
 type Phase = 'idle' | 'intro' | 1 | 2 | 3
 
-type Placement = 'below' | 'above' | 'above-right' | 'right'
+type Placement = 'below' | 'above' | 'above-right'
 
 interface StepConfig {
-  step: 1 | 2 | 3
   selector: string
   placement: Placement
   body: string
@@ -37,7 +36,6 @@ interface StepConfig {
 
 const STEPS: StepConfig[] = [
   {
-    step: 1,
     selector: '[data-tutorial="progress-bar"]',
     placement: 'below',
     body: 'Your previous search settings are pre-loaded. Click any step above to jump there and make changes.',
@@ -46,7 +44,6 @@ const STEPS: StepConfig[] = [
     earlyComplete: true,
   },
   {
-    step: 2,
     selector: '[data-tutorial="filters-section"]',
     placement: 'above-right',
     body: 'Click any section to edit it directly — try narrowing your geography or time window.',
@@ -55,7 +52,6 @@ const STEPS: StepConfig[] = [
     earlyComplete: true,
   },
   {
-    step: 3,
     selector: '[data-tutorial="run-button"]',
     placement: 'above',
     body: "When you're happy with your changes, hit Run to start a new search.",
@@ -153,15 +149,9 @@ function computeTooltipPosition(
     return { ...base, top: Math.max(top, 16), left: Math.max(left, minX) }
   }
 
-  // 'right' — fallback if not enough horizontal space
-  const leftVal = rect.right + p + TOOLTIP_GAP
-  if (leftVal + w + 16 > window.innerWidth) {
-    // Pick above or below based on where the element center sits
-    const fallback = rect.top + rect.height / 2 > vh / 2 ? 'above' : 'below'
-    return computeTooltipPosition(rect, fallback)
-  }
-  const top = Math.max(rect.top + rect.height / 2 - TOOLTIP_HEIGHT_ESTIMATE / 2, 16)
-  return { ...base, top: Math.min(top, vh - TOOLTIP_HEIGHT_ESTIMATE - 16), left: leftVal }
+  // 'above' fallback
+  const top = rect.top - p - TOOLTIP_GAP - TOOLTIP_HEIGHT_ESTIMATE
+  return { ...base, top: Math.max(top, 16), left: centerX }
 }
 
 // ── Auto-scroll helper ─────────────────────────────────────────────────────────
@@ -187,6 +177,45 @@ function scrollToElement(element: Element): Promise<void> {
       resolve()
     }, 600)
   })
+}
+
+// ── Focus trap hook ─────────────────────────────────────────────────────────────
+
+function useFocusTrap(
+  ref: React.RefObject<HTMLElement | null>,
+  active: boolean,
+  onEscape: () => void,
+) {
+  useEffect(() => {
+    if (!active || !ref.current) return
+    const container = ref.current
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onEscape()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const focusable = container.querySelectorAll<HTMLElement>(
+        'button, [href], [tabindex]:not([tabindex="-1"])',
+      )
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    container.querySelector<HTMLElement>('button')?.focus()
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [ref, active, onEscape])
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -238,21 +267,9 @@ export function RefineTutorial() {
   )
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  const handleNoThanks = useCallback(() => {
-    setSeenFlag()
-    setPhase('idle')
-  }, [])
-
-  const handleShowMe = useCallback(() => {
-    advanceTo(1)
-  }, [advanceTo])
-
-  const handleSkip = complete
-
   const handleNext = useCallback(() => {
-    if (phase === 1) advanceTo(2)
-    else if (phase === 2) advanceTo(3)
-    else if (phase === 3) complete()
+    if (typeof phase === 'number' && phase < 3) advanceTo((phase + 1) as 2 | 3)
+    else complete()
   }, [phase, advanceTo, complete])
 
   // ── Early completion: click on highlighted target ──────────────────────────
@@ -287,47 +304,7 @@ export function RefineTutorial() {
   }, [phase, currentStepConfig])
 
   // ── Focus trap: keep Tab within tooltip ────────────────────────────────────
-  useEffect(() => {
-    if (typeof phase !== 'number' || !tooltipRef.current) return
-
-    const tooltip = tooltipRef.current
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        complete()
-        return
-      }
-      if (e.key === 'Tab') {
-        const focusable = tooltip.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        )
-        if (focusable.length === 0) return
-
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault()
-            last.focus()
-          }
-        } else {
-          if (document.activeElement === last) {
-            e.preventDefault()
-            first.focus()
-          }
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-
-    // Auto-focus first button
-    const firstBtn = tooltip.querySelector<HTMLElement>('button')
-    firstBtn?.focus()
-
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [phase, complete, targetRect])
+  useFocusTrap(tooltipRef, typeof phase === 'number', complete)
 
   // ── Render nothing when idle ───────────────────────────────────────────────
   if (phase === 'idle') return null
@@ -338,7 +315,7 @@ export function RefineTutorial() {
       <Dialog
         open={phase === 'intro'}
         onOpenChange={(open) => {
-          if (!open) handleNoThanks()
+          if (!open) complete()
         }}
       >
         <DialogContent className="sm:max-w-md">
@@ -350,10 +327,10 @@ export function RefineTutorial() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="ghost" onClick={handleNoThanks}>
+            <Button variant="ghost" onClick={complete}>
               No thanks
             </Button>
-            <Button onClick={handleShowMe}>Show me</Button>
+            <Button onClick={() => advanceTo(1)}>Show me</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -403,7 +380,7 @@ export function RefineTutorial() {
                 <div className="mt-4 flex items-center justify-between">
                   <button
                     type="button"
-                    onClick={handleSkip}
+                    onClick={complete}
                     className="text-xs text-gray-500 underline-offset-2 hover:underline"
                   >
                     Skip tutorial
