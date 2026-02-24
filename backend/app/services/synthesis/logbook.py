@@ -33,6 +33,7 @@ from app.services.synthesis.nodes.impact_synthesis import (
     _normalise_unit_key,
 )
 from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
+from app.services.synthesis.utils import normalize_source_type
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
@@ -291,7 +292,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         docs_meta_res = (
             supabase.table("analysis_documents")
             .select(
-                "id, document_type, evidence_category, extraction_results, impact_score"
+                "id, source, document_type, evidence_category, evidence_category_reasoning, evidence_justification, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, top_line, venue, source_country, source_type, author_institutions"
             )
             .in_("id", doc_ids)
             .execute()
@@ -310,7 +311,34 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         stars = evidence_info.get("stars")
         cit.evidence_score = int(stars) if isinstance(stars, (int, float)) else None
         cit.impact_score = doc_meta.get("impact_score")
+        cit.impact_score_label = doc_meta.get("impact_score_label")
+        cit.impact_score_breakdown = doc_meta.get("impact_score_breakdown")
+        cit.transferability_score = doc_meta.get("transferability_score")
+        cit.transferability_breakdown = doc_meta.get("transferability_breakdown")
         cit.document_type = doc_meta.get("document_type")
+        cit.evidence_category = doc_meta.get("evidence_category")
+        cit.evidence_category_reasoning = doc_meta.get("evidence_category_reasoning")
+        cit.evidence_strength_justification = doc_meta.get("evidence_justification")
+        cit.venue = doc_meta.get("venue")
+        cit.country = doc_meta.get("source_country")
+        source_value = str(doc_meta.get("source") or "").strip()
+        if not source_value:
+            doc_id_raw = str(cit.doc_id or "")
+            if "openalex" in doc_id_raw.lower() or (
+                doc_id_raw.startswith("W") and doc_id_raw[1:].isdigit()
+            ):
+                source_value = "openalex"
+            elif "overton" in doc_id_raw.lower():
+                source_value = "overton"
+        cit.source_type = normalize_source_type(
+            source_value, str(doc_meta.get("document_type") or "")
+        )
+        raw_institutions = doc_meta.get("author_institutions")
+        if isinstance(raw_institutions, list):
+            cit.author_institutions = [
+                str(item).strip() for item in raw_institutions if str(item).strip()
+            ]
+        cit.top_line = doc_meta.get("top_line")
 
     # Parse evidence coverage
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = None

@@ -43,10 +43,36 @@ class CitationInfo(BaseModel):
     author_short: Optional[str] = Field(None, description="Short author reference")
     year: Optional[int] = Field(None, description="Publication year")
     title: Optional[str] = Field(None, description="Document title")
+    top_line: Optional[str] = Field(None, description="One-sentence document summary")
     url: Optional[str] = Field(None, description="Canonical URL or PDF URL")
+    venue: Optional[str] = Field(None, description="Journal or publication venue")
+    country: Optional[str] = Field(None, description="Source country")
+    source_type: Optional[str] = Field(None, description="Normalised source type")
+    evidence_category: Optional[str] = Field(
+        None, description="Evidence category classification"
+    )
+    evidence_category_reasoning: Optional[str] = Field(
+        None, description="Evidence category reasoning"
+    )
+    evidence_strength_justification: Optional[str] = Field(
+        None, description="Evidence score explanation"
+    )
+    author_institutions: Optional[List[str]] = Field(
+        None, description="Flat list of author institutions when available"
+    )
     document_type: Optional[str] = Field(None, description="Document/study type")
     evidence_score: Optional[int] = Field(None, description="Evidence strength score")
     impact_score: Optional[float] = Field(None, description="Impact score")
+    impact_score_label: Optional[str] = Field(None, description="Impact score label")
+    impact_score_breakdown: Optional[Dict[str, Any]] = Field(
+        None, description="Impact score breakdown details"
+    )
+    transferability_score: Optional[float] = Field(
+        None, description="Transferability fit score"
+    )
+    transferability_breakdown: Optional[Dict[str, Any]] = Field(
+        None, description="Transferability breakdown details"
+    )
     supporting_quote: Optional[str] = Field(
         None, description="Grounded quote from chunk"
     )

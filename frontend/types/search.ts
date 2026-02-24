@@ -176,10 +176,22 @@ export interface CausalityDetail {
     author_short?: string
     year?: number
     title?: string
+    top_line?: string
     url?: string
+    venue?: string
+    country?: string
+    source_type?: string
+    evidence_category?: string
+    evidence_category_reasoning?: string
+    evidence_strength_justification?: string
+    author_institutions?: string[]
     document_type?: string
     evidence_score?: number
     impact_score?: number
+    impact_score_label?: string
+    impact_score_breakdown?: Record<string, unknown>
+    transferability_score?: number
+    transferability_breakdown?: Record<string, unknown>
     supporting_quote?: string
     chunk_id?: string
     claim_quotes?: ClaimQuote[]
