@@ -35,6 +35,7 @@ interface ExecutiveBriefingProps {
   briefing: string;
   structuredBriefing?: StructuredBriefing;
   citationMap?: Record<string, CitationInfo>;
+  citationUsageCounts?: Record<string, number>;
   evidenceCoverage?: EvidenceCoverageSnapshot;
   documents?: Array<{
     id: string;
@@ -63,6 +64,7 @@ interface CitationInspectPayload {
 // Citation lookup function type
 type CitationLookupFn = (key: string | number) => CitationInfo | undefined;
 const REFERENCES_PER_PAGE = 5;
+type ReferenceSortMode = "citation_order" | "most_cited";
 
 interface OrderedReference {
   citationNumber: number;
@@ -724,6 +726,8 @@ function SynthesisSections({ sections, renderCitations }: {
 
 function ReferencesList({
   references,
+  sortMode,
+  onSortModeChange,
   currentPage,
   totalPages,
   onPreviousPage,
@@ -733,6 +737,8 @@ function ReferencesList({
   activeCitationInstanceId,
 }: {
   references: OrderedReference[];
+  sortMode: ReferenceSortMode;
+  onSortModeChange: (mode: ReferenceSortMode) => void;
   currentPage: number;
   totalPages: number;
   onPreviousPage: () => void;
@@ -745,10 +751,36 @@ function ReferencesList({
 
   return (
     <div className="mb-6">
-      <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center gap-2">
-        <BookOpen className="h-5 w-5 text-blue-600" />
-        References
-      </h3>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-800">
+          <BookOpen className="h-5 w-5 text-blue-600" />
+          References
+        </h3>
+        <div className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
+          <button
+            type="button"
+            onClick={() => onSortModeChange("citation_order")}
+            className={`rounded px-2 py-1 text-xs transition-colors ${
+              sortMode === "citation_order"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-800"
+            }`}
+          >
+            Citation order
+          </button>
+          <button
+            type="button"
+            onClick={() => onSortModeChange("most_cited")}
+            className={`rounded px-2 py-1 text-xs transition-colors ${
+              sortMode === "most_cited"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-800"
+            }`}
+          >
+            Most cited
+          </button>
+        </div>
+      </div>
       <div className="space-y-2">
         {references.map((reference) => {
           const presentation = buildReferencePresentation(reference.info);
@@ -904,6 +936,7 @@ export function ExecutiveBriefing({
   briefing, 
   structuredBriefing,
   citationMap, 
+  citationUsageCounts,
   evidenceCoverage,
   onCitationClick,
   onRerunSynthesis,
@@ -926,17 +959,40 @@ export function ExecutiveBriefing({
     return snake ?? camel ?? [];
   }, [structuredBriefing]);
   const orderedReferences = useMemo(() => buildOrderedReferences(citationMap), [citationMap]);
+  const [referencesSortMode, setReferencesSortMode] = useState<ReferenceSortMode>("citation_order");
+  const citationUsageCountMap = useMemo(() => {
+    const usage = new Map<number, number>();
+    Object.entries(citationUsageCounts || {}).forEach(([citationKey, count]) => {
+      const citationNumber = Number(citationKey);
+      if (!Number.isInteger(citationNumber)) return;
+      if (typeof count !== "number" || Number.isNaN(count)) return;
+      usage.set(citationNumber, count);
+    });
+    return usage;
+  }, [citationUsageCounts]);
+  const sortedReferences = useMemo(() => {
+    if (referencesSortMode === "citation_order") return orderedReferences;
+    return [...orderedReferences].sort((a, b) => {
+      const bCount = citationUsageCountMap.get(b.citationNumber) || 0;
+      const aCount = citationUsageCountMap.get(a.citationNumber) || 0;
+      if (bCount !== aCount) return bCount - aCount;
+      return a.citationNumber - b.citationNumber;
+    });
+  }, [orderedReferences, referencesSortMode, citationUsageCountMap]);
   const [referencesPage, setReferencesPage] = useState(1);
-  const totalReferencePages = Math.max(1, Math.ceil(orderedReferences.length / REFERENCES_PER_PAGE));
+  const totalReferencePages = Math.max(1, Math.ceil(sortedReferences.length / REFERENCES_PER_PAGE));
   const currentReferencePage = Math.min(referencesPage, totalReferencePages);
   const visibleReferences = useMemo(() => {
     const start = (currentReferencePage - 1) * REFERENCES_PER_PAGE;
-    return orderedReferences.slice(start, start + REFERENCES_PER_PAGE);
-  }, [orderedReferences, currentReferencePage]);
+    return sortedReferences.slice(start, start + REFERENCES_PER_PAGE);
+  }, [sortedReferences, currentReferencePage]);
 
   useEffect(() => {
     setReferencesPage(1);
   }, [projectId]);
+  useEffect(() => {
+    setReferencesPage(1);
+  }, [referencesSortMode]);
 
   const handleDownloadPdf = useCallback(() => {
     const sanitize = (text?: string) =>
@@ -1444,6 +1500,8 @@ export function ExecutiveBriefing({
             
             <ReferencesList
               references={visibleReferences}
+              sortMode={referencesSortMode}
+              onSortModeChange={setReferencesSortMode}
               currentPage={currentReferencePage}
               totalPages={totalReferencePages}
               onPreviousPage={() => setReferencesPage((prev) => Math.max(1, prev - 1))}

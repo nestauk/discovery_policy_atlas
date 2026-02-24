@@ -1116,6 +1116,7 @@ export default function ProjectResultsPage() {
                         briefing={summaryData.executive_briefing}
                         structuredBriefing={summaryData.structured_briefing}
                         citationMap={summaryData.citation_map}
+                        citationUsageCounts={summaryData.citation_usage_counts}
                         evidenceCoverage={summaryData.evidence_coverage}
                         {...(showRerunButton
                           ? {

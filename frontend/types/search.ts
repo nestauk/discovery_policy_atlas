@@ -322,6 +322,7 @@ export interface SynthesisSection {
     outcome_themes?: OutcomeTheme[]
     evidence_coverage?: EvidenceCoverageSnapshot
     citation_map?: Record<string, CitationInfo>
+    citation_usage_counts?: Record<string, number>
     risk_themes?: RiskTheme[]
   }
 
