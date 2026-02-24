@@ -388,16 +388,6 @@ class RecommendationsOutput(BaseModel):
     )
 
 
-class TopCitationItem(BaseModel):
-    """A top citation for the reading list."""
-
-    citation_number: int = Field(..., description="Citation number")
-    title: str = Field(..., description="Document title")
-    author_year: str = Field(..., description="Author, Year string")
-    reason: str = Field("", description="Recommendation reason")
-    url: Optional[str] = Field(None, description="Document URL")
-
-
 class BackgroundSection(BaseModel):
     """Structured background/context section."""
 
@@ -448,7 +438,6 @@ class StructuredBriefing(BaseModel):
     interventions_table: List[InterventionTableRow] = Field(default_factory=list)
     synthesis_sections: List["SynthesisSection"] = Field(default_factory=list)
     recommendations: List[RecommendationItem] = Field(default_factory=list)
-    top_citations: List[TopCitationItem] = Field(default_factory=list)
     follow_up_suggestions: List[str] = Field(default_factory=list)
 
 

@@ -273,14 +273,6 @@ export interface CausalityDetail {
     citation_numbers: number[]
   }
 
-  export interface TopCitationItem {
-    citation_number: number
-    title: string
-    author_year: string
-    reason: string
-    url?: string
-  }
-
   export interface BackgroundSection {
     title: string
     paragraphs: string[]
@@ -309,7 +301,6 @@ export interface SynthesisSection {
     interventions_table: InterventionTableRow[]
   synthesis_sections?: SynthesisSection[]
     recommendations: RecommendationItem[]
-    top_citations: TopCitationItem[]
     follow_up_suggestions: string[]
   }
 
