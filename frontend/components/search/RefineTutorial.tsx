@@ -233,8 +233,7 @@ export function RefineTutorial() {
     if (parentProjectId && !getSeenFlag()) {
       setPhase('intro')
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Check only on mount
+  }, [parentProjectId])
 
   // ── Complete/dismiss ───────────────────────────────────────────────────────
   const complete = useCallback(() => {

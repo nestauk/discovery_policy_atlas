@@ -332,6 +332,12 @@ async def create_analysis_project(
         parent_project_id = request.get("parent_project_id")
         if parent_project_id:
             try:
+                uuid.UUID(parent_project_id)
+            except (ValueError, AttributeError):
+                raise HTTPException(
+                    status_code=400, detail="parent_project_id must be a valid UUID"
+                )
+            try:
                 get_project_with_auth_check(parent_project_id, current_user, "id")
             except HTTPException:
                 raise HTTPException(
