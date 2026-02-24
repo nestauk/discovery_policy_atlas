@@ -176,8 +176,20 @@ export interface CausalityDetail {
     year?: number
     title?: string
     url?: string
+    document_type?: string
+    evidence_score?: number
+    impact_score?: number
     supporting_quote?: string
     chunk_id?: string
+    claim_quotes?: ClaimQuote[]
+  }
+
+  export interface ClaimQuote {
+    claim_text: string
+    supporting_quote: string
+    attribution: 'direct' | 'synthesised' | 'inferred'
+    chunk_id: string
+    section: string
   }
 
   export interface EvidenceCoverageSnapshot {

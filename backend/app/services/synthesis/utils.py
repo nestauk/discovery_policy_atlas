@@ -89,6 +89,65 @@ def normalize_source_type(source: str, document_type: str) -> str:
     return document_type.title() if document_type else "Other"
 
 
+def extract_author_short(authors: Any) -> Optional[str]:
+    """Extract compact author label from an authors field.
+
+    Args:
+        authors: Authors value from metadata, typically a list of strings.
+
+    Returns:
+        Short author label (usually surname of first author), or None when unavailable.
+    """
+    if isinstance(authors, str):
+        author_items = [authors]
+    elif isinstance(authors, list):
+        author_items = authors
+    else:
+        return None
+
+    if not author_items:
+        return None
+
+    first_author = author_items[0]
+    if not isinstance(first_author, str) or not first_author.strip():
+        return None
+
+    author_text = first_author.strip()
+    if "," in author_text:
+        return author_text.split(",", 1)[0].strip() or None
+
+    parts = [part for part in author_text.split() if part]
+    if not parts:
+        return None
+    return parts[-1].strip(".,") or None
+
+
+def extract_author_display(authors: Any) -> Optional[str]:
+    """Extract first author as stored for UI display.
+
+    Args:
+        authors: Authors value from metadata, typically a list of strings.
+
+    Returns:
+        First author string exactly as stored (trimmed), or None when unavailable.
+    """
+    if isinstance(authors, str):
+        author_items = [authors]
+    elif isinstance(authors, list):
+        author_items = authors
+    else:
+        return None
+
+    if not author_items:
+        return None
+
+    first_author = author_items[0]
+    if not isinstance(first_author, str):
+        return None
+
+    return first_author.strip() or None
+
+
 def escape_braces(text: str) -> str:
     """Escape braces for ChatPromptTemplate.
 
@@ -171,3 +230,38 @@ def build_langfuse_config(
             extra=extra,
         ),
     }
+
+
+async def fetch_chunk_texts(chunk_ids: List[str]) -> Dict[str, str]:
+    """Batch-fetch full chunk content from the chunks table.
+
+    Args:
+        chunk_ids: List of chunk UUIDs to fetch.
+
+    Returns:
+        Mapping of chunk_id to full content text.
+    """
+    unique_chunk_ids = [cid for cid in dict.fromkeys(chunk_ids) if cid]
+    if not unique_chunk_ids:
+        return {}
+
+    from app.services.vectorization import vectorization_service
+
+    supabase = vectorization_service.supabase
+    try:
+        res = (
+            supabase.table("chunks")
+            .select("id, content")
+            .in_("id", unique_chunk_ids)
+            .execute()
+        )
+    except Exception:
+        return {cid: "" for cid in unique_chunk_ids}
+
+    chunk_text_map: Dict[str, str] = {cid: "" for cid in unique_chunk_ids}
+    for row in res.data or []:
+        chunk_id = str(row.get("id") or "")
+        if chunk_id:
+            chunk_text_map[chunk_id] = str(row.get("content") or "")
+
+    return chunk_text_map

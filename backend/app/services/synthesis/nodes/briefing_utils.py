@@ -36,8 +36,11 @@ def clean_rec_title(title: str) -> str:
 
 
 def extract_citation_numbers(text: str) -> List[int]:
-    matches = re.findall(r"\[(\d+)\]", text)
-    return [int(m) for m in matches if int(m) > 0]
+    if not text:
+        return []
+    bracket_groups = re.findall(r"\[([0-9][0-9,\s;]*)\]", text)
+    numbers = [int(n) for group in bracket_groups for n in re.findall(r"\d+", group)]
+    return [n for n in numbers if n > 0]
 
 
 def parse_intervention_table(
