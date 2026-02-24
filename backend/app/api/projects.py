@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 import logging
 import os
-from typing import Optional, List, Any
+from typing import Optional, List
 import uuid
 import pandas as pd
 
@@ -330,7 +330,7 @@ async def get_chunk_context(
         doc_res = (
             vectorization_service.supabase.table("analysis_documents")
             .select(
-                "id, title, authors, year, venue, source_country, source, document_type, evidence_category, evidence_category_reasoning, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, pdf_url, landing_page_url, overton_url"
+                "id, doc_id, title, authors, year, venue, source_country, source, document_type, evidence_category, evidence_category_reasoning, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, pdf_url, landing_page_url, overton_url"
             )
             .eq("id", document_id)
             .eq("analysis_project_id", project_id)
@@ -347,6 +347,16 @@ async def get_chunk_context(
         stars = evidence_info.get("stars")
         evidence_score = int(stars) if isinstance(stars, (int, float)) else None
 
+        source_value = str(doc.get("source") or "").strip()
+        if not source_value:
+            doc_id_raw = str(doc.get("doc_id") or "")
+            if "openalex" in doc_id_raw.lower() or (
+                doc_id_raw.startswith("W") and doc_id_raw[1:].isdigit()
+            ):
+                source_value = "openalex"
+            elif "overton" in doc_id_raw.lower():
+                source_value = "overton"
+
         document = DocumentContextInfo(
             analysis_document_id=str(doc.get("id") or document_id),
             title=str(doc.get("title") or "Unknown source"),
@@ -359,7 +369,7 @@ async def get_chunk_context(
             or doc.get("landing_page_url")
             or doc.get("overton_url"),
             source_type=normalize_source_type(
-                str(doc.get("source") or ""), str(doc.get("document_type") or "")
+                source_value, str(doc.get("document_type") or "")
             ),
             document_type=doc.get("document_type"),
             evidence_category=doc.get("evidence_category"),
