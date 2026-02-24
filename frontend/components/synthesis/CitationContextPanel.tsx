@@ -332,6 +332,10 @@ export function CitationContextPanel({
   const institutionsDisplay =
     institutions.length > 2 ? `${institutions.slice(0, 2).join(", ")} +${institutions.length - 2} more` : institutionsText;
   const effectiveVenue = freshData?.document.venue;
+  const institutionsDuplicateVenue =
+    institutions.length > 0 &&
+    !!effectiveVenue &&
+    institutions.every((inst) => inst === effectiveVenue);
   const effectiveCountry = freshData?.document.country;
   const effectiveUrl = freshData?.document.url || citationInfo?.url;
   const effectiveSourceType =
@@ -412,7 +416,7 @@ export function CitationContextPanel({
           {effectiveVenue && (
             <div className="mt-1 text-xs text-slate-500">{effectiveVenue}</div>
           )}
-          {institutions.length > 0 && (
+          {institutions.length > 0 && !institutionsDuplicateVenue && (
             <Tooltip content={institutionsText}>
               <div className="mt-1 cursor-help text-xs text-slate-500">
                 Institutions: {institutionsDisplay}

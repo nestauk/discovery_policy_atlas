@@ -601,4 +601,15 @@ class AnalysisService:
         except (json.JSONDecodeError, ValueError):
             pass
 
+        try:
+            import ast
+
+            parsed = ast.literal_eval(str(value))
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed]
+            elif isinstance(parsed, str):
+                return [parsed]
+        except (ValueError, SyntaxError):
+            pass
+
         return [item.strip() for item in str(value).split(",") if item.strip()]

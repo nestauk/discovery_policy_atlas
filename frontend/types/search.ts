@@ -23,6 +23,7 @@ export interface SearchParams {
     doi: string
     abstract?: string
     authors: string[]
+    author_institutions?: string[]
     venue?: string
     is_relevant: boolean
     relevance_reason?: string

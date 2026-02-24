@@ -1869,11 +1869,17 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
                 authors = doc.get("authors", [])
                 if not isinstance(authors, list):
                     authors = []
+                author_institutions = doc.get("author_institutions", [])
+                if not isinstance(author_institutions, list):
+                    author_institutions = []
 
                 csv_rows.append(
                     {
                         "Title": doc.get("title", ""),
                         "Authors": ", ".join(authors) if authors else "",
+                        "Institutions": ", ".join(author_institutions)
+                        if author_institutions
+                        else "",
                         "Year": doc.get("year", ""),
                         "DOI": doc.get("doi", ""),
                         "Source": doc.get("source", ""),

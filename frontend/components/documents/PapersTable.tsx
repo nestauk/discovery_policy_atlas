@@ -23,6 +23,7 @@ interface PapersTableProps {
 interface DataType extends Paper {
   key: string
   authorsDisplay: string
+  institutionsDisplay: string
   topicsDisplay: string
   relevanceDisplay: string
 }
@@ -34,6 +35,7 @@ export function PapersTable({ papers, showAdditionalColumns = false, highlightNo
       ...paper,
       key: paper.id,
       authorsDisplay: paper.authors?.join(', ') || 'Unknown',
+      institutionsDisplay: paper.author_institutions?.join(', ') || 'Unknown',
       topicsDisplay: paper.topics?.slice(0, 2).join(', ') + (paper.topics && paper.topics.length > 2 ? ` +${paper.topics.length - 2} more` : ''),
       relevanceDisplay: paper.is_relevant ? 'Relevant' : 'Not Relevant'
     }))
@@ -148,6 +150,26 @@ export function PapersTable({ papers, showAdditionalColumns = false, highlightNo
             {authorsText.length > maxLength 
               ? `${authorsText.substring(0, maxLength)}...` 
               : authorsText
+            }
+          </div>
+        )
+      },
+    },
+    {
+      title: 'Institutions',
+      dataIndex: 'institutionsDisplay',
+      key: 'institutions',
+      width: '12%',
+      sorter: (a, b) => a.institutionsDisplay.localeCompare(b.institutionsDisplay),
+      render: (_text, record) => {
+        const institutionsText = record.author_institutions?.join(', ') || 'Unknown'
+        const maxLength = 60
+
+        return (
+          <div className="text-sm text-gray-700 whitespace-normal leading-tight" title={institutionsText}>
+            {institutionsText.length > maxLength
+              ? `${institutionsText.substring(0, maxLength)}...`
+              : institutionsText
             }
           </div>
         )
