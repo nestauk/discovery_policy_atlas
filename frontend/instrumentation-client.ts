@@ -1,9 +1,7 @@
 import posthog from 'posthog-js'
 
 // Environment variable flags (set in .env.local)
-// NEXT_PUBLIC_POSTHOG_ANONYMOUS=true  -> Don't identify users (anonymous by default)
 // NEXT_PUBLIC_POSTHOG_SESSION_RECORDING=false -> Disable session recording
-export const POSTHOG_ANONYMOUS = process.env.NEXT_PUBLIC_POSTHOG_ANONYMOUS === 'true'
 export const POSTHOG_SESSION_RECORDING = process.env.NEXT_PUBLIC_POSTHOG_SESSION_RECORDING !== 'false'
 
 // Prevent multiple initializations if this module is imported multiple times
@@ -19,7 +17,7 @@ if (typeof window !== 'undefined' && !initialized) {
     posthog.init(posthogKey, {
       api_host: posthogHost,
       defaults: '2025-11-30',
-      person_profiles: 'identified_only',
+      person_profiles: 'always',
       autocapture: true,
       capture_pageview: true,
       capture_pageleave: true,
@@ -34,7 +32,6 @@ if (typeof window !== 'undefined' && !initialized) {
       loaded: () => {
         if (process.env.NODE_ENV === 'development') {
           console.log('[PostHog] Initialized', {
-            anonymous: POSTHOG_ANONYMOUS,
             sessionRecording: POSTHOG_SESSION_RECORDING,
           })
         }
