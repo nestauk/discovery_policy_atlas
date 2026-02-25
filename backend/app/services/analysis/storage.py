@@ -496,7 +496,7 @@ class AnalysisStorageService:
         use_abstracts_only: bool = False,
     ) -> bool:
         """
-        Store document chunks for RAG. Creates summary, abstract, and content chunks.
+        Store document chunks for RAG. Creates abstract and content chunks.
 
         Args:
             project_id: The analysis project ID
