@@ -34,7 +34,11 @@ from app.services.synthesis.nodes.impact_synthesis import (
     _normalise_unit_key,
 )
 from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
-from app.services.synthesis.utils import normalize_source_type
+from app.services.synthesis.utils import (
+    extract_author_display,
+    extract_author_list,
+    normalize_source_type,
+)
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
@@ -312,7 +316,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         docs_meta_res = (
             supabase.table("analysis_documents")
             .select(
-                "id, source, document_type, evidence_category, evidence_category_reasoning, evidence_justification, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, top_line, venue, source_country, source_type, author_institutions"
+                "id, source, document_type, evidence_category, evidence_category_reasoning, evidence_justification, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, top_line, venue, source_country, source_type, author_institutions, authors"
             )
             .in_("id", doc_ids)
             .execute()
@@ -353,6 +357,18 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         cit.source_type = normalize_source_type(
             source_value, str(doc_meta.get("document_type") or "")
         )
+        raw_authors = doc_meta.get("authors")
+        if isinstance(raw_authors, str):
+            try:
+                raw_authors = (
+                    json.loads(raw_authors)
+                    if raw_authors.strip().startswith("[")
+                    else raw_authors
+                )
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        cit.authors = extract_author_list(raw_authors)
+        cit.author_display = extract_author_display(raw_authors)
         raw_institutions = doc_meta.get("author_institutions")
         if isinstance(raw_institutions, list):
             cit.author_institutions = [

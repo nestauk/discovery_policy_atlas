@@ -41,6 +41,12 @@ class CitationInfo(BaseModel):
     doc_id: Optional[str] = Field(None, description="External document identifier")
     analysis_document_id: str = Field(..., description="Internal UUID of the document")
     author_short: Optional[str] = Field(None, description="Short author reference")
+    author_display: Optional[str] = Field(
+        None, description="Display label e.g. 'First Author et al.'"
+    )
+    authors: Optional[List[str]] = Field(
+        None, description="Full list of authors when available"
+    )
     year: Optional[int] = Field(None, description="Publication year")
     title: Optional[str] = Field(None, description="Document title")
     top_line: Optional[str] = Field(None, description="One-sentence document summary")

@@ -413,15 +413,15 @@ export function CitationContextPanel({
               <>{[effectiveAuthor, effectiveYear].filter(Boolean).join(", ") || "Unknown metadata"}</>
             )}
           </div>
-          {effectiveVenue && (
-            <div className="mt-1 text-xs text-slate-500">{effectiveVenue}</div>
-          )}
           {institutions.length > 0 && !institutionsDuplicateVenue && (
             <Tooltip content={institutionsText}>
               <div className="mt-1 cursor-help text-xs text-slate-500">
                 Institutions: {institutionsDisplay}
               </div>
             </Tooltip>
+          )}
+          {effectiveVenue && (
+            <div className="mt-1 text-xs text-slate-500">{effectiveVenue}</div>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
             {effectiveSourceType && (

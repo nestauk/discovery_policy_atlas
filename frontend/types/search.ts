@@ -174,6 +174,8 @@ export interface CausalityDetail {
     doc_id?: string
     analysis_document_id: string
     author_short?: string
+    author_display?: string | null
+    authors?: string[] | null
     year?: number
     title?: string
     top_line?: string

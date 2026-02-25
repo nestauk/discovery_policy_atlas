@@ -78,6 +78,10 @@ interface ReferencePresentation {
   institutionsDuplicateVenue: boolean;
   sourceTypeDisplay?: string;
   evidenceCategoryColors: { bg: string; text: string } | null;
+  authorDisplay: string;
+  authorDisplayForReferences: string;
+  fullAuthorsText: string;
+  showAuthorsTooltip: boolean;
 }
 
 function formatOutOfFive(value?: number): string {
@@ -113,6 +117,22 @@ function buildReferencePresentation(info: CitationInfo): ReferencePresentation {
       ? `${institutions.slice(0, 2).join(", ")} +${institutions.length - 2} more`
       : institutions.join(", ");
 
+  const fullAuthors = Array.isArray(info.authors)
+    ? info.authors.filter((a): a is string => typeof a === "string" && !!a.trim())
+    : [];
+  const authorDisplay =
+    info.author_display ?? info.author_short ?? "";
+  const fullAuthorsText = fullAuthors.join(", ");
+  const showAuthorsTooltip =
+    !!authorDisplay && fullAuthors.length > 1 && !!fullAuthorsText;
+
+  const authorDisplayForReferences =
+    fullAuthors.length >= 4
+      ? `${fullAuthors.slice(0, 3).join(", ")} et al.`
+      : fullAuthors.length > 0
+        ? fullAuthors.join(", ")
+        : authorDisplay;
+
   return {
     institutions,
     institutionsText: institutions.join(", "),
@@ -120,6 +140,10 @@ function buildReferencePresentation(info: CitationInfo): ReferencePresentation {
     institutionsDuplicateVenue,
     sourceTypeDisplay: info.source_type || info.document_type || undefined,
     evidenceCategoryColors: info.evidence_category ? getEvidenceCategoryColors(info.evidence_category) : null,
+    authorDisplay,
+    authorDisplayForReferences,
+    fullAuthorsText,
+    showAuthorsTooltip,
   };
 }
 
@@ -311,11 +335,12 @@ function CitationLink({
     }
   }, [onCitationClick, docId, url, onCitationInspect, citationInfo, matchedClaimQuote, canInspectInContext, citationInstanceId]);
 
+  const effectiveAuthor = citationInfo?.author_display ?? citationInfo?.author_short;
   const tooltipContent = (
     <div className="space-y-2 max-w-sm">
       <div className="font-medium text-sm leading-tight">{title}</div>
-      {citationInfo?.author_short && citationInfo?.year && (
-        <div className="text-xs opacity-80">{citationInfo.author_short}, {citationInfo.year}</div>
+      {effectiveAuthor && citationInfo?.year && (
+        <div className="text-xs opacity-80">{effectiveAuthor}, {citationInfo.year}</div>
       )}
       {quote && (
         <div className="mt-2 pt-2 border-t border-white/20">
@@ -832,18 +857,25 @@ function ReferencesList({
                   </div>
 
                   <div className="mt-1 text-xs text-slate-600">
-                    {[reference.info.author_short, reference.info.year].filter(Boolean).join(", ") || "Unknown author/year"}
+                    {presentation.showAuthorsTooltip ? (
+                      <Tooltip content={presentation.fullAuthorsText}>
+                        <span className="cursor-help">
+                          {[presentation.authorDisplayForReferences, reference.info.year].filter(Boolean).join(", ") || "Unknown author/year"}
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      [presentation.authorDisplayForReferences, reference.info.year].filter(Boolean).join(", ") || "Unknown author/year"
+                    )}
                   </div>
-                  {reference.info.venue && (
-                    <div className="mt-0.5 text-xs text-slate-500">{reference.info.venue}</div>
-                  )}
-
                   {presentation.institutions.length > 0 && !presentation.institutionsDuplicateVenue && (
                     <Tooltip content={presentation.institutionsText}>
-                      <div className="mt-2 inline-flex max-w-full cursor-help text-xs text-slate-600">
-                        <span className="font-medium text-slate-700">Institutions: </span>{presentation.institutionsDisplay}
+                      <div className="mt-1 inline-flex max-w-full cursor-help text-xs text-slate-500">
+                        Institutions: {presentation.institutionsDisplay}
                       </div>
                     </Tooltip>
+                  )}
+                  {reference.info.venue && (
+                    <div className="mt-0.5 text-xs text-slate-500">{reference.info.venue}</div>
                   )}
 
                   {reference.info.top_line && (
@@ -1145,14 +1177,14 @@ export function ExecutiveBriefing({
       if (!orderedReferences.length) return "";
       const items = orderedReferences
         .map((reference) => {
+          const presentation = buildReferencePresentation(reference.info);
           const citationPill = `<span class="pill">[${reference.citationNumber}]</span>`;
           const title = sanitize(reference.info.title || "Unknown source");
           const authorYear = sanitize(
-            [reference.info.author_short, reference.info.year].filter(Boolean).join(", ") || "Unknown author/year"
+            [presentation.authorDisplayForReferences, reference.info.year].filter(Boolean).join(", ") || "Unknown author/year"
           );
           const topLine = sanitize(reference.info.top_line || "");
           const venue = sanitize(reference.info.venue || "");
-          const presentation = buildReferencePresentation(reference.info);
           const sourceType = sanitize(presentation.sourceTypeDisplay || "");
           const evidenceCategoryLabel = reference.info.evidence_category
             ? getEvidenceCategoryShortName(reference.info.evidence_category)
