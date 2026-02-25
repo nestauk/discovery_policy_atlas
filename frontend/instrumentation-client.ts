@@ -26,14 +26,9 @@ if (typeof window !== 'undefined' && !initialized) {
       disable_session_recording: !POSTHOG_SESSION_RECORDING,
       session_recording: {
         maskAllInputs: true,
-        maskTextSelector: '[data-posthog-mask]',
+        maskTextSelector: '*',
+        maskTextFn: () => '●●●●●',
         blockSelector: '[data-posthog-block]',
-        maskTextFn: (text) => {
-          if (text.length > 10) {
-            return text.substring(0, 3) + '...' + text.substring(text.length - 3)
-          }
-          return '***'
-        },
         recordCrossOriginIframes: false,
       },
       loaded: () => {
