@@ -1,0 +1,27 @@
+{
+    "staging": {
+        "aws_account_id": "715413099986",
+        "aws_region": "eu-west-2",
+        "policy_atlas_config": {
+            "vpc_id": "vpc-084b7d566e2715422",
+            "cpu": 512,
+            "memory_limit_mib": 1024,
+            "desired_count": 1,
+            "min_capacity": 1,
+            "max_capacity": 2,
+            "enable_http_insecure_access": true,
+            "policy_atlas_public_domain": "staging.policyatlas.uk",
+            "public_hosted_zone": "policyatlas.uk"
+        },
+        "supabase_config": {
+            "vpc_id": "vpc-084b7d566e2715422",
+            "internal_domain_name": "staging.policyatlas.local",
+            "supabase_internal_domain": "supabase.staging.policyatlas.local",
+            "instance_type": "t3a.large",
+            "db_instance_type": "t3.medium",
+            "multi_az_db": false
+        },
+        "domain_name": "staging.policyatlas.uk",
+        "internal_domain_name": "staging.policyatlas.local"
+    }
+}

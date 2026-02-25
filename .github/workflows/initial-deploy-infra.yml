@@ -1,0 +1,39 @@
+name: Initial Deploy Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Environment to deploy (staging, prod)"
+        required: true
+        default: "staging"
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions/checkout@v4
+        
+        - name: Set up Python
+          uses: actions/setup-python@v4
+          with:
+            python-version: '3.11'
+        
+        - name: Install uv
+          uses: astral-sh/setup-uv@v1
+          with:
+            version: "latest"
+        
+        - name: Install dependencies
+          run: |
+            cd infra
+            uv sync
+        
+        - name: Deploy with CDK
+          env:
+            AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_REGION: ${{ secrets.AWS_REGION }}
+          run: |
+            cd infra
+            uv run cdk deploy --app "python app.py --env ${{ github.event.inputs.env }}" --require-approval never
