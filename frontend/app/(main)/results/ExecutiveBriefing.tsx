@@ -1002,15 +1002,22 @@ export function ExecutiveBriefing({
     });
     return usage;
   }, [citationUsageCounts]);
+  const referencedInBriefing = useMemo(() => {
+    // Fallback to all references when usage counts are not available.
+    if (citationUsageCountMap.size === 0) return orderedReferences;
+    return orderedReferences.filter(
+      (reference) => (citationUsageCountMap.get(reference.citationNumber) || 0) > 0
+    );
+  }, [orderedReferences, citationUsageCountMap]);
   const sortedReferences = useMemo(() => {
-    if (referencesSortMode === "citation_order") return orderedReferences;
-    return [...orderedReferences].sort((a, b) => {
+    if (referencesSortMode === "citation_order") return referencedInBriefing;
+    return [...referencedInBriefing].sort((a, b) => {
       const bCount = citationUsageCountMap.get(b.citationNumber) || 0;
       const aCount = citationUsageCountMap.get(a.citationNumber) || 0;
       if (bCount !== aCount) return bCount - aCount;
       return a.citationNumber - b.citationNumber;
     });
-  }, [orderedReferences, referencesSortMode, citationUsageCountMap]);
+  }, [referencedInBriefing, referencesSortMode, citationUsageCountMap]);
   const [referencesPage, setReferencesPage] = useState(1);
   const totalReferencePages = Math.max(1, Math.ceil(sortedReferences.length / REFERENCES_PER_PAGE));
   const currentReferencePage = Math.min(referencesPage, totalReferencePages);
@@ -1174,8 +1181,8 @@ export function ExecutiveBriefing({
     };
 
     const renderReferences = () => {
-      if (!orderedReferences.length) return "";
-      const items = orderedReferences
+      if (!referencedInBriefing.length) return "";
+      const items = referencedInBriefing
         .map((reference) => {
           const presentation = buildReferencePresentation(reference.info);
           const citationPill = `<span class="pill">[${reference.citationNumber}]</span>`;
@@ -1416,7 +1423,7 @@ export function ExecutiveBriefing({
     setTimeout(() => {
       w.print();
     }, 300);
-  }, [briefing, evidenceCoverage, lookupCitation, orderedReferences, structuredBriefing, synthesisSections]);
+  }, [briefing, evidenceCoverage, lookupCitation, referencedInBriefing, structuredBriefing, synthesisSections]);
 
   // Legacy markdown components (simplified)
   const processText = useCallback((text: string, prefix: string): React.ReactNode => {
