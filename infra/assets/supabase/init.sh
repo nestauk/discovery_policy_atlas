@@ -11,10 +11,34 @@
 
 set -euo pipefail
 
+echo "==> Starting Supabase init script"
 WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JWT_SECRET_NAME="supabase/jwt-secrets"
+JWT_SECRET_NAME="${SUPABASE_JWT_SECRET_NAME}"
 
 log() { echo "[init] $*"; }
+
+# Resolve region — prefer env var, fall back to IMDSv2 instance metadata.
+log "AWS_DEFAULT_REGION from environment: '${AWS_DEFAULT_REGION:-}'"
+log "AWS_REGION from environment: '${AWS_REGION:-}'"
+if [[ -z "${AWS_DEFAULT_REGION:-}" ]]; then
+  log "AWS_DEFAULT_REGION not set — fetching from IMDSv2"
+  IMDS_TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600") || { log "ERROR: IMDSv2 token request failed (exit $?)"; exit 1; }
+  log "IMDSv2 token acquired (length ${#IMDS_TOKEN})"
+  AWS_DEFAULT_REGION=$(curl -sf \
+    -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" \
+    "http://169.254.169.254/latest/meta-data/placement/region") || { log "ERROR: IMDSv2 region request failed (exit $?)"; exit 1; }
+  export AWS_DEFAULT_REGION
+  log "Region from IMDSv2: '${AWS_DEFAULT_REGION}'"
+else
+  log "Region inherited from environment"
+fi
+
+if [[ -z "${AWS_DEFAULT_REGION:-}" ]]; then
+  log "ERROR: AWS_DEFAULT_REGION is empty after all resolution attempts"
+  exit 1
+fi
+log "Using region: ${AWS_DEFAULT_REGION}"
 
 # ── 1. Fetch RDS credentials ──────────────────────────────────────────────────
 log "Fetching RDS credentials from Secrets Manager (${RDS_SECRET_ARN})"
@@ -28,19 +52,19 @@ POSTGRES_HOST=$(echo "${RDS_JSON}" | python3 -c "import sys,json; print(json.loa
 POSTGRES_PORT=$(echo "${RDS_JSON}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('port', 5432))")
 POSTGRES_PASSWORD=$(echo "${RDS_JSON}" | python3 -c "import sys,json; print(json.load(sys.stdin)['password'])")
 
-# ── 2. Fetch or create JWT secrets ───────────────────────────────────────────
-log "Checking for existing JWT secrets (${JWT_SECRET_NAME})"
-if aws secretsmanager describe-secret \
-     --secret-id "${JWT_SECRET_NAME}" \
-     --region "${AWS_DEFAULT_REGION}" &>/dev/null; then
-  log "Fetching existing JWT secrets"
-  JWT_JSON=$(aws secretsmanager get-secret-value \
-    --secret-id "${JWT_SECRET_NAME}" \
-    --query SecretString \
-    --output text \
-    --region "${AWS_DEFAULT_REGION}")
-else
-  log "Generating new JWT secrets"
+# ── 2. Fetch or populate JWT secrets ─────────────────────────────────────────
+# The secret is pre-created by CDK with a placeholder value ({}).
+# On first boot we generate real values and update it; on subsequent boots we
+# read the already-populated value.
+log "Fetching JWT secrets from Secrets Manager (${JWT_SECRET_NAME})"
+JWT_JSON=$(aws secretsmanager get-secret-value \
+  --secret-id "${JWT_SECRET_NAME}" \
+  --query SecretString \
+  --output text \
+  --region "${AWS_DEFAULT_REGION}")
+
+if ! echo "${JWT_JSON}" | python3 -c "import sys,json; json.load(sys.stdin)['jwt_secret']" &>/dev/null; then
+  log "JWT secrets not yet initialised — generating and storing"
   JWT_JSON=$(python3 - <<'PYEOF'
 import hmac, hashlib, base64, json, time, secrets as _secrets
 
@@ -74,11 +98,12 @@ print(json.dumps({
 }))
 PYEOF
   )
-  log "Storing JWT secrets in Secrets Manager"
-  aws secretsmanager create-secret \
-    --name "${JWT_SECRET_NAME}" \
+  aws secretsmanager put-secret-value \
+    --secret-id "${JWT_SECRET_NAME}" \
     --secret-string "${JWT_JSON}" \
     --region "${AWS_DEFAULT_REGION}"
+else
+  log "Using existing JWT secrets"
 fi
 
 JWT_SECRET=$(echo "${JWT_JSON}"     | python3 -c "import sys,json; print(json.load(sys.stdin)['jwt_secret'])")
@@ -87,14 +112,20 @@ SERVICE_ROLE_KEY=$(echo "${JWT_JSON}" | python3 -c "import sys,json; print(json.
 SECRET_KEY_BASE=$(echo "${JWT_JSON}" | python3 -c "import sys,json; print(json.load(sys.stdin)['secret_key_base'])")
 DB_ENC_KEY=$(echo "${JWT_JSON}"     | python3 -c "import sys,json; print(json.load(sys.stdin)['db_enc_key'])")
 
-# ── 3. Run DB role/schema initialisation (once) ───────────────────────────────
+# ── 3. Run DB initialisation (once) ──────────────────────────────────────────
 FLAG_FILE="/opt/supabase/.db_initialised"
 if [ ! -f "${FLAG_FILE}" ]; then
-  log "Running DB initialisation (db/roles.sql)"
+  log "Installing pgjwt via TLE (db/pgjwt_tle.sql)"
+  PGPASSWORD="${POSTGRES_PASSWORD}" psql \
+    "host=${POSTGRES_HOST} port=${POSTGRES_PORT} dbname=postgres user=postgres sslmode=require" \
+    -f "${WORKDIR}/db/pgjwt_tle.sql"
+
+  log "Running DB role/schema initialisation (db/roles.sql)"
   PGPASSWORD="${POSTGRES_PASSWORD}" psql \
     "host=${POSTGRES_HOST} port=${POSTGRES_PORT} dbname=postgres user=postgres sslmode=require" \
     -v POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
     -f "${WORKDIR}/db/roles.sql"
+
   touch "${FLAG_FILE}"
 else
   log "DB already initialised, skipping"

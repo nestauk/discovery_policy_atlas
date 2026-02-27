@@ -1,0 +1,66 @@
+{
+  "vpc-provider:account=715413099986:filter.vpc-id=vpc-084b7d566e2715422:region=eu-west-2:returnAsymmetricSubnets=true": {
+    "vpcId": "vpc-084b7d566e2715422",
+    "vpcCidrBlock": "10.0.0.0/16",
+    "ownerAccountId": "715413099986",
+    "availabilityZones": [],
+    "subnetGroups": [
+      {
+        "name": "Private",
+        "type": "Private",
+        "subnets": [
+          {
+            "subnetId": "subnet-0d8f86016730c5524",
+            "cidr": "10.0.128.0/20",
+            "availabilityZone": "eu-west-2a",
+            "routeTableId": "rtb-01523776671428e6f"
+          },
+          {
+            "subnetId": "subnet-040ac19fb5c28dbdf",
+            "cidr": "10.0.144.0/20",
+            "availabilityZone": "eu-west-2b",
+            "routeTableId": "rtb-034c037d4be32cf15"
+          },
+          {
+            "subnetId": "subnet-0e7fd8a3c3bfe335a",
+            "cidr": "10.0.160.0/20",
+            "availabilityZone": "eu-west-2c",
+            "routeTableId": "rtb-05c74b08e10e2259f"
+          }
+        ]
+      },
+      {
+        "name": "Public",
+        "type": "Public",
+        "subnets": [
+          {
+            "subnetId": "subnet-05d1fc87d0db1472a",
+            "cidr": "10.0.0.0/20",
+            "availabilityZone": "eu-west-2a",
+            "routeTableId": "rtb-0e08041b03229d019"
+          },
+          {
+            "subnetId": "subnet-0399712f1c2cd2351",
+            "cidr": "10.0.16.0/20",
+            "availabilityZone": "eu-west-2b",
+            "routeTableId": "rtb-0e08041b03229d019"
+          },
+          {
+            "subnetId": "subnet-05ab03d7094fb019a",
+            "cidr": "10.0.32.0/20",
+            "availabilityZone": "eu-west-2c",
+            "routeTableId": "rtb-0e08041b03229d019"
+          }
+        ]
+      }
+    ]
+  },
+  "hosted-zone:account=715413099986:domainName=staging.policyatlas.local:privateZone=true:region=eu-west-2:vpcId=vpc-084b7d566e2715422": {
+    "Id": "/hostedzone/Z01862302DV896CW4NSVS",
+    "Name": "staging.policyatlas.local."
+  },
+  "hosted-zone:account=715413099986:domainName=staging.policyatlas.uk:region=eu-west-2": {
+    "Id": "/hostedzone/Z0682443S3R3Q16ZM838",
+    "Name": "staging.policyatlas.uk."
+  }
+}

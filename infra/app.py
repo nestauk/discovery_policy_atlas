@@ -3,8 +3,8 @@ import os
 import json
 import aws_cdk as cdk
 
-from infra.infra.policy_atlas_stack import PolicyAtlasStack
-from infra.infra.supabase_stack import SupabaseStack
+from infra.policy_atlas_stack import PolicyAtlasStack
+from infra.supabase_stack import SupabaseStack
 
 # Load config.json into memory.
 with open("config.json") as config_file:
@@ -36,7 +36,9 @@ SupabaseStack(app, f"SupabaseStack-{env_name}",
     env=cdk.Environment(
         account=env_config["aws_account_id"],
         region=env_config["aws_region"]
-    )
+    ),
+    env_name=env_name,
+    aws_region=env_config["aws_region"]
 )
 
 PolicyAtlasStack(app, f"PolicyAtlasStack-{env_name}",
@@ -45,7 +47,9 @@ PolicyAtlasStack(app, f"PolicyAtlasStack-{env_name}",
     env=cdk.Environment(
         account=env_config["aws_account_id"],
         region=env_config["aws_region"]
-    )
+    ),
+    env_name=env_name,
+    aws_region=env_config["aws_region"]
 )
 
 app.synth()

@@ -1,6 +1,7 @@
 import os
 
 from aws_cdk import (
+    SecretValue,
     Stack,
     aws_ec2 as ec2,
     aws_iam as iam,
@@ -8,14 +9,16 @@ from aws_cdk import (
     aws_route53 as r53,
     aws_s3 as s3,
     aws_s3_assets as s3_assets,
-    aws_ssm as ssm
+    aws_secretsmanager as secretsmanager,
+    aws_ssm as ssm,
 )
 from constructs import Construct
 
 
 class SupabaseStack(Stack):
 
-    def __init__(self, scope: Construct, construct_id: str, supabase_config: dict, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, supabase_config: dict, env_name: str,
+                 aws_region: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         # This stack manages:
         # * An EC2 instance acting as a Docker host for Supabase services.
@@ -24,7 +27,7 @@ class SupabaseStack(Stack):
         # * Security groups wiring the two together within the VPC.
         # * An internal Route 53 A record so other services can reach Supabase by name.
 
-        self.vpc = ec2.Vpc.from_lookup(self, "VPC", vpc_id=supabase_config["vpc_id"])
+        self.vpc = ec2.Vpc.from_lookup(self, "SPA_VPC", vpc_id=supabase_config["vpc_id"])
 
         # EC2 host: allow inbound Kong port from within VPC, unrestricted outbound
         # (outbound needed to pull Docker images and reach RDS).
@@ -52,8 +55,9 @@ class SupabaseStack(Stack):
                 version=rds.PostgresEngineVersion.VER_15
             ),
             parameters={
-                # Supabase needs the pg_stat_statements extension for query insights and performance monitoring.
-                "shared_preload_libraries": "pg_stat_statements",
+                # pg_tle is required for installing pgjwt (and other TLE extensions) on RDS.
+                # pg_stat_statements is needed by Supabase for query insights.
+                "shared_preload_libraries": "pg_tle,pg_stat_statements",
                 "rds.logical_replication": "1",  # Required for realtime to work properly.
             },
         )
@@ -93,20 +97,22 @@ class SupabaseStack(Stack):
         # Read and write Supabase Storage objects.
         self.storage_bucket.grant_read_write(instance_role)
 
-        # Create and read the Supabase JWT secrets entry (written once on first boot).
-        instance_role.add_to_principal_policy(iam.PolicyStatement(
-            actions=[
-                "secretsmanager:CreateSecret",
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:PutSecretValue",
-            ],
-            resources=[
-                f"arn:aws:secretsmanager:{self.region}:{self.account}:secret:supabase/jwt-secrets*"
-            ],
-        ))
+        # Pre-create the JWT secret with an empty placeholder. init.sh detects the
+        # placeholder on first boot, generates real values, and updates it via
+        # put-secret-value. Subsequent boots read the already-populated value.
+        supabase_secret_name = supabase_config["jwt_secret_name"]
+        self.jwt_secret = secretsmanager.Secret(self, "SupabaseJWTSecret",
+            secret_name=supabase_secret_name,
+            secret_string_value=SecretValue.unsafe_plain_text("{}"),
+            description="Supabase JWT secrets — populated by init.sh on first boot",
+        )
+        self.jwt_secret.grant_read(instance_role)
+        self.jwt_secret.grant_write(instance_role)
 
         supabase_assets = s3_assets.Asset(self, "SupabaseAssets",
             path=os.path.join(os.path.dirname(__file__), "../assets/supabase"),
+            deploy_time=True,  # We need the S3 location at deploy time to bake into UserData.
+            display_name=f"Supabase Assets - from infra/assets/supabase."
         )
         supabase_assets.grant_read(instance_role)
 
@@ -140,8 +146,8 @@ class SupabaseStack(Stack):
             # Pass deployment-time values as env vars for init.sh
             f"export RDS_SECRET_ARN='{self.db.secret.secret_arn}'",
             f"export STORAGE_S3_BUCKET='{self.storage_bucket.bucket_name}'",
-            # Use a neat trick to get the region at runtime. 
-            "export AWS_DEFAULT_REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)",
+            f"export AWS_DEFAULT_REGION={aws_region}",
+            f"export SUPABASE_JWT_SECRET_NAME='{supabase_secret_name}'",
             "cd /opt/supabase && bash init.sh 2>&1 | tee /var/log/supabase-init.log",
         )
 
@@ -173,13 +179,19 @@ class SupabaseStack(Stack):
         )
 
         # Store the JWT secret name in SSM so PolicyAtlasStack can look it up.
-        # The secret itself is created at runtime by init.sh; only the name is predictable here.
         ssm.StringParameter(self, "SupabaseJWTSecretsParam",
             parameter_name="/supabase/jwt-secrets",
-            string_value="supabase/jwt-secrets",
+            string_value=supabase_secret_name,
         )
 
         ssm.StringParameter(self, "SupabaseStorageBucketParam",
             parameter_name="/supabase/storage-bucket",
             string_value=self.storage_bucket.bucket_name,
+        )
+
+        # This is a bit of a hack, but... store SG ARN for the server
+        # into SSM so PolicyAtlasStack can look it up and allowlist it in the Backend SG for direct DB access.
+        ssm.StringParameter(self, "SupabaseHostSGParam",
+            parameter_name="/supabase/host-sg-arn",
+            string_value=ec2_sg.security_group_id,
         )

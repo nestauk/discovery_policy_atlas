@@ -95,6 +95,6 @@
     "@aws-cdk/aws-ec2:requirePrivateSubnetsForEgressOnlyInternetGateway": true,
     "@aws-cdk/aws-s3:publicAccessBlockedByDefault": true,
     "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true,
-    "@policy-atlas/ecr:repositoryName": "policy-atlas-repository"
+    "@policy-atlas/ecr:repositoryName": "policy-atlas/repository"
   }
 }
