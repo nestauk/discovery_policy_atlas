@@ -10,6 +10,7 @@ import { Settings, Copy, CheckCircle, Info, RefreshCw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import type { AnalysisProject } from '@/lib/analysisProjectStore'
 import { useWizard } from '@/components/search/SearchWizard'
+import { useAPI } from '@/lib/api'
 
 interface SearchPlanModalProps {
   project: AnalysisProject
@@ -40,6 +41,7 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
   const [copied, setCopied] = useState(false)
   const [selectedQueryIndex, setSelectedQueryIndex] = useState(0)
   const router = useRouter()
+  const { generatePopulationOptions, generateOutcomeOptions, generateInnerSettingOptions } = useAPI()
 
   const searchQuery = project.search_query
   if (!searchQuery) return null
@@ -86,9 +88,31 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
   }
 
   const refineSearch = () => {
-    useWizard.getState().initFromSearchQuery(searchQuery, project.id)
+    const wizard = useWizard.getState()
+    wizard.initFromSearchQuery(searchQuery, project.id)
     setIsOpen(false)
     router.push('/search')
+
+    // Re-generate LLM suggestions in the background so they're available
+    // when the user navigates back to population/outcome/setting steps
+    const question = searchQuery.research_question || searchQuery.original_query || ''
+    if (question) {
+      wizard.set({ isGeneratingOptions: true })
+      Promise.all([
+        generatePopulationOptions(question).catch(() => ({ population_options: [] })),
+        generateOutcomeOptions(question).catch(() => ({ outcome_options: [] })),
+        generateInnerSettingOptions(question).catch(() => ({ inner_setting_options: [] })),
+      ]).then(([popRes, outRes, setRes]) => {
+        useWizard.getState().set({
+          generatedPopulationOptions: popRes?.population_options || [],
+          generatedOutcomeOptions: outRes?.outcome_options || [],
+          generatedInnerSettingOptions: setRes?.inner_setting_options || [],
+          isGeneratingOptions: false,
+        })
+      }).catch(() => {
+        useWizard.getState().set({ isGeneratingOptions: false })
+      })
+    }
   }
 
   const selectedBooleanQuery = booleanQueries[selectedQueryIndex] || ''
