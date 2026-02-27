@@ -297,6 +297,38 @@ export const useWizard = create<WizardState>((set, get) => ({
   },
 }));
 
+// ---------------- OPTION GENERATION ----------------
+type GenerationApis = Pick<ReturnType<typeof useAPI>, 'generatePopulationOptions' | 'generateOutcomeOptions' | 'generateInnerSettingOptions'>;
+
+/**
+ * Fetch LLM-generated population/outcome/setting suggestions and write them
+ * into the wizard store. Guards against duplicate concurrent calls via the
+ * `isGeneratingOptions` flag.
+ */
+export async function generateWizardOptions(
+  question: string,
+  apis: GenerationApis,
+) {
+  const wizard = useWizard.getState();
+  if (!question || wizard.isGeneratingOptions) return;
+
+  wizard.set({ isGeneratingOptions: true });
+  try {
+    const [popRes, outRes, setRes] = await Promise.all([
+      apis.generatePopulationOptions(question).catch(() => ({ population_options: [] as string[] })),
+      apis.generateOutcomeOptions(question).catch(() => ({ outcome_options: [] as string[] })),
+      apis.generateInnerSettingOptions(question).catch(() => ({ inner_setting_options: [] as string[] })),
+    ]);
+    useWizard.getState().set({
+      generatedPopulationOptions: popRes?.population_options || [],
+      generatedOutcomeOptions: outRes?.outcome_options || [],
+      generatedInnerSettingOptions: setRes?.inner_setting_options || [],
+    });
+  } finally {
+    useWizard.getState().set({ isGeneratingOptions: false });
+  }
+}
+
 // ---------------- HELPERS ----------------
 function ProgressBar({
   step,
@@ -413,41 +445,14 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
 // ---------------- SCREENS ----------------
 function ScreenAsk() {
   const s = useWizard();
-  const { generatePopulationOptions, generateOutcomeOptions, generateInnerSettingOptions } = useAPI();
+  const apis = useAPI();
 
   const handleNext = async () => {
     const researchQuestion = s.researchQuestion.trim();
     if (!researchQuestion) return;
 
-    // Generate population and outcome options
-    s.set({ isGeneratingOptions: true });
-    
-    try {
-      // Generate both in parallel
-      const [populationResponse, outcomeResponse, innerSettingResponse] = await Promise.all([
-        generatePopulationOptions(researchQuestion).catch(() => ({ population_options: [] })),
-        generateOutcomeOptions(researchQuestion).catch(() => ({ outcome_options: [] })),
-        generateInnerSettingOptions(researchQuestion).catch(() => ({ inner_setting_options: [] })),
-      ]);
-
-      s.set({ 
-        generatedPopulationOptions: populationResponse?.population_options || [],
-        generatedOutcomeOptions: outcomeResponse?.outcome_options || [],
-        generatedInnerSettingOptions: innerSettingResponse?.inner_setting_options || [],
-        step: "POPULATION"
-      });
-    } catch (error) {
-      console.error('Failed to generate options:', error);
-      // Continue with empty options if generation fails
-      s.set({ 
-        generatedPopulationOptions: [],
-        generatedOutcomeOptions: [],
-        generatedInnerSettingOptions: [],
-        step: "POPULATION" 
-      });
-    } finally {
-      s.set({ isGeneratingOptions: false });
-    }
+    await generateWizardOptions(researchQuestion, apis);
+    s.set({ step: "POPULATION" });
   };
 
   return (
