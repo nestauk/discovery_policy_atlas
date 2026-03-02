@@ -134,7 +134,7 @@ export function useAPI() {
     return fetchWithAuth('api/analysis-projects');
   }, [fetchWithAuth]);
 
-  const createAnalysisProject = useCallback(async (project: { title: string; description?: string; query?: string }) => {
+  const createAnalysisProject = useCallback(async (project: { title: string; description?: string; query?: string; parent_project_id?: string }) => {
     return fetchWithAuth('api/analysis-projects', {
       method: 'POST',
       body: JSON.stringify(project),

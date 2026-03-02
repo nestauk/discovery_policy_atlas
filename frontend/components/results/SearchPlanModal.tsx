@@ -6,10 +6,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Settings, Search, Copy, CheckCircle, Info } from 'lucide-react'
+import { Settings, Copy, CheckCircle, Info, RefreshCw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import type { AnalysisProject } from '@/lib/analysisProjectStore'
-import { useWizard } from '@/components/search/SearchWizard'
+import { useWizard, generateWizardOptions } from '@/components/search/SearchWizard'
+import { useAPI } from '@/lib/api'
 
 interface SearchPlanModalProps {
   project: AnalysisProject
@@ -35,46 +36,14 @@ const GEO_LABELS: Record<string, string> = {
   'All but UK': 'Anywhere but UK',
 }
 
-type SearchQueryExtended = {
-  research_question?: string
-  original_query?: string
-  semantic_query?: string
-  boolean_queries?: string[]
-  boolean_query?: string
-  population?: string[]
-  inner_setting?: string[]
-  outcome?: string[]
-  geography?: string[]
-  geography_filter?: string[]
-  time_preset?: string
-  time_from?: string
-  time_to?: string
-  max_results?: number
-  limit?: number
-  sources?: string[]
-  mode?: string
-  relevance_enabled?: boolean
-  use_abstracts_only?: boolean
-  sub_questions?: string[]
-  additional_questions?: string[]
-  screening_factors?: string[]
-  implementation_constraints?: {
-    cost?: string
-    staffing?: string
-    implementation_complexity?: string
-  } | null
-  scope?: string[]
-  custom_focus?: string[]
-  excludes?: string[]
-}
-
 export function SearchPlanModal({ project }: SearchPlanModalProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [selectedQueryIndex, setSelectedQueryIndex] = useState(0)
   const router = useRouter()
+  const apis = useAPI()
 
-  const searchQuery = project.search_query as SearchQueryExtended | undefined
+  const searchQuery = project.search_query
   if (!searchQuery) return null
 
   // Handle both old and new formats
@@ -118,10 +87,15 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
     }
   }
 
-  const startNewSearch = () => {
-    useWizard.getState().reset()
+  const refineSearch = () => {
+    useWizard.getState().initFromSearchQuery(searchQuery, project.id)
     setIsOpen(false)
     router.push('/search')
+
+    // Re-generate LLM suggestions in the background so they're available
+    // when the user navigates back to population/outcome/setting steps
+    const question = searchQuery.research_question || searchQuery.original_query || ''
+    generateWizardOptions(question, apis)
   }
 
   const selectedBooleanQuery = booleanQueries[selectedQueryIndex] || ''
@@ -370,13 +344,15 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
             </div>
           ) : null}
 
-          {/* Start New Search Button */}
-          <div className="pt-2 border-t">
-            <Button onClick={startNewSearch} className="w-full h-9" variant="default">
-              <Search className="h-3.5 w-3.5 mr-2" />
-              Start new search
-            </Button>
-          </div>
+          {/* Refine & Re-search Button */}
+          {(project.status === 'completed' || project.status === 'failed') && (
+            <div className="pt-2 border-t">
+              <Button onClick={refineSearch} className="w-full h-9" variant="default">
+                <RefreshCw className="h-3.5 w-3.5 mr-2" />
+                Refine & re-search
+              </Button>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

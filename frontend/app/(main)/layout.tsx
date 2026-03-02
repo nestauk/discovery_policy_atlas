@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, ChevronLeft, HelpCircle } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
+import { useWizard } from '@/components/search/SearchWizard'
 import { pingBackend } from '@/lib/api'
 import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
@@ -175,7 +176,11 @@ export default function AgentLayout({
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">NAVIGATION</p>
           <nav className="space-y-1">
             {sidebarItems.map((item) => (
-              <Link key={item.name} href={item.href}>
+              <Link
+                key={item.name}
+                href={item.href}
+                onClick={item.href === '/search' ? () => useWizard.getState().reset() : undefined}
+              >
                 <Button
                   variant={pathname === item.href ? "secondary" : "ghost"}
                   className="w-full justify-start h-auto p-3 text-left"

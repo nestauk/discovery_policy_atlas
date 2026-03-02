@@ -3,6 +3,8 @@
 import React, { useState } from "react";
 import { create } from "zustand";
 import { useAPI } from '@/lib/api';
+import type { AnalysisProject } from '@/lib/analysisProjectStore';
+import { RefineTutorial } from './RefineTutorial';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
 
@@ -153,70 +155,51 @@ interface WizardState {
   screeningFactors: string[];
   additionalQuestions: string[];
   maxResults: number;
+  allStepsVisited: boolean;
+  parentProjectId: string | null;
   set: (p: Partial<WizardState>) => void;
   reset: () => void;
   next: () => void;
   back: () => void;
   buildContext: () => SearchContext;
+  initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => void;
 }
 
-export const useWizard = create<WizardState>((set, get) => ({
-  step: "ASK",
+const INITIAL_WIZARD_STATE = {
+  step: "ASK" as Step,
   researchQuestion: "",
-  population: { selected: [], noPreference: true },
-  innerSetting: { selected: [], noPreference: true },
-  outcome: { selected: [], noPreference: true },
+  population: { selected: [] as string[], noPreference: true },
+  innerSetting: { selected: [] as string[], noPreference: true },
+  outcome: { selected: [] as string[], noPreference: true },
   implementationConstraints: {
     cost: "Any",
     staffing: "Any",
     implementationComplexity: "Any",
   },
-  generatedPopulationOptions: [],
-  generatedInnerSettingOptions: [],
-  generatedOutcomeOptions: [],
-  generatedAdditionalQuestions: [],
+  generatedPopulationOptions: [] as string[],
+  generatedInnerSettingOptions: [] as string[],
+  generatedOutcomeOptions: [] as string[],
+  generatedAdditionalQuestions: [] as string[],
   isGeneratingOptions: false,
   parameters: {
-    sources: [],
+    sources: [] as ("openalex" | "overton")[],
     access: { academic: true, policy: true },
     geography: [ANYWHERE_VALUE],
-    timePreset: "LAST_10_YEARS",
-    customFrom: undefined,
-    customTo: undefined,
+    timePreset: "LAST_10_YEARS" as TimePreset,
+    customFrom: undefined as string | undefined,
+    customTo: undefined as string | undefined,
   },
-  screeningFactors: [],
-  additionalQuestions: [],
+  screeningFactors: [] as string[],
+  additionalQuestions: [] as string[],
   maxResults: 30,
+  allStepsVisited: false,
+  parentProjectId: null as string | null,
+};
+
+export const useWizard = create<WizardState>((set, get) => ({
+  ...INITIAL_WIZARD_STATE,
   set: (p) => set(p),
-  reset: () =>
-    set({
-      step: "ASK",
-      researchQuestion: "",
-      population: { selected: [], noPreference: true },
-      innerSetting: { selected: [], noPreference: true },
-      outcome: { selected: [], noPreference: true },
-      implementationConstraints: {
-        cost: "Any",
-        staffing: "Any",
-        implementationComplexity: "Any",
-      },
-      generatedPopulationOptions: [],
-      generatedInnerSettingOptions: [],
-      generatedOutcomeOptions: [],
-      generatedAdditionalQuestions: [],
-      isGeneratingOptions: false,
-      parameters: {
-        sources: [],
-        access: { academic: true, policy: true },
-        geography: [ANYWHERE_VALUE],
-        timePreset: "LAST_10_YEARS",
-        customFrom: undefined,
-        customTo: undefined,
-      },
-      screeningFactors: [],
-      additionalQuestions: [],
-      maxResults: 30,
-    }),
+  reset: () => set({ ...INITIAL_WIZARD_STATE }),
   next: () => {
     const s = get();
     // Skip ADDITIONAL_QUESTIONS step - go directly from PARAMETERS to SUMMARY
@@ -261,17 +244,102 @@ export const useWizard = create<WizardState>((set, get) => ({
       maxResults: s.maxResults,
     };
   },
+  initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => {
+    const population = sq.population || [];
+    const innerSetting = sq.inner_setting || [];
+    const outcome = sq.outcome || [];
+    const screeningFactors = sq.screening_factors || [];
+    const sources = (sq.sources || []) as ("openalex" | "overton")[];
+    const geography = sq.geography_filter || sq.geography || [ANYWHERE_VALUE];
+    const timePreset = (sq.time_preset || "LAST_10_YEARS") as TimePreset;
+    const constraints = sq.implementation_constraints;
+
+    const capitalise = (v?: string) => {
+      if (!v) return "Any";
+      const trimmed = v.trim();
+      if (!trimmed || trimmed.toLowerCase() === "any") return "Any";
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+    };
+
+    const toSelection = (items: string[]) => ({
+      selected: items,
+      noPreference: items.length === 0,
+    });
+
+    set({
+      step: "SUMMARY",
+      researchQuestion: sq.research_question || sq.original_query || "",
+      population: toSelection(population),
+      innerSetting: toSelection(innerSetting),
+      outcome: toSelection(outcome),
+      implementationConstraints: {
+        cost: capitalise(constraints?.cost),
+        staffing: capitalise(constraints?.staffing),
+        implementationComplexity: capitalise(constraints?.implementation_complexity),
+      },
+      generatedPopulationOptions: population,
+      generatedInnerSettingOptions: innerSetting,
+      generatedOutcomeOptions: outcome,
+      screeningFactors,
+      parameters: {
+        sources,
+        access: { academic: true, policy: true },
+        geography,
+        timePreset,
+        customFrom: sq.time_from || undefined,
+        customTo: sq.time_to || undefined,
+      },
+      additionalQuestions: sq.additional_questions || [],
+      maxResults: sq.max_results || sq.limit || 30,
+      allStepsVisited: true,
+      parentProjectId,
+    });
+  },
 }));
+
+// ---------------- OPTION GENERATION ----------------
+type GenerationApis = Pick<ReturnType<typeof useAPI>, 'generatePopulationOptions' | 'generateOutcomeOptions' | 'generateInnerSettingOptions'>;
+
+/**
+ * Fetch LLM-generated population/outcome/setting suggestions and write them
+ * into the wizard store. Guards against duplicate concurrent calls via the
+ * `isGeneratingOptions` flag.
+ */
+export async function generateWizardOptions(
+  question: string,
+  apis: GenerationApis,
+) {
+  const wizard = useWizard.getState();
+  if (!question || wizard.isGeneratingOptions) return;
+
+  wizard.set({ isGeneratingOptions: true });
+  try {
+    const [popRes, outRes, setRes] = await Promise.all([
+      apis.generatePopulationOptions(question).catch(() => ({ population_options: [] as string[] })),
+      apis.generateOutcomeOptions(question).catch(() => ({ outcome_options: [] as string[] })),
+      apis.generateInnerSettingOptions(question).catch(() => ({ inner_setting_options: [] as string[] })),
+    ]);
+    useWizard.getState().set({
+      generatedPopulationOptions: popRes?.population_options || [],
+      generatedOutcomeOptions: outRes?.outcome_options || [],
+      generatedInnerSettingOptions: setRes?.inner_setting_options || [],
+    });
+  } finally {
+    useWizard.getState().set({ isGeneratingOptions: false });
+  }
+}
 
 // ---------------- HELPERS ----------------
 function ProgressBar({
   step,
   researchQuestion,
   onStepClick,
+  allStepsVisited,
 }: {
   step: Step;
   researchQuestion: string;
   onStepClick: (s: Step) => void;
+  allStepsVisited: boolean;
 }) {
   const steps: { id: Step; label: string }[] = [
     { id: "ASK", label: "Question" },
@@ -286,10 +354,10 @@ function ProgressBar({
   const canJump = !!researchQuestion.trim();
 
   return (
-    <div className="w-full border-b border-gray-100 bg-white px-4 py-3">
+    <div data-tutorial="progress-bar" className="w-full border-b border-gray-100 bg-white px-4 py-3">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-2">
         {steps.map((item, idx) => {
-          const isCompleted = idx < currentIdx;
+          const isCompleted = allStepsVisited || idx < currentIdx;
           const isCurrent = idx === currentIdx;
           const isClickable = canJump;
           return (
@@ -377,41 +445,14 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
 // ---------------- SCREENS ----------------
 function ScreenAsk() {
   const s = useWizard();
-  const { generatePopulationOptions, generateOutcomeOptions, generateInnerSettingOptions } = useAPI();
+  const apis = useAPI();
 
   const handleNext = async () => {
     const researchQuestion = s.researchQuestion.trim();
     if (!researchQuestion) return;
 
-    // Generate population and outcome options
-    s.set({ isGeneratingOptions: true });
-    
-    try {
-      // Generate both in parallel
-      const [populationResponse, outcomeResponse, innerSettingResponse] = await Promise.all([
-        generatePopulationOptions(researchQuestion).catch(() => ({ population_options: [] })),
-        generateOutcomeOptions(researchQuestion).catch(() => ({ outcome_options: [] })),
-        generateInnerSettingOptions(researchQuestion).catch(() => ({ inner_setting_options: [] })),
-      ]);
-
-      s.set({ 
-        generatedPopulationOptions: populationResponse?.population_options || [],
-        generatedOutcomeOptions: outcomeResponse?.outcome_options || [],
-        generatedInnerSettingOptions: innerSettingResponse?.inner_setting_options || [],
-        step: "POPULATION"
-      });
-    } catch (error) {
-      console.error('Failed to generate options:', error);
-      // Continue with empty options if generation fails
-      s.set({ 
-        generatedPopulationOptions: [],
-        generatedOutcomeOptions: [],
-        generatedInnerSettingOptions: [],
-        step: "POPULATION" 
-      });
-    } finally {
-      s.set({ isGeneratingOptions: false });
-    }
+    await generateWizardOptions(researchQuestion, apis);
+    s.set({ step: "POPULATION" });
   };
 
   return (
@@ -1427,7 +1468,7 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
             </button>
           </div>
 
-          <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+          <div data-tutorial="filters-section" className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
             <div className="text-xs uppercase tracking-wide text-gray-500">Filters</div>
             <div className="space-y-3">
               <button type="button" onClick={() => goToStep("PARAMETERS")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
@@ -1552,6 +1593,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
         step={s.step}
         researchQuestion={s.researchQuestion}
         onStepClick={(step) => s.set({ step })}
+        allStepsVisited={s.allStepsVisited}
       />
       <div className={isSummaryStep ? "" : "flex-1"}>
         {s.step === "ASK" && <ScreenAsk />}
@@ -1573,14 +1615,16 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
                 {isSummaryStep ? "Start new search" : "Restart"}
               </Button>
             </div>
-            <Button
-              variant="secondary"
-              className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
-              onClick={primaryAction.onClick}
-              disabled={primaryAction.disabled}
-            >
-              {primaryAction.label}
-            </Button>
+            <div data-tutorial="run-button">
+              <Button
+                variant="secondary"
+                className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+                onClick={primaryAction.onClick}
+                disabled={primaryAction.disabled}
+              >
+                {primaryAction.label}
+              </Button>
+            </div>
           </div>
 
           {isSummaryStep && !hasSelectedSource && (
@@ -1595,6 +1639,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
           )}
         </div>
       )}
+      <RefineTutorial />
     </div>
   );
 }

@@ -458,6 +458,21 @@ async def create_analysis_project(
         if not title:
             raise HTTPException(status_code=400, detail="Title is required")
 
+        parent_project_id = request.get("parent_project_id")
+        if parent_project_id:
+            try:
+                uuid.UUID(parent_project_id)
+            except (ValueError, AttributeError):
+                raise HTTPException(
+                    status_code=400, detail="parent_project_id must be a valid UUID"
+                )
+            try:
+                get_project_with_auth_check(parent_project_id, current_user, "id")
+            except HTTPException:
+                raise HTTPException(
+                    status_code=400, detail="Invalid or inaccessible parent project"
+                )
+
         project_data = {
             "id": str(uuid.uuid4()),
             "title": title,
@@ -470,6 +485,7 @@ async def create_analysis_project(
             "created_by_user_id": current_user.user_id,
             "created_by_name": current_user.name,
             "organization_id": current_user.organization_id,
+            "parent_project_id": parent_project_id,
         }
 
         result = (
@@ -496,6 +512,7 @@ async def create_analysis_project(
             "created_by_user_id": created_project.get("created_by_user_id"),
             "created_by_name": created_project.get("created_by_name"),
             "organization_id": created_project.get("organization_id"),
+            "parent_project_id": created_project.get("parent_project_id"),
         }
 
     except HTTPException:
@@ -518,7 +535,8 @@ async def get_analysis_project(
         select_fields = (
             "id, run_id, title, description, query, total_references, "
             "relevant_references, status, created_at, created_by_user_id, "
-            "created_by_name, organization_id, search_query, is_public"
+            "created_by_name, organization_id, search_query, is_public, "
+            "parent_project_id"
         )
         project = get_project_with_auth_check(project_id, current_user, select_fields)
 
@@ -538,6 +556,7 @@ async def get_analysis_project(
                 "organization_id": project.get("organization_id"),
                 "search_query": project.get("search_query"),
                 "is_public": project.get("is_public", False),
+                "parent_project_id": project.get("parent_project_id"),
             },
         }
 
