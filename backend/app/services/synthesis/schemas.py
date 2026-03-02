@@ -654,10 +654,6 @@ class SynthesisSummary(BaseModel):
     risk_themes: List[RiskTheme] = Field(default_factory=list)
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = Field(None)
     citation_map: Dict[str, CitationInfo] = Field(default_factory=dict)
-    citation_usage_counts: Dict[int, int] = Field(
-        default_factory=dict,
-        description="Count of [N] citation references in briefing content",
-    )
 
 
 class Finding(BaseModel):

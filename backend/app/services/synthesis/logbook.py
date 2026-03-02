@@ -11,10 +11,9 @@ Handles reading/writing synthesis results to:
 
 import json
 import logging
-import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, List, Set
+from typing import Dict, Optional, List, Set
 
 from app.core.config import settings
 from app.services.synthesis.schemas import (
@@ -42,7 +41,6 @@ from app.services.synthesis.utils import (
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
-CITATION_PATTERN = re.compile(r"\[(\d+)\]")
 
 
 def _confidence_from_attribution(attribution: str) -> float:
@@ -86,24 +84,6 @@ def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
         except json.JSONDecodeError:
             return None
     return None
-
-
-def _accumulate_citation_usage(value: Any, usage_counts: Dict[int, int]) -> None:
-    """Recursively count [N] citations across strings/lists/dicts."""
-    if isinstance(value, str):
-        for match in CITATION_PATTERN.finditer(value):
-            citation_number = int(match.group(1))
-            usage_counts[citation_number] = usage_counts.get(citation_number, 0) + 1
-        return
-
-    if isinstance(value, list):
-        for item in value:
-            _accumulate_citation_usage(item, usage_counts)
-        return
-
-    if isinstance(value, dict):
-        for item in value.values():
-            _accumulate_citation_usage(item, usage_counts)
 
 
 def get_supabase():
@@ -402,14 +382,6 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
             f"Sample citation - key: {sample_key}, number: {sample_cit.citation_number}, title: {sample_cit.title}, author: {sample_cit.author_short}"
         )
 
-    citation_usage_counts: Dict[int, int] = {}
-    if sb_data and isinstance(sb_data, dict):
-        _accumulate_citation_usage(sb_data, citation_usage_counts)
-    else:
-        _accumulate_citation_usage(
-            run.get("executive_briefing") or "", citation_usage_counts
-        )
-
     return SynthesisSummary(
         executive_briefing=run.get("executive_briefing") or "",
         structured_briefing=structured_briefing,
@@ -419,7 +391,6 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         risk_themes=risk_themes,
         evidence_coverage=evidence_coverage,
         citation_map=citation_map,
-        citation_usage_counts=citation_usage_counts,
     )
 
 
