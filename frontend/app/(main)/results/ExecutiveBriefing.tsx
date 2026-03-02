@@ -758,7 +758,6 @@ function ReferencesList({
   onPreviousPage,
   onNextPage,
   onCitationClick,
-  onCitationInspect,
   activeCitationInstanceId,
 }: {
   references: OrderedReference[];
@@ -769,7 +768,6 @@ function ReferencesList({
   onPreviousPage: () => void;
   onNextPage: () => void;
   onCitationClick?: (docId: string) => void;
-  onCitationInspect?: (payload: CitationInspectPayload) => void;
   activeCitationInstanceId?: string;
 }) {
   if (!references.length) return null;
@@ -835,7 +833,6 @@ function ReferencesList({
                   citationNumber={reference.citationNumber}
                   citationInfo={reference.info}
                   onCitationClick={onCitationClick}
-                  onCitationInspect={onCitationInspect}
                   activeCitationInstanceId={activeCitationInstanceId}
                 />
                 <div className="min-w-0 flex-1">
@@ -1546,7 +1543,6 @@ export function ExecutiveBriefing({
               onPreviousPage={() => setReferencesPage((prev) => Math.max(1, prev - 1))}
               onNextPage={() => setReferencesPage((prev) => Math.min(totalReferencePages, prev + 1))}
               onCitationClick={onCitationClick}
-              onCitationInspect={setInspectedCitation}
               activeCitationInstanceId={activeCitationInstanceId}
             />
             
