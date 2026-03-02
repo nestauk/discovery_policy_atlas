@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 import logging
 import os
+import time
 from typing import Optional, List
 import uuid
 import pandas as pd
@@ -819,7 +820,9 @@ async def trigger_synthesis_for_project(
 
         # Run synthesis
         synthesis_agent = SynthesisAgent()
+        synthesis_start = time.time()
         final_state = await synthesis_agent.run(project_id, user_id=project_user_id)
+        synthesis_duration = time.time() - synthesis_start
 
         # Remove the placeholder run before creating the final one (async to avoid blocking)
         supabase = vectorization_service.supabase
@@ -835,6 +838,14 @@ async def trigger_synthesis_for_project(
         from app.services.synthesis.logbook import write_run_from_state
 
         await write_run_from_state(project_id, final_state)
+
+        # Persist synthesis _total wall-clock timing
+        try:
+            from app.services.timing import persist_timing
+
+            persist_timing(project_id, "synthesis", "_total", synthesis_duration)
+        except Exception as e:
+            logger.warning("Failed to persist synthesis _total timing: %s", e)
 
         # Mark project as completed (async to avoid blocking)
         loop = asyncio.get_event_loop()
