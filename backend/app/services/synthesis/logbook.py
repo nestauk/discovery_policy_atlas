@@ -12,7 +12,7 @@ Handles reading/writing synthesis results to:
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional, List, Set
 
 from app.core.config import settings
@@ -23,6 +23,7 @@ from app.services.synthesis.schemas import (
     OutcomeTheme,
     RiskTheme,
     CitationInfo,
+    ClaimQuote,
     EvidenceCoverageSnapshot,
     StructuredBriefing,
 )
@@ -31,9 +32,46 @@ from app.services.synthesis.nodes.impact_synthesis import (
     detect_scale_type,
     _normalise_unit_key,
 )
+from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
+from app.services.synthesis.utils import (
+    extract_author_display,
+    extract_author_list,
+    extract_string_list,
+    infer_source_value,
+    normalize_source_type,
+)
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
+
+
+def _confidence_from_attribution(attribution: str) -> float:
+    """Map attribution label to legacy confidence values for compatibility."""
+    if attribution == "direct":
+        return 1.0
+    if attribution == "synthesised":
+        return 0.7
+    if attribution == "inferred":
+        return 0.4
+    return 1.0
+
+
+def _attribution_from_row(row: Dict) -> str:
+    """Read attribution from row, with legacy confidence fallback."""
+    attribution = row.get("attribution")
+    if attribution in {"direct", "synthesised", "inferred"}:
+        return attribution
+
+    confidence = row.get("confidence")
+    try:
+        conf = float(confidence)
+    except (TypeError, ValueError):
+        conf = 1.0
+    if conf >= 0.85:
+        return "direct"
+    if conf >= 0.55:
+        return "synthesised"
+    return "inferred"
 
 
 def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
@@ -208,23 +246,98 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
                 )
             )
 
-    # Build citation map
+    # Build citation map (with per-claim quotes)
     citation_map: Dict[str, CitationInfo] = {}
+    citation_rows: Dict[str, List[Dict]] = {}
     for cit in citations_res.data or []:
         cit_key = cit.get("citation_key", "")
         if cit_key:
-            citation_map[cit_key] = CitationInfo(
-                citation_key=cit_key,
-                citation_number=cit.get("citation_index") or 0,
-                doc_id=cit.get("doc_id"),
-                analysis_document_id=str(cit.get("analysis_document_id", "")),
-                author_short=cit.get("author_short"),
-                year=cit.get("year"),
-                title=cit.get("title"),
-                url=cit.get("url"),
-                supporting_quote=cit.get("supporting_quote"),
-                chunk_id=cit.get("chunk_id"),
+            citation_rows.setdefault(cit_key, []).append(cit)
+
+    for cit_key, rows in citation_rows.items():
+        base_row = next((r for r in rows if not r.get("section")), rows[0])
+        claim_quotes: List[ClaimQuote] = []
+        for row in rows:
+            if not row.get("section") or not row.get("claim_text"):
+                continue
+            claim_quotes.append(
+                ClaimQuote(
+                    claim_text=row.get("claim_text") or "",
+                    supporting_quote=row.get("supporting_quote") or "",
+                    attribution=_attribution_from_row(row),
+                    chunk_id=row.get("chunk_id") or "",
+                    section=row.get("section") or "",
+                )
             )
+        citation_map[cit_key] = CitationInfo(
+            citation_key=cit_key,
+            citation_number=base_row.get("citation_index") or 0,
+            doc_id=base_row.get("doc_id"),
+            analysis_document_id=str(base_row.get("analysis_document_id", "")),
+            author_short=base_row.get("author_short"),
+            year=base_row.get("year"),
+            title=base_row.get("title"),
+            url=base_row.get("url"),
+            document_type=None,
+            evidence_score=None,
+            impact_score=None,
+            supporting_quote=base_row.get("supporting_quote"),
+            chunk_id=base_row.get("chunk_id"),
+            claim_quotes=claim_quotes,
+        )
+
+    doc_ids = list(
+        {
+            cit.analysis_document_id
+            for cit in citation_map.values()
+            if cit.analysis_document_id
+        }
+    )
+    doc_meta_by_id: Dict[str, Dict] = {}
+    if doc_ids:
+        docs_meta_res = (
+            supabase.table("analysis_documents")
+            .select(
+                "id, source, document_type, evidence_category, evidence_category_reasoning, evidence_justification, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, top_line, venue, source_country, source_type, author_institutions, authors"
+            )
+            .in_("id", doc_ids)
+            .execute()
+        )
+        doc_meta_by_id = {
+            str(row.get("id")): row
+            for row in (docs_meta_res.data or [])
+            if row.get("id")
+        }
+
+    for cit in citation_map.values():
+        doc_meta = doc_meta_by_id.get(cit.analysis_document_id)
+        if not doc_meta:
+            continue
+        evidence_info = get_or_calculate_document_evidence(doc_meta)
+        stars = evidence_info.get("stars")
+        cit.evidence_score = int(stars) if isinstance(stars, (int, float)) else None
+        cit.impact_score = doc_meta.get("impact_score")
+        cit.impact_score_label = doc_meta.get("impact_score_label")
+        cit.impact_score_breakdown = doc_meta.get("impact_score_breakdown")
+        cit.transferability_score = doc_meta.get("transferability_score")
+        cit.transferability_breakdown = doc_meta.get("transferability_breakdown")
+        cit.document_type = doc_meta.get("document_type")
+        cit.evidence_category = doc_meta.get("evidence_category")
+        cit.evidence_category_reasoning = doc_meta.get("evidence_category_reasoning")
+        cit.evidence_strength_justification = doc_meta.get("evidence_justification")
+        cit.venue = doc_meta.get("venue")
+        cit.country = doc_meta.get("source_country")
+        source_value = infer_source_value(doc_meta.get("source"), cit.doc_id)
+        cit.source_type = normalize_source_type(
+            source_value, str(doc_meta.get("document_type") or "")
+        )
+        raw_authors = doc_meta.get("authors")
+        cit.authors = extract_author_list(raw_authors)
+        cit.author_display = extract_author_display(raw_authors)
+        cit.author_institutions = extract_string_list(
+            doc_meta.get("author_institutions")
+        )
+        cit.top_line = doc_meta.get("top_line")
 
     # Parse evidence coverage
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = None
@@ -317,6 +430,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             if not isinstance(info_dict, dict):
                 continue
 
+            # Document-level fallback citation row
             citations_to_insert.append(
                 {
                     "id": str(uuid.uuid4()),
@@ -330,9 +444,39 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "url": info_dict.get("url"),
                     "supporting_quote": info_dict.get("supporting_quote"),
                     "chunk_id": info_dict.get("chunk_id"),
-                    "created_at": datetime.utcnow().isoformat(),
+                    "section": None,
+                    "claim_text": None,
+                    "attribution": None,
+                    "confidence": None,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
+
+            # Per-claim citation rows
+            for claim_quote in info_dict.get("claim_quotes") or []:
+                if not isinstance(claim_quote, dict):
+                    continue
+                attribution = str(claim_quote.get("attribution") or "direct")
+                citations_to_insert.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "synthesis_run_id": run_id,
+                        "analysis_document_id": info_dict.get("analysis_document_id"),
+                        "citation_key": cit_key,
+                        "citation_index": info_dict.get("citation_number") or i,
+                        "author_short": info_dict.get("author_short"),
+                        "year": info_dict.get("year"),
+                        "title": info_dict.get("title"),
+                        "url": info_dict.get("url"),
+                        "supporting_quote": claim_quote.get("supporting_quote"),
+                        "chunk_id": claim_quote.get("chunk_id"),
+                        "section": claim_quote.get("section"),
+                        "claim_text": claim_quote.get("claim_text"),
+                        "attribution": attribution,
+                        "confidence": _confidence_from_attribution(attribution),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
 
         logger.info(f"Inserting {len(citations_to_insert)} citations")
         if citations_to_insert:
@@ -411,7 +555,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "summary_description": issue_dict.get("summary_description"),
                 "frequency": issue_dict.get("frequency", 0),
                 "source_doc_ids": issue_dict.get("source_doc_ids", []),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ).execute()
 
@@ -422,7 +566,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "synthesis_run_id": run_id,
                     "synthesis_theme_id": theme_id,
                     "extraction_id": ex_id,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -455,7 +599,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "impact_score": intv_dict.get("impact_score"),
                 "impact_score_label": intv_dict.get("impact_score_label"),
                 "impact_score_breakdown": intv_dict.get("impact_score_breakdown"),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ).execute()
 
@@ -469,7 +613,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "synthesis_run_id": run_id,
                     "synthesis_theme_id": theme_id,
                     "extraction_id": ex_id,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -503,7 +647,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "primary_causal_mechanism": out_dict.get("primary_causal_mechanism"),
                 "causal_mechanism_detail": out_dict.get("causal_mechanism_detail"),
                 "intervention_theme_id": intervention_link,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ).execute()
 
@@ -517,7 +661,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "calibrated_magnitude": calibrated_magnitude_by_extraction_id.get(
                         ex_id
                     ),
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
 
@@ -548,7 +692,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "source_doc_ids": risk_dict.get("source_doc_ids", []),
                 "has_harm_warning": risk_dict.get("has_harm_warning", False),
                 "linked_intervention_theme_id": linked,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
         ).execute()
 
@@ -564,7 +708,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                             intervention_name
                         ],
                         "link_strength": link_strength,
-                        "created_at": datetime.utcnow().isoformat(),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).execute()
 
@@ -648,7 +792,7 @@ async def create_synthesis_run_placeholder(project_id: str) -> str:
         "version": 4,
         "executive_briefing": "",
         "model_info": {},
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
     supabase.table("synthesis_runs").insert(run_data).execute()
     return run_id

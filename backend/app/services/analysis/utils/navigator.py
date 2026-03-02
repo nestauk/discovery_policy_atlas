@@ -3,9 +3,8 @@
 import logging
 
 from app.services.analysis.evidence.strength import (
-    calculate_document_evidence_score,
     calculate_evidence_strength,
-    get_document_sample_size,
+    get_document_evidence_details,
     build_evidence_info_for_docs,
     build_evidence_info_from_detailed_interventions,
     compute_display_evidence_mix_from_detailed,
@@ -137,20 +136,7 @@ def build_doc_scores_and_mappings(
         if not extraction_results:
             continue
 
-        # Get conclusion scores
-        conclusion = extraction_results.get("conclusion", {}) or {}
-        stored_evidence = conclusion.get("evidence_strength", {}) or {}
-
-        # Prefer stored evidence strength, fallback to recompute
-        if stored_evidence:
-            evidence_score = stored_evidence.get("stars")
-            evidence_justification = stored_evidence.get("justification", "")
-            evidence_sample_size = get_document_sample_size(document)
-        else:
-            evidence_result = calculate_document_evidence_score(document)
-            evidence_score = evidence_result["score"]
-            evidence_justification = evidence_result.get("justification", "")
-            evidence_sample_size = evidence_result.get("sample_size")
+        evidence_details = get_document_evidence_details(document)
 
         doc_scores[doc_id] = {
             "impact_score": document.get("impact_score"),
@@ -160,10 +146,10 @@ def build_doc_scores_and_mappings(
             "transferability_breakdown": document.get("transferability_breakdown"),
             "has_harm_warning": bool(document.get("has_harm_warning")),
             "harm_warning_reason": document.get("harm_warning_reason"),
-            "evidence_score": evidence_score,
-            "sample_size": evidence_sample_size,
+            "evidence_score": evidence_details["score"],
+            "sample_size": evidence_details["sample_size"],
             "impact_justification": document.get("impact_score_label", "") or "",
-            "evidence_justification": evidence_justification,
+            "evidence_justification": evidence_details["justification"],
         }
 
         # Find extraction IDs for issues and interventions in this document

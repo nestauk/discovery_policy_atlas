@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, HelpCircle } from 'lucide-react'
+import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, ChevronLeft, HelpCircle } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { pingBackend } from '@/lib/api'
 import { FeedbackButton } from '@/components/ui/feedback-button'
@@ -46,6 +46,7 @@ export default function AgentLayout({
   const pathname = usePathname()
   const { activeProject } = useAnalysisProjectStore()
   const [testSectionOpen, setTestSectionOpen] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   
   // Feedback state
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false)
@@ -117,16 +118,25 @@ export default function AgentLayout({
   return (
     <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
-      <div className="w-64 bg-white border-r border-slate-200 fixed h-full flex flex-col">
+      <div
+        className={`w-64 bg-white border-r border-slate-200 fixed h-full flex flex-col z-30 transition-transform duration-300 ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         {/* Header */}
-        <div className="p-6 pb-4">
-          <div className="flex items-center gap-3">
-            <div>
-              <Link href="/">
-                <h1 className="text-2xl font-bold cursor-pointer">🌐 Policy Atlas</h1>
-              </Link>
-            </div>
-          </div>
+        <div className="relative p-6 pb-4">
+          <Link href="/">
+            <h1 className="text-2xl font-bold cursor-pointer whitespace-nowrap">🌐 Policy Atlas</h1>
+          </Link>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsSidebarOpen(false)}
+            className="absolute right-4 top-5 h-8 w-8 text-slate-500 hover:text-slate-700"
+            aria-label="Collapse navigation panel"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
         </div>
 
         {/* Active Project */}
@@ -261,8 +271,24 @@ export default function AgentLayout({
         </div>
       </div>
 
+      {!isSidebarOpen && (
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => setIsSidebarOpen(true)}
+          className="fixed left-3 top-1/2 -translate-y-1/2 z-40 h-9 w-9 bg-white shadow-sm"
+          aria-label="Expand navigation panel"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      )}
+
       {/* Main Content */}
-      <div className="flex-1 flex flex-col ml-64 min-h-0">
+      <div
+        className={`flex-1 flex flex-col min-h-0 transition-[margin] duration-300 ${
+          isSidebarOpen ? 'ml-64' : 'ml-0'
+        }`}
+      >
         <div className="flex-1 min-h-0 overflow-auto">
           <div className="min-h-full flex flex-col bg-white">
             <div className="flex-1 min-h-0 flex flex-col">

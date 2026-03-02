@@ -52,6 +52,7 @@ interface AnalysisDocument {
   title: string
   source: string
   authors?: string[]
+  author_institutions?: string[]
   year?: number
   abstract_or_summary?: string
   is_relevant?: boolean
@@ -84,11 +85,6 @@ interface AnalysisDocument {
       top_line_summary?: string
       detailed_explanation?: string
       supporting_quote?: string
-      evidence_strength?: {
-        stars: number | null
-        justification: string
-        evidence_gap?: string | null
-      }
     }
     issues?: unknown[]
     interventions?: unknown[]
@@ -780,8 +776,6 @@ export default function ProjectResultsPage() {
   // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
-      const conclusion = doc.extraction_results?.conclusion
-      const evidenceStrength = conclusion?.evidence_strength
       const isRelevant = Boolean(doc.is_relevant !== false)
       const isEvidence = Boolean(doc.is_evidence !== false)
       const isRelevantEvidence = isRelevant && isEvidence
@@ -793,6 +787,9 @@ export default function ProjectResultsPage() {
         publication_year: Number(doc.year || 0),
         cited_by_count: Number(doc.cited_by_count || 0),
         authors: Array.isArray(doc.authors) ? doc.authors : ['Unknown'],
+        author_institutions: Array.isArray(doc.author_institutions)
+          ? doc.author_institutions
+          : [],
         is_relevant: isRelevant,
         is_evidence: isEvidence,
         is_relevant_evidence: isRelevantEvidence,
@@ -810,8 +807,8 @@ export default function ProjectResultsPage() {
         source: doc.source,
         study_strength: studyStrengthMapping[doc.doc_id] || undefined,
         sample_size: sampleSizeMapping[doc.doc_id] || undefined,
-        evidence_strength: evidenceStrength?.stars || undefined,
-        evidence_strength_justification: evidenceStrength?.justification,
+        evidence_strength: doc.evidence_strength ?? undefined,
+        evidence_strength_justification: doc.evidence_strength_justification,
         impact_score: doc.impact_score,
         impact_score_label: doc.impact_score_label,
         impact_score_breakdown: doc.impact_score_breakdown,
@@ -1115,6 +1112,7 @@ export default function ProjectResultsPage() {
                   {summaryData && (
                     <div className="space-y-8">
                       <ExecutiveBriefing 
+                        projectId={projectId}
                         briefing={summaryData.executive_briefing}
                         structuredBriefing={summaryData.structured_briefing}
                         citationMap={summaryData.citation_map}

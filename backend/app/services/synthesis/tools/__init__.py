@@ -34,6 +34,8 @@ from app.services.synthesis.tools.quality import (
 )
 from app.services.synthesis.tools.search import (
     search_extractions,
+    retrieve_evidence,
+    DynamicRetrieveTool,
     SearchExtractionsTool,
     SearchResultItem,
 )
@@ -78,6 +80,8 @@ __all__ = [
     "DocumentQualityInfo",
     # Search tools
     "search_extractions",
+    "retrieve_evidence",
+    "DynamicRetrieveTool",
     "SearchExtractionsTool",
     "SearchResultItem",
     # Verification tools

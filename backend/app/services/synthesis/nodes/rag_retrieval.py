@@ -125,6 +125,7 @@ async def _retrieve_for_theme(
     ctx: RetrievalContext,
     match_count: int,
     max_results: int,
+    use_global_seen: bool = True,
 ) -> Tuple[List[RetrievedChunk], int]:
     """Retrieve and process chunks for a single theme.
 
@@ -165,18 +166,20 @@ async def _retrieve_for_theme(
         ranked = _rerank_chunks_by_quality(constrained_chunks, ctx.doc_scores)
 
         retrieved: List[RetrievedChunk] = []
+        local_seen_chunk_ids: Set[str] = set()
         for chunk, final_score in ranked:
             chunk_id = str(chunk.get("id", ""))
-            if chunk_id in ctx.seen_chunks:
+            if chunk_id in local_seen_chunk_ids:
                 continue
-            ctx.seen_chunks.add(chunk_id)
+            local_seen_chunk_ids.add(chunk_id)
+            if use_global_seen:
+                if chunk_id in ctx.seen_chunks:
+                    continue
+                ctx.seen_chunks.add(chunk_id)
 
             info = extract_doc_info_from_chunk(chunk, ctx.doc_metadata)
-            content = str(chunk.get("content", ""))[:500]
+            content = str(chunk.get("content", ""))
             doc_uuid = info["doc_uuid"]
-
-            doc_quotes = ctx.extraction_quotes.get(doc_uuid, [])
-            supporting_quote = doc_quotes[0][:300] if doc_quotes else content[:300]
 
             retrieved.append(
                 RetrievedChunk(
@@ -209,7 +212,7 @@ async def _retrieve_for_theme(
                             year=info["year"],
                             title=info["title"],
                             url=info["url"],
-                            supporting_quote=supporting_quote,
+                            supporting_quote=None,
                             chunk_id=chunk_id,
                         )
                     )
@@ -231,6 +234,7 @@ async def _retrieve_collection(
     max_results: int,
     query_limit: int,
     reuse_existing: bool,
+    use_global_seen: bool = True,
 ) -> Tuple[Dict[str, List[RetrievedChunk]], RetrievalContext, int]:
     """Shared retrieval for themes/issues/outcomes."""
     ctx = _build_retrieval_context(state, reuse_existing=reuse_existing)
@@ -245,7 +249,12 @@ async def _retrieve_collection(
         query = f"{theme_id} {description}"[:query_limit]
 
         chunks, constrained = await _retrieve_for_theme(
-            theme_id, query, ctx, match_count=match_count, max_results=max_results
+            theme_id,
+            query,
+            ctx,
+            match_count=match_count,
+            max_results=max_results,
+            use_global_seen=use_global_seen,
         )
         evidence[theme_id] = chunks
         total_constrained += constrained
@@ -274,6 +283,7 @@ async def retrieve_evidence_for_themes(state: SynthesisState) -> SynthesisState:
         max_results=8,
         query_limit=500,
         reuse_existing=False,
+        use_global_seen=True,
     )
 
     print(
@@ -313,6 +323,7 @@ async def retrieve_evidence_for_issues(state: SynthesisState) -> SynthesisState:
         max_results=6,
         query_limit=400,
         reuse_existing=True,
+        use_global_seen=True,
     )
 
     print(f"Constrained issue retrieval: {total_constrained} chunks passed filter")
@@ -346,6 +357,7 @@ async def retrieve_evidence_for_outcomes(state: SynthesisState) -> SynthesisStat
         max_results=6,
         query_limit=400,
         reuse_existing=True,
+        use_global_seen=False,
     )
 
     print(f"Constrained outcome retrieval: {total_constrained} chunks passed filter")

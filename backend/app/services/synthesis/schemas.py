@@ -10,7 +10,7 @@ These models define the data structures for:
 
 from __future__ import annotations
 
-from typing import List, Optional, Dict, Literal
+from typing import Any, List, Optional, Dict, Literal
 from pydantic import BaseModel, Field
 
 
@@ -25,7 +25,7 @@ class RetrievedChunk(BaseModel):
     chunk_id: str = Field(..., description="Unique chunk identifier")
     document_id: str = Field(..., description="analysis_documents.id UUID")
     content: str = Field(..., description="Chunk text content")
-    chunk_type: str = Field("content", description="summary | abstract | content")
+    chunk_type: str = Field("content", description="abstract | content")
     similarity: float = Field(0.0, description="Cosine similarity score")
     doc_title: Optional[str] = Field(None, description="Document title")
     author_short: Optional[str] = Field(None, description="Author surname")
@@ -41,13 +41,123 @@ class CitationInfo(BaseModel):
     doc_id: Optional[str] = Field(None, description="External document identifier")
     analysis_document_id: str = Field(..., description="Internal UUID of the document")
     author_short: Optional[str] = Field(None, description="Short author reference")
+    author_display: Optional[str] = Field(
+        None, description="Display label e.g. 'First Author et al.'"
+    )
+    authors: Optional[List[str]] = Field(
+        None, description="Full list of authors when available"
+    )
     year: Optional[int] = Field(None, description="Publication year")
     title: Optional[str] = Field(None, description="Document title")
+    top_line: Optional[str] = Field(None, description="One-sentence document summary")
     url: Optional[str] = Field(None, description="Canonical URL or PDF URL")
+    venue: Optional[str] = Field(None, description="Journal or publication venue")
+    country: Optional[str] = Field(None, description="Source country")
+    source_type: Optional[str] = Field(None, description="Normalised source type")
+    evidence_category: Optional[str] = Field(
+        None, description="Evidence category classification"
+    )
+    evidence_category_reasoning: Optional[str] = Field(
+        None, description="Evidence category reasoning"
+    )
+    evidence_strength_justification: Optional[str] = Field(
+        None, description="Evidence score explanation"
+    )
+    author_institutions: Optional[List[str]] = Field(
+        None, description="Flat list of author institutions when available"
+    )
+    document_type: Optional[str] = Field(None, description="Document/study type")
+    evidence_score: Optional[int] = Field(None, description="Evidence strength score")
+    impact_score: Optional[float] = Field(None, description="Impact score")
+    impact_score_label: Optional[str] = Field(None, description="Impact score label")
+    impact_score_breakdown: Optional[Dict[str, Any]] = Field(
+        None, description="Impact score breakdown details"
+    )
+    transferability_score: Optional[float] = Field(
+        None, description="Transferability fit score"
+    )
+    transferability_breakdown: Optional[Dict[str, Any]] = Field(
+        None, description="Transferability breakdown details"
+    )
     supporting_quote: Optional[str] = Field(
         None, description="Grounded quote from chunk"
     )
     chunk_id: Optional[str] = Field(None, description="Source chunk ID")
+    claim_quotes: List["ClaimQuote"] = Field(
+        default_factory=list, description="Per-claim grounded quotes for this citation"
+    )
+
+
+class ClaimQuote(BaseModel):
+    """Per-claim grounded quote tied to a citation."""
+
+    claim_text: str = Field(..., description="Claim text this quote supports")
+    supporting_quote: str = Field(..., description="Verbatim supporting quote")
+    attribution: Literal["direct", "synthesised", "inferred"] = Field(
+        ..., description="Attribution relationship between claim and source"
+    )
+    chunk_id: str = Field("", description="Chunk UUID for the supporting quote")
+    section: str = Field("", description="Briefing section where claim appears")
+
+
+class DocumentContextInfo(BaseModel):
+    """Metadata for a source document shown in citation context."""
+
+    analysis_document_id: str = Field(..., description="Internal document UUID")
+    title: str = Field(..., description="Document title")
+    author_display: Optional[str] = Field(
+        None,
+        description="Display author label (first author with et al. when applicable)",
+    )
+    authors: Optional[List[str]] = Field(
+        None, description="Full list of authors when available"
+    )
+    author_institutions: Optional[List[str]] = Field(
+        None, description="Flat list of author institutions when available"
+    )
+    author_short: Optional[str] = Field(None, description="Short author reference")
+    year: Optional[int] = Field(None, description="Publication year")
+    venue: Optional[str] = Field(None, description="Journal or publication venue")
+    country: Optional[str] = Field(None, description="Source country")
+    url: Optional[str] = Field(None, description="Canonical source URL")
+    source_type: Optional[str] = Field(None, description="Normalised source type")
+    document_type: Optional[str] = Field(None, description="Document/study type")
+    evidence_category: Optional[str] = Field(
+        None, description="Evidence category classification"
+    )
+    evidence_category_reasoning: Optional[str] = Field(
+        None, description="Evidence category reasoning"
+    )
+    evidence_score: Optional[int] = Field(None, description="Evidence strength score")
+    evidence_strength_justification: Optional[str] = Field(
+        None, description="Evidence strength justification"
+    )
+    impact_score: Optional[float] = Field(None, description="Impact score")
+    impact_score_label: Optional[str] = Field(None, description="Impact score label")
+    impact_score_breakdown: Optional[Dict[str, Any]] = Field(
+        None, description="Impact score calculation breakdown"
+    )
+    transferability_score: Optional[float] = Field(
+        None, description="Transferability score"
+    )
+    transferability_breakdown: Optional[Dict[str, Any]] = Field(
+        None, description="Transferability breakdown"
+    )
+
+
+class ChunkContextResponse(BaseModel):
+    """Chunk context payload for citation inspection sidebar."""
+
+    chunk_id: str = Field(..., description="Target chunk UUID")
+    chunk_content: str = Field(..., description="Target chunk content")
+    chunk_index: int = Field(..., description="Target chunk index within document")
+    previous_chunk_content: Optional[str] = Field(
+        None, description="Immediate previous chunk content"
+    )
+    next_chunk_content: Optional[str] = Field(
+        None, description="Immediate next chunk content"
+    )
+    document: DocumentContextInfo
 
 
 # =============================================================================
@@ -77,7 +187,6 @@ class ScoredContext(BaseModel):
     chunk_id: str = Field(..., description="Reference to source document chunk")
     document_id: str = Field(..., description="Reference to source document UUID")
     document_title: str = Field("", description="Document title for citation")
-    chunk_text: str = Field("", description="Original chunk text (truncated)")
 
     # Citation metadata
     citation_key: str = Field(..., description="Short citation key e.g., 'pqa-abc123'")
@@ -285,16 +394,6 @@ class RecommendationsOutput(BaseModel):
     )
 
 
-class TopCitationItem(BaseModel):
-    """A top citation for the reading list."""
-
-    citation_number: int = Field(..., description="Citation number")
-    title: str = Field(..., description="Document title")
-    author_year: str = Field(..., description="Author, Year string")
-    reason: str = Field("", description="Recommendation reason")
-    url: Optional[str] = Field(None, description="Document URL")
-
-
 class BackgroundSection(BaseModel):
     """Structured background/context section."""
 
@@ -345,7 +444,6 @@ class StructuredBriefing(BaseModel):
     interventions_table: List[InterventionTableRow] = Field(default_factory=list)
     synthesis_sections: List["SynthesisSection"] = Field(default_factory=list)
     recommendations: List[RecommendationItem] = Field(default_factory=list)
-    top_citations: List[TopCitationItem] = Field(default_factory=list)
     follow_up_suggestions: List[str] = Field(default_factory=list)
 
 

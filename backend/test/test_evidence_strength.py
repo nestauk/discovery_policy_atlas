@@ -1,56 +1,13 @@
 """Unit tests for evidence strength calculation with sample size penalty."""
 
-import asyncio
 import logging
 
 from app.services.analysis.evidence.strength import (
     build_evidence_info_from_detailed_interventions,
+    calculate_document_evidence_score,
     calculate_evidence_strength,
+    get_document_evidence_details,
 )
-from app.services.analysis.schemas_langchain import ConclusionItem, ImpactRating
-from app.services.analysis.workflows.base import BaseExtractionWorkflow
-
-
-class _TestWorkflow(BaseExtractionWorkflow):
-    """Minimal workflow stub for testing computed evidence_strength persistence."""
-
-    workflow_type = "test"
-
-    def __init__(self):
-        # Avoid OpenAI key requirement and LLM setup for this test workflow.
-        self.model_name = "test"
-        self.json_parser = None
-        self.policy_project_id = None
-        self.policy_user_id = None
-        self._langfuse_session_id = None
-        self._langfuse_handler = None
-        self.workflow = self._build_workflow()
-
-    async def _extract_issues(self, state):
-        return {"issues": []}
-
-    async def _extract_interventions(self, state):
-        return {"interventions": []}
-
-    async def _extract_mappings(self, state):
-        return {"mappings": []}
-
-    async def _extract_results(self, state):
-        return {"results": []}
-
-    async def _extract_conclusions(self, state):
-        return {
-            "conclusion": ConclusionItem(
-                top_line_summary="Summary",
-                detailed_explanation="Details",
-                supporting_quote="Quote",
-                predicted_impact=ImpactRating(
-                    stars=3,
-                    justification="Impact justification",
-                    evidence_gap=None,
-                ),
-            )
-        }
 
 
 logger = logging.getLogger(__name__)
@@ -265,26 +222,74 @@ class TestEvidenceStrengthBasics:
         assert result["stars"] == 0
 
 
-class TestEvidenceStrengthPersistence:
-    """Ensure computed evidence strength is written into extraction results."""
+class TestGetDocumentEvidenceDetails:
+    """Tests for get_document_evidence_details helper."""
 
-    def test_conclusion_includes_evidence_strength(self):
-        workflow = _TestWorkflow()
+    def test_all_db_fields_present(self):
+        """When DB fields are present, return stored values unchanged."""
+        doc = {
+            "evidence_score": 2,
+            "evidence_justification": "",
+            "evidence_sample_size": 45,
+            "evidence_category": "RCTs and Quasi-Experimental Studies",
+        }
+        assert get_document_evidence_details(doc) == {
+            "score": 2,
+            "justification": "",
+            "sample_size": 45,
+        }
 
-        bundle = asyncio.run(
-            workflow.run(
-                paper_id="paper-1",
-                full_text="Quote",
-                evidence_category="RCTs and Quasi-Experimental Studies",
-                evidence_confidence=0.9,
-            )
-        )
+    def test_missing_all_fields(self):
+        """When all DB fields are missing, compute all details."""
+        doc = {
+            "evidence_score": None,
+            "evidence_justification": None,
+            "evidence_sample_size": None,
+            "evidence_category": "Policy Syntheses & Guidance Documents",
+        }
+        assert get_document_evidence_details(doc) == {
+            "score": 2,
+            "justification": "Based on evidence category: Policy Syntheses & Guidance Documents",
+            "sample_size": None,
+        }
 
-        assert bundle.conclusion is not None
-        evidence_strength = bundle.conclusion.evidence_strength
-        assert evidence_strength is not None
-        assert evidence_strength.stars == 4
-        assert "Based on evidence category" in evidence_strength.justification
+    def test_missing_keys_legacy_doc(self):
+        """When evidence detail keys are absent, fallback should still work."""
+        doc = {
+            "evidence_category": "Observational Research Studies",
+            "extraction_results": {"interventions": [{"sample_size": 60}]},
+        }
+        assert get_document_evidence_details(doc) == {
+            "score": 2,
+            "justification": "Based on evidence category: Observational Research Studies. Score reduced due to sample size < 100.",
+            "sample_size": 60,
+        }
+
+
+class TestCalculateDocumentEvidenceScore:
+    """Tests for calculate_document_evidence_score."""
+
+    def test_rct_with_small_sample_penalty(self):
+        """RCT with sample size < 100 should get penalty."""
+        doc = {
+            "evidence_category": "RCTs and Quasi-Experimental Studies",
+            "extraction_results": {"interventions": [{"sample_size": 50}]},
+        }
+        result = calculate_document_evidence_score(doc)
+        assert result["base_score"] == 4
+        assert result["penalty_applied"] is True
+        assert result["score"] == 3
+
+    def test_rct_without_penalty(self):
+        """RCT with sample size >= 100 should not get penalty."""
+        doc = {
+            "evidence_category": "RCTs and Quasi-Experimental Studies",
+            "extraction_results": {"interventions": [{"sample_size": 200}]},
+        }
+        result = calculate_document_evidence_score(doc)
+        assert result["base_score"] == 4
+        assert result["penalty_applied"] is False
+        assert result["score"] == 4
 
     def test_evidence_hierarchy(self):
         """Higher evidence types should yield higher base ratings."""

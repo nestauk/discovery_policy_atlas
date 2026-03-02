@@ -23,6 +23,7 @@ from .scoring import (
     compute_harm_warning,
 )
 from .chunking import chunk_document_text
+from .evidence.strength import calculate_document_evidence_score
 from ..vectorization import VectorizationService
 
 logger = logging.getLogger(__name__)
@@ -148,12 +149,15 @@ class AnalysisStorageService:
         project_id: Optional[str],
         extraction_data: Dict[str, Any],
         doc_source_country: Optional[str] = None,
+        evidence_category: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Compute document-level scores and harm warnings from extraction data.
 
         Args:
             project_id (Optional[str]): Analysis project UUID.
             extraction_data (Dict[str, Any]): Extraction payload for the document.
+            doc_source_country (Optional[str]): Source country for transferability.
+            evidence_category (Optional[str]): Evidence category for evidence score calculation.
 
         Returns:
             Dict[str, Any]: Fields for analysis_documents update.
@@ -293,7 +297,17 @@ class AnalysisStorageService:
                 has_negative_impact, risks_identified
             )
 
+            # Compute evidence score from evidence_category + sample_size
+            doc_stub = {
+                "evidence_category": evidence_category,
+                "extraction_results": {"interventions": interventions},
+            }
+            evidence_result = calculate_document_evidence_score(doc_stub)
+
             return {
+                "evidence_score": evidence_result["score"],
+                "evidence_justification": evidence_result["justification"],
+                "evidence_sample_size": evidence_result["sample_size"],
                 "impact_score": score,
                 "impact_score_label": label,
                 "impact_score_breakdown": breakdown,
@@ -394,10 +408,11 @@ class AnalysisStorageService:
                 "upload_step": "extracted",
             }
             source_country = None
+            evidence_category = None
             try:
                 doc_meta = await self._async_supabase_query(
                     lambda: self.supabase.table("analysis_documents")
-                    .select("source_country")
+                    .select("source_country, evidence_category")
                     .eq("analysis_project_id", project_id)
                     .eq("doc_id", doc_id)
                     .limit(1)
@@ -405,11 +420,15 @@ class AnalysisStorageService:
                 )
                 if doc_meta.data:
                     source_country = doc_meta.data[0].get("source_country")
+                    evidence_category = doc_meta.data[0].get("evidence_category")
             except Exception as exc:
                 logger.warning(f"Failed to load source_country for {doc_id}: {exc}")
             doc_update.update(
                 await self._compute_document_scoring_fields(
-                    project_id, extraction_data, doc_source_country=source_country
+                    project_id,
+                    extraction_data,
+                    doc_source_country=source_country,
+                    evidence_category=evidence_category,
                 )
             )
 
@@ -477,7 +496,7 @@ class AnalysisStorageService:
         use_abstracts_only: bool = False,
     ) -> bool:
         """
-        Store document chunks for RAG. Creates summary, abstract, and content chunks.
+        Store document chunks for RAG. Creates abstract and content chunks.
 
         Args:
             project_id: The analysis project ID
@@ -629,27 +648,27 @@ class AnalysisStorageService:
 
         # Update documents with extraction results
         updates = []
-        doc_source_lookup: Dict[str, Optional[str]] = {}
+        doc_meta_lookup: Dict[str, Dict] = {}
         try:
             source_rows = await self._async_supabase_query(
                 lambda: self.supabase.table("analysis_documents")
-                .select("doc_id, source_country")
+                .select("doc_id, source_country, evidence_category")
                 .eq("analysis_project_id", project_id)
                 .execute()
             )
             if source_rows.data:
-                doc_source_lookup = {
-                    row.get("doc_id"): row.get("source_country")
-                    for row in source_rows.data
-                }
+                doc_meta_lookup = {row.get("doc_id"): row for row in source_rows.data}
         except Exception as exc:
-            logger.warning(f"Failed to build source_country lookup: {exc}")
+            logger.warning(f"Failed to build doc metadata lookup: {exc}")
         for extraction in extractions_data.get("extractions", []):
             doc_id = extraction.get("paper_id")
             if doc_id:
-                source_country = doc_source_lookup.get(doc_id)
+                doc_meta = doc_meta_lookup.get(doc_id, {})
                 scoring_fields = await self._compute_document_scoring_fields(
-                    project_id, extraction, doc_source_country=source_country
+                    project_id,
+                    extraction,
+                    doc_source_country=doc_meta.get("source_country"),
+                    evidence_category=doc_meta.get("evidence_category"),
                 )
                 updates.append(
                     {
@@ -1092,10 +1111,12 @@ class AnalysisStorageService:
             "source_id": ref.source_id,
             "doi": ref.doi,
             "authors": ref.authors,
+            "author_institutions": ref.author_institutions,
             "landing_page_url": ref.landing_page_url,
             "pdf_url": ref.pdf_url,
             "is_oa": ref.is_oa,
             "document_type": ref.type,
+            "venue": ref.venue,
             "author_institution_countries": ref.author_institution_countries,
             # Relevance fields
             "relevance_confidence": ref.relevance_confidence,

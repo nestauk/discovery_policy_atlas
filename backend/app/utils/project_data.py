@@ -23,7 +23,7 @@ from app.services.analysis.evidence.strength import (
     parse_sample_size,
     calculate_evidence_strength,
     get_document_max_sample_size,
-    get_or_calculate_document_evidence,
+    get_document_evidence_details,
     build_document_evidence_info,
 )
 from app.services.analysis.utils.navigator import (
@@ -98,13 +98,13 @@ def transform_document_for_api(doc: Dict) -> Dict:
         evidence_category, UNKNOWN_RANK
     )
 
-    evidence_info = get_or_calculate_document_evidence(doc)
-    conclusion = (doc.get("extraction_results") or {}).get("conclusion") or {}
+    evidence_details = get_document_evidence_details(doc)
+    doc_copy["evidence_strength"] = evidence_details["score"]
+    if evidence_details["justification"]:
+        doc_copy["evidence_strength_justification"] = evidence_details["justification"]
+    doc_copy["sample_size"] = evidence_details["sample_size"]
 
-    doc_copy["evidence_strength"] = evidence_info["stars"]
-    if evidence_info["justification"]:
-        doc_copy["evidence_strength_justification"] = evidence_info["justification"]
-    doc_copy["sample_size"] = evidence_info["sample_size"]
+    conclusion = (doc.get("extraction_results") or {}).get("conclusion") or {}
 
     predicted_impact = conclusion.get("predicted_impact") or {}
     doc_copy["predicted_impact"] = predicted_impact.get("stars")
@@ -153,28 +153,6 @@ def get_project_documents_data(project_id: str) -> Dict:
     }
 
 
-INSTITUTIONAL_KEYWORDS = [
-    "Ministry",
-    "Department",
-    "Agency",
-    "Bureau",
-    "Office",
-    "Government",
-    "National",
-    "Federal",
-    "State",
-    "Regional",
-    "Institute",
-    "Center",
-    "Centre",
-    "Council",
-    "Commission",
-    "Authority",
-    "Administration",
-    "Service",
-]
-
-
 def aggregate_charts_data(docs_data: List[Dict]) -> Dict:
     """Aggregate document data for chart visualizations.
 
@@ -182,19 +160,22 @@ def aggregate_charts_data(docs_data: List[Dict]) -> Dict:
         docs_data: List of document dicts with year, source_country, authors, evidence_category
 
     Returns:
-        Dict with documents_by_year, documents_by_country, documents_by_author, documents_by_evidence_category
+        Dict with documents_by_year, documents_by_country, documents_by_author,
+        documents_by_institution, documents_by_evidence_category
     """
     if not docs_data:
         return {
             "documents_by_year": [],
             "documents_by_country": [],
             "documents_by_author": [],
+            "documents_by_institution": [],
             "documents_by_evidence_category": [],
         }
 
     year_counts: Dict[int, int] = {}
     country_counts: Dict[str, int] = {}
     author_counts: Dict[str, int] = {}
+    institution_counts: Dict[str, int] = {}
     evidence_category_counts: Dict[str, int] = {}
 
     for doc in docs_data:
@@ -220,17 +201,17 @@ def aggregate_charts_data(docs_data: List[Dict]) -> Dict:
         if isinstance(authors, list):
             for author in authors:
                 if author and author.strip():
-                    author = author.strip()
-                    is_institutional = any(
-                        kw in author for kw in INSTITUTIONAL_KEYWORDS
+                    clean_author = author.strip()
+                    author_counts[clean_author] = author_counts.get(clean_author, 0) + 1
+
+        institutions = doc.get("author_institutions", [])
+        if isinstance(institutions, list):
+            for institution in institutions:
+                if institution and isinstance(institution, str) and institution.strip():
+                    clean_institution = institution.strip()
+                    institution_counts[clean_institution] = (
+                        institution_counts.get(clean_institution, 0) + 1
                     )
-                    if is_institutional and doc_countries:
-                        author_with_context = f"{author} ({doc_countries[0]})"
-                        author_counts[author_with_context] = (
-                            author_counts.get(author_with_context, 0) + 1
-                        )
-                    else:
-                        author_counts[author] = author_counts.get(author, 0) + 1
 
         evidence_category = doc.get("evidence_category")
         if evidence_category and evidence_category.strip():
@@ -256,6 +237,13 @@ def aggregate_charts_data(docs_data: List[Dict]) -> Dict:
         )
     ][:10]
 
+    documents_by_institution = [
+        {"institution": institution, "count": count}
+        for institution, count in sorted(
+            institution_counts.items(), key=lambda x: x[1], reverse=True
+        )
+    ][:10]
+
     evidence_category_order = [
         cat for cat in EVIDENCE_CATEGORIES if cat != NON_EVIDENCE_CATEGORY
     ]
@@ -269,6 +257,7 @@ def aggregate_charts_data(docs_data: List[Dict]) -> Dict:
         "documents_by_year": documents_by_year,
         "documents_by_country": documents_by_country,
         "documents_by_author": documents_by_author,
+        "documents_by_institution": documents_by_institution,
         "documents_by_evidence_category": documents_by_evidence_category,
     }
 
@@ -277,7 +266,7 @@ def get_project_charts_data(project_id: str) -> Dict:
     """Get chart aggregation data for a project."""
     docs_result = (
         vectorization_service.supabase.table("analysis_documents")
-        .select("year, source_country, authors, evidence_category")
+        .select("year, source_country, authors, author_institutions, evidence_category")
         .eq("analysis_project_id", project_id)
         .execute()
     )
@@ -482,8 +471,7 @@ def get_outcome_contributions_data(project_id: str, outcome_theme_id: str) -> Di
     for doc_id, entry in documents_map.items():
         doc = docs_by_id.get(doc_id)
         if doc:
-            evidence_info = get_or_calculate_document_evidence(doc)
-            entry["evidence_score"] = evidence_info.get("stars")
+            entry["evidence_score"] = get_document_evidence_details(doc)["score"]
 
     documents = list(documents_map.values())
     documents.sort(key=lambda doc: (doc.get("title") or ""))

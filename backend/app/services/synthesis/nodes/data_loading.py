@@ -10,7 +10,7 @@ from typing import Dict, List
 
 from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState, Concept
-from app.services.synthesis.utils import normalize_study_type
+from app.services.synthesis.utils import normalize_study_type, extract_author_short
 from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
 
 
@@ -87,7 +87,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     docs_res = (
         supabase.table("analysis_documents")
         .select(
-            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, top_line, is_relevant, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, has_harm_warning, harm_warning_reason"
+            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, evidence_score, evidence_justification, evidence_sample_size, top_line, is_relevant, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, has_harm_warning, harm_warning_reason"
         )
         .eq("analysis_project_id", project_id)
         .execute()
@@ -98,11 +98,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     for doc in docs_res.data or []:
         doc_uuid = str(doc.get("id"))
         authors = doc.get("authors") or []
-        author_short = None
-        if authors and isinstance(authors, list):
-            parts = str(authors[0]).strip().split()
-            if parts:
-                author_short = parts[-1]
+        author_short = extract_author_short(authors)
         doc_metadata[doc_uuid] = {
             "doc_id": doc.get("doc_id"),
             "title": doc.get("title") or "",
@@ -119,7 +115,6 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             else None,
         }
 
-        # Get evidence and impact scores from conclusion (prefer stored, fallback to recompute)
         evidence_info = get_or_calculate_document_evidence(doc)
 
         doc_scores[doc_uuid] = {

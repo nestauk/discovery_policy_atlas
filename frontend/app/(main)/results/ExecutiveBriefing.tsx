@@ -1,29 +1,37 @@
 'use client'
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
-import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, ChevronRight, Download } from "lucide-react";
+import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type {
   CitationInfo,
+  ClaimQuote,
   EvidenceCoverageSnapshot,
   StructuredBriefing,
   InterventionTableRow,
   RecommendationItem,
-  TopCitationItem,
   BackgroundSection,
   SynthesisSection as SynthesisSectionType,
 } from "@/types/search";
 import {
+  getEvidenceCategoryColors,
   getEvidenceCategoryShortName,
   getEvidenceCategoryRank
 } from "@/lib/evidenceCategories";
+import {
+  getEvidenceCategoryTooltipContent,
+  getEvidenceStrengthTooltipContent,
+  getImpactScoreTooltipContent,
+} from "@/lib/documentTooltips";
 import { FOOTER_DISCLAIMER_TEXT } from "@/components/Footer";
+import { CitationContextPanel } from "@/components/synthesis/CitationContextPanel";
 
 interface ExecutiveBriefingProps {
+  projectId: string;
   briefing: string;
   structuredBriefing?: StructuredBriefing;
   citationMap?: Record<string, CitationInfo>;
@@ -44,9 +52,118 @@ interface ExecutiveBriefingProps {
   rerunError?: string | null;
 }
 
+interface CitationInspectPayload {
+  citationInfo: CitationInfo;
+  chunkId: string;
+  quote: string;
+  citationInstanceId: string;
+}
+
 
 // Citation lookup function type
 type CitationLookupFn = (key: string | number) => CitationInfo | undefined;
+const REFERENCES_PER_PAGE = 5;
+
+interface OrderedReference {
+  citationNumber: number;
+  info: CitationInfo;
+}
+
+interface ReferencePresentation {
+  institutions: string[];
+  institutionsText: string;
+  institutionsDisplay: string;
+  institutionsDuplicateVenue: boolean;
+  sourceTypeDisplay?: string;
+  evidenceCategoryColors: { bg: string; text: string } | null;
+  authorDisplay: string;
+  authorDisplayForReferences: string;
+  fullAuthorsText: string;
+  showAuthorsTooltip: boolean;
+}
+
+function formatOutOfFive(value?: number): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
+  const clamped = Math.max(0, Math.min(5, value));
+  const formatted = Number.isInteger(clamped) ? clamped.toString() : clamped.toFixed(1);
+  return `${formatted}/5`;
+}
+
+function getNormalisedUniqueValues(values: string[] | undefined | null): string[] {
+  if (!Array.isArray(values)) return [];
+
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const raw of values) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
+function buildReferencePresentation(info: CitationInfo): ReferencePresentation {
+  const institutions = getNormalisedUniqueValues(info.author_institutions);
+  const institutionsDuplicateVenue =
+    institutions.length > 0 && !!info.venue && institutions.every((institution) => institution === info.venue);
+  const institutionsDisplay =
+    institutions.length > 2
+      ? `${institutions.slice(0, 2).join(", ")} +${institutions.length - 2} more`
+      : institutions.join(", ");
+
+  const fullAuthors = Array.isArray(info.authors)
+    ? info.authors.filter((a): a is string => typeof a === "string" && !!a.trim())
+    : [];
+  const authorDisplay =
+    info.author_display ?? info.author_short ?? "";
+  const fullAuthorsText = fullAuthors.join(", ");
+  const showAuthorsTooltip =
+    !!authorDisplay && fullAuthors.length > 1 && !!fullAuthorsText;
+
+  const authorDisplayForReferences =
+    fullAuthors.length >= 4
+      ? `${fullAuthors.slice(0, 3).join(", ")} et al.`
+      : fullAuthors.length > 0
+        ? fullAuthors.join(", ")
+        : authorDisplay;
+
+  return {
+    institutions,
+    institutionsText: institutions.join(", "),
+    institutionsDisplay,
+    institutionsDuplicateVenue,
+    sourceTypeDisplay: info.source_type || info.document_type || undefined,
+    evidenceCategoryColors: info.evidence_category ? getEvidenceCategoryColors(info.evidence_category) : null,
+    authorDisplay,
+    authorDisplayForReferences,
+    fullAuthorsText,
+    showAuthorsTooltip,
+  };
+}
+
+function buildOrderedReferences(citationMap?: Record<string, CitationInfo>): OrderedReference[] {
+  if (!citationMap) return [];
+
+  const byNumber = new Map<number, CitationInfo>();
+  Object.values(citationMap).forEach((info) => {
+    const fromField = info.citation_number;
+    const fromKey = info.citation_key?.match(/\[(\d+)\]/)?.[1];
+    const citationNumber = fromField ?? (fromKey ? parseInt(fromKey, 10) : null);
+
+    if (citationNumber === null || Number.isNaN(citationNumber)) return;
+    if (!byNumber.has(citationNumber)) {
+      byNumber.set(citationNumber, info);
+    }
+  });
+
+  return Array.from(byNumber.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([citationNumber, info]) => ({ citationNumber, info }));
+}
 
 function buildCitationLookup(citationMap?: Record<string, CitationInfo>): CitationLookupFn {
   if (!citationMap) return () => undefined;
@@ -67,7 +184,12 @@ function buildCitationLookup(citationMap?: Record<string, CitationInfo>): Citati
 }
 
 // Shared citation rendering utility
-function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: (docId: string) => void) {
+function useRenderCitations(
+  lookupCitation: CitationLookupFn,
+  onCitationClick?: (docId: string) => void,
+  onCitationInspect?: (payload: CitationInspectPayload) => void,
+  activeCitationInstanceId?: string
+) {
   return useCallback((text: string, keyPrefix: string): React.ReactNode[] => {
     const parts: React.ReactNode[] = [];
     const pattern = /\[(\d+)\]/g;
@@ -80,6 +202,18 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
       
       const citNum = parseInt(match[1], 10);
       const citInfo = lookupCitation(citNum);
+      const contextStart = Math.max(
+        text.lastIndexOf(".", match.index) + 1,
+        text.lastIndexOf("\n", match.index) + 1
+      );
+      const periodEnd = text.indexOf(".", match.index + match[0].length);
+      const newlineEnd = text.indexOf("\n", match.index + match[0].length);
+      const contextEndCandidates = [periodEnd, newlineEnd].filter((idx) => idx >= 0);
+      const contextEnd =
+        contextEndCandidates.length > 0
+          ? Math.min(...contextEndCandidates)
+          : text.length;
+      const claimContext = text.slice(contextStart, contextEnd).trim();
 
       // If citations are back-to-back like "...[3][4][5]", insert spacing between them
       const last = parts[parts.length - 1];
@@ -87,13 +221,18 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
         parts.push(' ');
       }
       
+      const citationInstanceId = `${keyPrefix}-${keyIdx++}`;
       parts.push(
         <CitationLink
-          key={`${keyPrefix}-${keyIdx++}`}
+          key={citationInstanceId}
+          citationInstanceId={citationInstanceId}
           citationKey={`[${citNum}]`}
           citationNumber={citNum}
           citationInfo={citInfo}
+          claimContext={claimContext}
           onCitationClick={onCitationClick}
+          onCitationInspect={onCitationInspect}
+          activeCitationInstanceId={activeCitationInstanceId}
         />
       );
       
@@ -102,7 +241,7 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
     
     if (lastIndex < text.length) parts.push(text.slice(lastIndex));
     return parts;
-  }, [lookupCitation, onCitationClick]);
+  }, [lookupCitation, onCitationClick, onCitationInspect, activeCitationInstanceId]);
 }
 
 // ============================================================================
@@ -110,32 +249,98 @@ function useRenderCitations(lookupCitation: CitationLookupFn, onCitationClick?: 
 // ============================================================================
 
 interface CitationLinkProps {
+  citationInstanceId: string;
   citationKey: string;
   citationNumber?: number;
   citationInfo?: CitationInfo;
+  claimContext?: string;
   onCitationClick?: (docId: string) => void;
+  onCitationInspect?: (payload: CitationInspectPayload) => void;
+  activeCitationInstanceId?: string;
+  disableTooltip?: boolean;
 }
 
-function CitationLink({ citationKey, citationNumber, citationInfo, onCitationClick }: CitationLinkProps) {
+function CitationLink({
+  citationInstanceId,
+  citationKey,
+  citationNumber,
+  citationInfo,
+  claimContext,
+  onCitationClick,
+  onCitationInspect,
+  activeCitationInstanceId,
+  disableTooltip,
+}: CitationLinkProps) {
   const url = citationInfo?.url;
   const title = citationInfo?.title || "Unknown source";
-  const quote = citationInfo?.supporting_quote;
   const docId = citationInfo?.analysis_document_id;
   const displayText = citationNumber ? `[${citationNumber}]` : citationKey;
 
+  const matchedClaimQuote = useMemo<ClaimQuote | undefined>(() => {
+    const claimQuotes = citationInfo?.claim_quotes || [];
+    if (!claimContext || claimQuotes.length === 0) return undefined;
+
+    const contextLower = claimContext.toLowerCase();
+    const exact = claimQuotes.find((cq) => contextLower.includes(cq.claim_text.toLowerCase()));
+    if (exact) return exact;
+
+    const byOverlap = claimQuotes
+      .map((cq) => {
+        const claimWords = new Set(cq.claim_text.toLowerCase().split(/\s+/).filter(Boolean));
+        const contextWords = new Set(contextLower.split(/\s+/).filter(Boolean));
+        let overlap = 0;
+        claimWords.forEach((word) => {
+          if (contextWords.has(word)) overlap += 1;
+        });
+        return { cq, overlap };
+      })
+      .sort((a, b) => b.overlap - a.overlap);
+
+    return byOverlap[0]?.overlap ? byOverlap[0].cq : undefined;
+  }, [citationInfo?.claim_quotes, claimContext]);
+
+  const quote = matchedClaimQuote?.supporting_quote || citationInfo?.supporting_quote;
+  const attribution = matchedClaimQuote?.attribution;
+  const attributionLabel =
+    attribution === "direct"
+      ? "Direct evidence"
+      : attribution === "synthesised"
+      ? "Contributing evidence"
+      : attribution === "inferred"
+      ? "Supporting premise"
+      : null;
+  const attributionMarker =
+    attribution === "direct" ? "●" : attribution === "synthesised" ? "◐" : attribution === "inferred" ? "○" : null;
+  const canInspectInContext = Boolean(
+    onCitationInspect && citationInfo && (matchedClaimQuote?.chunk_id || citationInfo?.chunk_id)
+  );
+  const isActiveCitation = Boolean(activeCitationInstanceId && activeCitationInstanceId === citationInstanceId);
+
   const handleClick = useCallback((e: React.MouseEvent) => {
-    if (url) return;
-    if (onCitationClick && docId) {
+    const inspectChunkId = matchedClaimQuote?.chunk_id || citationInfo?.chunk_id;
+    const inspectQuote = matchedClaimQuote?.supporting_quote || citationInfo?.supporting_quote || "";
+    if (canInspectInContext && onCitationInspect && citationInfo && inspectChunkId) {
+      e.preventDefault();
+      onCitationInspect({
+        citationInfo,
+        chunkId: inspectChunkId,
+        quote: inspectQuote,
+        citationInstanceId,
+      });
+      return;
+    }
+    if (!url && onCitationClick && docId) {
       e.preventDefault();
       onCitationClick(docId);
     }
-  }, [onCitationClick, docId, url]);
+  }, [onCitationClick, docId, url, onCitationInspect, citationInfo, matchedClaimQuote, canInspectInContext, citationInstanceId]);
 
+  const effectiveAuthor = citationInfo?.author_display ?? citationInfo?.author_short;
   const tooltipContent = (
     <div className="space-y-2 max-w-sm">
       <div className="font-medium text-sm leading-tight">{title}</div>
-      {citationInfo?.author_short && citationInfo?.year && (
-        <div className="text-xs opacity-80">{citationInfo.author_short}, {citationInfo.year}</div>
+      {effectiveAuthor && citationInfo?.year && (
+        <div className="text-xs opacity-80">{effectiveAuthor}, {citationInfo.year}</div>
       )}
       {quote && (
         <div className="mt-2 pt-2 border-t border-white/20">
@@ -145,9 +350,17 @@ function CitationLink({ citationKey, citationNumber, citationInfo, onCitationCli
               {quote.length > 200 ? quote.substring(0, 200) + "…" : quote}
             </div>
           </div>
+          {attributionLabel && attributionMarker && (
+            <div className="mt-2 text-[11px] opacity-80">
+              {attributionMarker} {attributionLabel}
+            </div>
+          )}
         </div>
       )}
-      {url && (
+      {canInspectInContext && (
+        <div className="text-xs text-blue-300 pt-1">Click to view in context</div>
+      )}
+      {!canInspectInContext && url && (
         <div className="text-xs text-blue-300 flex items-center gap-1 pt-1">
           <ExternalLink className="h-3 w-3" />
           Click to view source
@@ -158,16 +371,25 @@ function CitationLink({ citationKey, citationNumber, citationInfo, onCitationCli
 
   const linkElement = url ? (
     <a href={url} target="_blank" rel="noopener noreferrer" onClick={handleClick}
-       className="inline-flex items-center text-blue-600 hover:text-blue-800 hover:underline cursor-pointer font-medium transition-colors mx-0.5">
+       className={`inline-flex items-center cursor-pointer font-medium transition-colors mx-0.5 ${
+         isActiveCitation
+           ? "bg-blue-700 text-white hover:text-white hover:bg-blue-800 rounded px-1.5 ring-1 ring-blue-800"
+           : "text-blue-600 hover:text-blue-800 hover:underline"
+       }`}>
       {displayText}
     </a>
   ) : (
     <span onClick={handleClick}
-          className={`inline-flex items-center text-blue-600 font-medium mx-0.5 ${onCitationClick && docId ? 'cursor-pointer hover:underline' : ''}`}>
+          className={`inline-flex items-center font-medium mx-0.5 ${
+            isActiveCitation
+              ? "bg-blue-700 text-white rounded px-1.5 ring-1 ring-blue-800"
+              : "text-blue-600"
+          } ${(canInspectInContext || (onCitationClick && docId)) ? 'cursor-pointer hover:underline' : ''}`}>
       {displayText}
     </span>
   );
 
+  if (disableTooltip) return linkElement;
   return <Tooltip content={tooltipContent}>{linkElement}</Tooltip>;
 }
 
@@ -280,11 +502,13 @@ function BackgroundSectionComponent({ background, renderCitations }: {
   );
 }
 
-function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations }: { 
+function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations, onCitationInspect, activeCitationInstanceId }: { 
   interventions: InterventionTableRow[];
   lookupCitation: CitationLookupFn;
   onCitationClick?: (docId: string) => void;
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
+  onCitationInspect?: (payload: CitationInspectPayload) => void;
+  activeCitationInstanceId?: string;
 }) {
   if (!interventions.length) return null;
 
@@ -381,10 +605,13 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                         && !row.key_study_description.includes(`[${row.key_study_citation}]`) && (
                           <span className="ml-1">
                             <CitationLink
+                              citationInstanceId={`ks-${idx}-${row.key_study_citation}`}
                               citationKey={`[${row.key_study_citation}]`}
                               citationNumber={row.key_study_citation}
                               citationInfo={lookupCitation(row.key_study_citation)}
                               onCitationClick={onCitationClick}
+                              onCitationInspect={onCitationInspect}
+                              activeCitationInstanceId={activeCitationInstanceId}
                             />
                           </span>
                         )}
@@ -430,10 +657,13 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
                     {[...(new Set(row.citation_numbers || []))].map((num, citIdx) => (
                       <CitationLink
                         key={`int-${idx}-${citIdx}-${num}`}
+                        citationInstanceId={`int-${idx}-${citIdx}-${num}`}
                         citationKey={`[${num}]`}
                         citationNumber={num}
                         citationInfo={lookupCitation(num)}
                         onCitationClick={onCitationClick}
+                        onCitationInspect={onCitationInspect}
+                        activeCitationInstanceId={activeCitationInstanceId}
                       />
                     ))}
                   </div>
@@ -520,41 +750,182 @@ function SynthesisSections({ sections, renderCitations }: {
   );
 }
 
-function TopCitationsList({ citations, lookupCitation, onCitationClick }: { 
-  citations: TopCitationItem[];
-  lookupCitation: CitationLookupFn;
+function ReferencesList({
+  references,
+  currentPage,
+  totalPages,
+  onPreviousPage,
+  onNextPage,
+  onCitationClick,
+  activeCitationInstanceId,
+}: {
+  references: OrderedReference[];
+  currentPage: number;
+  totalPages: number;
+  onPreviousPage: () => void;
+  onNextPage: () => void;
   onCitationClick?: (docId: string) => void;
+  activeCitationInstanceId?: string;
 }) {
-  if (!citations.length) return null;
+  if (!references.length) return null;
 
   return (
     <div className="mb-6">
-      <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center gap-2">
-        <BookOpen className="h-5 w-5 text-blue-600" />
-        Key Sources for Review
-      </h3>
-      <div className="space-y-2">
-        {citations.map((cit) => (
-          <div key={cit.citation_number} className="flex items-start gap-3 p-3 bg-white rounded-lg border border-slate-200 hover:border-blue-300 transition-colors">
-            <CitationLink
-              citationKey={`[${cit.citation_number}]`}
-              citationNumber={cit.citation_number}
-              citationInfo={lookupCitation(cit.citation_number)}
-              onCitationClick={onCitationClick}
-            />
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-slate-800 truncate">{cit.title}</div>
-              <div className="text-xs text-slate-500">{cit.author_year}</div>
-              {cit.reason && <div className="text-xs text-slate-600 mt-1">{cit.reason}</div>}
-            </div>
-            {cit.url && (
-              <a href={cit.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
-                <ExternalLink className="h-4 w-4" />
-              </a>
-            )}
-          </div>
-        ))}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-lg font-semibold text-slate-800">
+          <BookOpen className="h-5 w-5 text-blue-600" />
+          References
+        </h3>
       </div>
+      <div className="space-y-2">
+        {references.map((reference) => {
+          const presentation = buildReferencePresentation(reference.info);
+          const evidenceCategoryTooltip = getEvidenceCategoryTooltipContent(
+            reference.info.evidence_category,
+            reference.info.evidence_category_reasoning
+          );
+          const evidenceStrengthTooltip = getEvidenceStrengthTooltipContent(
+            reference.info.evidence_strength_justification
+          );
+          const impactTooltip = getImpactScoreTooltipContent({
+            impact_score_label: reference.info.impact_score_label,
+            impact_score_breakdown: reference.info.impact_score_breakdown,
+            transferability_score: reference.info.transferability_score,
+            transferability_breakdown: reference.info.transferability_breakdown,
+          });
+
+          return (
+            <div
+              key={reference.citationNumber}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-3 transition-colors hover:border-blue-300"
+            >
+              <div className="flex items-start gap-3">
+                <CitationLink
+                  citationInstanceId={`ref-${reference.citationNumber}`}
+                  citationKey={`[${reference.citationNumber}]`}
+                  citationNumber={reference.citationNumber}
+                  citationInfo={reference.info}
+                  onCitationClick={onCitationClick}
+                  activeCitationInstanceId={activeCitationInstanceId}
+                  disableTooltip
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <h4 className="text-sm font-semibold leading-5 text-slate-900">
+                      {reference.info.title || "Unknown source"}
+                    </h4>
+                    {reference.info.url && (
+                      <a
+                        href={reference.info.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-0.5 shrink-0 text-blue-600 hover:text-blue-800"
+                        aria-label="Open source link"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="mt-1 text-xs text-slate-600">
+                    {presentation.showAuthorsTooltip ? (
+                      <Tooltip content={presentation.fullAuthorsText}>
+                        <span className="cursor-help">
+                          {[presentation.authorDisplayForReferences, reference.info.year].filter(Boolean).join(", ") || "Unknown author/year"}
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      [presentation.authorDisplayForReferences, reference.info.year].filter(Boolean).join(", ") || "Unknown author/year"
+                    )}
+                  </div>
+                  {presentation.institutions.length > 0 && !presentation.institutionsDuplicateVenue && (
+                    <Tooltip content={presentation.institutionsText}>
+                      <div className="mt-1 inline-flex max-w-full cursor-help text-xs text-slate-500">
+                        Institutions: {presentation.institutionsDisplay}
+                      </div>
+                    </Tooltip>
+                  )}
+                  {reference.info.venue && (
+                    <div className="mt-0.5 text-xs text-slate-500">{reference.info.venue}</div>
+                  )}
+
+                  {reference.info.top_line && (
+                    <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs leading-5 text-slate-700">
+                      <div className="flex items-start gap-1.5">
+                        <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+                        <span>{reference.info.top_line}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {presentation.sourceTypeDisplay && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                        {presentation.sourceTypeDisplay}
+                      </span>
+                    )}
+                    {reference.info.evidence_category && presentation.evidenceCategoryColors && (
+                      <Tooltip content={evidenceCategoryTooltip}>
+                        <span
+                          className="cursor-help rounded-full px-2 py-0.5 text-[11px] font-medium"
+                          style={{
+                            backgroundColor: presentation.evidenceCategoryColors.bg,
+                            color: presentation.evidenceCategoryColors.text,
+                          }}
+                        >
+                          {getEvidenceCategoryShortName(reference.info.evidence_category)}
+                        </span>
+                      </Tooltip>
+                    )}
+                    <Tooltip content={evidenceStrengthTooltip}>
+                      <span className="cursor-help rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-slate-700">
+                        Evidence <span className="font-semibold">{formatOutOfFive(reference.info.evidence_score)}</span>
+                      </span>
+                    </Tooltip>
+                    <Tooltip content={impactTooltip}>
+                      <span className="cursor-help rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-slate-700">
+                        Impact <span className="font-semibold">{formatOutOfFive(reference.info.impact_score)}</span>
+                      </span>
+                    </Tooltip>
+                    {reference.info.country && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">
+                        {reference.info.country}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-slate-500 hover:text-slate-700"
+            onClick={onPreviousPage}
+            disabled={currentPage <= 1}
+            aria-label="Previous references page"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="text-[11px] text-slate-400 px-1">
+            Page {currentPage} of {totalPages}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-slate-500 hover:text-slate-700"
+            onClick={onNextPage}
+            disabled={currentPage >= totalPages}
+            aria-label="Next references page"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -564,6 +935,7 @@ function TopCitationsList({ citations, lookupCitation, onCitationClick }: {
 // ============================================================================
 
 export function ExecutiveBriefing({ 
+  projectId,
   briefing, 
   structuredBriefing,
   citationMap, 
@@ -573,15 +945,36 @@ export function ExecutiveBriefing({
   isRerunningSynthesis,
   rerunError,
 }: ExecutiveBriefingProps) {
+  const [inspectedCitation, setInspectedCitation] = useState<CitationInspectPayload | null>(null);
+  const activeCitationInstanceId = inspectedCitation?.citationInstanceId;
   const lookupCitation = useMemo(() => buildCitationLookup(citationMap), [citationMap]);
-  const renderCitations = useRenderCitations(lookupCitation, onCitationClick);
+  const renderCitations = useRenderCitations(
+    lookupCitation,
+    onCitationClick,
+    setInspectedCitation,
+    activeCitationInstanceId
+  );
   const synthesisSections = useMemo<SynthesisSectionType[]>(() => {
     if (!structuredBriefing) return [];
     const snake = structuredBriefing.synthesis_sections;
     const camel = (structuredBriefing as { synthesisSections?: SynthesisSectionType[] })?.synthesisSections;
     return snake ?? camel ?? [];
   }, [structuredBriefing]);
+  const orderedReferences = useMemo(() => buildOrderedReferences(citationMap), [citationMap]);
+  const referencedInBriefing = useMemo(() => {
+    return orderedReferences;
+  }, [orderedReferences]);
+  const [referencesPage, setReferencesPage] = useState(1);
+  const totalReferencePages = Math.max(1, Math.ceil(referencedInBriefing.length / REFERENCES_PER_PAGE));
+  const currentReferencePage = Math.min(referencesPage, totalReferencePages);
+  const visibleReferences = useMemo(() => {
+    const start = (currentReferencePage - 1) * REFERENCES_PER_PAGE;
+    return referencedInBriefing.slice(start, start + REFERENCES_PER_PAGE);
+  }, [referencedInBriefing, currentReferencePage]);
 
+  useEffect(() => {
+    setReferencesPage(1);
+  }, [projectId]);
   const handleDownloadPdf = useCallback(() => {
     const sanitize = (text?: string) =>
       (text || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -729,6 +1122,66 @@ export function ExecutiveBriefing({
       `;
     };
 
+    const renderReferences = () => {
+      if (!referencedInBriefing.length) return "";
+      const items = referencedInBriefing
+        .map((reference) => {
+          const presentation = buildReferencePresentation(reference.info);
+          const citationPill = `<span class="pill">[${reference.citationNumber}]</span>`;
+          const title = sanitize(reference.info.title || "Unknown source");
+          const authorYear = sanitize(
+            [presentation.authorDisplayForReferences, reference.info.year].filter(Boolean).join(", ") || "Unknown author/year"
+          );
+          const topLine = sanitize(reference.info.top_line || "");
+          const venue = sanitize(reference.info.venue || "");
+          const sourceType = sanitize(presentation.sourceTypeDisplay || "");
+          const evidenceCategoryLabel = reference.info.evidence_category
+            ? getEvidenceCategoryShortName(reference.info.evidence_category)
+            : "";
+          const evidenceCategory = sanitize(evidenceCategoryLabel);
+          const evidenceCategoryColors = reference.info.evidence_category
+            ? getEvidenceCategoryColors(reference.info.evidence_category)
+            : null;
+          const country = sanitize(reference.info.country || "");
+          const institutions = presentation.institutions.map((institution) => sanitize(institution)).filter(Boolean).join(", ");
+          const evidenceScore = formatOutOfFive(reference.info.evidence_score);
+          const impactScore = formatOutOfFive(reference.info.impact_score);
+          const evidenceCategoryChip = evidenceCategory && evidenceCategoryColors
+            ? `<span class="pill-subtle" style="background:${sanitize(evidenceCategoryColors.bg)};color:${sanitize(evidenceCategoryColors.text)};">${evidenceCategory}</span>`
+            : "";
+          const externalLink = reference.info.url
+            ? `<a href="${sanitize(reference.info.url)}" target="_blank" rel="noopener noreferrer" class="pill-inline">Open source ↗</a>`
+            : "";
+          return `
+            <div class="chip-row">
+              <div>${citationPill}</div>
+              <div>
+                <div class="chip-title">${title}</div>
+                <div class="chip-meta">${authorYear}</div>
+                ${venue ? `<div class="chip-meta">${venue}</div>` : ""}
+                ${institutions && !presentation.institutionsDuplicateVenue ? `<div class="chip-meta"><span class="chip-key">Institutions: </span>${institutions}</div>` : ""}
+                ${topLine ? `<div class="chip-impl"><span class="chip-bulb">💡</span>${topLine}</div>` : ""}
+                <div class="chip-pills">
+                  ${sourceType ? `<span class="pill-subtle">${sourceType}</span>` : ""}
+                  ${evidenceCategoryChip}
+                  <span class="pill-subtle">Evidence ${evidenceScore}</span>
+                  <span class="pill-subtle">Impact ${impactScore}</span>
+                  ${country ? `<span class="pill-subtle">${country}</span>` : ""}
+                </div>
+                ${externalLink ? `<div style="margin-top:8px;">${externalLink}</div>` : ""}
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+      return `
+        <div class="card">
+          <div class="card-title">References</div>
+          ${items}
+        </div>
+      `;
+    };
+
     const renderEvidenceSnapshot = () => {
       if (!evidenceCoverage) return "";
       const strengths: Record<string, string> = {
@@ -843,6 +1296,7 @@ export function ExecutiveBriefing({
         ${renderInterventions()}
         ${renderSynthesisSections()}
         ${renderRecommendations()}
+        ${renderReferences()}
       `
       : `<div style="white-space: pre-wrap;">${sanitize(briefing)}</div>`;
 
@@ -883,7 +1337,12 @@ export function ExecutiveBriefing({
             .chip-num { width:24px; height:24px; border-radius:9999px; background:#2563eb; color:#fff; font-weight:700; display:flex; align-items:center; justify-content:center; font-size:12px; }
             .chip-title { font-weight:700; color:#0f172a; }
             .chip-body { color:#1f2937; font-size:14px; margin-top:4px; }
-            .chip-impl { margin-top:8px; padding-top:8px; border-top:1px solid #bfdbfe; color:#1f2937; font-size:13px; }
+            .chip-meta { color:#475569; font-size:12px; margin-top:4px; }
+            .chip-key { font-weight:700; color:#334155; }
+            .chip-pills { margin-top:8px; display:flex; flex-wrap:wrap; gap:6px; }
+            .pill-subtle { display:inline-block; padding:3px 8px; border-radius:9999px; background:#eef2ff; color:#334155; font-size:11px; font-weight:600; }
+            .chip-impl { margin-top:8px; padding:8px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; color:#1f2937; font-size:13px; }
+            .chip-bulb { margin-right:6px; }
             .pill { text-decoration:none; background:#e0f2fe; color:#1d4ed8; }
             .pill-inline { text-decoration:none; color:#1d4ed8; font-weight:600; }
             .question-text { font-size:14px; color:#0f172a; font-weight:600; }
@@ -906,7 +1365,7 @@ export function ExecutiveBriefing({
     setTimeout(() => {
       w.print();
     }, 300);
-  }, [briefing, evidenceCoverage, lookupCitation, structuredBriefing, synthesisSections]);
+  }, [briefing, evidenceCoverage, lookupCitation, referencedInBriefing, structuredBriefing, synthesisSections]);
 
   // Legacy markdown components (simplified)
   const processText = useCallback((text: string, prefix: string): React.ReactNode => {
@@ -946,7 +1405,11 @@ export function ExecutiveBriefing({
   }), [processText]);
 
   return (
-    <Card className="shadow-sm">
+    <Card
+      className={`shadow-sm transition-[margin] duration-300 ${
+        inspectedCitation ? "mr-[clamp(120px,10vw,200px)]" : "mr-0"
+      }`}
+    >
       <CardHeader className="pb-2">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <CardTitle className="flex items-center gap-2">
@@ -1002,6 +1465,8 @@ export function ExecutiveBriefing({
               lookupCitation={lookupCitation}
               onCitationClick={onCitationClick}
               renderCitations={renderCitations}
+              onCitationInspect={setInspectedCitation}
+              activeCitationInstanceId={activeCitationInstanceId}
             />
 
             <SynthesisSections 
@@ -1014,10 +1479,14 @@ export function ExecutiveBriefing({
               renderCitations={renderCitations}
             />
             
-            <TopCitationsList 
-              citations={structuredBriefing.top_citations}
-              lookupCitation={lookupCitation}
+            <ReferencesList
+              references={visibleReferences}
+              currentPage={currentReferencePage}
+              totalPages={totalReferencePages}
+              onPreviousPage={() => setReferencesPage((prev) => Math.max(1, prev - 1))}
+              onNextPage={() => setReferencesPage((prev) => Math.min(totalReferencePages, prev + 1))}
               onCitationClick={onCitationClick}
+              activeCitationInstanceId={activeCitationInstanceId}
             />
             
             {structuredBriefing.follow_up_suggestions.length > 0 && (
@@ -1045,6 +1514,15 @@ export function ExecutiveBriefing({
           </div>
         )}
       </CardContent>
+      <CitationContextPanel
+        isOpen={Boolean(inspectedCitation)}
+        projectId={projectId}
+        citationInfo={inspectedCitation?.citationInfo ?? null}
+        chunkId={inspectedCitation?.chunkId}
+        supportingQuote={inspectedCitation?.quote}
+        onClose={() => setInspectedCitation(null)}
+        onViewEvidence={onCitationClick}
+      />
     </Card>
   );
 }

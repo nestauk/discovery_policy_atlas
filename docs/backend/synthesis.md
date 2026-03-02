@@ -4,7 +4,7 @@ This document describes the full methodology by which Policy Atlas transforms
 screened document extractions into an executive briefing.  It covers the
 end-to-end pipeline, from raw data loading through theme discovery,
 evidence retrieval, contextual summarisation, impact assessment, and
-tool-augmented briefing generation with mandatory verification.
+tool-augmented briefing generation with mandatory grounding.
 
 For detailed impact assessment methodology (verdicts, magnitude,
 transferability, causal mechanism, harm warnings, scalar scores), see
@@ -44,8 +44,9 @@ Given an `analysis_project`, the synthesis process produces:
   by the frontend and PDF renderer.
 - **Theme analysis**: Discovered themes for issues, interventions,
   outcomes, and risks.
-- **Citation database**: Grounded citations with source traceability
-  (hoverable `[N]` citations).
+- **Citation database**: Grounded citations with source traceability,
+  including per-claim quotes and attribution types for hoverable `[N]`
+  citations.
 - **Evidence coverage snapshot**: Deterministic stats for the "Evidence
   Base" card.
 - **Impact profiles**: Verdict, magnitude, transferability, and causal
@@ -204,21 +205,26 @@ system enforces the same rigour constraints at each step.
 | Component | Technology |
 |-----------|------------|
 | Workflow orchestration | LangGraph `StateGraph` |
-| LLM models | See [model configuration](#model-configuration) below |
+| LLM models | See [model configuration](#model-configuration) below (currently: `gpt-5.2` orchestration, `gpt-5-mini` generation + grounding, `gpt-4.1-mini` RCS) |
 | Vector search | Supabase pgvector |
 | Observability | Langfuse tracing |
 | Fuzzy matching | rapidfuzz (evidence tools) |
 
 ### Model configuration
 
-Models are spread across three locations.  This table lists every model
-used in the synthesis pipeline:
+```python
+# tools/models.py
+ORCHESTRATOR_MODEL = "gpt-5.2"      # Tool selection reasoning
+VERIFICATION_MODEL = "gpt-5-mini"   # Claim grounding + quote extraction
+GENERATION_MODEL = "gpt-5-mini"     # Section content generation
+RCS_MODEL = "gpt-4.1-mini"          # Contextual summarisation (cost-optimised)
+```
 
 | Role | Model | Location | Notes |
 |------|-------|----------|-------|
 | Orchestrator | `gpt-5.2` | `tools/models.py` | Tool selection reasoning during briefing |
 | Generation | `gpt-5-mini` | `tools/models.py` | Section content generation |
-| Verification | `gpt-5-mini` | `tools/models.py` | Claim verification |
+| Verification / grounding | `gpt-5-mini` | `tools/models.py` | Claim grounding + quote extraction (soft) |
 | RCS scoring | `gpt-4.1-mini` | `tools/models.py` and `contextual_summarisation.py` | Contextual summarisation (cost-optimised) |
 | Theme discovery | `gpt-5-mini` | `utils.py` (`THEME_MODEL`) | Theme identification and critique |
 | Concept classification | `gpt-5-nano` | `utils.py` (`MAPPING_MODEL`) | Concept-to-theme mapping |
@@ -376,7 +382,13 @@ Risk concepts are derived from two sources:
 **Implementation**: `nodes/theme_discovery.py`
 **Models**: `THEME_MODEL` (gpt-5-mini), `MAPPING_MODEL` (gpt-5-nano)
 
-All four branches execute the same three-step pipeline in parallel:
+All four branches execute the same three-step pipeline in parallel.
+
+Downstream evidence gathering (Phases 4–6) is designed to:
+
+- **Constrain retrieval**: chunks are retrieved only from documents contributing to each theme.
+- **Quality-weight reranking**: prioritises documents by evidence strength and predicted impact.
+- **Handle chunk reuse by branch**: intervention/issue retrieval de-duplicates globally, while outcome retrieval allows chunk reuse so outcome RCS is not starved by earlier branches.
 
 ### Step 1: Discover themes (`_discover_themes`)
 
@@ -723,34 +735,56 @@ mirroring how a systematic review separates data extraction, narrative
 writing, and peer review.
 
 ```
-┌───────────────────────────────────────────────┐
-│ ORCHESTRATOR (gpt-5.2)                        │
-│ Decides which tools to call to gather         │
-│ evidence for each section                     │
-└───────────────────────────────────────────────┘
-        ↓ Tool calls            ↑ Tool results
-┌───────────────────────────────────────────────┐
-│ TOOL EXECUTOR (deterministic)                 │
-│ Executes tools against pre-computed state     │
-└───────────────────────────────────────────────┘
-        ↓ Formatted evidence context
-┌───────────────────────────────────────────────┐
-│ GENERATOR (gpt-5-mini)                        │
-│ Writes section content with [N] citations     │
-│ Can ONLY cite sources in the evidence context │
-└───────────────────────────────────────────────┘
-        ↓ Generated content
-┌───────────────────────────────────────────────┐
-│ VERIFIER (gpt-5-mini) — soft verification     │
-│ Extracts each claim, checks against evidence  │
-│ Flags unsupported claims → retry if budget    │
-└───────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│ ORCHESTRATOR (gpt-5.2)                                  │
+│ "What evidence do I need for this section?"             │
+└─────────────────────────────────────────────────────────┘
+        ↓                                    ↑
+   Tool calls                          Tool results
+        ↓                                    ↑
+┌─────────────────────────────────────────────────────────┐
+│ TOOL EXECUTOR                                           │
+│ - get_theme_evidence(theme_name)                        │
+│ - get_top_studies(intervention_name)                    │
+│ - get_intervention_outcomes(intervention_name)          │
+│ - get_intervention_details(intervention_name)           │
+│ - retrieve_evidence(query)                              │
+│ - get_citation_context(citation_number)                 │
+│ - search_extractions(query)                             │
+│ - get_document_quality(citation_number)                 │
+│ - get_multiple_document_quality(citation_numbers)       │
+└─────────────────────────────────────────────────────────┘
+        ↓
+┌─────────────────────────────────────────────────────────┐
+│ SECTION GENERATOR (gpt-5-mini)                          │
+│ Generate section content with inline [N] citations      │
+└─────────────────────────────────────────────────────────┘
+        ↓
+┌─────────────────────────────────────────────────────────┐
+│ GROUNDER (gpt-5-mini) - MANDATORY                       │
+│ Verify each claim is grounded in cited source text      │
+│ Extract per-claim quotes and attribution type           │
+│ Flag unsupported claims → orchestrator regathers evidence│
+│ and generator retries with targeted feedback             │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### Section generation order
 
 Sections are generated sequentially.  Each section's orchestrator sees
 the full pre-computed state but gathers evidence independently:
+
+#### Cross-section context
+
+Generation carries a compact running summary of previously generated
+sections into subsequent section prompts.  This improves coherence
+between Background, Interventions, Synthesis sections, Core Answer, and
+Recommendations without copying full section text into each prompt.
+
+#### Tool-call budgets
+
+Per-section tool calls are capped by the orchestrator, with expanded
+budgets for the interventions table.  See [Configuration reference](#configuration-reference).
 
 1. **Background** — 2–3 paragraphs, policy context, 120–180 words
 2. **Interventions table** — 4–6 rows with per-row tool evidence
@@ -1334,14 +1368,32 @@ precomputed `analysis_documents.top_line` field — no LLM is used for
 3. **Evidence gathering**: if no tool evidence is gathered, the
    generation prompt receives pre-computed RCS contexts as fallback.
 
-### Verification
+### Grounding / verification
 
-- Verification is **soft**: content is always returned even if claims are
-  flagged as unsupported.
+- Grounding is **soft**: content is always returned even if claims are
+  flagged as unsupported or weakly supported.
+- When grounding fails, unsupported claims can trigger targeted
+  `retrieve_evidence` tool calls before regeneration.
 - If verification itself fails (parsing error, LLM failure), the
   section is assumed to be OK.
 - Maximum 1 regeneration retry on verification failure (reduced from 2
   for efficiency).
+
+### Attribution types
+
+Per-claim grounding stores one of:
+
+- `direct`: the source alone supports the specific claim.
+- `synthesised`: the source contributes evidence; the claim combines multiple sources.
+- `inferred`: the source provides premises; the claim extrapolates beyond explicit source wording.
+
+All three can be supported.  Unsupported means the cited source provides no relevant evidence.
+
+### Controls
+
+- **RCS thresholds** are controlled via `RCSConfig`.
+- **Grounding retries** are controlled via `BriefingConfig.max_verification_retries` (3 total passes: initial + 2 retries).
+- **Retry behaviour**: when grounding fails, unsupported claims can trigger targeted `retrieve_evidence` tool calls before regeneration.
 
 ---
 
@@ -1358,9 +1410,13 @@ All LLM calls are traced via Langfuse:
   `model:gpt-5-mini`)
 - **Run names**: descriptive names for each call (e.g.,
   `synthesis.discover_themes`, `rcs:{chunk_id}`,
-  `orchestrator_decide`, `verify_section`)
+  `orchestrator_decide`, `verify_section` / `ground_section`)
 - **Metadata**: includes session ID, user ID, project ID where
   available
+- **Tool execution**: logged with durations and key result summaries.
+- **Grounding failures**: captured with suggested fixes and retry attempts.
+- **Project session linking**: briefing/orchestrator traces are attached
+  to the project session via `CallbackHandler(session_id=...)`.
 
 ---
 
@@ -1377,10 +1433,11 @@ write_run_from_state()`.  The cache uses a version field (currently
 | `synthesis_runs` | Run metadata, status lifecycle (`running → completed / failed`), cached `structured_briefing_data` and `evidence_coverage` |
 | `synthesis_themes` | Issue, intervention, and risk themes (`theme_type` discriminator).  Intervention themes include transferability, impact score, effect consensus fields.  Risk themes include `has_harm_warning` and linked intervention |
 | `synthesis_outcome_themes` | One row per intervention–outcome pair.  Stores verdict, magnitude, discord, causal mechanism fields (JSON for detail objects).  Links to interventions via `intervention_theme_id` |
-| `synthesis_citations` | Citation references for the structured briefing (author, year, title, URL, supporting quote) |
+| `synthesis_citations` | Citation references for the structured briefing (author, year, title, URL) plus per-claim quote rows (`section`, `claim_text`, `chunk_id`, `attribution`) |
 | `theme_assignments` | Extraction-to-theme mappings, deduplicated by (theme_id, extraction_id) |
 | `outcome_theme_assignments` | Outcome extraction mappings, includes `calibrated_magnitude` per extraction |
 | `theme_intervention_links` | Many-to-many links between risk themes and intervention themes, with `link_strength` (primary / secondary) |
+| `analysis_extractions` | Raw extractions (issues/interventions/outcomes/results) |
 | `analysis_documents` (overwrite) | After Tier 2 calibration, `impact_score`, `impact_score_label`, `impact_score_breakdown` are written back |
 
 ### Run lifecycle
@@ -1483,9 +1540,26 @@ backend/app/services/synthesis/
     ├── __init__.py                     # Tool exports and registry
     ├── base.py                         # BaseTool, ToolRegistry, ToolResult
     ├── models.py                       # Orchestrator/generation/verification/RCS model constants
-    ├── orchestrator.py                 # BriefingOrchestrator (evidence loop + generation + verification)
+    ├── orchestrator.py                 # BriefingOrchestrator (evidence loop + generation + grounding)
     ├── evidence.py                     # get_theme_evidence, get_citation_context, get_intervention_outcomes, get_intervention_details, get_top_studies
-    ├── search.py                       # search_extractions (RCS keyword + live vector fallback)
+    ├── search.py                       # search_extractions + retrieve_evidence (RCS keyword + live vector fallback)
     ├── quality.py                      # get_document_quality, get_multiple_document_quality
     └── verification.py                 # verify_claim_support, verify_multiple_claims
 ```
+
+---
+
+## Changelog
+
+### Recent changes (February 2026)
+
+- **Evidence Base card**: shows both **screened** and **synthesised** counts.
+- **Key Sources**: removed LLM “why selected” generation; now uses `analysis_documents.top_line`.
+- **Interventions table**: adds a “Key Study” column and performs per-row evidence gathering via tools.
+- **Recommendations**: structured output includes a clearer `implementation_option` field for rendering.
+- **Tool budgets**: increased default per-section tool budget and expanded interventions-section budget.
+- **Grounding update**: verification replaced with source-grounded claim attribution with per-claim quote extraction and attribution labels.
+- **Retry loop update**: grounding failures now trigger targeted evidence re-gathering (`retrieve_evidence`) before regeneration.
+- **Interventions grounding**: interventions table is now row-grounded against cited sources (no hardcoded verification pass).
+- **Cross-section context**: later sections receive compact summaries of earlier sections for narrative consistency.
+- **Outcome retrieval fix**: outcome branch now avoids global seen-chunk starvation from earlier retrieval passes.

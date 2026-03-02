@@ -10,21 +10,20 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from pydantic import BaseModel, Field
 
-from app.services.synthesis.state import SynthesisState, ScoredContext
+from app.services.synthesis.state import SynthesisState
 from app.services.synthesis.schemas import (
     StructuredBriefing,
     BackgroundSection,
     CoreAnswer,
     SynthesisSectionProposal,
     CitationInfo,
+    ClaimQuote,
     EvidenceSnapshotRow,
-    TopCitationItem,
 )
 from app.services.synthesis.nodes.briefing_utils import (
     parse_intervention_table,
@@ -150,7 +149,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     Uses the BriefingOrchestrator to:
     1. Gather evidence using tools (get_theme_evidence, search_extractions, etc.)
     2. Generate each section with gpt-5-mini
-    3. Verify each section (soft verification with warnings)
+    3. Ground each section against source evidence (soft grounding with warnings)
 
     Args:
         state: Current synthesis state with RCS results.
@@ -185,7 +184,6 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     limits = {
         "max_interventions": min(8, max(4, num_docs // 4 or 4)),
         "max_recommendations": min(5, max(3, num_docs // 10 or 3)),
-        "max_top_citations": min(10, max(6, (num_docs // 2) or 6)),
         "max_synthesis_sections": 2,
     }
 
@@ -219,6 +217,27 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     synthesis_outputs: List[Tuple[str, SectionOutput]] = []
     total_tool_calls = 0
     verification_failures: List[str] = []
+    running_section_context: List[str] = []
+
+    def _current_prior_sections_summary() -> str:
+        # Keep prompt size bounded while preserving recent narrative flow.
+        return "\n".join(running_section_context[-6:])
+
+    def _summarise_section_for_context(
+        section_title: str,
+        output: SectionOutput,
+    ) -> str:
+        content = re.sub(r"(?m)^\\s*\\|.*\\|\\s*$", " ", output.content or "")
+        content = re.sub(r"<br\\s*/?>", " ", content)
+        content = re.sub(r"\\s+", " ", content).strip()
+        words = content.split()
+        if len(words) > 150:
+            content = " ".join(words[:150]).rstrip() + "..."
+        citations = sorted(set(output.citations_used))
+        citations_text = (
+            ", ".join(f"[{c}]" for c in citations[:8]) if citations else "none"
+        )
+        return f"- {section_title}: {content} (citations: {citations_text})"
 
     async def _run_section(section_key: str, additional_extra: str = "") -> None:
         nonlocal total_tool_calls
@@ -257,10 +276,14 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
                 section_instructions=instructions,
                 additional_instructions=additional,
                 max_retries=config.max_verification_retries,
+                prior_sections_summary=_current_prior_sections_summary(),
             )
 
             section_outputs[section_key] = output
             total_tool_calls += output.tool_calls_made
+            running_section_context.append(
+                _summarise_section_for_context(section_config["name"], output)
+            )
 
             if not output.verification_passed:
                 verification_failures.append(section_key)
@@ -357,6 +380,12 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         synthesis_outputs.append((proposal.section_title, synth_output))
         section_outputs[section_key] = synth_output
         total_tool_calls += synth_output.tool_calls_made
+        running_section_context.append(
+            _summarise_section_for_context(
+                f"Synthesis {idx + 1}: {proposal.section_title}",
+                synth_output,
+            )
+        )
         if not synth_output.verification_passed:
             verification_failures.append(section_key)
         _persist_substage(
@@ -391,6 +420,28 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         metadata=_section_meta("recommendations"),
     )
 
+    # Enforce strict citation token style so downstream quote/detail features can
+    # always resolve citations reliably.
+    for output in section_outputs.values():
+        output.content = _normalise_compound_citation_brackets(output.content or "")
+        for claim in output.claim_quotes:
+            claim.claim_text = _normalise_compound_citation_brackets(
+                claim.claim_text or ""
+            )
+
+    # Pre-sort interventions table rows to match frontend display order *before*
+    # renumbering so the scan order equals the rendered order.
+    int_out = section_outputs.get("interventions")
+    if int_out and int_out.content:
+        int_out.content = _sort_interventions_table_markdown(int_out.content)
+
+    # Renumber citations by order of first appearance in final briefing content.
+    _renumber_citations_by_appearance(
+        section_outputs=section_outputs,
+        synthesis_outputs=synthesis_outputs,
+        state=state,
+    )
+
     # Build structured briefing from sections
     t0 = time.time()
     with _langfuse.start_as_current_span(
@@ -401,10 +452,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
             grounded_citations,
             state.get("aggregated_interventions") or [],
             research_question,
-            state.get("doc_scores") or {},
-            state.get("all_scored_contexts") or [],
             state.get("doc_citation_map") or {},
-            state.get("doc_metadata") or {},
             synthesis_outputs,
             limits,
         )
@@ -420,6 +468,23 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     citation_map = {
         f"[{c.citation_number}]": c for c in grounded_citations if c.citation_number
     }
+
+    # Merge per-claim quotes from section outputs into citation map
+    for section_key, output in section_outputs.items():
+        for quote in output.claim_quotes:
+            citation_key = f"[{quote.citation_number}]"
+            citation = citation_map.get(citation_key)
+            if not citation:
+                continue
+            citation.claim_quotes.append(
+                ClaimQuote(
+                    claim_text=quote.claim_text,
+                    supporting_quote=quote.supporting_quote,
+                    attribution=quote.attribution,
+                    chunk_id=quote.chunk_id,
+                    section=section_key,
+                )
+            )
 
     print("\n  Briefing complete:")
     print(f"    - Total tool calls: {total_tool_calls}")
@@ -470,15 +535,188 @@ def _extract_research_question(state: SynthesisState) -> str:
     return ""
 
 
+def _sort_interventions_table_markdown(content: str) -> str:
+    """Sort markdown table data rows by citation count (most first).
+
+    Matches the display-order sort applied later in _build_structured_briefing
+    so that _renumber_citations_by_appearance scans rows in the same order
+    the frontend renders them.
+    """
+    if not content or "|" not in content:
+        return content
+
+    lines = content.strip().split("\n")
+    header_lines: List[str] = []
+    data_lines: List[str] = []
+    past_separator = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not past_separator:
+            header_lines.append(line)
+            if (
+                set(stripped.replace("|", "").replace("-", "").replace(" ", ""))
+                == set()
+            ):
+                past_separator = True
+        else:
+            data_lines.append(line)
+
+    if len(data_lines) <= 1:
+        return content
+
+    data_lines.sort(
+        key=lambda row: len(re.findall(r"\[\d+\]", row)),
+        reverse=True,
+    )
+    return "\n".join(header_lines + data_lines)
+
+
+def _normalise_compound_citation_brackets(text: str) -> str:
+    """Rewrite bracketed citation lists into strict `[N] [N]` format.
+
+    Args:
+        text: Free text that may contain bracketed citation lists such as
+            ``[1, 3, 12]``.
+
+    Returns:
+        Text with citation lists expanded to individual bracketed citations.
+    """
+    if not text:
+        return text
+
+    def _expand(match: re.Match[str]) -> str:
+        numbers = [int(n) for n in re.findall(r"\d+", match.group(1))]
+        if not numbers:
+            return match.group(0)
+        seen = set()
+        ordered = []
+        for num in numbers:
+            if num <= 0 or num in seen:
+                continue
+            seen.add(num)
+            ordered.append(num)
+        return " ".join(f"[{num}]" for num in ordered) if ordered else match.group(0)
+
+    return re.sub(r"\[([0-9][0-9,\s;]*)\]", _expand, text)
+
+
+def _apply_citation_mapping(text: str, mapping: Dict[int, int]) -> str:
+    """Replace [old] citation tokens with [new] tokens safely."""
+    if not text or not mapping:
+        return text
+    text = _normalise_compound_citation_brackets(text)
+    placeholder_prefix = "__CIT_PLACEHOLDER_"
+    updated = text
+    for old_num in mapping:
+        updated = updated.replace(f"[{old_num}]", f"[{placeholder_prefix}{old_num}__]")
+    for old_num, new_num in mapping.items():
+        updated = updated.replace(
+            f"[{placeholder_prefix}{old_num}__]",
+            f"[{new_num}]",
+        )
+    return updated
+
+
+def _normalise_inline_citation_groups(text: str) -> str:
+    """Sort adjacent inline citation groups numerically (e.g., [3] [1] -> [1] [3])."""
+    if not text:
+        return text
+    text = _normalise_compound_citation_brackets(text)
+
+    def _sort_group(match: re.Match[str]) -> str:
+        citations = [int(num) for num in re.findall(r"\[(\d+)\]", match.group(0))]
+        ordered = sorted(set(citations))
+        return " ".join(f"[{num}]" for num in ordered)
+
+    return re.sub(r"(?:\[\d+\]\s*){2,}", _sort_group, text)
+
+
+def _renumber_citations_by_appearance(
+    section_outputs: Dict[str, SectionOutput],
+    synthesis_outputs: List[Tuple[str, SectionOutput]],
+    state: SynthesisState,
+) -> Dict[int, int]:
+    """Renumber citations sequentially by first appearance order in briefing output."""
+    # Must match frontend display order in ExecutiveBriefing.tsx.
+    ordered_section_keys: List[str] = ["core_answer", "background", "interventions"]
+    ordered_section_keys.extend(
+        [f"synthesis_{i+1}" for i in range(len(synthesis_outputs))]
+    )
+    ordered_section_keys.extend(["recommendations"])
+
+    seen_in_order: List[int] = []
+    seen_set = set()
+    for key in ordered_section_keys:
+        output = section_outputs.get(key)
+        if not output or not output.content:
+            continue
+        normalised_content = _normalise_compound_citation_brackets(output.content)
+        for match in re.findall(r"\[(\d+)\]", normalised_content):
+            num = int(match)
+            if num not in seen_set:
+                seen_set.add(num)
+                seen_in_order.append(num)
+
+    grounded_citations = state.get("grounded_citations") or []
+    for citation in grounded_citations:
+        num = getattr(citation, "citation_number", 0) or 0
+        if num > 0 and num not in seen_set:
+            seen_set.add(num)
+            seen_in_order.append(num)
+
+    mapping = {old_num: idx for idx, old_num in enumerate(seen_in_order, start=1)}
+    if not mapping:
+        return {}
+
+    for output in section_outputs.values():
+        output.content = _normalise_inline_citation_groups(
+            _apply_citation_mapping(output.content or "", mapping)
+        )
+        output.citations_used = sorted(
+            {
+                mapping.get(int(c), int(c))
+                for c in (output.citations_used or [])
+                if int(c) > 0
+            }
+        )
+        for claim in output.claim_quotes:
+            claim.citation_number = mapping.get(
+                int(claim.citation_number), int(claim.citation_number)
+            )
+            claim.claim_text = _normalise_inline_citation_groups(
+                _apply_citation_mapping(claim.claim_text or "", mapping)
+            )
+
+    new_doc_citation_map: Dict[str, int] = {}
+    for doc_id, old_num in (state.get("doc_citation_map") or {}).items():
+        old_int = int(old_num) if old_num else 0
+        if old_int <= 0:
+            continue
+        new_doc_citation_map[doc_id] = mapping.get(old_int, old_int)
+    state["doc_citation_map"] = new_doc_citation_map
+
+    for citation in grounded_citations:
+        old_num = int(getattr(citation, "citation_number", 0) or 0)
+        if old_num <= 0:
+            continue
+        new_num = mapping.get(old_num, old_num)
+        citation.citation_number = new_num
+        citation.citation_key = f"[{new_num}]"
+        for cq in citation.claim_quotes:
+            cq.claim_text = _normalise_inline_citation_groups(
+                _apply_citation_mapping(cq.claim_text or "", mapping)
+            )
+
+    return mapping
+
+
 async def _build_structured_briefing(
     section_outputs: Dict[str, SectionOutput],
     grounded_citations: List[CitationInfo],
     interventions: List,
     research_question: str,
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
     doc_citation_map: Dict[str, int],
-    doc_metadata: Dict[str, Dict[str, Any]],
     synthesis_outputs: List[Tuple[str, SectionOutput]],
     limits: Dict[str, int],
 ) -> StructuredBriefing:
@@ -489,8 +727,6 @@ async def _build_structured_briefing(
         grounded_citations: Available citations.
         interventions: Aggregated interventions for table.
         research_question: The original research question.
-        doc_scores: Document quality scores for citation ranking.
-        all_scored_contexts: RCS-scored contexts for citation ranking.
         doc_citation_map: Document UUID to citation number mapping.
 
     Returns:
@@ -573,17 +809,6 @@ async def _build_structured_briefing(
     # Parse synthesis sections (if any)
     synthesis_sections = parse_synthesis_sections(synthesis_outputs)
 
-    # Build top citations (use precomputed document top_line, no LLM reason generation)
-    top_citations = await _build_top_citations_async(
-        grounded_citations,
-        section_outputs,
-        doc_scores,
-        all_scored_contexts,
-        doc_citation_map,
-        doc_metadata,
-        max_citations=limits.get("max_top_citations", 8),
-    )
-
     # Build evidence snapshot summary
     evidence_snapshot = [
         EvidenceSnapshotRow(
@@ -599,7 +824,6 @@ async def _build_structured_briefing(
         interventions_table=intervention_rows,
         synthesis_sections=synthesis_sections,
         recommendations=recommendation_items,
-        top_citations=top_citations,
         follow_up_suggestions=[],
     )
 
@@ -667,6 +891,7 @@ async def _generate_synthesis_section(
     research_question: str,
     section_index: int,
     max_retries: int,
+    prior_sections_summary: str = "",
 ) -> SectionOutput:
     """Generate a single synthesis section via the orchestrator."""
     instructions = f"""Write a synthesis section titled "{proposal.section_title}" that supports the policy briefing.
@@ -693,144 +918,5 @@ Guidance:
         section_instructions=instructions,
         additional_instructions=additional,
         max_retries=max_retries,
+        prior_sections_summary=prior_sections_summary,
     )
-
-
-# =============================================================================
-# TOP CITATIONS SELECTION (uses analysis_documents.top_line; no LLM reason generation)
-# =============================================================================
-
-
-def _rank_citations(
-    grounded_citations: List[CitationInfo],
-    section_outputs: Dict[str, SectionOutput],
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
-    doc_citation_map: Dict[str, int],
-) -> List[Tuple[CitationInfo, float]]:
-    """Rank citations by importance using multiple signals.
-
-    Combines:
-    - Usage frequency across briefing sections
-    - Document quality scores (evidence strength, predicted impact)
-    - Average relevance scores from RCS
-
-    Args:
-        grounded_citations: All available citations.
-        section_outputs: Outputs from each briefing section.
-        doc_scores: Document quality scores.
-        all_scored_contexts: RCS-scored contexts.
-        doc_citation_map: Document UUID to citation number mapping.
-
-    Returns:
-        List of (citation, score) tuples sorted by importance.
-    """
-    # Count usage across sections
-    usage_counts: Counter = Counter()
-    for output in section_outputs.values():
-        for cit_num in output.citations_used:
-            usage_counts[cit_num] += 1
-
-    # Build reverse mapping: citation_number -> doc_uuid
-    cit_to_doc = {v: k for k, v in doc_citation_map.items()}
-
-    # Calculate relevance scores by document
-    doc_relevance: Dict[str, List[float]] = {}
-    for ctx in all_scored_contexts:
-        if ctx.document_id not in doc_relevance:
-            doc_relevance[ctx.document_id] = []
-        doc_relevance[ctx.document_id].append(ctx.relevance_score)
-
-    ranked: List[Tuple[CitationInfo, float]] = []
-
-    for cit in grounded_citations:
-        if not cit.citation_number:
-            continue
-
-        score = 0.0
-
-        # Usage frequency (0-10 points)
-        usage = usage_counts.get(cit.citation_number, 0)
-        score += min(usage * 2, 10)
-
-        # Document quality (0-10 points)
-        doc_uuid = cit_to_doc.get(cit.citation_number)
-        if doc_uuid and doc_uuid in doc_scores:
-            quality = doc_scores[doc_uuid]
-            evidence_score = quality.get("evidence_score", 0) or 0
-            impact_score = quality.get("impact_score", 0) or 0
-            score += evidence_score + impact_score  # Both are 0-5 scale
-
-        # Average relevance from RCS (0-10 points)
-        if doc_uuid and doc_uuid in doc_relevance:
-            avg_relevance = sum(doc_relevance[doc_uuid]) / len(doc_relevance[doc_uuid])
-            score += avg_relevance  # 0-10 scale
-
-        ranked.append((cit, score))
-
-    # Sort by score descending
-    ranked.sort(key=lambda x: x[1], reverse=True)
-    return ranked
-
-
-async def _build_top_citations_async(
-    grounded_citations: List[CitationInfo],
-    section_outputs: Dict[str, SectionOutput],
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
-    doc_citation_map: Dict[str, int],
-    doc_metadata: Dict[str, Dict[str, Any]],
-    max_citations: int = 8,
-) -> List[TopCitationItem]:
-    """Build top citations using precomputed document 'top_line' (no LLM reason generation).
-
-    Selects the most important citations based on usage, quality, and relevance,
-    then generates meaningful reasons explaining each source's contribution.
-
-    Args:
-        grounded_citations: All available citations.
-        section_outputs: Generated briefing sections.
-        doc_scores: Document quality scores.
-        all_scored_contexts: RCS-scored contexts.
-        doc_citation_map: Document UUID to citation number mapping.
-        doc_metadata: Document metadata keyed by doc_uuid (should include 'top_line').
-        max_citations: Maximum citations to include.
-
-    Returns:
-        List of TopCitationItem with contextual reasons.
-    """
-    # Rank citations by importance
-    ranked = _rank_citations(
-        grounded_citations,
-        section_outputs,
-        doc_scores,
-        all_scored_contexts,
-        doc_citation_map,
-    )
-
-    # Build reverse mapping: citation_number -> doc_uuid
-    cit_to_doc = {v: k for k, v in doc_citation_map.items()}
-
-    # Select top citations
-    top_citations_data = [cit for cit, _ in ranked[:max_citations]]
-
-    # Build final citation items
-    top_citations = []
-    for cit in top_citations_data:
-        doc_uuid = cit_to_doc.get(cit.citation_number) if cit.citation_number else None
-        reason = ""
-        if doc_uuid:
-            reason = (doc_metadata.get(doc_uuid, {}) or {}).get("top_line") or ""
-        reason = reason.strip()
-
-        top_citations.append(
-            TopCitationItem(
-                citation_number=cit.citation_number,
-                title=cit.title or "Untitled",
-                author_year=f"{cit.author_short or 'Unknown'}, {cit.year or 'n.d.'}",
-                reason=reason,
-                url=cit.url,
-            )
-        )
-
-    return top_citations

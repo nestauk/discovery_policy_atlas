@@ -22,15 +22,15 @@ from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.utils.llm.llm_utils import get_llm, build_langfuse_metadata
 from app.services.synthesis.schemas import (
-    RCSConfig,
     RetrievedChunk,
     ScoredContext,
     ThemeEvidence,
+    RCSConfig,
 )
 from app.services.synthesis.state import SynthesisState
 from app.services.synthesis.utils import escape_braces
-from app.utils.llm.llm_utils import build_langfuse_metadata, get_llm
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +44,8 @@ RCS_MODEL = "gpt-4.1-mini"
 
 RCS_SYSTEM_PROMPT = """You are an expert policy analyst evaluating evidence relevance.
 
-For the given excerpt from a policy document, determine if it contains information
-relevant to answering the question. If relevant, provide a concise summary of the
+For the given excerpt from a policy document, determine if it contains information 
+relevant to answering the question. If relevant, provide a concise summary of the 
 key points that help answer the question.
 
 Respond with JSON only:
@@ -56,7 +56,7 @@ Respond with JSON only:
 
 Scoring guide:
 - 0: Not relevant at all
-- 1-3: Tangentially related, minimal direct relevance
+- 1-3: Tangentially related, minimal direct relevance  
 - 4-6: Moderately relevant, provides useful context
 - 7-8: Highly relevant, directly addresses the question
 - 9-10: Critical evidence, directly answers key aspects
@@ -206,9 +206,8 @@ async def contextual_summarise_chunk(
                         session_id=state.get("langfuse_session_id"),
                         user_id=state.get("policy_user_id"),
                         project_id=state.get("project_id"),
-                        extra={"chunk_id": chunk.chunk_id},
                     ),
-                    "run_name": "synthesis.rcs",
+                    "run_name": f"rcs:{chunk.chunk_id[:8]}",
                 }
 
         response = await llm.ainvoke(messages, config=config)
@@ -229,7 +228,6 @@ async def contextual_summarise_chunk(
         chunk_id=chunk.chunk_id,
         document_id=chunk.document_id,
         document_title=chunk.doc_title or "",
-        chunk_text=chunk_text[:500],  # Store truncated for reference
         citation_key=citation_key,
         full_citation=build_full_citation(chunk),
         theme_id=theme_id,
@@ -330,6 +328,21 @@ async def _apply_rcs_to_evidence(
     evidence = state.get(evidence_key) or {}
     research_question = state.get("research_question", "")
     rcs_config = state.get("rcs_config") or RCSConfig()
+    chunk_counts = {
+        theme_id: len(chunks or []) for theme_id, chunks in evidence.items()
+    }
+    non_empty_theme_count = sum(1 for count in chunk_counts.values() if count > 0)
+    logger.info(
+        "RCS input '%s': %d themes (%d with chunks).",
+        evidence_key,
+        len(chunk_counts),
+        non_empty_theme_count,
+    )
+    if chunk_counts:
+        preview = list(chunk_counts.items())[:10]
+        logger.info(
+            "RCS input '%s' theme chunk-count preview: %s", evidence_key, preview
+        )
 
     item_lookup = {
         getattr(item, name_attr): item
@@ -398,6 +411,12 @@ async def _apply_rcs_to_evidence(
             all_scored_contexts.extend(filtered_contexts)
 
     response: Dict[str, Any] = {result_key: results}
+    if evidence and not results:
+        logger.warning(
+            "RCS produced zero results for '%s' despite %d themes in input.",
+            evidence_key,
+            len(evidence),
+        )
     if collect_all_contexts:
         response["all_scored_contexts"] = all_scored_contexts
         response["themes_with_gaps"] = themes_with_gaps

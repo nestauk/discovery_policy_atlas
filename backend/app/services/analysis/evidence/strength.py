@@ -49,6 +49,22 @@ class DocumentEvidenceScoreResult(TypedDict):
     sample_size: Optional[int]
 
 
+class DocumentEvidenceDetailsResult(TypedDict):
+    """Return type for get_document_evidence_details()."""
+
+    score: int
+    justification: str
+    sample_size: Optional[int]
+
+
+class DocumentEvidenceSummaryResult(TypedDict):
+    """Return type for get_or_calculate_document_evidence()."""
+
+    stars: int
+    justification: str
+    sample_size: Optional[int]
+
+
 class EvidenceStrengthResult(TypedDict):
     """Return type for calculate_evidence_strength()."""
 
@@ -169,27 +185,47 @@ def build_evidence_info_for_docs(
     return result
 
 
-def get_or_calculate_document_evidence(doc: dict) -> dict:
-    """Get stored evidence strength or calculate it.
+def get_document_evidence_details(doc: dict) -> DocumentEvidenceDetailsResult:
+    """Get document evidence details: DB columns first, fallback to calculation.
 
-    Returns dict with 'stars', 'justification', 'sample_size' keys.
+    Args:
+        doc: Document dict with optional 'evidence_score',
+             'evidence_justification', and 'evidence_sample_size' columns.
+
+    Returns:
+        Dict with score, justification, and sample_size.
     """
-    extraction_results = doc.get("extraction_results") or {}
-    conclusion = extraction_results.get("conclusion") or {}
-    stored = conclusion.get("evidence_strength") or {}
-
-    if stored:
+    score = doc.get("evidence_score")
+    if score is not None:
         return {
-            "stars": stored.get("stars"),
-            "justification": stored.get("justification", ""),
-            "sample_size": get_document_sample_size(doc),
+            "score": score,
+            "justification": doc.get("evidence_justification") or "",
+            "sample_size": doc.get("evidence_sample_size"),
         }
-
-    result = calculate_document_evidence_score(doc)
+    calculated = calculate_document_evidence_score(doc)
     return {
-        "stars": result["score"],
-        "justification": result.get("justification", ""),
-        "sample_size": result.get("sample_size"),
+        "score": calculated["score"],
+        "justification": calculated["justification"],
+        "sample_size": calculated["sample_size"],
+    }
+
+
+def get_or_calculate_document_evidence(doc: dict) -> DocumentEvidenceSummaryResult:
+    """Get document evidence in star format with DB-first fallback.
+
+    Args:
+        doc: Document dictionary that may include persisted evidence fields.
+
+    Returns:
+        Evidence payload with star rating, justification text, and sample size.
+    """
+    details = get_document_evidence_details(doc)
+    score = details.get("score")
+    stars = int(score) if isinstance(score, (int, float)) else 0
+    return {
+        "stars": stars,
+        "justification": details.get("justification") or "",
+        "sample_size": details.get("sample_size"),
     }
 
 
