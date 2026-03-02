@@ -25,7 +25,7 @@ class RetrievedChunk(BaseModel):
     chunk_id: str = Field(..., description="Unique chunk identifier")
     document_id: str = Field(..., description="analysis_documents.id UUID")
     content: str = Field(..., description="Chunk text content")
-    chunk_type: str = Field("content", description="summary | abstract | content")
+    chunk_type: str = Field("content", description="abstract | content")
     similarity: float = Field(0.0, description="Cosine similarity score")
     doc_title: Optional[str] = Field(None, description="Document title")
     author_short: Optional[str] = Field(None, description="Author surname")

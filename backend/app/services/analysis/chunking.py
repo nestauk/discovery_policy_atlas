@@ -95,7 +95,7 @@ class TextChunker:
 
         Args:
             text: The text to chunk
-            chunk_type: Type of content being chunked ("content", "abstract", "summary")
+            chunk_type: Type of content being chunked ("content", "abstract")
 
         Returns:
             List of TextChunk objects
@@ -194,7 +194,6 @@ def chunk_document_text(
     Chunk a document into multiple types for optimal RAG performance.
 
     Creates:
-    - Summary chunk: title + top_line + relevance (for quick overview)
     - Abstract chunk: just the abstract (for focused abstract search)
     - Content chunks: overlapping full text chunks (for detailed content)
 
@@ -205,31 +204,7 @@ def chunk_document_text(
     chunks = []
     chunk_index = 0
 
-    # 1. Summary chunk (title + key findings)
-    if title or top_line or relevance_reason:
-        summary_parts = []
-        if title:
-            summary_parts.append(f"Title: {title}")
-        if top_line:
-            summary_parts.append(f"Key Finding: {top_line}")
-        if relevance_reason:
-            summary_parts.append(f"Relevance: {relevance_reason}")
-
-        if summary_parts:
-            content = "\n\n".join(summary_parts)
-            chunks.append(
-                TextChunk(
-                    content=content,
-                    chunk_index=chunk_index,
-                    chunk_type="summary",
-                    start_char=0,
-                    end_char=len(content),
-                    token_count=chunker.estimate_tokens(content),
-                )
-            )
-            chunk_index += 1
-
-    # 2. Abstract chunk (separate for focused abstract search)
+    # 1. Abstract chunk (separate for focused abstract search)
     if abstract and abstract.strip():
         chunks.append(
             TextChunk(
@@ -243,7 +218,7 @@ def chunk_document_text(
         )
         chunk_index += 1
 
-    # 3. Full text chunks (if available and not abstract-only mode)
+    # 2. Full text chunks (if available and not abstract-only mode)
     if full_text and not use_abstracts_only and len(full_text.strip()) > 500:
         content_chunks = chunker.chunk_text(full_text, chunk_type="content")
         # Update chunk indices to continue from where we left off
