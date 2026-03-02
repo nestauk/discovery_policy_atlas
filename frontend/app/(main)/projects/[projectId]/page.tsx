@@ -53,6 +53,7 @@ interface AnalysisDocument {
   title: string
   source: string
   authors?: string[]
+  author_institutions?: string[]
   year?: number
   abstract_or_summary?: string
   is_relevant?: boolean
@@ -810,6 +811,9 @@ export default function ProjectResultsPage() {
         publication_year: Number(doc.year || 0),
         cited_by_count: Number(doc.cited_by_count || 0),
         authors: Array.isArray(doc.authors) ? doc.authors : ['Unknown'],
+        author_institutions: Array.isArray(doc.author_institutions)
+          ? doc.author_institutions
+          : [],
         is_relevant: isRelevant,
         is_evidence: isEvidence,
         is_relevant_evidence: isRelevantEvidence,

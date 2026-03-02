@@ -23,6 +23,7 @@ export interface SearchParams {
     doi: string
     abstract?: string
     authors: string[]
+    author_institutions?: string[]
     venue?: string
     is_relevant: boolean
     relevance_reason?: string
@@ -173,12 +174,26 @@ export interface CausalityDetail {
     doc_id?: string
     analysis_document_id: string
     author_short?: string
+    author_display?: string | null
+    authors?: string[] | null
     year?: number
     title?: string
+    top_line?: string
     url?: string
+    venue?: string
+    country?: string
+    source_type?: string
+    evidence_category?: string
+    evidence_category_reasoning?: string
+    evidence_strength_justification?: string
+    author_institutions?: string[]
     document_type?: string
     evidence_score?: number
     impact_score?: number
+    impact_score_label?: string
+    impact_score_breakdown?: Record<string, unknown>
+    transferability_score?: number
+    transferability_breakdown?: Record<string, unknown>
     supporting_quote?: string
     chunk_id?: string
     claim_quotes?: ClaimQuote[]
@@ -260,14 +275,6 @@ export interface CausalityDetail {
     citation_numbers: number[]
   }
 
-  export interface TopCitationItem {
-    citation_number: number
-    title: string
-    author_year: string
-    reason: string
-    url?: string
-  }
-
   export interface BackgroundSection {
     title: string
     paragraphs: string[]
@@ -296,7 +303,6 @@ export interface SynthesisSection {
     interventions_table: InterventionTableRow[]
   synthesis_sections?: SynthesisSection[]
     recommendations: RecommendationItem[]
-    top_citations: TopCitationItem[]
     follow_up_suggestions: string[]
   }
 

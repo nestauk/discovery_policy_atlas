@@ -35,6 +35,7 @@
     "fuzzball": "^2.2.3",
     "lucide-react": "^0.511.0",
     "next": "^15.5.9",
+    "posthog-js": "^1.321.0",
     "react": "^19.0.0",
     "react-chartjs-2": "^5.2.0",
     "react-dom": "^19.0.0",

@@ -64,6 +64,7 @@ export interface AnalysisDocument {
   year?: number
   doi?: string
   authors?: string[]
+  author_institutions?: string[]
   landing_page_url?: string
   pdf_url?: string
   is_oa?: boolean

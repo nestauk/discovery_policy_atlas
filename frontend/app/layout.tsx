@@ -24,8 +24,8 @@ export default function RootLayout({
       </head>
       <body className={inter.className}>
         <ClerkProvider>
-          <ConditionalHeader />
-          {children}
+            <ConditionalHeader />
+            {children}
         </ClerkProvider>
       </body>
     </html>

@@ -66,16 +66,19 @@ interface ChartData {
   documents_by_year: Array<{ year: number; count: number }>
   documents_by_country: Array<{ country: string; count: number }>
   documents_by_author: Array<{ author: string; count: number }>
+  documents_by_institution?: Array<{ institution: string; count: number }>
   documents_by_evidence_category?: Array<{ category: string; count: number }>
 }
 
 export function ProjectCharts({ projectId, projectTitle, isPublic = false }: ProjectChartsProps) {
+  type ContributorMode = 'authors' | 'institutions'
   const [chartData, setChartData] = useState<ChartData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showTimelineData, setShowTimelineData] = useState(false)
   const [showCountriesData, setShowCountriesData] = useState(false)
   const [showAuthorsData, setShowAuthorsData] = useState(false)
+  const [contributorsMode, setContributorsMode] = useState<ContributorMode>('institutions')
   const [showEvidenceData, setShowEvidenceData] = useState(false)
   const { fetchWithAuth } = useAPI()
   const { getCached, setCache } = useProjectDataCache()
@@ -354,10 +357,18 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
     document.body.removeChild(link)
   }
 
-  const exportAuthorsData = () => {
-    const csvData = ['Author,Documents']
-    chartData.documents_by_author.forEach(item => {
-      csvData.push(`"${item.author}",${item.count}`)
+  const exportContributorsData = () => {
+    const usingInstitutions = contributorsMode === 'institutions'
+    const rows = usingInstitutions
+      ? (chartData.documents_by_institution || [])
+      : chartData.documents_by_author
+    const label = usingInstitutions ? 'Institution' : 'Author'
+    const csvData = [`${label},Documents`]
+    rows.forEach((item) => {
+      const key = usingInstitutions
+        ? (item as { institution: string }).institution
+        : (item as { author: string }).author
+      csvData.push(`"${key}",${item.count}`)
     })
 
     const csvContent = csvData.join('\n')
@@ -365,7 +376,10 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
     const link = document.createElement('a')
     const url = URL.createObjectURL(blob)
     link.setAttribute('href', url)
-    link.setAttribute('download', createFilename('authors_data'))
+    link.setAttribute(
+      'download',
+      createFilename(usingInstitutions ? 'institutions_data' : 'authors_data')
+    )
     link.style.visibility = 'hidden'
     document.body.appendChild(link)
     link.click()
@@ -419,12 +433,24 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
     ],
   }
 
-  const authorChartData = {
-    labels: chartData.documents_by_author.map((d) => d.author) as string[],
+  const contributorRows =
+    contributorsMode === 'institutions'
+      ? (chartData.documents_by_institution || [])
+      : chartData.documents_by_author
+  const contributorLabels = contributorRows.map((d) =>
+    contributorsMode === 'institutions'
+      ? (d as { institution: string }).institution
+      : (d as { author: string }).author
+  )
+  const contributorChartData = {
+    labels: contributorLabels as string[],
     datasets: [
       {
-        label: 'Documents per Author',
-        data: chartData.documents_by_author.map((d) => d.count) as number[],
+        label:
+          contributorsMode === 'institutions'
+            ? 'Documents per Institution'
+            : 'Documents per Author',
+        data: contributorRows.map((d) => d.count) as number[],
         backgroundColor: withAlpha(PALETTE.yellow, 0.85),
         borderColor: PALETTE.yellow,
         borderWidth: 1,
@@ -629,16 +655,47 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
           </Card>
         )}
 
-        {chartData.documents_by_author.length > 0 && (
+        {((chartData.documents_by_institution || []).length > 0 || chartData.documents_by_author.length > 0) && (
           <Card>
             <CardHeader>
-              <CardTitle>
-                Top {chartData.documents_by_author.length} {chartData.documents_by_author.length === 1 ? 'author' : 'authors'}
-              </CardTitle>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>
+                  Top {contributorRows.length}{' '}
+                  {contributorsMode === 'institutions'
+                    ? contributorRows.length === 1
+                      ? 'institution'
+                      : 'institutions'
+                    : contributorRows.length === 1
+                      ? 'author'
+                      : 'authors'}
+                </CardTitle>
+                <div className="inline-flex rounded-md border border-slate-200 p-0.5">
+                  <button
+                    onClick={() => setContributorsMode('institutions')}
+                    className={`rounded px-2 py-1 text-xs ${
+                      contributorsMode === 'institutions'
+                        ? 'bg-slate-100 text-slate-900'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Institutions
+                  </button>
+                  <button
+                    onClick={() => setContributorsMode('authors')}
+                    className={`rounded px-2 py-1 text-xs ${
+                      contributorsMode === 'authors'
+                        ? 'bg-slate-100 text-slate-900'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    Authors
+                  </button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="h-80">
-                <Bar data={authorChartData} options={createHorizontalChartOptions(chartData.documents_by_author.map(d => d.author))} />
+                <Bar data={contributorChartData} options={createHorizontalChartOptions(contributorLabels)} />
               </div>
               
               {/* Collapsible data section */}
@@ -652,7 +709,7 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
                     View data
                   </button>
                   <button
-                    onClick={exportAuthorsData}
+                    onClick={exportContributorsData}
                     className="flex items-center gap-1 px-2 py-1 text-xs text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded transition-colors"
                   >
                     <Download className="h-3 w-3" />
@@ -662,12 +719,17 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
                 
                 {showAuthorsData && (
                   <div className="mt-3 grid gap-1 text-xs">
-                    {chartData.documents_by_author.map((item) => (
-                      <div key={item.author} className="flex justify-between items-center py-1 hover:bg-slate-50 px-2 -mx-2 rounded">
-                        <span className="select-text font-mono text-slate-700">{item.author}</span>
+                    {contributorRows.map((item) => {
+                      const label = contributorsMode === 'institutions'
+                        ? (item as { institution: string }).institution
+                        : (item as { author: string }).author
+                      return (
+                      <div key={label} className="flex justify-between items-center py-1 hover:bg-slate-50 px-2 -mx-2 rounded">
+                        <span className="select-text font-mono text-slate-700">{label}</span>
                         <span className="text-slate-400">{item.count}</span>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </div>

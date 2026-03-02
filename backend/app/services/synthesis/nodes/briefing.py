@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import logging
 import re
-from collections import Counter
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 from pydantic import BaseModel, Field
 
-from app.services.synthesis.state import SynthesisState, ScoredContext
+from app.services.synthesis.state import SynthesisState
 from app.services.synthesis.schemas import (
     StructuredBriefing,
     BackgroundSection,
@@ -24,7 +24,6 @@ from app.services.synthesis.schemas import (
     CitationInfo,
     ClaimQuote,
     EvidenceSnapshotRow,
-    TopCitationItem,
 )
 from app.services.synthesis.nodes.briefing_utils import (
     parse_intervention_table,
@@ -185,9 +184,33 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     limits = {
         "max_interventions": min(8, max(4, num_docs // 4 or 4)),
         "max_recommendations": min(5, max(3, num_docs // 10 or 3)),
-        "max_top_citations": min(10, max(6, (num_docs // 2) or 6)),
         "max_synthesis_sections": 2,
     }
+
+    # Sub-stage timing + Langfuse span helper
+    project_id = state.get("project_id")
+
+    from langfuse import Langfuse
+
+    _langfuse = Langfuse()
+
+    def _persist_substage(
+        stage_name: str,
+        duration: float,
+        metadata: Dict[str, Any] | None = None,
+    ) -> None:
+        if not project_id:
+            return
+        try:
+            from app.services.timing import persist_timing
+
+            persist_timing(
+                project_id, "synthesis", stage_name, duration, metadata=metadata
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist briefing sub-stage timing %s: %s", stage_name, exc
+            )
 
     # Track results
     section_outputs: Dict[str, SectionOutput] = {}
@@ -285,8 +308,26 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
                 tool_calls_made=0,
             )
 
+    def _section_meta(key: str) -> Dict[str, Any] | None:
+        """Extract metadata from a section output for timing persistence."""
+        out = section_outputs.get(key)
+        if not out:
+            return None
+        return {
+            "tool_calls": out.tool_calls_made,
+            "citations_used": len(out.citations_used),
+            "verification_passed": out.verification_passed,
+        }
+
     # Background
-    await _run_section("background")
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/background", metadata={"project_id": project_id}
+    ):
+        await _run_section("background")
+    _persist_substage(
+        "briefing/background", time.time() - t0, metadata=_section_meta("background")
+    )
 
     # Interventions with dynamic limits and tool guidance
     inter_extra = (
@@ -294,26 +335,50 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         "Use get_intervention_outcomes for effect sizes; get_top_studies for concrete key-study implementation examples; "
         "and get_intervention_details for delivery features and subgroups."
     )
-    await _run_section("interventions", additional_extra=f" {inter_extra}")
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/interventions", metadata={"project_id": project_id}
+    ):
+        await _run_section("interventions", additional_extra=f" {inter_extra}")
+    _persist_substage(
+        "briefing/interventions",
+        time.time() - t0,
+        metadata=_section_meta("interventions"),
+    )
 
     # Decide and generate synthesis sections (always propose up to 2)
-    proposals = await _decide_synthesis_sections(
-        orchestrator=orchestrator,
-        research_question=research_question,
-        max_sections=limits["max_synthesis_sections"],
-        num_sources=num_docs,
-    )
-    for idx, proposal in enumerate(proposals[: limits["max_synthesis_sections"]]):
-        synth_output = await _generate_synthesis_section(
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/synthesis_proposal", metadata={"project_id": project_id}
+    ):
+        proposals = await _decide_synthesis_sections(
             orchestrator=orchestrator,
-            proposal=proposal,
             research_question=research_question,
-            section_index=idx + 1,
-            max_retries=config.max_verification_retries,
-            prior_sections_summary=_current_prior_sections_summary(),
+            max_sections=limits["max_synthesis_sections"],
+            num_sources=num_docs,
         )
+    _persist_substage(
+        "briefing/synthesis_proposal",
+        time.time() - t0,
+        metadata={"proposals": len(proposals)},
+    )
+
+    for idx, proposal in enumerate(proposals[: limits["max_synthesis_sections"]]):
+        stage_name = f"briefing/synthesis_{idx + 1}"
+        section_key = f"synthesis_{idx + 1}"
+        t0 = time.time()
+        with _langfuse.start_as_current_span(
+            name=stage_name, metadata={"project_id": project_id}
+        ):
+            synth_output = await _generate_synthesis_section(
+                orchestrator=orchestrator,
+                proposal=proposal,
+                research_question=research_question,
+                section_index=idx + 1,
+                max_retries=config.max_verification_retries,
+            )
         synthesis_outputs.append((proposal.section_title, synth_output))
-        section_outputs[f"synthesis_{idx+1}"] = synth_output
+        section_outputs[section_key] = synth_output
         total_tool_calls += synth_output.tool_calls_made
         running_section_context.append(
             _summarise_section_for_context(
@@ -322,17 +387,38 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
             )
         )
         if not synth_output.verification_passed:
-            verification_failures.append(f"synthesis_{idx+1}")
+            verification_failures.append(section_key)
+        _persist_substage(
+            stage_name, time.time() - t0, metadata=_section_meta(section_key)
+        )
 
     # Core Findings
-    await _run_section("core_answer")
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/core_answer", metadata={"project_id": project_id}
+    ):
+        await _run_section("core_answer")
+    _persist_substage(
+        "briefing/core_answer",
+        time.time() - t0,
+        metadata=_section_meta("core_answer"),
+    )
 
     # Recommendations with adaptive count
     rec_extra = (
         f"Provide {limits['max_recommendations']} concise recommendations unless evidence is sparse. "
         "Each must include [N] citations."
     )
-    await _run_section("recommendations", additional_extra=f" {rec_extra}")
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/recommendations", metadata={"project_id": project_id}
+    ):
+        await _run_section("recommendations", additional_extra=f" {rec_extra}")
+    _persist_substage(
+        "briefing/recommendations",
+        time.time() - t0,
+        metadata=_section_meta("recommendations"),
+    )
 
     # Enforce strict citation token style so downstream quote/detail features can
     # always resolve citations reliably.
@@ -357,18 +443,20 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     )
 
     # Build structured briefing from sections
-    structured_briefing = await _build_structured_briefing(
-        section_outputs,
-        grounded_citations,
-        state.get("aggregated_interventions") or [],
-        research_question,
-        state.get("doc_scores") or {},
-        state.get("all_scored_contexts") or [],
-        state.get("doc_citation_map") or {},
-        state.get("doc_metadata") or {},
-        synthesis_outputs,
-        limits,
-    )
+    t0 = time.time()
+    with _langfuse.start_as_current_span(
+        name="briefing/build_structured", metadata={"project_id": project_id}
+    ):
+        structured_briefing = await _build_structured_briefing(
+            section_outputs,
+            grounded_citations,
+            state.get("aggregated_interventions") or [],
+            research_question,
+            state.get("doc_citation_map") or {},
+            synthesis_outputs,
+            limits,
+        )
+    _persist_substage("briefing/build_structured", time.time() - t0)
 
     # Collect all citations used
     all_citations_used = set()
@@ -628,10 +716,7 @@ async def _build_structured_briefing(
     grounded_citations: List[CitationInfo],
     interventions: List,
     research_question: str,
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
     doc_citation_map: Dict[str, int],
-    doc_metadata: Dict[str, Dict[str, Any]],
     synthesis_outputs: List[Tuple[str, SectionOutput]],
     limits: Dict[str, int],
 ) -> StructuredBriefing:
@@ -642,8 +727,6 @@ async def _build_structured_briefing(
         grounded_citations: Available citations.
         interventions: Aggregated interventions for table.
         research_question: The original research question.
-        doc_scores: Document quality scores for citation ranking.
-        all_scored_contexts: RCS-scored contexts for citation ranking.
         doc_citation_map: Document UUID to citation number mapping.
 
     Returns:
@@ -726,17 +809,6 @@ async def _build_structured_briefing(
     # Parse synthesis sections (if any)
     synthesis_sections = parse_synthesis_sections(synthesis_outputs)
 
-    # Build top citations (use precomputed document top_line, no LLM reason generation)
-    top_citations = await _build_top_citations_async(
-        grounded_citations,
-        section_outputs,
-        doc_scores,
-        all_scored_contexts,
-        doc_citation_map,
-        doc_metadata,
-        max_citations=limits.get("max_top_citations", 8),
-    )
-
     # Build evidence snapshot summary
     evidence_snapshot = [
         EvidenceSnapshotRow(
@@ -752,7 +824,6 @@ async def _build_structured_briefing(
         interventions_table=intervention_rows,
         synthesis_sections=synthesis_sections,
         recommendations=recommendation_items,
-        top_citations=top_citations,
         follow_up_suggestions=[],
     )
 
@@ -849,143 +920,3 @@ Guidance:
         max_retries=max_retries,
         prior_sections_summary=prior_sections_summary,
     )
-
-
-# =============================================================================
-# TOP CITATIONS SELECTION (uses analysis_documents.top_line; no LLM reason generation)
-# =============================================================================
-
-
-def _rank_citations(
-    grounded_citations: List[CitationInfo],
-    section_outputs: Dict[str, SectionOutput],
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
-    doc_citation_map: Dict[str, int],
-) -> List[Tuple[CitationInfo, float]]:
-    """Rank citations by importance using multiple signals.
-
-    Combines:
-    - Usage frequency across briefing sections
-    - Document quality scores (evidence strength, predicted impact)
-    - Average relevance scores from RCS
-
-    Args:
-        grounded_citations: All available citations.
-        section_outputs: Outputs from each briefing section.
-        doc_scores: Document quality scores.
-        all_scored_contexts: RCS-scored contexts.
-        doc_citation_map: Document UUID to citation number mapping.
-
-    Returns:
-        List of (citation, score) tuples sorted by importance.
-    """
-    # Count usage across sections
-    usage_counts: Counter = Counter()
-    for output in section_outputs.values():
-        for cit_num in output.citations_used:
-            usage_counts[cit_num] += 1
-
-    # Build reverse mapping: citation_number -> doc_uuid
-    cit_to_doc = {v: k for k, v in doc_citation_map.items()}
-
-    # Calculate relevance scores by document
-    doc_relevance: Dict[str, List[float]] = {}
-    for ctx in all_scored_contexts:
-        if ctx.document_id not in doc_relevance:
-            doc_relevance[ctx.document_id] = []
-        doc_relevance[ctx.document_id].append(ctx.relevance_score)
-
-    ranked: List[Tuple[CitationInfo, float]] = []
-
-    for cit in grounded_citations:
-        if not cit.citation_number:
-            continue
-
-        score = 0.0
-
-        # Usage frequency (0-10 points)
-        usage = usage_counts.get(cit.citation_number, 0)
-        score += min(usage * 2, 10)
-
-        # Document quality (0-10 points)
-        doc_uuid = cit_to_doc.get(cit.citation_number)
-        if doc_uuid and doc_uuid in doc_scores:
-            quality = doc_scores[doc_uuid]
-            evidence_score = quality.get("evidence_score", 0) or 0
-            impact_score = quality.get("impact_score", 0) or 0
-            score += evidence_score + impact_score  # Both are 0-5 scale
-
-        # Average relevance from RCS (0-10 points)
-        if doc_uuid and doc_uuid in doc_relevance:
-            avg_relevance = sum(doc_relevance[doc_uuid]) / len(doc_relevance[doc_uuid])
-            score += avg_relevance  # 0-10 scale
-
-        ranked.append((cit, score))
-
-    # Sort by score descending
-    ranked.sort(key=lambda x: x[1], reverse=True)
-    return ranked
-
-
-async def _build_top_citations_async(
-    grounded_citations: List[CitationInfo],
-    section_outputs: Dict[str, SectionOutput],
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
-    doc_citation_map: Dict[str, int],
-    doc_metadata: Dict[str, Dict[str, Any]],
-    max_citations: int = 8,
-) -> List[TopCitationItem]:
-    """Build top citations using precomputed document 'top_line' (no LLM reason generation).
-
-    Selects the most important citations based on usage, quality, and relevance,
-    then generates meaningful reasons explaining each source's contribution.
-
-    Args:
-        grounded_citations: All available citations.
-        section_outputs: Generated briefing sections.
-        doc_scores: Document quality scores.
-        all_scored_contexts: RCS-scored contexts.
-        doc_citation_map: Document UUID to citation number mapping.
-        doc_metadata: Document metadata keyed by doc_uuid (should include 'top_line').
-        max_citations: Maximum citations to include.
-
-    Returns:
-        List of TopCitationItem with contextual reasons.
-    """
-    # Rank citations by importance
-    ranked = _rank_citations(
-        grounded_citations,
-        section_outputs,
-        doc_scores,
-        all_scored_contexts,
-        doc_citation_map,
-    )
-
-    # Build reverse mapping: citation_number -> doc_uuid
-    cit_to_doc = {v: k for k, v in doc_citation_map.items()}
-
-    # Select top citations
-    top_citations_data = [cit for cit, _ in ranked[:max_citations]]
-
-    # Build final citation items
-    top_citations = []
-    for cit in top_citations_data:
-        doc_uuid = cit_to_doc.get(cit.citation_number) if cit.citation_number else None
-        reason = ""
-        if doc_uuid:
-            reason = (doc_metadata.get(doc_uuid, {}) or {}).get("top_line") or ""
-        reason = reason.strip()
-
-        top_citations.append(
-            TopCitationItem(
-                citation_number=cit.citation_number,
-                title=cit.title or "Untitled",
-                author_year=f"{cit.author_short or 'Unknown'}, {cit.year or 'n.d.'}",
-                reason=reason,
-                url=cit.url,
-            )
-        )
-
-    return top_citations

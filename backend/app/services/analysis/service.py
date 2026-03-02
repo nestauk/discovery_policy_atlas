@@ -336,6 +336,52 @@ class AnalysisService:
         monitor.log_snapshot("Pipeline complete")
         monitor.log_summary()
 
+        # Persist stage timings to pipeline_timings table
+        if project_id:
+            try:
+                from app.services.timing import persist_timings_batch
+
+                summary = monitor.get_summary()
+                metrics = summary.get("custom_metrics", {})
+
+                # Map stage durations to document counts where available
+                doc_count_map = {
+                    "references": metrics.get("total_references"),
+                    "relevance": metrics.get("relevant_references"),
+                    "evidence_categorisation": metrics.get("relevant_references"),
+                    "acquisition": metrics.get("acquired_count"),
+                    "parsing": metrics.get("parsed_count"),
+                    "extraction": metrics.get("relevant_references"),
+                    "storage": None,
+                }
+
+                rows = []
+                for key, value in metrics.items():
+                    if key.endswith("_duration_seconds"):
+                        stage = key.removesuffix("_duration_seconds")
+                        rows.append(
+                            {
+                                "stage_name": stage,
+                                "duration_seconds": value,
+                                "document_count": doc_count_map.get(stage),
+                            }
+                        )
+
+                # Add a _total row from the summary
+                total_time = summary.get("total_time_seconds")
+                if total_time is not None:
+                    rows.append(
+                        {
+                            "stage_name": "_total",
+                            "duration_seconds": total_time,
+                            "document_count": metrics.get("total_references"),
+                        }
+                    )
+
+                persist_timings_batch(project_id, "analysis", rows)
+            except Exception as e:
+                logger.warning("Failed to persist analysis timings: %s", e)
+
         return result
 
     def _update_acquisition_status(
@@ -460,10 +506,12 @@ class AnalysisService:
                 "year": self._safe_int(row.get("year")),
                 "doi": self._safe_str(row.get("doi")),
                 "authors": self._parse_authors(row.get("authors")),
+                "author_institutions": self._parse_list(row.get("author_institutions")),
                 "landing_page_url": self._safe_str(row.get("landing_page_url")),
                 "pdf_url": self._safe_str(row.get("pdf_url")),
                 "is_oa": self._safe_bool(row.get("is_oa")),
                 "type": self._safe_str(row.get("type")),
+                "venue": self._safe_str(row.get("venue")),
                 "author_institution_countries": self._parse_list(
                     row.get("author_institution_countries")
                 ),
@@ -597,6 +645,17 @@ class AnalysisService:
             if isinstance(parsed, list):
                 return [str(item) for item in parsed]
         except (json.JSONDecodeError, ValueError):
+            pass
+
+        try:
+            import ast
+
+            parsed = ast.literal_eval(str(value))
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed]
+            elif isinstance(parsed, str):
+                return [parsed]
+        except (ValueError, SyntaxError):
             pass
 
         return [item.strip() for item in str(value).split(",") if item.strip()]

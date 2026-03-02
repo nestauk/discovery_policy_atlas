@@ -104,6 +104,17 @@ class OvertonService:
                 content_parts.append(doc["llm_document_description"])
             content = " ".join(content_parts)
 
+            # Extract explicit source organisation metadata
+            source_meta = doc.get("source") or {}
+            source_title = (
+                source_meta.get("title", "") if isinstance(source_meta, dict) else ""
+            )
+            author_institutions = (
+                [source_title.strip()]
+                if isinstance(source_title, str) and source_title.strip()
+                else []
+            )
+
             # URLs and identifiers
             overton_url = doc.get("overton_url", "")
             document_url = doc.get("document_url", "")  # may be a PDF or a landing page
@@ -138,17 +149,22 @@ class OvertonService:
                 if content
                 else "No content available",  # Limit to 1000 chars
                 "authors": authors,
+                "author_institutions": author_institutions,
                 "publication_date": doc.get("published_on", ""),
                 "publication_year": int(doc.get("published_on", "").split("-")[0])
                 if doc.get("published_on")
                 and doc.get("published_on").split("-")[0].isdigit()
                 else None,
-                "venue": doc.get("source", {}).get("title", ""),
+                "venue": source_title,
                 "doi": doi_value or "",
                 "cited_by_count": doc.get("citation_count", 0),
                 "topics": topics_list,
-                "source_country": doc.get("source", {}).get("country", ""),
-                "source_type": doc.get("source", {}).get("type", ""),
+                "source_country": source_meta.get("country", "")
+                if isinstance(source_meta, dict)
+                else "",
+                "source_type": source_meta.get("type", "")
+                if isinstance(source_meta, dict)
+                else "",
                 "published_on": doc.get("published_on", ""),
                 "overton_url": overton_url,
                 "document_url": document_url,
@@ -172,6 +188,10 @@ class OvertonService:
             df["content"] = df["content"].fillna("No content available")
         if "authors" in df.columns:
             df["authors"] = df["authors"].apply(
+                lambda x: x if isinstance(x, list) else []
+            )
+        if "author_institutions" in df.columns:
+            df["author_institutions"] = df["author_institutions"].apply(
                 lambda x: x if isinstance(x, list) else []
             )
 
