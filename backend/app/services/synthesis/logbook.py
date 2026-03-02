@@ -33,6 +33,13 @@ from app.services.synthesis.nodes.impact_synthesis import (
     _normalise_unit_key,
 )
 from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
+from app.services.synthesis.utils import (
+    extract_author_display,
+    extract_author_list,
+    extract_string_list,
+    infer_source_value,
+    normalize_source_type,
+)
 from supabase import create_client
 
 logger = logging.getLogger(__name__)
@@ -291,7 +298,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         docs_meta_res = (
             supabase.table("analysis_documents")
             .select(
-                "id, document_type, evidence_category, extraction_results, impact_score"
+                "id, source, document_type, evidence_category, evidence_category_reasoning, evidence_justification, extraction_results, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, top_line, venue, source_country, source_type, author_institutions, authors"
             )
             .in_("id", doc_ids)
             .execute()
@@ -310,7 +317,27 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         stars = evidence_info.get("stars")
         cit.evidence_score = int(stars) if isinstance(stars, (int, float)) else None
         cit.impact_score = doc_meta.get("impact_score")
+        cit.impact_score_label = doc_meta.get("impact_score_label")
+        cit.impact_score_breakdown = doc_meta.get("impact_score_breakdown")
+        cit.transferability_score = doc_meta.get("transferability_score")
+        cit.transferability_breakdown = doc_meta.get("transferability_breakdown")
         cit.document_type = doc_meta.get("document_type")
+        cit.evidence_category = doc_meta.get("evidence_category")
+        cit.evidence_category_reasoning = doc_meta.get("evidence_category_reasoning")
+        cit.evidence_strength_justification = doc_meta.get("evidence_justification")
+        cit.venue = doc_meta.get("venue")
+        cit.country = doc_meta.get("source_country")
+        source_value = infer_source_value(doc_meta.get("source"), cit.doc_id)
+        cit.source_type = normalize_source_type(
+            source_value, str(doc_meta.get("document_type") or "")
+        )
+        raw_authors = doc_meta.get("authors")
+        cit.authors = extract_author_list(raw_authors)
+        cit.author_display = extract_author_display(raw_authors)
+        cit.author_institutions = extract_string_list(
+            doc_meta.get("author_institutions")
+        )
+        cit.top_line = doc_meta.get("top_line")
 
     # Parse evidence coverage
     evidence_coverage: Optional[EvidenceCoverageSnapshot] = None

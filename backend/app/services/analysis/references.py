@@ -676,8 +676,10 @@ class ReferencesService:
                     "title",
                     "abstract_or_summary",
                     "year",
+                    "venue",
                     "doi",
                     "authors",
+                    "author_institutions",
                     "landing_page_url",
                     "pdf_url",
                     "is_oa",
@@ -702,6 +704,7 @@ class ReferencesService:
                     source_id_col = "id"
                     doi_col = "doi"
                     year_col = "publication_year"
+                    venue_col = "venue"
                     title_col = "title"
                     abs_col = "abstract"
                     landing_col = "landing_page_url"
@@ -714,6 +717,7 @@ class ReferencesService:
                     source_id_col = "id"
                     doi_col = "doi"
                     year_col = "publication_year"
+                    venue_col = "venue"
                     title_col = "title"
                     abs_col = "abstract"
                     landing_col = "landing_page_url"
@@ -733,8 +737,13 @@ class ReferencesService:
                             abs_col, pd.Series([None] * len(df))
                         ),
                         "year": df.get(year_col, pd.Series([None] * len(df))),
+                        "venue": df.get(venue_col, pd.Series([None] * len(df))),
                         "doi": df.get(doi_col, pd.Series([None] * len(df))),
                         "authors": df.get(authors_col, pd.Series([None] * len(df))),
+                        "author_institutions": df.get(
+                            "author_institutions",
+                            pd.Series([[] for _ in range(len(df))]),
+                        ),
                         "landing_page_url": df.get(
                             landing_col, pd.Series([None] * len(df))
                         ),
@@ -807,8 +816,10 @@ class ReferencesService:
                             "title",
                             "abstract_or_summary",
                             "year",
+                            "venue",
                             "doi",
                             "authors",
+                            "author_institutions",
                             "landing_page_url",
                             "pdf_url",
                             "is_oa",

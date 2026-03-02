@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import logging
 import re
-from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 from pydantic import BaseModel, Field
 
-from app.services.synthesis.state import SynthesisState, ScoredContext
+from app.services.synthesis.state import SynthesisState
 from app.services.synthesis.schemas import (
     StructuredBriefing,
     BackgroundSection,
@@ -24,7 +23,6 @@ from app.services.synthesis.schemas import (
     CitationInfo,
     ClaimQuote,
     EvidenceSnapshotRow,
-    TopCitationItem,
 )
 from app.services.synthesis.nodes.briefing_utils import (
     parse_intervention_table,
@@ -185,7 +183,6 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     limits = {
         "max_interventions": min(8, max(4, num_docs // 4 or 4)),
         "max_recommendations": min(5, max(3, num_docs // 10 or 3)),
-        "max_top_citations": min(10, max(6, (num_docs // 2) or 6)),
         "max_synthesis_sections": 2,
     }
 
@@ -362,10 +359,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         grounded_citations,
         state.get("aggregated_interventions") or [],
         research_question,
-        state.get("doc_scores") or {},
-        state.get("all_scored_contexts") or [],
         state.get("doc_citation_map") or {},
-        state.get("doc_metadata") or {},
         synthesis_outputs,
         limits,
     )
@@ -628,10 +622,7 @@ async def _build_structured_briefing(
     grounded_citations: List[CitationInfo],
     interventions: List,
     research_question: str,
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
     doc_citation_map: Dict[str, int],
-    doc_metadata: Dict[str, Dict[str, Any]],
     synthesis_outputs: List[Tuple[str, SectionOutput]],
     limits: Dict[str, int],
 ) -> StructuredBriefing:
@@ -642,8 +633,6 @@ async def _build_structured_briefing(
         grounded_citations: Available citations.
         interventions: Aggregated interventions for table.
         research_question: The original research question.
-        doc_scores: Document quality scores for citation ranking.
-        all_scored_contexts: RCS-scored contexts for citation ranking.
         doc_citation_map: Document UUID to citation number mapping.
 
     Returns:
@@ -726,17 +715,6 @@ async def _build_structured_briefing(
     # Parse synthesis sections (if any)
     synthesis_sections = parse_synthesis_sections(synthesis_outputs)
 
-    # Build top citations (use precomputed document top_line, no LLM reason generation)
-    top_citations = await _build_top_citations_async(
-        grounded_citations,
-        section_outputs,
-        doc_scores,
-        all_scored_contexts,
-        doc_citation_map,
-        doc_metadata,
-        max_citations=limits.get("max_top_citations", 8),
-    )
-
     # Build evidence snapshot summary
     evidence_snapshot = [
         EvidenceSnapshotRow(
@@ -752,7 +730,6 @@ async def _build_structured_briefing(
         interventions_table=intervention_rows,
         synthesis_sections=synthesis_sections,
         recommendations=recommendation_items,
-        top_citations=top_citations,
         follow_up_suggestions=[],
     )
 
@@ -849,143 +826,3 @@ Guidance:
         max_retries=max_retries,
         prior_sections_summary=prior_sections_summary,
     )
-
-
-# =============================================================================
-# TOP CITATIONS SELECTION (uses analysis_documents.top_line; no LLM reason generation)
-# =============================================================================
-
-
-def _rank_citations(
-    grounded_citations: List[CitationInfo],
-    section_outputs: Dict[str, SectionOutput],
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
-    doc_citation_map: Dict[str, int],
-) -> List[Tuple[CitationInfo, float]]:
-    """Rank citations by importance using multiple signals.
-
-    Combines:
-    - Usage frequency across briefing sections
-    - Document quality scores (evidence strength, predicted impact)
-    - Average relevance scores from RCS
-
-    Args:
-        grounded_citations: All available citations.
-        section_outputs: Outputs from each briefing section.
-        doc_scores: Document quality scores.
-        all_scored_contexts: RCS-scored contexts.
-        doc_citation_map: Document UUID to citation number mapping.
-
-    Returns:
-        List of (citation, score) tuples sorted by importance.
-    """
-    # Count usage across sections
-    usage_counts: Counter = Counter()
-    for output in section_outputs.values():
-        for cit_num in output.citations_used:
-            usage_counts[cit_num] += 1
-
-    # Build reverse mapping: citation_number -> doc_uuid
-    cit_to_doc = {v: k for k, v in doc_citation_map.items()}
-
-    # Calculate relevance scores by document
-    doc_relevance: Dict[str, List[float]] = {}
-    for ctx in all_scored_contexts:
-        if ctx.document_id not in doc_relevance:
-            doc_relevance[ctx.document_id] = []
-        doc_relevance[ctx.document_id].append(ctx.relevance_score)
-
-    ranked: List[Tuple[CitationInfo, float]] = []
-
-    for cit in grounded_citations:
-        if not cit.citation_number:
-            continue
-
-        score = 0.0
-
-        # Usage frequency (0-10 points)
-        usage = usage_counts.get(cit.citation_number, 0)
-        score += min(usage * 2, 10)
-
-        # Document quality (0-10 points)
-        doc_uuid = cit_to_doc.get(cit.citation_number)
-        if doc_uuid and doc_uuid in doc_scores:
-            quality = doc_scores[doc_uuid]
-            evidence_score = quality.get("evidence_score", 0) or 0
-            impact_score = quality.get("impact_score", 0) or 0
-            score += evidence_score + impact_score  # Both are 0-5 scale
-
-        # Average relevance from RCS (0-10 points)
-        if doc_uuid and doc_uuid in doc_relevance:
-            avg_relevance = sum(doc_relevance[doc_uuid]) / len(doc_relevance[doc_uuid])
-            score += avg_relevance  # 0-10 scale
-
-        ranked.append((cit, score))
-
-    # Sort by score descending
-    ranked.sort(key=lambda x: x[1], reverse=True)
-    return ranked
-
-
-async def _build_top_citations_async(
-    grounded_citations: List[CitationInfo],
-    section_outputs: Dict[str, SectionOutput],
-    doc_scores: Dict[str, Dict[str, Any]],
-    all_scored_contexts: List[ScoredContext],
-    doc_citation_map: Dict[str, int],
-    doc_metadata: Dict[str, Dict[str, Any]],
-    max_citations: int = 8,
-) -> List[TopCitationItem]:
-    """Build top citations using precomputed document 'top_line' (no LLM reason generation).
-
-    Selects the most important citations based on usage, quality, and relevance,
-    then generates meaningful reasons explaining each source's contribution.
-
-    Args:
-        grounded_citations: All available citations.
-        section_outputs: Generated briefing sections.
-        doc_scores: Document quality scores.
-        all_scored_contexts: RCS-scored contexts.
-        doc_citation_map: Document UUID to citation number mapping.
-        doc_metadata: Document metadata keyed by doc_uuid (should include 'top_line').
-        max_citations: Maximum citations to include.
-
-    Returns:
-        List of TopCitationItem with contextual reasons.
-    """
-    # Rank citations by importance
-    ranked = _rank_citations(
-        grounded_citations,
-        section_outputs,
-        doc_scores,
-        all_scored_contexts,
-        doc_citation_map,
-    )
-
-    # Build reverse mapping: citation_number -> doc_uuid
-    cit_to_doc = {v: k for k, v in doc_citation_map.items()}
-
-    # Select top citations
-    top_citations_data = [cit for cit, _ in ranked[:max_citations]]
-
-    # Build final citation items
-    top_citations = []
-    for cit in top_citations_data:
-        doc_uuid = cit_to_doc.get(cit.citation_number) if cit.citation_number else None
-        reason = ""
-        if doc_uuid:
-            reason = (doc_metadata.get(doc_uuid, {}) or {}).get("top_line") or ""
-        reason = reason.strip()
-
-        top_citations.append(
-            TopCitationItem(
-                citation_number=cit.citation_number,
-                title=cit.title or "Untitled",
-                author_year=f"{cit.author_short or 'Unknown'}, {cit.year or 'n.d.'}",
-                reason=reason,
-                url=cit.url,
-            )
-        )
-
-    return top_citations

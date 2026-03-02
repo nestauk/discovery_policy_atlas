@@ -7,6 +7,8 @@ and Langfuse configuration utilities.
 
 from __future__ import annotations
 
+import ast
+import json
 import re
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
@@ -122,30 +124,107 @@ def extract_author_short(authors: Any) -> Optional[str]:
     return parts[-1].strip(".,") or None
 
 
-def extract_author_display(authors: Any) -> Optional[str]:
-    """Extract first author as stored for UI display.
+def extract_author_list(authors: Any) -> Optional[List[str]]:
+    """Extract a cleaned list of author names from metadata.
 
     Args:
         authors: Authors value from metadata, typically a list of strings.
 
     Returns:
-        First author string exactly as stored (trimmed), or None when unavailable.
+        Cleaned list of author names, or None when unavailable.
     """
-    if isinstance(authors, str):
-        author_items = [authors]
-    elif isinstance(authors, list):
-        author_items = authors
-    else:
-        return None
-
+    author_items = extract_string_list(authors)
     if not author_items:
         return None
 
-    first_author = author_items[0]
-    if not isinstance(first_author, str):
+    cleaned = [
+        author.strip()
+        for author in author_items
+        if isinstance(author, str) and author.strip()
+    ]
+    return cleaned or None
+
+
+def extract_author_display(authors: Any) -> Optional[str]:
+    """Extract a compact author label for UI display.
+
+    Args:
+        authors: Authors value from metadata, typically a list of strings.
+
+    Returns:
+        First author name, with ``et al.`` appended when multiple authors exist.
+    """
+    author_items = extract_author_list(authors)
+    if not author_items:
         return None
 
-    return first_author.strip() or None
+    if len(author_items) > 1:
+        return f"{author_items[0]} et al."
+    return author_items[0]
+
+
+def infer_source_value(source: Any, doc_id: Any = None) -> str:
+    """Infer source identifier with fallback to doc_id patterns.
+
+    Args:
+        source: Raw source field from metadata.
+        doc_id: External document identifier used as fallback.
+
+    Returns:
+        Lowercase source identifier when recognised, else empty string.
+    """
+    source_value = str(source or "").strip().lower()
+    if source_value:
+        return source_value
+
+    doc_id_raw = str(doc_id or "")
+    doc_id_lower = doc_id_raw.lower()
+    if "openalex" in doc_id_lower or (
+        doc_id_raw.startswith("W") and doc_id_raw[1:].isdigit()
+    ):
+        return "openalex"
+    if "overton" in doc_id_lower:
+        return "overton"
+    return ""
+
+
+def extract_string_list(value: Any) -> Optional[List[str]]:
+    """Extract a cleaned string list from list-like metadata.
+
+    Args:
+        value: Raw value that may be a list, JSON string, or Python-list-like string.
+
+    Returns:
+        Cleaned list of non-empty strings, or ``None`` when unavailable.
+    """
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()] or None
+
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+
+    parsed: Any = None
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                parsed = ast.literal_eval(text)
+            except (ValueError, SyntaxError):
+                parsed = None
+
+    if isinstance(parsed, list):
+        return [str(item).strip() for item in parsed if str(item).strip()] or None
+
+    if isinstance(parsed, str):
+        cleaned = parsed.strip()
+        return [cleaned] if cleaned else None
+
+    return [text]
 
 
 def escape_braces(text: str) -> str:

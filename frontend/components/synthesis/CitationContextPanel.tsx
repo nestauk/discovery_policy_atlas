@@ -6,6 +6,11 @@ import * as fuzz from "fuzzball";
 import { fetchWithAuthExternal } from "@/lib/api";
 import { Tooltip } from "@/components/ui/tooltip";
 import { getEvidenceCategoryColors, getEvidenceCategoryShortName } from "@/lib/evidenceCategories";
+import {
+  getEvidenceCategoryTooltipContent,
+  getEvidenceStrengthTooltipContent,
+  getImpactScoreTooltipContent,
+} from "@/lib/documentTooltips";
 import type { CitationInfo } from "@/types/search";
 
 interface ChunkContextResponse {
@@ -18,15 +23,24 @@ interface ChunkContextResponse {
     analysis_document_id: string;
     title: string;
     author_display?: string | null;
+    authors?: string[] | null;
+    author_institutions?: string[] | null;
     author_short?: string | null;
     year?: number | null;
+    venue?: string | null;
     country?: string | null;
     url?: string | null;
     source_type?: string | null;
     document_type?: string | null;
     evidence_category?: string | null;
+    evidence_category_reasoning?: string | null;
     evidence_score?: number | null;
+    evidence_strength_justification?: string | null;
     impact_score?: number | null;
+    impact_score_label?: string | null;
+    impact_score_breakdown?: Record<string, unknown> | null;
+    transferability_score?: number | null;
+    transferability_breakdown?: Record<string, unknown> | null;
   };
 }
 
@@ -304,13 +318,45 @@ export function CitationContextPanel({
   const effectiveAuthor =
     freshData?.document.author_display || freshData?.document.author_short || citationInfo?.author_short;
   const effectiveYear = freshData?.document.year || citationInfo?.year;
+  const fullAuthors = Array.isArray(freshData?.document.authors)
+    ? freshData.document.authors.filter((author): author is string => typeof author === "string" && !!author.trim())
+    : [];
+  const fullAuthorsText = fullAuthors.join(", ");
+  const shouldShowAuthorsTooltip = !!effectiveAuthor && fullAuthors.length > 1 && !!fullAuthorsText;
+  const institutions = Array.isArray(freshData?.document.author_institutions)
+    ? freshData.document.author_institutions.filter(
+        (institution): institution is string => typeof institution === "string" && !!institution.trim()
+      )
+    : [];
+  const institutionsText = institutions.join(", ");
+  const institutionsDisplay =
+    institutions.length > 2 ? `${institutions.slice(0, 2).join(", ")} +${institutions.length - 2} more` : institutionsText;
+  const effectiveVenue = freshData?.document.venue;
+  const institutionsDuplicateVenue =
+    institutions.length > 0 &&
+    !!effectiveVenue &&
+    institutions.every((inst) => inst === effectiveVenue);
   const effectiveCountry = freshData?.document.country;
   const effectiveUrl = freshData?.document.url || citationInfo?.url;
   const effectiveSourceType =
     freshData?.document.source_type || freshData?.document.document_type || citationInfo?.document_type;
   const effectiveEvidenceCategory = freshData?.document.evidence_category;
+  const effectiveEvidenceCategoryReasoning = freshData?.document.evidence_category_reasoning;
   const evidenceScore = freshData?.document.evidence_score ?? citationInfo?.evidence_score;
+  const evidenceStrengthTooltip = getEvidenceStrengthTooltipContent(
+    freshData?.document.evidence_strength_justification
+  );
+  const evidenceCategoryTooltip = getEvidenceCategoryTooltipContent(
+    effectiveEvidenceCategory,
+    effectiveEvidenceCategoryReasoning
+  );
   const impactScore = freshData?.document.impact_score ?? citationInfo?.impact_score;
+  const impactTooltip = getImpactScoreTooltipContent({
+    impact_score_label: freshData?.document.impact_score_label,
+    impact_score_breakdown: freshData?.document.impact_score_breakdown,
+    transferability_score: freshData?.document.transferability_score,
+    transferability_breakdown: freshData?.document.transferability_breakdown,
+  });
   const quote = supportingQuote || citationInfo?.supporting_quote || "";
 
   const quoteRange = useMemo(() => {
@@ -357,8 +403,26 @@ export function CitationContextPanel({
           </button>
           <h3 className="pr-8 text-sm font-semibold text-slate-900">{effectiveTitle}</h3>
           <div className="mt-1 text-xs text-slate-600">
-            {[effectiveAuthor, effectiveYear].filter(Boolean).join(", ") || "Unknown metadata"}
+            {shouldShowAuthorsTooltip ? (
+              <Tooltip content={fullAuthorsText}>
+                <span className="cursor-help">
+                  {[effectiveAuthor, effectiveYear].filter(Boolean).join(", ")}
+                </span>
+              </Tooltip>
+            ) : (
+              <>{[effectiveAuthor, effectiveYear].filter(Boolean).join(", ") || "Unknown metadata"}</>
+            )}
           </div>
+          {institutions.length > 0 && !institutionsDuplicateVenue && (
+            <Tooltip content={institutionsText}>
+              <div className="mt-1 cursor-help text-xs text-slate-500">
+                Institutions: {institutionsDisplay}
+              </div>
+            </Tooltip>
+          )}
+          {effectiveVenue && (
+            <div className="mt-1 text-xs text-slate-500">{effectiveVenue}</div>
+          )}
           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
             {effectiveSourceType && (
               <span className="rounded bg-slate-100 px-2 py-1 font-medium text-slate-700">
@@ -366,7 +430,7 @@ export function CitationContextPanel({
               </span>
             )}
             {effectiveEvidenceCategory && (
-              <Tooltip content={effectiveEvidenceCategory}>
+              <Tooltip content={evidenceCategoryTooltip}>
                 <span
                   className="inline-block cursor-help whitespace-normal rounded px-2 py-1 text-xs font-medium leading-tight"
                   style={{
@@ -378,15 +442,17 @@ export function CitationContextPanel({
                 </span>
               </Tooltip>
             )}
-            <div className="text-slate-500">
-              Evidence: <span className="font-medium text-slate-700">{formatOutOfFive(evidenceScore)}</span>
-            </div>
-            <div className="text-slate-500">
-              Impact:{" "}
-              <span className="font-medium text-slate-700">
-                {formatOutOfFive(impactScore)}
-              </span>
-            </div>
+            <Tooltip content={evidenceStrengthTooltip}>
+              <div className="cursor-help text-slate-500">
+                Evidence:{" "}
+                <span className="font-medium text-slate-700">{formatOutOfFive(evidenceScore)}</span>
+              </div>
+            </Tooltip>
+            <Tooltip content={impactTooltip}>
+              <div className="cursor-help text-slate-500">
+                Impact: <span className="font-medium text-slate-700">{formatOutOfFive(impactScore)}</span>
+              </div>
+            </Tooltip>
             {effectiveCountry && (
               <div className="text-slate-500">
                 Country: <span className="font-medium text-slate-700">{effectiveCountry}</span>

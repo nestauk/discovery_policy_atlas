@@ -137,6 +137,7 @@ class OpenAlexService:
                 # Extract authors with proper null checks
                 authors = []
                 author_institution_countries = set()
+                author_institutions = set()
                 if page.get("authorships"):
                     for authorship in page["authorships"]:
                         if authorship and isinstance(authorship, dict):
@@ -150,6 +151,11 @@ class OpenAlexService:
                             if isinstance(institutions, list):
                                 for inst in institutions:
                                     if isinstance(inst, dict):
+                                        inst_name = inst.get("display_name")
+                                        if inst_name and isinstance(inst_name, str):
+                                            clean_name = inst_name.strip()
+                                            if clean_name:
+                                                author_institutions.add(clean_name)
                                         cc = inst.get("country_code")
                                         if cc:
                                             author_institution_countries.add(cc)
@@ -223,6 +229,9 @@ class OpenAlexService:
                     "landing_page_url": landing_page_url,
                     "pdf_url": pdf_url,
                     "is_oa": is_oa,
+                    "author_institutions": sorted(author_institutions)
+                    if author_institutions
+                    else [],
                     "author_institution_countries": sorted(author_institution_countries)
                     if author_institution_countries
                     else [],
@@ -249,6 +258,9 @@ class OpenAlexService:
         df["doi"] = df["doi"].fillna("")
         df["authors"] = df["authors"].apply(
             lambda x: x if isinstance(x, list) and len(x) > 0 else ["Unknown"]
+        )
+        df["author_institutions"] = df["author_institutions"].apply(
+            lambda x: x if isinstance(x, list) else []
         )
         df["publication_date"] = df["publication_date"].fillna("")
         # Handle publication_year properly - convert NaN to None for missing years
