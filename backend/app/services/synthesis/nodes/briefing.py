@@ -843,7 +843,7 @@ async def _decide_synthesis_sections(
     """Use the orchestrator LLM to propose synthesis sections."""
     prompt = f"""You are designing synthesis sections for an executive policy briefing.
 
-Research question: {research_question or "Not provided"}
+Research question: {research_question or 'Not provided'}
 Evidence base: {num_sources} cited sources
 
 Always propose 1-2 sections to include between the interventions table and recommendations.
