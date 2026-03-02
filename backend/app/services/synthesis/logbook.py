@@ -36,6 +36,8 @@ from app.services.analysis.evidence.strength import get_or_calculate_document_ev
 from app.services.synthesis.utils import (
     extract_author_display,
     extract_author_list,
+    extract_string_list,
+    infer_source_value,
     normalize_source_type,
 )
 from supabase import create_client
@@ -325,35 +327,16 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         cit.evidence_strength_justification = doc_meta.get("evidence_justification")
         cit.venue = doc_meta.get("venue")
         cit.country = doc_meta.get("source_country")
-        source_value = str(doc_meta.get("source") or "").strip()
-        if not source_value:
-            doc_id_raw = str(cit.doc_id or "")
-            if "openalex" in doc_id_raw.lower() or (
-                doc_id_raw.startswith("W") and doc_id_raw[1:].isdigit()
-            ):
-                source_value = "openalex"
-            elif "overton" in doc_id_raw.lower():
-                source_value = "overton"
+        source_value = infer_source_value(doc_meta.get("source"), cit.doc_id)
         cit.source_type = normalize_source_type(
             source_value, str(doc_meta.get("document_type") or "")
         )
         raw_authors = doc_meta.get("authors")
-        if isinstance(raw_authors, str):
-            try:
-                raw_authors = (
-                    json.loads(raw_authors)
-                    if raw_authors.strip().startswith("[")
-                    else raw_authors
-                )
-            except (json.JSONDecodeError, AttributeError):
-                pass
         cit.authors = extract_author_list(raw_authors)
         cit.author_display = extract_author_display(raw_authors)
-        raw_institutions = doc_meta.get("author_institutions")
-        if isinstance(raw_institutions, list):
-            cit.author_institutions = [
-                str(item).strip() for item in raw_institutions if str(item).strip()
-            ]
+        cit.author_institutions = extract_string_list(
+            doc_meta.get("author_institutions")
+        )
         cit.top_line = doc_meta.get("top_line")
 
     # Parse evidence coverage

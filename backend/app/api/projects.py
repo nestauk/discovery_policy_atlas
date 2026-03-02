@@ -41,6 +41,7 @@ from app.services.synthesis.utils import (
     extract_author_short,
     extract_author_display,
     extract_author_list,
+    infer_source_value,
 )
 from app.utils.project_data import (
     filter_prevalence_only_results,
@@ -348,15 +349,7 @@ async def get_chunk_context(
         stars = evidence_info.get("stars")
         evidence_score = int(stars) if isinstance(stars, (int, float)) else None
 
-        source_value = str(doc.get("source") or "").strip()
-        if not source_value:
-            doc_id_raw = str(doc.get("doc_id") or "")
-            if "openalex" in doc_id_raw.lower() or (
-                doc_id_raw.startswith("W") and doc_id_raw[1:].isdigit()
-            ):
-                source_value = "openalex"
-            elif "overton" in doc_id_raw.lower():
-                source_value = "overton"
+        source_value = infer_source_value(doc.get("source"), doc.get("doc_id"))
 
         document = DocumentContextInfo(
             analysis_document_id=str(doc.get("id") or document_id),
