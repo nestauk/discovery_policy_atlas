@@ -11,6 +11,7 @@ import {
   Legend,
   Filler,
 } from 'chart.js'
+import type { TooltipItem } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAPI } from '@/lib/api'
@@ -528,8 +529,9 @@ export function ProjectCharts({ projectId, projectTitle, isPublic = false }: Pro
       },
       tooltip: {
         callbacks: {
-          label: (context: { dataset: { label?: string }; parsed: { x: number } }) => {
-            return `${context.dataset.label || 'Unknown'}: ${context.parsed.x} documents`
+          label: (context: TooltipItem<'bar'>) => {
+            const value = context.parsed.x ?? 0
+            return `${context.dataset.label || 'Unknown'}: ${value} documents`
           }
         }
       }
