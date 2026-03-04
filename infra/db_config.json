@@ -1,0 +1,17 @@
+{
+    "staging": {
+        "aws_account_id": "715413099986",
+        "aws_region": "eu-west-2",
+        "vpc_id": "vpc-084b7d566e2715422",
+        "instance_size": "t3.medium",
+        "cluster_instances": 1,
+        "studio-meta": {
+            "cpu": 512,
+            "memory_limit_mib": 1024
+        },
+        "base_domain_name": "staging.policyatlas.uk",
+        "studio_subdomain": "studio",
+        "postgres_meta_tag": "v0.96.0",
+        "studio_tag": "v1.24.05"
+    }
+}

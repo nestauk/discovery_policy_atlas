@@ -19,24 +19,24 @@ Subdomains - such as `staging.*` - should use their own zone with relevant deleg
 
 ### How To Setup
 
-Use the AWS Console to create a new VPC (and more), and specify the NAT type as 'Regional'. When done, add the VPC configuration into the "supabase_config" and "vpc_config" for the environment.
+Use the AWS Console to create a new VPC (and more), and specify the NAT type as 'Regional'. When done, add the VPC configuration into the relevant environment-scope configurations - generally, it is under `vpc_id`.
 
 It is *possible* to share a VPC between environments, but this is not recommended.
 
 ## CDK Context
 
-The CDK context is mostly unused - for ease of configuration, most configuration is moved out to `config.json`. The `cdk.json` file should not be modified.
+The CDK context is mostly unused - for ease of configuration, most configuration is moved out to `pa_config.json` and `db_config.json`. The `cdk.json` file should not be modified.
 
 ## Configuration
 
-Configuration is stored in the `config.json` file, and has the following structure:
+Configuration is stored in the `pa_config.json` and `db_config.json` files, and has the following structure:
 
 ```json
 {
     "env_name": {
         ...
     },
-    "env_name_2: {
+    "env_name_2": {
         ...
     }
 }

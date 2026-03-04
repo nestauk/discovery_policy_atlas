@@ -2,13 +2,9 @@
 import os
 import json
 import aws_cdk as cdk
+from aws_cdk import Environment
 
-from infra.policy_atlas_stack import PolicyAtlasStack
-from infra.supabase_stack import SupabaseStack
-
-# Load config.json into memory.
-with open("config.json") as config_file:
-    config = json.load(config_file)
+from infra.database_stack import DatabaseStack
 
 # Create CDK application instance, 
 # and pull env_name from provided context. No default; if missing, abort.
@@ -18,9 +14,17 @@ env_name = app.node.try_get_context("env_name")
 if not env_name:
     raise ValueError("Context variable 'env_name' is required. Please provide it using '-c env_name=your_env'.")
 
-env_config = config.get(env_name)
-if not env_config:
-    raise ValueError(f"Environment '{env_name}' not found in config.json. Please check your configuration.")
+with open('pa_config.json') as f:
+    config = json.load(f)
+    pa_config = config.get(env_name)
+    if not pa_config:
+        raise ValueError(f"No configuration found for environment '{env_name}' in pa_config.json.")
+
+with open('db_config.json') as f:
+    config = json.load(f)
+    db_config = config.get(env_name)
+    if not db_config:
+        raise ValueError(f"No database configuration found for environment '{env_name}' in db_config.json.")
 
 # Add 'VPCManaged': true tag to all resources recursively.
 # Just in case we're looking manually and need to spot what this has built.
@@ -28,28 +32,12 @@ cdk.Tags.of(app).add("VPCManaged", "true", apply_to_launched_instances=True)
 
 # Why two separate stacks?
 # CDK will pick up on changes needed independently - so if
-# Policy Atlas updates, then the Supabase stack will remain untouched
-# if needed.
-# This logic can be extended out for other additional components as needed.
-SupabaseStack(app, f"SupabaseStack-{env_name}",
-    supabase_config=env_config["supabase_config"],
-    env=cdk.Environment(
-        account=env_config["aws_account_id"],
-        region=env_config["aws_region"]
-    ),
-    env_name=env_name,
-    aws_region=env_config["aws_region"]
+# we need to push Policy Atlas or Database updates independently, we can.
+db_env = Environment(
+    account=db_config['aws_account_id'],
+    region=db_config['aws_region']
 )
 
-PolicyAtlasStack(app, f"PolicyAtlasStack-{env_name}",
-    pa_config=env_config["policy_atlas_config"],
-    supabase_config=env_config["supabase_config"],
-    env=cdk.Environment(
-        account=env_config["aws_account_id"],
-        region=env_config["aws_region"]
-    ),
-    env_name=env_name,
-    aws_region=env_config["aws_region"]
-)
+DatabaseStack(app, "DatabaseStack", db_config=db_config, env=db_env)
 
 app.synth()
