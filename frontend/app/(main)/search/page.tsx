@@ -116,9 +116,7 @@ export default function SearchPage() {
         search_context: searchContext,
       }
 
-      // Fire-and-forget: the project page discovers status via polling.
-      // We must not write terminal statuses here — doing so causes a
-      // stale-status bug when the HTTP connection drops mid-analysis.
+      // Fire-and-forget — the project page handles status via polling
       runAnalysisForProject(project.id, analysisConfig)
         .then((result) => {
           console.log('Search analysis completed:', result.run_id)

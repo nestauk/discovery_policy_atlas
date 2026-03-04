@@ -209,8 +209,7 @@ export default function ProjectResultsPage() {
   }, [updateUrl])
 
   // Load project from API if not in store or different project.
-  // Note: when the project is running/synthesising, verifyAndPoll (below)
-  // handles the initial fetch, so we skip here to avoid a duplicate API call.
+  // Running projects are handled by the polling effect below.
   useEffect(() => {
     const loadProjectIfNeeded = async () => {
       if (!projectId) {
@@ -524,15 +523,14 @@ export default function ProjectResultsPage() {
     }
   }, [analysisComplete])
 
-  // Always verify status from the API before deciding whether to poll.
-  // This prevents stale localStorage status (e.g. "failed" from a dropped
-  // HTTP connection) from blocking polling when the backend is still running.
+  // Always verify status from the API before polling — stale localStorage
+  // (e.g. "failed" from a dropped HTTP connection) must not block polling.
   useEffect(() => {
     if (!projectId) return
     if (hasStartedPollingRef.current === projectId) return
     if (analysisComplete) return
 
-    // Shared helper: fetch project status and handle terminal states
+    // Fetch project status and handle terminal states
     const fetchAndCheckStatus = async () => {
       const projectData = await getAnalysisProject(projectId)
       const project = projectData.project
@@ -585,13 +583,13 @@ export default function ProjectResultsPage() {
 
         if (isTerminal) return
 
-        // Guard against race: another effect may have started polling during the await
+        // Prevent duplicate polling if another effect started during the await
         if (hasStartedPollingRef.current === projectId) return
 
         startPolling()
       } catch (error) {
         console.error('Failed to verify project status:', error)
-        // Fallback: if the store has a running status, start polling anyway
+        // Fallback to store status if API is unreachable
         const storeStatus = activeProject?.id === projectId ? activeProject.status : null
         if (storeStatus === 'running' || storeStatus === 'synthesising') {
           startPolling()
@@ -609,8 +607,7 @@ export default function ProjectResultsPage() {
       }
       hasStartedPollingRef.current = null
     }
-    // Intentionally omitting analysisComplete, activeProject, refreshData —
-    // these are either refs, stable setters, or guarded by hasStartedPollingRef.
+    // Deps intentionally limited to projectId — other values are refs or stable setters
   }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load data when navigating to a project
