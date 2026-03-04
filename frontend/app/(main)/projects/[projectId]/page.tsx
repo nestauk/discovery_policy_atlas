@@ -518,33 +518,13 @@ export default function ProjectResultsPage() {
     }
   }, [analysisComplete])
 
-  // Start polling ONLY when the project is actively running/synthesising.
-  // The initial project load is handled by loadProjectIfNeeded above, so we
-  // wait until activeProject is populated to decide whether polling is needed.
+  // Always verify status from the API before deciding whether to poll.
+  // This prevents stale localStorage status (e.g. "failed" from a dropped
+  // HTTP connection) from blocking polling when the backend is still running.
   useEffect(() => {
     if (!projectId) return
-
-    const currentProjectStatus = activeProject?.id === projectId ? activeProject.status : null
-
-    // Wait until the project is loaded before deciding
-    if (!currentProjectStatus) return
-
-    const isProjectRunning = currentProjectStatus === 'running' || currentProjectStatus === 'synthesising'
-
-    if (!isProjectRunning) {
-      setAnalysisComplete(currentProjectStatus === 'completed' || currentProjectStatus === 'created')
-      return
-    }
-
     if (hasStartedPollingRef.current === projectId) return
     if (analysisComplete) return
-
-    hasStartedPollingRef.current = projectId
-
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current)
-      pollingIntervalRef.current = null
-    }
 
     const checkProjectStatus = async () => {
       try {
@@ -566,23 +546,53 @@ export default function ProjectResultsPage() {
       }
     }
 
-    setIsPolling(true)
-    pollingIntervalRef.current = setInterval(async () => {
-      if (!pollingIntervalRef.current) return
+    const verifyAndPoll = async () => {
+      try {
+        const projectData = await getAnalysisProject(projectId)
+        const project = projectData.project
+        setActiveProject(project)
 
-      await refreshData()
+        const isRunning = project.status === 'running' || project.status === 'synthesising'
 
-      const isComplete = await checkProjectStatus()
-      if (isComplete) {
+        if (!isRunning) {
+          setAnalysisComplete(project.status === 'completed' || project.status === 'created')
+          if (project.status === 'failed') {
+            setError('Analysis failed. Please try again.')
+          }
+          return
+        }
+
+        // Project is genuinely running — start polling
+        hasStartedPollingRef.current = projectId
+
         if (pollingIntervalRef.current) {
           clearInterval(pollingIntervalRef.current)
           pollingIntervalRef.current = null
         }
-        setIsPolling(false)
-        hasStartedPollingRef.current = null
-        await refreshData()
+
+        setIsPolling(true)
+        pollingIntervalRef.current = setInterval(async () => {
+          if (!pollingIntervalRef.current) return
+
+          await refreshData()
+
+          const isComplete = await checkProjectStatus()
+          if (isComplete) {
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current)
+              pollingIntervalRef.current = null
+            }
+            setIsPolling(false)
+            hasStartedPollingRef.current = null
+            await refreshData()
+          }
+        }, 20000)
+      } catch (error) {
+        console.error('Failed to verify project status:', error)
       }
-    }, 20000)
+    }
+
+    verifyAndPoll()
 
     return () => {
       if (pollingIntervalRef.current) {
@@ -592,7 +602,7 @@ export default function ProjectResultsPage() {
       }
       hasStartedPollingRef.current = null
     }
-  }, [projectId, analysisComplete, activeProject?.id, activeProject?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load data when navigating to a project
   useEffect(() => {
