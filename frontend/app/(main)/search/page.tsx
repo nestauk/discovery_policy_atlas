@@ -116,21 +116,15 @@ export default function SearchPage() {
         search_context: searchContext,
       }
 
-      // Start analysis (don't wait for completion)
+      // Fire-and-forget: the project page discovers status via polling.
+      // We must not write terminal statuses here — doing so causes a
+      // stale-status bug when the HTTP connection drops mid-analysis.
       runAnalysisForProject(project.id, analysisConfig)
         .then((result) => {
           console.log('Search analysis completed:', result.run_id)
-          setActiveProject({ 
-            ...project, 
-            status: 'completed',
-            run_id: result.run_id,
-            total_references: result.total_references,
-            relevant_references: result.relevant_references
-          })
         })
         .catch((error) => {
-          console.error('Search analysis failed:', error)
-          setActiveProject({ ...project, status: 'failed' })
+          console.error('Search analysis HTTP connection lost (backend may still be running):', error)
         })
 
       // Navigate to results immediately
