@@ -208,14 +208,20 @@ export default function ProjectResultsPage() {
     updateUrl('evidence', subtab)
   }, [updateUrl])
 
-  // Load project from API if not in store or different project
+  // Load project from API if not in store or different project.
+  // Note: when the project is running/synthesising, verifyAndPoll (below)
+  // handles the initial fetch, so we skip here to avoid a duplicate API call.
   useEffect(() => {
     const loadProjectIfNeeded = async () => {
       if (!projectId) {
         setError('No project ID provided')
         return
       }
-      
+
+      // verifyAndPoll handles the fetch for running projects
+      const storeStatus = activeProject?.id === projectId ? activeProject.status : null
+      if (storeStatus === 'running' || storeStatus === 'synthesising') return
+
       // If we already have this project in store with full payload, no need to fetch.
       // The projects list endpoint omits search_query, so we must refetch when that field is missing.
       const hasSearchQueryField =
@@ -526,58 +532,39 @@ export default function ProjectResultsPage() {
     if (hasStartedPollingRef.current === projectId) return
     if (analysisComplete) return
 
-    const checkProjectStatus = async () => {
-      try {
-        const projectData = await getAnalysisProject(projectId)
-        const project = projectData.project
-        setActiveProject(project)
+    // Shared helper: fetch project status and handle terminal states
+    const fetchAndCheckStatus = async () => {
+      const projectData = await getAnalysisProject(projectId)
+      const project = projectData.project
+      setActiveProject(project)
 
-        if (project.status === 'completed' || project.status === 'failed' || project.status === 'created') {
-          setAnalysisComplete(project.status === 'completed' || project.status === 'created')
-          if (project.status === 'failed') {
-            setError('Analysis failed. Please try again.')
-          }
-          return true
+      const isTerminal = project.status === 'completed' || project.status === 'failed' || project.status === 'created'
+      if (isTerminal) {
+        setAnalysisComplete(project.status === 'completed' || project.status === 'created')
+        if (project.status === 'failed') {
+          setError('Analysis failed. Please try again.')
         }
-        return false
-      } catch (error) {
-        console.error('Failed to poll project status:', error)
-        return false
       }
+      return { project, isTerminal }
     }
 
-    const verifyAndPoll = async () => {
-      try {
-        const projectData = await getAnalysisProject(projectId)
-        const project = projectData.project
-        setActiveProject(project)
+    const startPolling = () => {
+      hasStartedPollingRef.current = projectId
 
-        const isRunning = project.status === 'running' || project.status === 'synthesising'
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+        pollingIntervalRef.current = null
+      }
 
-        if (!isRunning) {
-          setAnalysisComplete(project.status === 'completed' || project.status === 'created')
-          if (project.status === 'failed') {
-            setError('Analysis failed. Please try again.')
-          }
-          return
-        }
+      setIsPolling(true)
+      pollingIntervalRef.current = setInterval(async () => {
+        if (!pollingIntervalRef.current) return
 
-        // Project is genuinely running — start polling
-        hasStartedPollingRef.current = projectId
+        await refreshData()
 
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current)
-          pollingIntervalRef.current = null
-        }
-
-        setIsPolling(true)
-        pollingIntervalRef.current = setInterval(async () => {
-          if (!pollingIntervalRef.current) return
-
-          await refreshData()
-
-          const isComplete = await checkProjectStatus()
-          if (isComplete) {
+        try {
+          const { isTerminal: done } = await fetchAndCheckStatus()
+          if (done) {
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current)
               pollingIntervalRef.current = null
@@ -586,9 +573,29 @@ export default function ProjectResultsPage() {
             hasStartedPollingRef.current = null
             await refreshData()
           }
-        }, 20000)
+        } catch (error) {
+          console.error('Failed to poll project status:', error)
+        }
+      }, 20000)
+    }
+
+    const verifyAndPoll = async () => {
+      try {
+        const { isTerminal } = await fetchAndCheckStatus()
+
+        if (isTerminal) return
+
+        // Guard against race: another effect may have started polling during the await
+        if (hasStartedPollingRef.current === projectId) return
+
+        startPolling()
       } catch (error) {
         console.error('Failed to verify project status:', error)
+        // Fallback: if the store has a running status, start polling anyway
+        const storeStatus = activeProject?.id === projectId ? activeProject.status : null
+        if (storeStatus === 'running' || storeStatus === 'synthesising') {
+          startPolling()
+        }
       }
     }
 
@@ -602,6 +609,8 @@ export default function ProjectResultsPage() {
       }
       hasStartedPollingRef.current = null
     }
+    // Intentionally omitting analysisComplete, activeProject, refreshData —
+    // these are either refs, stable setters, or guarded by hasStartedPollingRef.
   }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load data when navigating to a project
