@@ -122,7 +122,9 @@ class LLMProcessor:
             [("system", self.system_message), ("user", "{input}")]
         )
 
-    async def _invoke_llm(self, input_text: str, _id: str) -> Dict:
+    async def _invoke_llm(
+        self, input_text: str, _id: str, max_retries: int = 2
+    ) -> Optional[Dict]:
         start_time = datetime.now(tz=timezone.utc).isoformat()
         structured_llm = self.llm.with_structured_output(self.schema)
         tags = self.component_tags + [
@@ -131,31 +133,53 @@ class LLMProcessor:
         ]
         if self.policy_project_id:
             tags.append(f"project:{self.policy_project_id}")
-        response = await structured_llm.ainvoke(
-            input_text,
-            config={
-                "callbacks": [self.langfuse_handler] if self.langfuse_handler else [],
-                "tags": tags,
-                "metadata": build_langfuse_metadata(
-                    tags=tags,
-                    session_id=self.langfuse_session_id,
-                    user_id=self.policy_user_id,
-                    project_id=self.policy_project_id,
-                    extra={
-                        "model": self.model_name,
-                        "temperature": self.temperature,
-                    },
-                ),
-                "run_name": self.run_name,
-            },
-        )
-        response = response.model_dump()
-        response["id"] = _id
-        response["timestamp"] = start_time
-        response["model"] = self.model_name
-        response["temperature"] = self.temperature
 
-        return response
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await structured_llm.ainvoke(
+                    input_text,
+                    config={
+                        "callbacks": [self.langfuse_handler]
+                        if self.langfuse_handler
+                        else [],
+                        "tags": tags,
+                        "metadata": build_langfuse_metadata(
+                            tags=tags,
+                            session_id=self.langfuse_session_id,
+                            user_id=self.policy_user_id,
+                            project_id=self.policy_project_id,
+                            extra={
+                                "model": self.model_name,
+                                "temperature": self.temperature,
+                            },
+                        ),
+                        "run_name": self.run_name,
+                    },
+                )
+                response = response.model_dump()
+                response["id"] = _id
+                response["timestamp"] = start_time
+                response["model"] = self.model_name
+                response["temperature"] = self.temperature
+                return response
+            except Exception as e:
+                if attempt < max_retries:
+                    logger.debug(
+                        "LLM call failed for %s (attempt %d/%d): %s",
+                        _id,
+                        attempt,
+                        max_retries,
+                        e,
+                    )
+                    await asyncio.sleep(1 * attempt)
+                else:
+                    logger.debug(
+                        "LLM call failed for %s after %d attempts: %s",
+                        _id,
+                        max_retries,
+                        e,
+                    )
+                    return None
 
     async def _process_batch(
         self, batch: List[str], batch_ids: List[str], prompt_template: str
@@ -165,7 +189,8 @@ class LLMProcessor:
             formatted_prompt = prompt_template.format(input=text_data)
             tasks.append(self._invoke_llm(formatted_prompt, batch_ids[idx]))
 
-        return await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
+        return [r for r in results if r is not None]
 
     async def process_text_data(
         self, text_data: Dict[str, str], batch_size: int = 10, sleep_time: float = 0.5
@@ -192,6 +217,7 @@ class LLMProcessor:
         _text_data = list(text_data.values())
         _ids = list(text_data.keys())
 
+        total_succeeded = 0
         num_batches = math.ceil(len(_text_data) / batch_size)
         for i in range(num_batches):
             logger.info(f"Processing batch {i + 1}/{num_batches}")
@@ -201,6 +227,7 @@ class LLMProcessor:
             batch_ids = _ids[start_idx:end_idx]
 
             responses = await self._process_batch(batch, batch_ids, prompt_template)
+            total_succeeded += len(responses)
 
             with open(self.output_path, "a") as f:
                 for response in responses:
@@ -208,6 +235,12 @@ class LLMProcessor:
 
             if i < num_batches - 1:
                 await asyncio.sleep(sleep_time)
+
+        total_failed = len(_text_data) - total_succeeded
+        if total_failed:
+            logger.warning(
+                "Batch processing: %d/%d calls failed", total_failed, len(_text_data)
+            )
 
     def run(
         self, text_data: Dict[str, str], batch_size: int = 10, sleep_time: float = 0.5
