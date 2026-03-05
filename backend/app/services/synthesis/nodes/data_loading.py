@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from app.services.vectorization import vectorization_service
+import app.core.database as db
 from app.services.synthesis.state import SynthesisState, Concept
 from app.services.synthesis.utils import normalize_study_type
 from app.services.analysis.evidence.strength import (
@@ -53,23 +53,18 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             "doc_metadata": {},
         }
 
-    supabase = vectorization_service.supabase
-    theme_assignment_map = await load_theme_assignments(project_id, supabase)
+    theme_assignment_map = await load_theme_assignments(project_id)
 
     # Fetch research question + user search intent (population/outcome)
-    proj_res = (
-        supabase.table("analysis_projects")
-        .select("title, query, search_query")
-        .eq("id", project_id)
-        .execute()
+    proj_row = db.fetchone(
+        "SELECT title, query, search_query FROM analysis_projects WHERE id = %s::uuid",
+        [project_id],
     )
     research_question = (
-        (proj_res.data[0].get("title") or proj_res.data[0].get("query"))
-        if proj_res.data
-        else "Not specified"
+        (proj_row.get("title") or proj_row.get("query")) if proj_row else "Not specified"
     )
 
-    search_query = (proj_res.data[0].get("search_query") or {}) if proj_res.data else {}
+    search_query = (proj_row.get("search_query") or {}) if proj_row else {}
     target_population = search_query.get("population") or []
     target_outcomes = search_query.get("outcome") or []
     target_geography = search_query.get("geography") or ["UK"]
@@ -86,18 +81,23 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         target_inner_setting = [target_inner_setting]
 
     # Fetch document metadata including extraction_results for scores
-    docs_res = (
-        supabase.table("analysis_documents")
-        .select(
-            "id, doc_id, title, year, authors, landing_page_url, pdf_url, source, document_type, extraction_results, evidence_category, evidence_score, evidence_justification, evidence_sample_size, top_line, is_relevant, impact_score, impact_score_label, impact_score_breakdown, transferability_score, transferability_breakdown, has_harm_warning, harm_warning_reason"
-        )
-        .eq("analysis_project_id", project_id)
-        .execute()
+    docs = db.fetch(
+        """
+        SELECT id, doc_id, title, year, authors, landing_page_url, pdf_url, source,
+               document_type, extraction_results, evidence_category, evidence_score,
+               evidence_justification, evidence_sample_size, top_line, is_relevant,
+               impact_score, impact_score_label, impact_score_breakdown,
+               transferability_score, transferability_breakdown,
+               has_harm_warning, harm_warning_reason
+        FROM analysis_documents
+        WHERE analysis_project_id = %s::uuid
+        """,
+        [project_id],
     )
 
     doc_metadata: Dict[str, Dict] = {}
     doc_scores: Dict[str, Dict] = {}
-    for doc in docs_res.data or []:
+    for doc in docs:
         doc_uuid = str(doc.get("id"))
         authors = doc.get("authors") or []
         author_short = None
@@ -138,18 +138,18 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         }
 
     # Fetch extractions
-    res = (
-        supabase.table("analysis_extractions")
-        .select(
-            "id, analysis_document_id, extraction_type, label, description, raw_data"
-        )
-        .eq("analysis_project_id", project_id)
-        .execute()
+    extractions = db.fetch(
+        """
+        SELECT id, analysis_document_id, extraction_type, label, description, raw_data
+        FROM analysis_extractions
+        WHERE analysis_project_id = %s::uuid
+        """,
+        [project_id],
     )
 
     # Build extraction_id -> doc_uuid mapping
     extraction_to_doc: Dict[str, str] = {}
-    for row in res.data or []:
+    for row in extractions:
         ext_id = str(row.get("id") or "")
         doc_uuid = str(row.get("analysis_document_id") or "")
         if ext_id and doc_uuid:
@@ -251,7 +251,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             }
         return {**base, "type": et}
 
-    uniform = [item for item in (to_uniform(r) for r in (res.data or [])) if item]
+    uniform = [item for item in (to_uniform(r) for r in extractions) if item]
 
     # Count docs with scores
     scored_docs = sum(1 for s in doc_scores.values() if s.get("evidence_score"))
@@ -274,12 +274,11 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     }
 
 
-async def load_theme_assignments(project_id: str, supabase) -> Dict[str, List[str]]:
+async def load_theme_assignments(project_id: str) -> Dict[str, List[str]]:
     """Load theme assignments for the latest completed synthesis run.
 
     Args:
         project_id: Analysis project ID.
-        supabase: Supabase client instance.
 
     Returns:
         Mapping of intervention theme names to extraction IDs.
@@ -287,44 +286,44 @@ async def load_theme_assignments(project_id: str, supabase) -> Dict[str, List[st
     if not project_id:
         return {}
     try:
-        runs_res = (
-            supabase.table("synthesis_runs")
-            .select("id")
-            .eq("analysis_project_id", project_id)
-            .eq("status", "completed")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
+        run = db.fetchone(
+            """
+            SELECT id FROM synthesis_runs
+            WHERE analysis_project_id = %s::uuid AND status = 'completed'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            [project_id],
         )
-        if not runs_res.data:
+        if not run:
             return {}
-        run_id = runs_res.data[0].get("id")
+        run_id = run.get("id")
         if not run_id:
             return {}
 
-        themes_res = (
-            supabase.table("synthesis_themes")
-            .select("id, theme_name")
-            .eq("synthesis_run_id", run_id)
-            .eq("theme_type", "intervention")
-            .execute()
+        themes = db.fetch(
+            """
+            SELECT id, theme_name FROM synthesis_themes
+            WHERE synthesis_run_id = %s::uuid AND theme_type = 'intervention'
+            """,
+            [run_id],
         )
         theme_id_to_name = {
             str(row.get("id")): row.get("theme_name") or ""
-            for row in (themes_res.data or [])
+            for row in themes
             if row.get("id") and row.get("theme_name")
         }
         if not theme_id_to_name:
             return {}
 
-        assignments_res = (
-            supabase.table("theme_assignments")
-            .select("synthesis_theme_id, extraction_id")
-            .eq("synthesis_run_id", run_id)
-            .execute()
+        assignments = db.fetch(
+            """
+            SELECT synthesis_theme_id, extraction_id FROM theme_assignments
+            WHERE synthesis_run_id = %s::uuid
+            """,
+            [run_id],
         )
         theme_to_extraction_ids: Dict[str, List[str]] = {}
-        for row in assignments_res.data or []:
+        for row in assignments:
             theme_id = str(row.get("synthesis_theme_id") or "")
             extraction_id = str(row.get("extraction_id") or "")
             theme_name = theme_id_to_name.get(theme_id, "")

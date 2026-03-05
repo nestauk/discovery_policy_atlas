@@ -6,6 +6,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from openai import AsyncOpenAI
 from app.core.config import settings
+import app.core.database as db
 from app.services.vectorization import vectorization_service
 from .models import ChatRequest, ChatResponse, ChatMessage, DocumentReference
 
@@ -110,18 +111,18 @@ class ChatbotService:
                 expanded_max = max_index + 1
 
                 # Fetch all chunks in the expanded range
-                result = (
-                    vectorization_service.supabase.table("chunks")
-                    .select("*")
-                    .eq("document_id", doc_id)
-                    .gte("chunk_index", expanded_min)
-                    .lte("chunk_index", expanded_max)
-                    .order("chunk_index")
-                    .execute()
+                neighbor_chunks = db.fetch(
+                    """
+                    SELECT * FROM chunks
+                    WHERE document_id = %s
+                      AND chunk_index BETWEEN %s AND %s
+                    ORDER BY chunk_index
+                    """,
+                    [doc_id, expanded_min, expanded_max],
                 )
 
-                if result.data:
-                    enriched_chunks.extend(result.data)
+                if neighbor_chunks:
+                    enriched_chunks.extend(neighbor_chunks)
                 else:
                     # Fallback to original chunks if query fails
                     enriched_chunks.extend(doc_chunks)
@@ -150,16 +151,16 @@ class ChatbotService:
         document_details = {}
         if document_ids:
             try:
-                result = (
-                    vectorization_service.supabase.table("analysis_documents")
-                    .select(
-                        "id, doc_id, title, authors, doi, overton_url, source_country, year, published_on"
-                    )
-                    .in_("id", document_ids)
-                    .execute()
+                docs = db.fetch(
+                    """
+                    SELECT id, doc_id, title, authors, doi, overton_url,
+                           source_country, year, published_on
+                    FROM analysis_documents
+                    WHERE id = ANY(%s)
+                    """,
+                    [document_ids],
                 )
-
-                for doc in result.data:
+                for doc in docs:
                     document_details[doc["id"]] = doc
             except Exception as e:
                 logger.error(f"Error fetching document details: {e}")

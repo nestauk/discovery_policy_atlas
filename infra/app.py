@@ -5,6 +5,7 @@ import aws_cdk as cdk
 from aws_cdk import Environment
 
 from infra.database_stack import DatabaseStack
+from infra.policy_atlas_stack import PolicyAtlasStack
 
 # Create CDK application instance, 
 # and pull env_name from provided context. No default; if missing, abort.
@@ -39,5 +40,12 @@ db_env = Environment(
 )
 
 DatabaseStack(app, "DatabaseStack", db_config=db_config, env=db_env)
+
+pa_env = Environment(
+    account=pa_config['aws_account_id'],
+    region=pa_config['aws_region']
+)
+
+PolicyAtlasStack(app, "PolicyAtlasStack", pa_config=pa_config, env=pa_env)
 
 app.synth()

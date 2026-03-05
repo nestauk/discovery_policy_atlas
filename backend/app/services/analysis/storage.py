@@ -1,6 +1,6 @@
 """
-Supabase storage service for Analysis Service results.
-Uploads references and extraction results to new analysis tables.
+Storage service for Analysis Service results.
+Uploads references and extraction results to analysis tables via psycopg2.
 """
 
 from __future__ import annotations
@@ -10,10 +10,10 @@ import json
 import logging
 import math
 import pandas as pd
+import psycopg2.extras
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from supabase import create_client
-from app.core.config import settings
+import app.core.database as db
 from app.utils.llm.llm_utils import get_llm
 from .schemas import RunConfig, RunResult, UnifiedReference
 from .schemas_langchain import DocumentExtractionBundle, ResultItem
@@ -26,36 +26,21 @@ from .chunking import chunk_document_text
 from .evidence.strength import calculate_document_evidence_score
 from ..vectorization import VectorizationService
 
+
+def _adapt_params(params: list) -> list:
+    """Wrap dicts/lists with Json() so psycopg2 serialises them as JSONB."""
+    return [psycopg2.extras.Json(v) if isinstance(v, (dict, list)) else v for v in params]
+
 logger = logging.getLogger(__name__)
 
 
 class AnalysisStorageService:
-    """Service for storing analysis results in Supabase."""
+    """Service for storing analysis results in the database."""
 
     def __init__(self):
-        self._supabase = None
         self._vectorization_service = None
         self._scoring_llm = None
         self._project_search_cache: Dict[str, Dict[str, Any]] = {}
-        # Limit concurrent DB queries to prevent connection exhaustion
-        # Generous limit of 50 concurrent queries
-        self._db_semaphore = asyncio.Semaphore(50)
-
-    @property
-    def supabase(self):
-        """Lazy initialization of Supabase client."""
-        if self._supabase is None:
-            if not settings.SUPABASE_URL:
-                raise ValueError(
-                    "SUPABASE_URL is required for analysis storage service"
-                )
-            if not settings.SUPABASE_KEY:
-                raise ValueError(
-                    "SUPABASE_KEY is required for analysis storage service"
-                )
-
-            self._supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-        return self._supabase
 
     @property
     def vectorization_service(self):
@@ -69,23 +54,6 @@ class AnalysisStorageService:
         if self._scoring_llm is None:
             self._scoring_llm = get_llm(settings.LLM_MODEL, temperature=0.0)
         return self._scoring_llm
-
-    async def _async_supabase_query(self, query_func):
-        """
-        Execute a Supabase query asynchronously in thread pool.
-
-        This prevents blocking the event loop during database operations.
-        Uses a semaphore to limit concurrent queries and prevent DB connection exhaustion.
-
-        Args:
-            query_func: Lambda or callable that executes the Supabase query
-
-        Returns:
-            Query result
-        """
-        async with self._db_semaphore:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, query_func)
 
     def _clean_data_for_json(self, data: Any) -> Any:
         """Clean data to prevent JSON serialization issues (NaN, None, etc.)."""
@@ -112,15 +80,17 @@ class AnalysisStorageService:
             return self._project_search_cache[project_id]
 
         try:
-            response = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_projects")
-                .select("search_query")
-                .eq("id", project_id)
-                .execute()
+            loop = asyncio.get_event_loop()
+            row = await loop.run_in_executor(
+                None,
+                lambda: db.fetchone(
+                    "SELECT search_query FROM analysis_projects WHERE id = %s::uuid",
+                    [project_id],
+                ),
             )
             search_query = {}
-            if response.data:
-                stored = response.data[0].get("search_query") or {}
+            if row:
+                stored = row.get("search_query") or {}
                 if isinstance(stored, str):
                     try:
                         stored = json.loads(stored)
@@ -361,16 +331,16 @@ class AnalysisStorageService:
         logger.info(f"Checking existing extractions for project {project_id}")
 
         try:
-            # Query documents that have extraction_status = 'completed' or 'success' (async to avoid blocking)
-            response = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_documents")
-                .select("doc_id,extraction_status")
-                .eq("analysis_project_id", project_id)
-                .in_("extraction_status", ["completed", "success"])
-                .execute()
+            loop = asyncio.get_event_loop()
+            rows = await loop.run_in_executor(
+                None,
+                lambda: db.fetch(
+                    "SELECT doc_id FROM analysis_documents WHERE analysis_project_id = %s::uuid AND extraction_status = ANY(%s)",
+                    [project_id, ["completed", "success"]],
+                ),
             )
 
-            existing_extractions = {doc["doc_id"]: True for doc in response.data}
+            existing_extractions = {row["doc_id"]: True for row in rows}
 
             logger.info(
                 f"Found {len(existing_extractions)} documents with existing extractions"
@@ -410,17 +380,17 @@ class AnalysisStorageService:
             source_country = None
             evidence_category = None
             try:
-                doc_meta = await self._async_supabase_query(
-                    lambda: self.supabase.table("analysis_documents")
-                    .select("source_country, evidence_category")
-                    .eq("analysis_project_id", project_id)
-                    .eq("doc_id", doc_id)
-                    .limit(1)
-                    .execute()
+                loop = asyncio.get_event_loop()
+                meta = await loop.run_in_executor(
+                    None,
+                    lambda: db.fetchone(
+                        "SELECT source_country, evidence_category FROM analysis_documents WHERE analysis_project_id = %s::uuid AND doc_id = %s LIMIT 1",
+                        [project_id, doc_id],
+                    ),
                 )
-                if doc_meta.data:
-                    source_country = doc_meta.data[0].get("source_country")
-                    evidence_category = doc_meta.data[0].get("evidence_category")
+                if meta:
+                    source_country = meta.get("source_country")
+                    evidence_category = meta.get("evidence_category")
             except Exception as exc:
                 logger.warning(f"Failed to load source_country for {doc_id}: {exc}")
             doc_update.update(
@@ -432,22 +402,25 @@ class AnalysisStorageService:
                 )
             )
 
-            doc_response = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_documents")
-                .update(doc_update)
-                .eq("analysis_project_id", project_id)
-                .eq("doc_id", doc_id)
-                .execute()
+            set_clause = ", ".join(f'"{k}" = %s' for k in doc_update)
+            set_values = _adapt_params(list(doc_update.values())) + [project_id, doc_id]
+            loop = asyncio.get_event_loop()
+            updated = await loop.run_in_executor(
+                None,
+                lambda: db.fetchone(
+                    f'UPDATE analysis_documents SET {set_clause} WHERE analysis_project_id = %s::uuid AND doc_id = %s RETURNING id',
+                    set_values,
+                ),
             )
 
-            if not doc_response.data:
+            if not updated:
                 logger.warning(
                     f"Failed to update document {doc_id} - not found in project {project_id}"
                 )
                 return False
 
             # 2. Get the document database ID for extractions table
-            document_db_id = doc_response.data[0]["id"]
+            document_db_id = updated["id"]
 
             # 3. Create extraction bundle and store individual items
             from .schemas_langchain import DocumentExtractionBundle
@@ -461,21 +434,21 @@ class AnalysisStorageService:
 
             extraction_items = self._create_extraction_items(bundle, base_data)
 
-            # 4. Insert extraction items (delete existing ones first to handle re-runs) (async to avoid blocking)
+            # 4. Insert extraction items (delete existing ones first to handle re-runs)
             if extraction_items:
                 # Delete existing extractions for this document
-                await self._async_supabase_query(
-                    lambda: self.supabase.table("analysis_extractions")
-                    .delete()
-                    .eq("analysis_document_id", document_db_id)
-                    .execute()
+                await loop.run_in_executor(
+                    None,
+                    lambda: db.execute(
+                        "DELETE FROM analysis_extractions WHERE analysis_document_id = %s::uuid",
+                        [document_db_id],
+                    ),
                 )
 
                 # Insert new extractions
-                await self._async_supabase_query(
-                    lambda: self.supabase.table("analysis_extractions")
-                    .insert(extraction_items)
-                    .execute()
+                await loop.run_in_executor(
+                    None,
+                    lambda: db.insert_many("analysis_extractions", extraction_items),
                 )
 
             logger.debug(
@@ -513,22 +486,23 @@ class AnalysisStorageService:
                 f"Creating chunks for document {doc_id} in project {project_id}"
             )
 
-            # First, get the analysis_documents.id (UUID) for this doc_id (async to avoid blocking)
-            analysis_doc_result = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_documents")
-                .select("id")
-                .eq("analysis_project_id", project_id)
-                .eq("doc_id", doc_id)
-                .execute()
+            # First, get the analysis_documents.id (UUID) for this doc_id
+            loop = asyncio.get_event_loop()
+            analysis_doc_row = await loop.run_in_executor(
+                None,
+                lambda: db.fetchone(
+                    "SELECT id FROM analysis_documents WHERE analysis_project_id = %s::uuid AND doc_id = %s",
+                    [project_id, doc_id],
+                ),
             )
 
-            if not analysis_doc_result.data:
+            if not analysis_doc_row:
                 logger.error(
                     f"No analysis document found for doc_id {doc_id} in project {project_id}"
                 )
                 return False
 
-            analysis_doc_uuid = analysis_doc_result.data[0]["id"]
+            analysis_doc_uuid = analysis_doc_row["id"]
             logger.debug(
                 f"Found analysis document UUID {analysis_doc_uuid} for doc_id {doc_id}"
             )
@@ -547,13 +521,13 @@ class AnalysisStorageService:
                 logger.warning(f"No chunks generated for document {doc_id}")
                 return False
 
-            # Clean up existing chunks for this document UUID (async to avoid blocking)
-            await self._async_supabase_query(
-                lambda: self.vectorization_service.supabase.table("chunks")
-                .delete()
-                .eq("document_id", analysis_doc_uuid)
-                .eq("project_id", project_id)
-                .execute()
+            # Clean up existing chunks for this document UUID
+            await loop.run_in_executor(
+                None,
+                lambda: db.execute(
+                    "DELETE FROM chunks WHERE document_id = %s::uuid AND project_id = %s::uuid",
+                    [analysis_doc_uuid, project_id],
+                ),
             )
 
             # Generate embeddings for all chunks in parallel for better performance
@@ -582,7 +556,7 @@ class AnalysisStorageService:
                         "content": chunk.content,
                         "chunk_type": chunk.chunk_type,
                         "chunk_index": chunk.chunk_index,
-                        "embedding": embedding,
+                        "embedding": db.fmt_vector(embedding),
                         "token_count": chunk.token_count,
                     }
                 )
@@ -595,12 +569,9 @@ class AnalysisStorageService:
                 for i in range(0, len(chunk_data_list), batch_size):
                     batch = chunk_data_list[i : i + batch_size]
                     try:
-                        await self._async_supabase_query(
-                            lambda b=batch: self.vectorization_service.supabase.table(
-                                "chunks"
-                            )
-                            .insert(b)
-                            .execute()
+                        await loop.run_in_executor(
+                            None,
+                            lambda b=batch: db.insert_many("chunks", b),
                         )
                         chunk_count += len(batch)
                         logger.debug(
@@ -650,14 +621,15 @@ class AnalysisStorageService:
         updates = []
         doc_meta_lookup: Dict[str, Dict] = {}
         try:
-            source_rows = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_documents")
-                .select("doc_id, source_country, evidence_category")
-                .eq("analysis_project_id", project_id)
-                .execute()
+            loop = asyncio.get_event_loop()
+            source_rows = await loop.run_in_executor(
+                None,
+                lambda: db.fetch(
+                    "SELECT doc_id, source_country, evidence_category FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+                    [project_id],
+                ),
             )
-            if source_rows.data:
-                doc_meta_lookup = {row.get("doc_id"): row for row in source_rows.data}
+            doc_meta_lookup = {row.get("doc_id"): row for row in source_rows}
         except Exception as exc:
             logger.warning(f"Failed to build doc metadata lookup: {exc}")
         for extraction in extractions_data.get("extractions", []):
@@ -766,16 +738,16 @@ class AnalysisStorageService:
             "created_by_name": user_name,
         }
 
-        response = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_projects")
-            .insert(project_data)
-            .execute()
+        loop = asyncio.get_event_loop()
+        row = await loop.run_in_executor(
+            None,
+            lambda: db.insert("analysis_projects", project_data),
         )
 
-        if not response.data:
+        if not row:
             raise Exception("Failed to create analysis project record")
 
-        project_id = response.data[0]["id"]
+        project_id = row["id"]
         logger.info(f"Created analysis project {project_id} for run {result.run_id}")
         return project_id
 
@@ -790,14 +762,16 @@ class AnalysisStorageService:
             "status": "uploading",
         }
 
-        response = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_projects")
-            .update(update_data)
-            .eq("id", project_id)
-            .execute()
+        loop = asyncio.get_event_loop()
+        updated = await loop.run_in_executor(
+            None,
+            lambda: db.fetchone(
+                'UPDATE analysis_projects SET run_id = %s, total_references = %s, relevant_references = %s, status = %s WHERE id = %s::uuid RETURNING id',
+                [update_data["run_id"], update_data["total_references"], update_data["relevant_references"], update_data["status"], project_id],
+            ),
         )
 
-        if not response.data:
+        if not updated:
             raise Exception(f"Failed to update analysis project {project_id}")
 
         logger.info(f"Updated analysis project {project_id} for run {result.run_id}")
@@ -924,14 +898,14 @@ class AnalysisStorageService:
 
         # Get document IDs mapping
         loop = asyncio.get_event_loop()
-        doc_response = await loop.run_in_executor(
+        doc_rows = await loop.run_in_executor(
             None,
-            lambda: self.supabase.table("analysis_documents")
-            .select("id,doc_id")
-            .eq("analysis_project_id", project_id)
-            .execute(),
+            lambda: db.fetch(
+                "SELECT id, doc_id FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+                [project_id],
+            ),
         )
-        doc_id_map = {doc["doc_id"]: doc["id"] for doc in doc_response.data}
+        doc_id_map = {row["doc_id"]: row["id"] for row in doc_rows}
 
         extraction_items = []
 
@@ -957,15 +931,10 @@ class AnalysisStorageService:
             batch_size = 100
             for i in range(0, len(extraction_items), batch_size):
                 batch = extraction_items[i : i + batch_size]
-                response = await self._async_supabase_query(
-                    lambda b=batch: self.supabase.table("analysis_extractions")
-                    .insert(b)
-                    .execute()
+                await loop.run_in_executor(
+                    None,
+                    lambda b=batch: db.insert_many("analysis_extractions", b),
                 )
-                if not response.data:
-                    raise Exception(
-                        f"Failed to insert extractions batch {i//batch_size + 1}"
-                    )
 
             logger.info(
                 f"Successfully uploaded {len(extraction_items)} extraction items"
@@ -973,18 +942,16 @@ class AnalysisStorageService:
 
     async def _mark_analysis_completed(self, project_id: str) -> None:
         """Mark analysis extraction as completed, ready for synthesis."""
-        response = await self._async_supabase_query(
-            lambda: self.supabase.table("analysis_projects")
-            .update(
-                {
-                    "status": "synthesising",
-                }
-            )
-            .eq("id", project_id)
-            .execute()
+        loop = asyncio.get_event_loop()
+        updated = await loop.run_in_executor(
+            None,
+            lambda: db.fetchone(
+                "UPDATE analysis_projects SET status = 'synthesising' WHERE id = %s::uuid RETURNING id",
+                [project_id],
+            ),
         )
 
-        if not response.data:
+        if not updated:
             raise Exception("Failed to mark project as synthesising")
 
         logger.info(f"Marked analysis project {project_id} as synthesising")
@@ -992,19 +959,15 @@ class AnalysisStorageService:
     async def _mark_project_failed(self, run_id: str, error_message: str) -> None:
         """Mark analysis project as failed."""
         try:
-            response = await self._async_supabase_query(
-                lambda: self.supabase.table("analysis_projects")
-                .update(
-                    {
-                        "status": "failed",
-                    }
-                )
-                .eq("run_id", run_id)
-                .execute()
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: db.execute(
+                    "UPDATE analysis_projects SET status = 'failed' WHERE run_id = %s",
+                    [run_id],
+                ),
             )
-
-            if response.data:
-                logger.info(f"Marked analysis project {run_id} as failed")
+            logger.info(f"Marked analysis project {run_id} as failed")
         except Exception as e:
             logger.error(f"Failed to mark project as failed: {e}")
 
@@ -1153,64 +1116,29 @@ class AnalysisStorageService:
         if not documents_data:
             return
 
-        # Use insert with conflict resolution
+        loop = asyncio.get_event_loop()
         batch_size = 100
         for i in range(0, len(documents_data), batch_size):
             batch = documents_data[i : i + batch_size]
 
-            # Try regular insert first for new documents
+            # Try batch insert first; fall back to individual upserts on conflict
             try:
-                # Run database operations in thread pool to avoid blocking
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
+                await loop.run_in_executor(
                     None,
-                    lambda: self.supabase.table("analysis_documents")
-                    .insert(batch)
-                    .execute(),
+                    lambda b=batch: db.insert_many("analysis_documents", b),
                 )
-                if response.data:
-                    continue
             except Exception as e:
-                # If insert fails due to conflicts, try individual upserts
                 logger.warning(f"Batch insert failed, trying individual upserts: {e}")
-
                 for doc in batch:
                     try:
-                        # Check if document exists
-                        existing = await loop.run_in_executor(
+                        await loop.run_in_executor(
                             None,
-                            lambda: self.supabase.table("analysis_documents")
-                            .select("id")
-                            .eq("analysis_project_id", doc["analysis_project_id"])
-                            .eq("doc_id", doc["doc_id"])
-                            .eq("source", doc["source"])
-                            .execute(),
+                            lambda d=doc: db.upsert(
+                                "analysis_documents",
+                                d,
+                                ["analysis_project_id", "doc_id", "source"],
+                            ),
                         )
-
-                        if existing.data:
-                            # Update existing document
-                            doc_id = existing.data[0]["id"]
-                            update_doc = {
-                                k: v
-                                for k, v in doc.items()
-                                if k not in ["analysis_project_id", "doc_id", "source"]
-                            }
-                            await loop.run_in_executor(
-                                None,
-                                lambda: self.supabase.table("analysis_documents")
-                                .update(update_doc)
-                                .eq("id", doc_id)
-                                .execute(),
-                            )
-                        else:
-                            # Insert new document
-                            await loop.run_in_executor(
-                                None,
-                                lambda: self.supabase.table("analysis_documents")
-                                .insert(doc)
-                                .execute(),
-                            )
-
                     except Exception as doc_error:
                         logger.error(
                             f"Failed to upsert document {doc.get('doc_id')}: {doc_error}"
@@ -1221,18 +1149,19 @@ class AnalysisStorageService:
         self, project_id: str, updates: List[Dict[str, Any]]
     ) -> None:
         """Update documents by doc_id."""
+        loop = asyncio.get_event_loop()
         for update in updates:
             doc_id = update.pop("doc_id")
-
-            response = await self._async_supabase_query(
-                lambda u=update, d=doc_id: self.supabase.table("analysis_documents")
-                .update(u)
-                .eq("analysis_project_id", project_id)
-                .eq("doc_id", d)
-                .execute()
+            set_clause = ", ".join(f'"{k}" = %s' for k in update)
+            values = _adapt_params(list(update.values())) + [project_id, doc_id]
+            updated = await loop.run_in_executor(
+                None,
+                lambda sc=set_clause, v=values: db.fetchone(
+                    f'UPDATE analysis_documents SET {sc} WHERE analysis_project_id = %s::uuid AND doc_id = %s RETURNING id',
+                    v,
+                ),
             )
-
-            if not response.data:
+            if not updated:
                 logger.warning(
                     f"Failed to update document {doc_id} in project {project_id}"
                 )

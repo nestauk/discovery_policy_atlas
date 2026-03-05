@@ -7,29 +7,13 @@ intervention name or issue theme.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import List, Optional
 
-from app.services.vectorization import vectorization_service
+import app.core.database as db
 from app.services.synthesis.schemas import Finding
 
 logger = logging.getLogger(__name__)
-
-
-async def _async_supabase_query(query_func):
-    """Execute a Supabase query asynchronously in thread pool.
-
-    This prevents blocking the event loop during database operations.
-
-    Args:
-        query_func: Lambda or callable that executes the Supabase query.
-
-    Returns:
-        Query result.
-    """
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, query_func)
 
 
 async def get_findings(
@@ -51,16 +35,11 @@ async def get_findings(
     Returns:
         List of findings sorted by year (desc) then title.
     """
-    supabase = vectorization_service.supabase
-
     # Load documents for the project
-    docs_res = await _async_supabase_query(
-        lambda: supabase.table("analysis_documents")
-        .select("*")
-        .eq("analysis_project_id", project_id)
-        .execute()
+    documents = db.fetch(
+        "SELECT * FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+        [project_id],
     )
-    documents = docs_res.data or []
     if not documents:
         return []
 
@@ -77,61 +56,60 @@ async def get_findings(
 
     try:
         # Latest completed run
-        runs_res = await _async_supabase_query(
-            lambda: supabase.table("synthesis_runs")
-            .select("id")
-            .eq("analysis_project_id", project_id)
-            .eq("status", "completed")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
+        run = db.fetchone(
+            """
+            SELECT id FROM synthesis_runs
+            WHERE analysis_project_id = %s::uuid AND status = 'completed'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            [project_id],
         )
-        if runs_res.data:
-            run_id = runs_res.data[0]["id"]
+        if run:
+            run_id = run["id"]
             # Find matching theme record
             if filt_intr:
-                themes_res = await _async_supabase_query(
-                    lambda: supabase.table("synthesis_themes")
-                    .select("id")
-                    .eq("synthesis_run_id", run_id)
-                    .eq("theme_type", "intervention")
-                    .eq("theme_name", filt_intr)
-                    .limit(1)
-                    .execute()
+                theme = db.fetchone(
+                    """
+                    SELECT id FROM synthesis_themes
+                    WHERE synthesis_run_id = %s::uuid
+                      AND theme_type = 'intervention'
+                      AND theme_name = %s
+                    LIMIT 1
+                    """,
+                    [run_id, filt_intr],
                 )
             else:
-                themes_res = await _async_supabase_query(
-                    lambda: supabase.table("synthesis_themes")
-                    .select("id")
-                    .eq("synthesis_run_id", run_id)
-                    .eq("theme_type", "issue")
-                    .eq("theme_name", filt_issue)
-                    .limit(1)
-                    .execute()
+                theme = db.fetchone(
+                    """
+                    SELECT id FROM synthesis_themes
+                    WHERE synthesis_run_id = %s::uuid
+                      AND theme_type = 'issue'
+                      AND theme_name = %s
+                    LIMIT 1
+                    """,
+                    [run_id, filt_issue],
                 )
-            if themes_res.data:
-                theme_id = themes_res.data[0]["id"]
+            if theme:
+                theme_id = theme["id"]
                 # Assignments for theme
-                assign_res = await _async_supabase_query(
-                    lambda: supabase.table("theme_assignments")
-                    .select("extraction_id")
-                    .eq("synthesis_theme_id", theme_id)
-                    .execute()
+                assignments = db.fetch(
+                    "SELECT extraction_id FROM theme_assignments WHERE synthesis_theme_id = %s::uuid",
+                    [theme_id],
                 )
-                ex_ids = [str(a["extraction_id"]) for a in (assign_res.data or [])]
+                ex_ids = [str(a["extraction_id"]) for a in assignments]
                 if ex_ids:
                     # Fetch extraction records to map to documents and names/labels
                     for i in range(0, len(ex_ids), 100):
                         chunk = ex_ids[i : i + 100]
-                        exts_res = await _async_supabase_query(
-                            lambda: supabase.table("analysis_extractions")
-                            .select(
-                                "id, analysis_document_id, extraction_type, label, raw_data"
-                            )
-                            .in_("id", chunk)
-                            .execute()
+                        exts = db.fetch(
+                            """
+                            SELECT id, analysis_document_id, extraction_type, label, raw_data
+                            FROM analysis_extractions
+                            WHERE id = ANY(%s)
+                            """,
+                            [chunk],
                         )
-                        for row in exts_res.data or []:
+                        for row in exts:
                             doc_uuid = str(row.get("analysis_document_id") or "")
                             assigned_doc_uuids.add(doc_uuid)
                             etype = str(row.get("extraction_type") or "")

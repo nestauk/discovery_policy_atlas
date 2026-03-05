@@ -8,3 +8,8 @@ __pycache__
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# Ignore local bundling for run_migrations, if present
+infra/deploy_functions/run_migrations/*
+!infra/deploy_functions/run_migrations/run_migrations.py
+!infra/deploy_functions/run_migrations/migrations

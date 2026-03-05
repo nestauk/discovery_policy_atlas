@@ -12,7 +12,7 @@ import math
 from typing import Dict, List, Tuple
 import re
 
-from app.services.vectorization import vectorization_service
+import app.core.database as db
 from app.services.synthesis.state import SynthesisState
 from app.services.synthesis.utils import normalize_study_type, normalize_source_type
 from app.services.synthesis.schemas import (
@@ -155,7 +155,6 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     doc_scores = state.get("doc_scores") or {}
 
     project_id = state.get("project_id", "")
-    supabase = vectorization_service.supabase
 
     # Build extraction metadata lookup
     all_ex_ids = []
@@ -165,25 +164,19 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
 
     ex_metadata: Dict[str, Dict] = {}
     if all_ex_ids:
-        docs_res = (
-            supabase.table("analysis_documents")
-            .select("id, doc_id")
-            .eq("analysis_project_id", project_id)
-            .execute()
+        docs = db.fetch(
+            "SELECT id, doc_id FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+            [project_id],
         )
-        uuid_to_doc_id = {
-            str(d["id"]): str(d.get("doc_id") or "") for d in (docs_res.data or [])
-        }
+        uuid_to_doc_id = {str(d["id"]): str(d.get("doc_id") or "") for d in docs}
 
         for i in range(0, len(all_ex_ids), 100):
             chunk = all_ex_ids[i : i + 100]
-            exts_res = (
-                supabase.table("analysis_extractions")
-                .select("id, analysis_document_id, raw_data")
-                .in_("id", chunk)
-                .execute()
+            exts = db.fetch(
+                "SELECT id, analysis_document_id, raw_data FROM analysis_extractions WHERE id = ANY(%s)",
+                [chunk],
             )
-            for r in exts_res.data or []:
+            for r in exts:
                 doc_uuid = str(r.get("analysis_document_id") or "")
                 ex_metadata[str(r["id"])] = {
                     "doc_uuid": doc_uuid,

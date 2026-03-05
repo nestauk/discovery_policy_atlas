@@ -16,7 +16,7 @@ from typing import Optional
 
 from langgraph.graph import StateGraph, END
 
-from app.services.vectorization import vectorization_service
+import app.core.database as db
 from app.utils.llm.llm_utils import get_langfuse_handler, resolve_langfuse_session_id
 from app.services.synthesis.state import SynthesisState
 from app.services.synthesis.nodes import (
@@ -174,13 +174,11 @@ class SynthesisAgent:
             User ID or None.
         """
         try:
-            result = (
-                vectorization_service.supabase.table("analysis_projects")
-                .select("created_by_user_id")
-                .eq("id", project_id)
-                .execute()
+            row = db.fetchone(
+                "SELECT created_by_user_id FROM analysis_projects WHERE id = %s::uuid",
+                [project_id],
             )
-            return result.data[0].get("created_by_user_id") if result.data else None
+            return row.get("created_by_user_id") if row else None
         except Exception:
             return None
 

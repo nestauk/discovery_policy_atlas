@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from app.services.vectorization import vectorization_service
+import app.core.database as db
 from app.services.synthesis.schemas import EvidenceCoverageSnapshot
 from app.services.synthesis.logbook import read_cached_summary
 from app.services.analysis.evidence.category import (
@@ -130,17 +130,15 @@ def get_project_documents_data(project_id: str) -> Dict:
     Returns:
         Dict with 'documents' list, 'total' count, and 'relevant_evidence_count'
     """
-    docs_result = (
-        vectorization_service.supabase.table("analysis_documents")
-        .select("*")
-        .eq("analysis_project_id", project_id)
-        .execute()
+    docs = db.fetch(
+        "SELECT * FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+        [project_id],
     )
 
     documents = []
     relevant_evidence_count = 0
 
-    for doc in docs_result.data or []:
+    for doc in docs:
         doc_copy = transform_document_for_api(doc)
         if doc_copy.get("is_relevant_evidence"):
             relevant_evidence_count += 1
@@ -275,14 +273,11 @@ def aggregate_charts_data(docs_data: List[Dict]) -> Dict:
 
 def get_project_charts_data(project_id: str) -> Dict:
     """Get chart aggregation data for a project."""
-    docs_result = (
-        vectorization_service.supabase.table("analysis_documents")
-        .select("year, source_country, authors, evidence_category")
-        .eq("analysis_project_id", project_id)
-        .execute()
+    docs = db.fetch(
+        "SELECT year, source_country, authors, evidence_category FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+        [project_id],
     )
-
-    return aggregate_charts_data(docs_result.data or [])
+    return aggregate_charts_data(docs)
 
 
 def get_outcome_contributions_data(project_id: str, outcome_theme_id: str) -> Dict:
@@ -298,64 +293,61 @@ def get_outcome_contributions_data(project_id: str, outcome_theme_id: str) -> Di
     Raises:
         HTTPException: 404 if outcome theme not found.
     """
-    runs_res = (
-        vectorization_service.supabase.table("synthesis_runs")
-        .select("id")
-        .eq("analysis_project_id", project_id)
-        .eq("status", "completed")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
+    run = db.fetchone(
+        """
+        SELECT id FROM synthesis_runs
+        WHERE analysis_project_id = %s::uuid AND status = 'completed'
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        [project_id],
     )
-    if not runs_res.data:
+    if not run:
         return {"documents": []}
 
-    run_id = runs_res.data[0].get("id")
+    run_id = run.get("id")
     if not run_id:
         return {"documents": []}
 
-    theme_res = (
-        vectorization_service.supabase.table("synthesis_outcome_themes")
-        .select("id, intervention_theme_id")
-        .eq("id", outcome_theme_id)
-        .eq("synthesis_run_id", run_id)
-        .limit(1)
-        .execute()
+    theme = db.fetchone(
+        """
+        SELECT id, intervention_theme_id FROM synthesis_outcome_themes
+        WHERE id = %s::uuid AND synthesis_run_id = %s::uuid
+        LIMIT 1
+        """,
+        [outcome_theme_id, run_id],
     )
-    if not theme_res.data:
+    if not theme:
         raise HTTPException(status_code=404, detail="Outcome theme not found")
 
-    intervention_theme_id = theme_res.data[0].get("intervention_theme_id")
+    intervention_theme_id = theme.get("intervention_theme_id")
     if not intervention_theme_id:
         return {"documents": []}
 
-    assignments_res = (
-        vectorization_service.supabase.table("outcome_theme_assignments")
-        .select("extraction_id, calibrated_magnitude")
-        .eq("synthesis_run_id", run_id)
-        .eq("synthesis_outcome_theme_id", outcome_theme_id)
-        .execute()
+    assignments = db.fetch(
+        """
+        SELECT extraction_id, calibrated_magnitude FROM outcome_theme_assignments
+        WHERE synthesis_run_id = %s::uuid AND synthesis_outcome_theme_id = %s::uuid
+        """,
+        [run_id, outcome_theme_id],
     )
     extraction_ids = [
         str(row.get("extraction_id"))
-        for row in (assignments_res.data or [])
+        for row in assignments
         if row.get("extraction_id")
     ]
     calibrated_by_extraction_id = {
         str(row.get("extraction_id")): row.get("calibrated_magnitude")
-        for row in (assignments_res.data or [])
+        for row in assignments
         if row.get("extraction_id")
     }
     if not extraction_ids:
         return {"documents": []}
 
-    extractions_res = (
-        vectorization_service.supabase.table("analysis_extractions")
-        .select("id, analysis_document_id, label, raw_data")
-        .in_("id", extraction_ids)
-        .execute()
+    extractions = db.fetch(
+        "SELECT id, analysis_document_id, label, raw_data FROM analysis_extractions WHERE id = ANY(%s)",
+        [extraction_ids],
     )
-    extractions = filter_prevalence_only_extractions(extractions_res.data or [])
+    extractions = filter_prevalence_only_extractions(extractions)
     if not extractions:
         return {"documents": []}
 
@@ -368,43 +360,45 @@ def get_outcome_contributions_data(project_id: str, outcome_theme_id: str) -> Di
     )
     docs_by_id: Dict[str, Dict] = {}
     if doc_ids:
-        docs_res = (
-            vectorization_service.supabase.table("analysis_documents")
-            .select(
-                "id, doc_id, title, source, landing_page_url, doi, year, evidence_category, extraction_results"
-            )
-            .in_("id", doc_ids)
-            .execute()
+        docs = db.fetch(
+            """
+            SELECT id, doc_id, title, source, landing_page_url, doi, year,
+                   evidence_category, extraction_results
+            FROM analysis_documents
+            WHERE id = ANY(%s)
+            """,
+            [doc_ids],
         )
         docs_by_id = {
             str(doc.get("id")): doc
-            for doc in (docs_res.data or [])
+            for doc in docs
             if doc and doc.get("id")
         }
 
-    intervention_assignments_res = (
-        vectorization_service.supabase.table("theme_assignments")
-        .select("extraction_id")
-        .eq("synthesis_run_id", run_id)
-        .eq("synthesis_theme_id", intervention_theme_id)
-        .execute()
+    intervention_assignments = db.fetch(
+        """
+        SELECT extraction_id FROM theme_assignments
+        WHERE synthesis_run_id = %s::uuid AND synthesis_theme_id = %s::uuid
+        """,
+        [run_id, intervention_theme_id],
     )
     intervention_extraction_ids = {
         str(row.get("extraction_id"))
-        for row in (intervention_assignments_res.data or [])
+        for row in intervention_assignments
         if row.get("extraction_id")
     }
 
-    intervention_extractions_res = (
-        vectorization_service.supabase.table("analysis_extractions")
-        .select("id, analysis_document_id, raw_data")
-        .eq("analysis_project_id", project_id)
-        .eq("extraction_type", "intervention")
-        .in_("analysis_document_id", doc_ids)
-        .execute()
+    intervention_extractions = db.fetch(
+        """
+        SELECT id, analysis_document_id, raw_data FROM analysis_extractions
+        WHERE analysis_project_id = %s::uuid
+          AND extraction_type = 'intervention'
+          AND analysis_document_id = ANY(%s)
+        """,
+        [project_id, doc_ids],
     )
     intervention_by_doc_idx: Dict[tuple, str] = {}
-    for extraction in intervention_extractions_res.data or []:
+    for extraction in intervention_extractions:
         raw = extraction.get("raw_data") or {}
         doc_id = str(extraction.get("analysis_document_id") or "")
         idx = raw.get("idx")
@@ -563,25 +557,25 @@ def get_project_interventions_data(project_id: str) -> Dict:
     Returns:
         Dict with 'interventions' list and 'total' count
     """
-    docs_result = (
-        vectorization_service.supabase.table("analysis_documents")
-        .select(
-            "doc_id, title, source, landing_page_url, "
-            "evidence_category, evidence_confidence, extraction_results"
-        )
-        .eq("analysis_project_id", project_id)
-        .not_.is_("extraction_results", "null")
-        .execute()
+    docs = db.fetch(
+        """
+        SELECT doc_id, title, source, landing_page_url,
+               evidence_category, evidence_confidence, extraction_results
+        FROM analysis_documents
+        WHERE analysis_project_id = %s::uuid
+          AND extraction_results IS NOT NULL
+        """,
+        [project_id],
     )
 
-    if not docs_result.data:
+    if not docs:
         return {"interventions": [], "total": 0}
 
-    project_total_docs = len(docs_result.data)
+    project_total_docs = len(docs)
     aggregated_interventions: Dict[str, Dict] = {}
     accumulator: Dict[str, Dict] = {}
 
-    for document in docs_result.data:
+    for document in docs:
         extraction_results = document.get("extraction_results", {})
         interventions = extraction_results.get("interventions", [])
         results = filter_prevalence_only_results(extraction_results.get("results", []))
@@ -695,9 +689,8 @@ def get_project_interventions_data(project_id: str) -> Dict:
 def get_navigator_overview_data(project_id: str) -> Dict:
     """Lightweight overview for the interventions navigator.
 
-    Uses a single PostgREST embedded query that joins
-    themes → assignments → extractions → documents server-side via foreign keys.
-    This avoids multiple large table scans and lets the DB use FK indexes.
+    Joins themes -> assignments -> extractions -> documents in a single SQL query
+    to avoid multiple round trips.
 
     Args:
         project_id: The analysis project ID.
@@ -705,68 +698,85 @@ def get_navigator_overview_data(project_id: str) -> Dict:
     Returns:
         Dict with 'interventions' overview list and 'issue_themes' name list.
     """
-    sb = vectorization_service.supabase
-
-    runs_res = (
-        sb.table("synthesis_runs")
-        .select("id")
-        .eq("analysis_project_id", project_id)
-        .eq("status", "completed")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
+    run = db.fetchone(
+        """
+        SELECT id FROM synthesis_runs
+        WHERE analysis_project_id = %s::uuid AND status = 'completed'
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        [project_id],
     )
-    if not runs_res.data:
+    if not run:
         return {"interventions": [], "issue_themes": []}
 
-    run_id = runs_res.data[0]["id"]
+    run_id = run["id"]
 
-    # Single embedded query: themes → assignments → extractions → documents
-    # PostgREST follows FK relationships server-side, avoiding 4 separate round trips.
-    themes_res = (
-        sb.table("synthesis_themes")
-        .select(
-            "id, theme_type, theme_name, summary_description, frequency, "
-            "impact_score, impact_score_label, "
-            "theme_assignments("
-            "  extraction_id, "
-            "  analysis_extractions("
-            "    analysis_document_id, "
-            "    analysis_documents(doc_id, evidence_category, evidence_confidence)"
-            "  )"
-            ")"
-        )
-        .eq("synthesis_run_id", run_id)
-        .in_("theme_type", ["intervention", "issue"])
-        .execute()
+    # Single SQL join: themes -> assignments -> extractions -> documents
+    rows = db.fetch(
+        """
+        SELECT
+            st.id            AS theme_id,
+            st.theme_type,
+            st.theme_name,
+            st.summary_description,
+            st.frequency,
+            st.impact_score,
+            st.impact_score_label,
+            ad.doc_id,
+            ad.evidence_category,
+            ad.evidence_confidence
+        FROM synthesis_themes st
+        LEFT JOIN theme_assignments ta ON ta.synthesis_theme_id = st.id
+        LEFT JOIN analysis_extractions ae ON ae.id = ta.extraction_id
+        LEFT JOIN analysis_documents ad ON ad.id = ae.analysis_document_id
+        WHERE st.synthesis_run_id = %s::uuid
+          AND st.theme_type IN ('intervention', 'issue')
+        """,
+        [run_id],
     )
-    themes = themes_res.data or []
 
     # Total project docs for density cap calculation
-    docs_count_res = (
-        sb.table("analysis_documents")
-        .select("id", count="exact")
-        .eq("analysis_project_id", project_id)
-        .limit(0)
-        .execute()
+    total_docs = db.fetchcount(
+        "SELECT COUNT(*) FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+        [project_id],
     )
-    total_docs = (
-        docs_count_res.count
-        if hasattr(docs_count_res, "count") and docs_count_res.count is not None
-        else 0
-    )
+
+    # Aggregate rows per theme
+    theme_meta: Dict[str, Dict] = {}
+    theme_docs: Dict[str, Dict[str, Dict]] = {}  # theme_id -> {doc_id -> doc_evidence}
+
+    for row in rows:
+        theme_id = str(row["theme_id"])
+        if theme_id not in theme_meta:
+            theme_meta[theme_id] = {
+                "theme_type": row["theme_type"],
+                "theme_name": row["theme_name"],
+                "summary_description": row.get("summary_description", ""),
+                "frequency": row.get("frequency", 0),
+                "impact_score": row.get("impact_score"),
+                "impact_score_label": row.get("impact_score_label"),
+            }
+            theme_docs[theme_id] = {}
+
+        doc_id = row.get("doc_id")
+        if doc_id and doc_id not in theme_docs[theme_id]:
+            theme_docs[theme_id][doc_id] = {
+                "doc_id": doc_id,
+                "evidence_category": row.get("evidence_category"),
+                "evidence_confidence": row.get("evidence_confidence", 1.0),
+            }
 
     overview_interventions = []
     issue_theme_names = []
 
-    for theme in themes:
-        theme_type = theme.get("theme_type")
+    for theme_id, meta in theme_meta.items():
+        theme_type = meta["theme_type"]
 
         if theme_type == "issue":
             issue_theme_names.append(
                 {
-                    "theme_name": theme["theme_name"],
-                    "frequency": theme.get("frequency", 0),
+                    "theme_name": meta["theme_name"],
+                    "frequency": meta.get("frequency", 0),
                 }
             )
             continue
@@ -774,33 +784,17 @@ def get_navigator_overview_data(project_id: str) -> Dict:
         if theme_type != "intervention":
             continue
 
-        # Walk the embedded assignments → extractions → documents
-        doc_evidence: Dict[str, Dict] = {}
-        for assignment in theme.get("theme_assignments") or []:
-            extraction = assignment.get("analysis_extractions")
-            if not extraction:
-                continue
-            doc = extraction.get("analysis_documents")
-            if not doc or not doc.get("doc_id"):
-                continue
-            did = doc["doc_id"]
-            if did not in doc_evidence:
-                doc_evidence[did] = {
-                    "doc_id": did,
-                    "evidence_category": doc.get("evidence_category"),
-                    "evidence_confidence": doc.get("evidence_confidence", 1.0),
-                }
-
+        doc_evidence = theme_docs[theme_id]
         if not doc_evidence:
             continue
 
         strength = calculate_evidence_strength(list(doc_evidence.values()), total_docs)
         overview_interventions.append(
             {
-                "theme_name": theme["theme_name"],
-                "description": theme.get("summary_description", ""),
+                "theme_name": meta["theme_name"],
+                "description": meta.get("summary_description", ""),
                 "frequency": len(doc_evidence),
-                "avg_impact_score": theme.get("impact_score"),
+                "avg_impact_score": meta.get("impact_score"),
                 "avg_evidence_score": strength["stars"],
                 "study_count": len(doc_evidence),
             }
@@ -820,32 +814,28 @@ def get_navigator_data(project_id: str) -> Dict:
     Returns:
         Dict with 'issue_themes' list and 'all_interventions' list
     """
-    runs_res = (
-        vectorization_service.supabase.table("synthesis_runs")
-        .select("id")
-        .eq("analysis_project_id", project_id)
-        .eq("status", "completed")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
+    run = db.fetchone(
+        """
+        SELECT id FROM synthesis_runs
+        WHERE analysis_project_id = %s::uuid AND status = 'completed'
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        [project_id],
     )
 
-    if not runs_res.data:
+    if not run:
         return {"issue_themes": []}
 
-    run_id = runs_res.data[0]["id"]
+    run_id = run["id"]
 
-    themes_res = (
-        vectorization_service.supabase.table("synthesis_themes")
-        .select("*")
-        .eq("synthesis_run_id", run_id)
-        .execute()
+    themes = db.fetch(
+        "SELECT * FROM synthesis_themes WHERE synthesis_run_id = %s::uuid",
+        [run_id],
     )
 
-    if not themes_res.data:
+    if not themes:
         return {"issue_themes": []}
 
-    themes = themes_res.data
     issue_themes = [t for t in themes if t["theme_type"] == "issue"]
     intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
     risk_theme_rows = [t for t in themes if t["theme_type"] == "risk"]
@@ -863,21 +853,20 @@ def get_navigator_data(project_id: str) -> Dict:
         if t.get("id")
     }
 
-    outcome_themes_res = (
-        vectorization_service.supabase.table("synthesis_outcome_themes")
-        .select(
-            "id, synthesis_run_id, outcome_name, outcome_description, "
-            "effect_consensus, positive_count, negative_count, null_count, "
-            "sample_effect_sizes, frequency, source_doc_ids, "
-            "verdict_label, verdict_description, discord_flag, discord_reason, "
-            "predicted_magnitude, magnitude_detail, "
-            "primary_causal_mechanism, causal_mechanism_detail, "
-            "intervention_theme_id"
-        )
-        .eq("synthesis_run_id", run_id)
-        .execute()
+    outcome_themes = db.fetch(
+        """
+        SELECT id, synthesis_run_id, outcome_name, outcome_description,
+               effect_consensus, positive_count, negative_count, null_count,
+               sample_effect_sizes, frequency, source_doc_ids,
+               verdict_label, verdict_description, discord_flag, discord_reason,
+               predicted_magnitude, magnitude_detail,
+               primary_causal_mechanism, causal_mechanism_detail,
+               intervention_theme_id
+        FROM synthesis_outcome_themes
+        WHERE synthesis_run_id = %s::uuid
+        """,
+        [run_id],
     )
-    outcome_themes = outcome_themes_res.data or []
     for outcome in outcome_themes:
         outcome["magnitude_detail"] = parse_json_field(outcome.get("magnitude_detail"))
         outcome["causal_mechanism_detail"] = parse_json_field(
@@ -895,13 +884,11 @@ def get_navigator_data(project_id: str) -> Dict:
     links_by_theme: Dict[str, List[Dict]] = {}
 
     if risk_theme_ids:
-        links_res = (
-            vectorization_service.supabase.table("theme_intervention_links")
-            .select("theme_id, intervention_theme_id, link_strength")
-            .in_("theme_id", risk_theme_ids)
-            .execute()
+        links = db.fetch(
+            "SELECT theme_id, intervention_theme_id, link_strength FROM theme_intervention_links WHERE theme_id = ANY(%s)",
+            [risk_theme_ids],
         )
-        for link in links_res.data or []:
+        for link in links:
             links_by_theme.setdefault(link["theme_id"], []).append(
                 {
                     "intervention_theme_id": link["intervention_theme_id"],
@@ -922,13 +909,10 @@ def get_navigator_data(project_id: str) -> Dict:
         if linked_id:
             risks_by_intervention.setdefault(linked_id, []).append(risk_theme)
 
-    assignments_res = (
-        vectorization_service.supabase.table("theme_assignments")
-        .select("synthesis_theme_id, extraction_id")
-        .eq("synthesis_run_id", run_id)
-        .execute()
+    assignments = db.fetch(
+        "SELECT synthesis_theme_id, extraction_id FROM theme_assignments WHERE synthesis_run_id = %s::uuid",
+        [run_id],
     )
-    assignments = assignments_res.data or []
 
     theme_to_extractions: Dict[str, List] = {}
     for assignment in assignments:
@@ -941,30 +925,28 @@ def get_navigator_data(project_id: str) -> Dict:
                 theme_to_extractions[theme_id] = []
             theme_to_extractions[theme_id].append(extraction_id)
 
-    extractions_res = (
-        vectorization_service.supabase.table("analysis_extractions")
-        .select(
-            "id, analysis_document_id, extraction_type, label, description, supporting_quote, raw_data"
-        )
-        .eq("analysis_project_id", project_id)
-        .execute()
+    extractions = db.fetch(
+        """
+        SELECT id, analysis_document_id, extraction_type, label, description, supporting_quote, raw_data
+        FROM analysis_extractions
+        WHERE analysis_project_id = %s::uuid
+        """,
+        [project_id],
     )
-    extractions = extractions_res.data or []
     extractions_by_id = {str(e["id"]): e for e in extractions if e and e.get("id")}
 
-    docs_result = (
-        vectorization_service.supabase.table("analysis_documents")
-        .select(
-            "id, doc_id, title, source, landing_page_url, year, evidence_category, "
-            "evidence_category_reasoning, evidence_confidence, extraction_results, "
-            "impact_score, impact_score_label, impact_score_breakdown, "
-            "transferability_score, transferability_breakdown, "
-            "has_harm_warning, harm_warning_reason"
-        )
-        .eq("analysis_project_id", project_id)
-        .execute()
+    documents = db.fetch(
+        """
+        SELECT id, doc_id, title, source, landing_page_url, year, evidence_category,
+               evidence_category_reasoning, evidence_confidence, extraction_results,
+               impact_score, impact_score_label, impact_score_breakdown,
+               transferability_score, transferability_breakdown,
+               has_harm_warning, harm_warning_reason
+        FROM analysis_documents
+        WHERE analysis_project_id = %s::uuid
+        """,
+        [project_id],
     )
-    documents = docs_result.data or []
     docs_by_id = {str(d["id"]): d for d in documents if d and d.get("id")}
     docs_by_doc_id = {d.get("doc_id"): d for d in documents if d and d.get("doc_id")}
 
@@ -1058,29 +1040,14 @@ async def get_summary_with_counts(project_id: str) -> Tuple[Optional[object], in
         return None, 0, 0
 
     try:
-        screened_res = (
-            vectorization_service.supabase.table("analysis_documents")
-            .select("id", count="exact")
-            .eq("analysis_project_id", project_id)
-            .execute()
-        )
-        total_screened = (
-            screened_res.count
-            if hasattr(screened_res, "count")
-            else len(screened_res.data or [])
+        total_screened = db.fetchcount(
+            "SELECT COUNT(*) FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+            [project_id],
         )
 
-        synthesised_res = (
-            vectorization_service.supabase.table("analysis_documents")
-            .select("id", count="exact")
-            .eq("analysis_project_id", project_id)
-            .eq("is_relevant", True)
-            .execute()
-        )
-        total_synthesised = (
-            synthesised_res.count
-            if hasattr(synthesised_res, "count")
-            else len(synthesised_res.data or [])
+        total_synthesised = db.fetchcount(
+            "SELECT COUNT(*) FROM analysis_documents WHERE analysis_project_id = %s::uuid AND is_relevant = TRUE",
+            [project_id],
         )
 
         if cached.evidence_coverage:

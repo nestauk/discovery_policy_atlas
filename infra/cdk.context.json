@@ -62,5 +62,7 @@
   "hosted-zone:account=715413099986:domainName=staging.policyatlas.uk:region=eu-west-2": {
     "Id": "/hostedzone/Z0682443S3R3Q16ZM838",
     "Name": "staging.policyatlas.uk."
-  }
+  },
+  "ssm:account=715413099986:parameterName=/policy_atlas/db/secret_name:region=eu-west-2": "DatabaseStackPolicyAtlasDBC-AniS6syZZpsT",
+  "ssm:account=715413099986:parameterName=/policy_atlas/db/security_group_id:region=eu-west-2": "sg-04109675957383b7a"
 }

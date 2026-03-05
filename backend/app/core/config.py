@@ -101,9 +101,8 @@ class Settings(BaseSettings):
     # LLM Configuration
     OPENAI_API_KEY: Optional[str] = None
 
-    # Supabase Configuration
-    SUPABASE_URL: Optional[str] = None
-    SUPABASE_KEY: Optional[str] = None
+    # Database Configuration
+    DATABASE_URL: Optional[str] = None
 
     # Development/Testing
     MOCK_OPENAI: bool = False

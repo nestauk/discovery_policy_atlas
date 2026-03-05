@@ -10,7 +10,7 @@ import pandas as pd
 
 from app.core.auth import get_current_user, CurrentUser
 from app.services.search_wizard import SearchWizardService
-from app.services.vectorization import vectorization_service
+import app.core.database as db
 from app.services.chatbot import ChatRequest, ChatResponse
 from app.services.chatbot.chat_service import chatbot_service
 from app.services.synthesis.schemas import (
@@ -114,17 +114,13 @@ def get_project_with_auth_check(
         if "created_by_user_id" not in select:
             select = f"{select}, created_by_user_id"
 
-    result = (
-        vectorization_service.supabase.table("analysis_projects")
-        .select(select)
-        .eq("id", project_id)
-        .execute()
+    project = db.fetchone(
+        f"SELECT {select} FROM analysis_projects WHERE id = %s::uuid",
+        [project_id],
     )
 
-    if not result.data:
+    if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-
-    project = result.data[0]
 
     if not can_access_project(
         user, project.get("organization_id"), project.get("created_by_user_id")
@@ -171,28 +167,13 @@ async def get_synthesis_summary(
         if cached:
             # Normalise evidence coverage counts to reflect screening outcomes, even for older cached runs.
             try:
-                screened_res = (
-                    vectorization_service.supabase.table("analysis_documents")
-                    .select("id", count="exact")
-                    .eq("analysis_project_id", project_id)
-                    .execute()
+                total_screened = db.fetchcount(
+                    "SELECT COUNT(*) FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+                    [project_id],
                 )
-                total_screened = (
-                    screened_res.count
-                    if hasattr(screened_res, "count")
-                    else len(screened_res.data or [])
-                )
-                synthesised_res = (
-                    vectorization_service.supabase.table("analysis_documents")
-                    .select("id", count="exact")
-                    .eq("analysis_project_id", project_id)
-                    .eq("is_relevant", True)
-                    .execute()
-                )
-                total_synthesised = (
-                    synthesised_res.count
-                    if hasattr(synthesised_res, "count")
-                    else len(synthesised_res.data or [])
+                total_synthesised = db.fetchcount(
+                    "SELECT COUNT(*) FROM analysis_documents WHERE analysis_project_id = %s::uuid AND is_relevant = TRUE",
+                    [project_id],
                 )
 
                 if cached.evidence_coverage:
@@ -276,19 +257,19 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
         demo_org_id = os.getenv("DEMO_ORG_ID")
 
         # Use database function for filtering (centralizes authorization logic)
-        result = vectorization_service.supabase.rpc(
-            "get_user_projects",
-            {
-                "p_user_id": current_user.user_id,
-                "p_organization_id": current_user.organization_id,
-                "p_organization_slug": current_user.organization_slug,
-                "p_demo_org_id": demo_org_id,
-                "p_admin_org_slug": ADMIN_ORG_SLUG,
-            },
-        ).execute()
+        project_rows = db.fetch(
+            "SELECT * FROM get_user_projects(%s, %s, %s, %s, %s)",
+            [
+                current_user.user_id,
+                current_user.organization_id,
+                current_user.organization_slug,
+                demo_org_id,
+                ADMIN_ORG_SLUG,
+            ],
+        )
 
         projects = []
-        for project_data in result.data:
+        for project_data in project_rows:
             project_org_id = project_data.get("organization_id")
             projects.append(
                 {
@@ -343,18 +324,7 @@ async def create_analysis_project(
             "organization_id": current_user.organization_id,
         }
 
-        result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .insert(project_data)
-            .execute()
-        )
-
-        if not result.data:
-            raise HTTPException(
-                status_code=500, detail="Failed to create analysis project"
-            )
-
-        created_project = result.data[0]
+        created_project = db.insert("analysis_projects", project_data)
         return {
             "id": str(created_project["id"]),
             "title": created_project["title"],
@@ -451,17 +421,16 @@ async def update_analysis_project(
         if not update_data:
             raise HTTPException(status_code=400, detail="No valid fields to update")
 
-        result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .update(update_data)
-            .eq("id", project_id)
-            .execute()
+        set_clause = ", ".join(f'"{k}" = %s' for k in update_data)
+        values = list(update_data.values()) + [project_id]
+        updated_project = db.fetchone(
+            f'UPDATE "analysis_projects" SET {set_clause} WHERE id = %s::uuid RETURNING *',
+            values,
         )
 
-        if not result.data:
+        if not updated_project:
             raise HTTPException(status_code=404, detail="Project not found")
 
-        updated_project = result.data[0]
         return {
             "id": str(updated_project["id"]),
             "run_id": updated_project.get("run_id"),
@@ -505,15 +474,10 @@ async def update_project_visibility(
         if is_public is None:
             raise HTTPException(status_code=400, detail="is_public field is required")
 
-        result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .update({"is_public": bool(is_public)})
-            .eq("id", project_id)
-            .execute()
+        db.execute(
+            'UPDATE "analysis_projects" SET "is_public" = %s WHERE id = %s::uuid',
+            [bool(is_public), project_id],
         )
-
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to update visibility")
 
         return {"success": True, "is_public": bool(is_public)}
 
@@ -538,31 +502,25 @@ async def delete_analysis_project(
     try:
         get_project_with_auth_check(project_id, current_user, "id, organization_id")
 
-        sb = vectorization_service.supabase
-
         # Collect IDs we'll need for targeted deletes
-        doc_ids = [
-            d["id"]
-            for d in sb.table("analysis_documents")
-            .select("id")
-            .eq("analysis_project_id", project_id)
-            .execute()
-            .data
-        ]
-        run_ids = [
-            r["id"]
-            for r in sb.table("synthesis_runs")
-            .select("id")
-            .eq("analysis_project_id", project_id)
-            .execute()
-            .data
-        ]
+        doc_rows = db.fetch(
+            "SELECT id FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+            [project_id],
+        )
+        doc_ids = [d["id"] for d in doc_rows]
+
+        run_rows = db.fetch(
+            "SELECT id FROM synthesis_runs WHERE analysis_project_id = %s::uuid",
+            [project_id],
+        )
+        run_ids = [r["id"] for r in run_rows]
+
         # 1. Chunks (no CASCADE path from project)
         if doc_ids:
-            sb.table("chunks").delete().in_("document_id", doc_ids).execute()
-        sb.table("chunks").delete().eq("project_id", project_id).execute()
+            db.execute("DELETE FROM chunks WHERE document_id = ANY(%s)", [doc_ids])
+        db.execute("DELETE FROM chunks WHERE project_id = %s::uuid", [project_id])
 
-        # 2. Synthesis leaf tables → parents (by run_id)
+        # 2. Synthesis leaf tables -> parents (by run_id)
         if run_ids:
             for table in [
                 "outcome_theme_assignments",
@@ -571,23 +529,26 @@ async def delete_analysis_project(
                 "synthesis_outcome_themes",
                 "synthesis_themes",
             ]:
-                sb.table(table).delete().in_("synthesis_run_id", run_ids).execute()
-            sb.table("synthesis_runs").delete().eq(
-                "analysis_project_id", project_id
-            ).execute()
+                db.execute(f'DELETE FROM "{table}" WHERE synthesis_run_id = ANY(%s)', [run_ids])
+            db.execute(
+                "DELETE FROM synthesis_runs WHERE analysis_project_id = %s::uuid",
+                [project_id],
+            )
 
         # 3. Extractions (has direct project FK)
-        sb.table("analysis_extractions").delete().eq(
-            "analysis_project_id", project_id
-        ).execute()
+        db.execute(
+            "DELETE FROM analysis_extractions WHERE analysis_project_id = %s::uuid",
+            [project_id],
+        )
 
         # 4. Documents
-        sb.table("analysis_documents").delete().eq(
-            "analysis_project_id", project_id
-        ).execute()
+        db.execute(
+            "DELETE FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+            [project_id],
+        )
 
         # 5. Delete project (CASCADE handles any remaining stragglers)
-        sb.table("analysis_projects").delete().eq("id", project_id).execute()
+        db.execute("DELETE FROM analysis_projects WHERE id = %s::uuid", [project_id])
 
         logger.info(f"Deleted analysis project {project_id}")
         return {"message": "Analysis project deleted successfully"}
@@ -628,10 +589,10 @@ async def trigger_synthesis_for_project(
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "completed"})
-            .eq("id", project_id)
-            .execute(),
+            lambda: db.execute(
+                'UPDATE "analysis_projects" SET "status" = %s WHERE id = %s::uuid',
+                ["completed", project_id],
+            ),
         )
         return
 
@@ -650,9 +611,10 @@ async def trigger_synthesis_for_project(
     if force:
         try:
             # Clear prior synthesis_runs rows to satisfy unique constraint on analysis_project_id
-            vectorization_service.supabase.table("synthesis_runs").delete().eq(
-                "analysis_project_id", project_id
-            ).execute()
+            db.execute(
+                "DELETE FROM synthesis_runs WHERE analysis_project_id = %s::uuid",
+                [project_id],
+            )
         except Exception as e:
             logger.warning(
                 f"Failed to clear existing synthesis_runs for forced rerun of project {project_id}: {e}"
@@ -670,22 +632,20 @@ async def trigger_synthesis_for_project(
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "synthesising"})
-            .eq("id", project_id)
-            .execute(),
+            lambda: db.execute(
+                'UPDATE "analysis_projects" SET "status" = %s WHERE id = %s::uuid',
+                ["synthesising", project_id],
+            ),
         )
 
         project_user_id = None
         try:
-            project_row = (
-                vectorization_service.supabase.table("analysis_projects")
-                .select("created_by_user_id")
-                .eq("id", project_id)
-                .execute()
+            row = db.fetchone(
+                "SELECT created_by_user_id FROM analysis_projects WHERE id = %s::uuid",
+                [project_id],
             )
-            if project_row.data:
-                project_user_id = project_row.data[0].get("created_by_user_id")
+            if row:
+                project_user_id = row.get("created_by_user_id")
         except Exception:
             project_user_id = None
 
@@ -694,13 +654,11 @@ async def trigger_synthesis_for_project(
         final_state = await synthesis_agent.run(project_id, user_id=project_user_id)
 
         # Remove the placeholder run before creating the final one (async to avoid blocking)
-        supabase = vectorization_service.supabase
         await loop.run_in_executor(
             None,
-            lambda: supabase.table("synthesis_runs")
-            .delete()
-            .eq("id", run_id)
-            .execute(),
+            lambda: db.execute(
+                "DELETE FROM synthesis_runs WHERE id = %s::uuid", [run_id]
+            ),
         )
 
         # Write complete synthesis results (this creates the synthesis_runs record with themes)
@@ -712,10 +670,10 @@ async def trigger_synthesis_for_project(
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "completed"})
-            .eq("id", project_id)
-            .execute(),
+            lambda: db.execute(
+                'UPDATE "analysis_projects" SET "status" = %s WHERE id = %s::uuid',
+                ["completed", project_id],
+            ),
         )
 
         logger.info(f"Synthesis completed for project {project_id}")
@@ -723,14 +681,12 @@ async def trigger_synthesis_for_project(
     except Exception as e:
         # Clean up placeholder run on failure (async to avoid blocking)
         try:
-            supabase = vectorization_service.supabase
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                lambda: supabase.table("synthesis_runs")
-                .delete()
-                .eq("id", run_id)
-                .execute(),
+                lambda: db.execute(
+                    "DELETE FROM synthesis_runs WHERE id = %s::uuid", [run_id]
+                ),
             )
         except Exception:
             pass  # Ignore cleanup errors
@@ -739,10 +695,10 @@ async def trigger_synthesis_for_project(
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "completed"})
-            .eq("id", project_id)
-            .execute(),
+            lambda: db.execute(
+                'UPDATE "analysis_projects" SET "status" = %s WHERE id = %s::uuid',
+                ["completed", project_id],
+            ),
         )
 
         logger.error(f"Synthesis failed for project {project_id}: {e}")
@@ -855,10 +811,10 @@ async def run_analysis_for_project(
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
-            .update({"status": "running", "search_query": search_query_data})
-            .eq("id", project_id)
-            .execute(),
+            lambda: db.execute(
+                'UPDATE "analysis_projects" SET "status" = %s, "search_query" = %s WHERE id = %s::uuid',
+                ["running", search_query_data, project_id],
+            ),
         )
 
         # Run analysis
@@ -877,18 +833,10 @@ async def run_analysis_for_project(
         # Update project with analysis results but keep status as "running" (async to avoid blocking)
         await loop.run_in_executor(
             None,
-            lambda: vectorization_service.supabase.table("analysis_projects")
-            .update(
-                {
-                    "run_id": result.run_id,
-                    "total_references": result.total_references,
-                    "relevant_references": result.relevant_references,
-                    "search_query": search_query_data,
-                    # Don't set status to "completed" yet - synthesis will do that
-                }
-            )
-            .eq("id", project_id)
-            .execute(),
+            lambda: db.execute(
+                'UPDATE "analysis_projects" SET "run_id" = %s, "total_references" = %s, "relevant_references" = %s, "search_query" = %s WHERE id = %s::uuid',
+                [result.run_id, result.total_references, result.relevant_references, search_query_data, project_id],
+            ),
         )
 
         # Trigger synthesis automatically
@@ -899,10 +847,10 @@ async def run_analysis_for_project(
             # Even if synthesis fails, mark analysis as completed (async to avoid blocking)
             await loop.run_in_executor(
                 None,
-                lambda: vectorization_service.supabase.table("analysis_projects")
-                .update({"status": "completed"})
-                .eq("id", project_id)
-                .execute(),
+                lambda: db.execute(
+                    'UPDATE "analysis_projects" SET "status" = %s WHERE id = %s::uuid',
+                    ["completed", project_id],
+                ),
             )
 
         return {
@@ -920,9 +868,10 @@ async def run_analysis_for_project(
         logger.error(f"Error running analysis for project {project_id}: {e}")
         # Mark project as failed
         try:
-            vectorization_service.supabase.table("analysis_projects").update(
-                {"status": "failed"}
-            ).eq("id", project_id).execute()
+            db.execute(
+                'UPDATE "analysis_projects" SET "status" = %s WHERE id = %s::uuid',
+                ["failed", project_id],
+            )
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to run analysis: {str(e)}")
@@ -1023,17 +972,17 @@ async def get_project_extractions(
 ):
     """Get all extractions for an analysis project, optionally filtered by type"""
     try:
-        query = (
-            vectorization_service.supabase.table("analysis_extractions")
-            .select("*")
-            .eq("analysis_project_id", project_id)
-        )
-
         if extraction_type:
-            query = query.eq("extraction_type", extraction_type)
-
-        extractions_result = query.execute()
-        extractions = filter_prevalence_only_extractions(extractions_result.data or [])
+            rows = db.fetch(
+                "SELECT * FROM analysis_extractions WHERE analysis_project_id = %s::uuid AND extraction_type = %s",
+                [project_id, extraction_type],
+            )
+        else:
+            rows = db.fetch(
+                "SELECT * FROM analysis_extractions WHERE analysis_project_id = %s::uuid",
+                [project_id],
+            )
+        extractions = filter_prevalence_only_extractions(rows)
         return {
             "extractions": extractions,
             "total": len(extractions),
@@ -1056,14 +1005,12 @@ async def get_thematic_groups(
     theme_type: str = Query(..., enum=["intervention", "issue"]),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Return thematic groups by type via Supabase RPC for the Evidence view."""
+    """Return thematic groups by type via RPC for the Evidence view."""
     try:
-        response = vectorization_service.supabase.rpc(
-            "get_project_thematic_groups_by_type",
-            {"p_project_id": project_id, "p_theme_type": theme_type},
-        ).execute()
-
-        data = response.data or []
+        data = db.fetch(
+            "SELECT * FROM get_project_thematic_groups_by_type(%s::uuid, %s)",
+            [project_id, theme_type],
+        )
         return [ThematicGroup(**item) for item in data]
     except Exception as e:
         logger.error(f"Error fetching thematic groups for project {project_id}: {e}")
@@ -1083,18 +1030,15 @@ async def get_thematic_group_items(
     ),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Return items for a thematic group via Supabase RPC.
+    """Return items for a thematic group via RPC.
 
-    Uses get_theme_items_rich RPC with parameters p_theme_id and p_item_type.
+    Uses get_theme_items_rich with parameters p_theme_id and p_item_type.
     """
     try:
-        response = vectorization_service.supabase.rpc(
-            "get_theme_items_rich",
-            {"p_theme_id": theme_id, "p_item_type": item_type},
-        ).execute()
-
-        raw_items = response.data or []
-        # RPC returns JSONB array directly as response.data
+        raw_items = db.fetch(
+            "SELECT * FROM get_theme_items_rich(%s::uuid, %s)",
+            [theme_id, item_type],
+        )
         return [EvidenceItem(**item) for item in raw_items]
     except Exception as e:
         logger.error(
@@ -1126,20 +1070,15 @@ async def get_document_extraction(
     """Get detailed extraction results for a specific document"""
     try:
         # First verify the document belongs to this project
-        doc_result = (
-            vectorization_service.supabase.table("analysis_documents")
-            .select("*")
-            .eq("id", document_id)
-            .eq("analysis_project_id", project_id)
-            .execute()
+        document = db.fetchone(
+            "SELECT * FROM analysis_documents WHERE id = %s::uuid AND analysis_project_id = %s::uuid",
+            [document_id, project_id],
         )
 
-        if not doc_result.data:
+        if not document:
             raise HTTPException(
                 status_code=404, detail="Document not found in this project"
             )
-
-        document = doc_result.data[0]
 
         # Get the extraction results from the JSONB field
         extraction_results = document.get("extraction_results")
@@ -1319,31 +1258,25 @@ async def get_navigator_stats(
     and theme_assignments + analysis_extractions for distinct label counts.
     """
     try:
-        sb = vectorization_service.supabase
-
-        runs_res = (
-            sb.table("synthesis_runs")
-            .select("id")
-            .eq("analysis_project_id", project_id)
-            .eq("status", "completed")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
+        run = db.fetchone(
+            """
+            SELECT id FROM synthesis_runs
+            WHERE analysis_project_id = %s::uuid AND status = 'completed'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            [project_id],
         )
-        if not runs_res.data:
+        if not run:
             return {"intervention_group_count": 0, "intervention_count": 0}
 
-        run_id = runs_res.data[0]["id"]
+        run_id = run["id"]
 
-        themes_res = (
-            sb.table("synthesis_themes")
-            .select("id, theme_type")
-            .eq("synthesis_run_id", run_id)
-            .eq("theme_type", "intervention")
-            .execute()
+        themes = db.fetch(
+            "SELECT id FROM synthesis_themes WHERE synthesis_run_id = %s::uuid AND theme_type = 'intervention'",
+            [run_id],
         )
-        intervention_theme_count = len(themes_res.data or [])
-        intervention_theme_ids = [t["id"] for t in (themes_res.data or [])]
+        intervention_theme_count = len(themes)
+        intervention_theme_ids = [t["id"] for t in themes]
 
         if not intervention_theme_ids:
             return {
@@ -1351,30 +1284,21 @@ async def get_navigator_stats(
                 "intervention_count": 0,
             }
 
-        assignments_res = (
-            sb.table("theme_assignments")
-            .select("extraction_id")
-            .eq("synthesis_run_id", run_id)
-            .in_("synthesis_theme_id", intervention_theme_ids)
-            .execute()
+        assignments = db.fetch(
+            "SELECT extraction_id FROM theme_assignments WHERE synthesis_run_id = %s::uuid AND synthesis_theme_id = ANY(%s)",
+            [run_id, intervention_theme_ids],
         )
         extraction_ids = list(
-            {
-                a["extraction_id"]
-                for a in (assignments_res.data or [])
-                if a.get("extraction_id")
-            }
+            {a["extraction_id"] for a in assignments if a.get("extraction_id")}
         )
 
         unique_labels: set[str] = set()
         if extraction_ids:
-            extractions_res = (
-                sb.table("analysis_extractions")
-                .select("label")
-                .in_("id", extraction_ids)
-                .execute()
+            extractions = db.fetch(
+                "SELECT label FROM analysis_extractions WHERE id = ANY(%s)",
+                [extraction_ids],
             )
-            for e in extractions_res.data or []:
+            for e in extractions:
                 if e.get("label"):
                     unique_labels.add(e["label"])
 
@@ -1415,45 +1339,37 @@ async def debug_themes(
 ):
     """Debug endpoint to check theme data structure."""
     try:
-        # Get themes via RPC (what we're currently using)
-        issue_themes_response = vectorization_service.supabase.rpc(
-            "get_project_thematic_groups_by_type",
-            {"p_project_id": project_id, "p_theme_type": "issue"},
-        ).execute()
+        rpc_issue_themes = db.fetch(
+            "SELECT * FROM get_project_thematic_groups_by_type(%s::uuid, %s)",
+            [project_id, "issue"],
+        )
+        rpc_intervention_themes = db.fetch(
+            "SELECT * FROM get_project_thematic_groups_by_type(%s::uuid, %s)",
+            [project_id, "intervention"],
+        )
 
-        intervention_themes_response = vectorization_service.supabase.rpc(
-            "get_project_thematic_groups_by_type",
-            {"p_project_id": project_id, "p_theme_type": "intervention"},
-        ).execute()
-
-        # Also get themes directly from synthesis_themes table (what Summary tab uses)
-        # Get most recent completed synthesis run
-        runs_res = (
-            vectorization_service.supabase.table("synthesis_runs")
-            .select("*")
-            .eq("analysis_project_id", project_id)
-            .eq("status", "completed")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
+        # Also get themes directly from synthesis_themes table
+        run = db.fetchone(
+            """
+            SELECT id FROM synthesis_runs
+            WHERE analysis_project_id = %s::uuid AND status = 'completed'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            [project_id],
         )
 
         direct_themes = []
-        if runs_res.data:
-            run_id = runs_res.data[0]["id"]
-            themes_res = (
-                vectorization_service.supabase.table("synthesis_themes")
-                .select("*")
-                .eq("synthesis_run_id", run_id)
-                .execute()
+        if run:
+            direct_themes = db.fetch(
+                "SELECT * FROM synthesis_themes WHERE synthesis_run_id = %s::uuid",
+                [run["id"]],
             )
-            direct_themes = themes_res.data or []
 
         return {
-            "rpc_issue_themes": issue_themes_response.data or [],
-            "rpc_intervention_themes": intervention_themes_response.data or [],
-            "rpc_issue_count": len(issue_themes_response.data or []),
-            "rpc_intervention_count": len(intervention_themes_response.data or []),
+            "rpc_issue_themes": rpc_issue_themes,
+            "rpc_intervention_themes": rpc_intervention_themes,
+            "rpc_issue_count": len(rpc_issue_themes),
+            "rpc_intervention_count": len(rpc_intervention_themes),
             "direct_themes": direct_themes,
             "direct_issue_themes": [
                 t for t in direct_themes if t.get("theme_type") == "issue"
@@ -1470,15 +1386,13 @@ async def debug_themes(
 def get_project_title(project_id: str) -> str:
     """Get project title for filename generation"""
     try:
-        result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("title")
-            .eq("id", project_id)
-            .execute()
+        row = db.fetchone(
+            "SELECT title FROM analysis_projects WHERE id = %s::uuid",
+            [project_id],
         )
 
-        if result.data and len(result.data) > 0:
-            title = result.data[0].get("title", "")
+        if row:
+            title = row.get("title", "")
             # Clean title for filename: replace spaces with underscores, remove special chars
             import re
 
@@ -1490,8 +1404,7 @@ def get_project_title(project_id: str) -> str:
             )  # Replace spaces and hyphens with underscores
             clean_title = clean_title.strip("_")  # Remove leading/trailing underscores
             return clean_title[:50] if clean_title else "project"  # Limit length
-        else:
-            return "project"
+        return "project"
     except Exception as e:
         logger.warning(f"Failed to get project title for {project_id}: {e}")
         return "project"
@@ -1503,85 +1416,69 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
     # but flatten the nested structure into a tabular format
 
     # Get most recent completed synthesis run
-    runs_res = (
-        vectorization_service.supabase.table("synthesis_runs")
-        .select("*")
-        .eq("analysis_project_id", project_id)
-        .eq("status", "completed")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
+    run = db.fetchone(
+        """
+        SELECT id FROM synthesis_runs
+        WHERE analysis_project_id = %s::uuid AND status = 'completed'
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        [project_id],
     )
 
-    if not runs_res.data:
+    if not run:
         return pd.DataFrame()
 
-    run_id = runs_res.data[0]["id"]
+    run_id = run["id"]
 
     # Get all themes for this synthesis run
-    themes_res = (
-        vectorization_service.supabase.table("synthesis_themes")
-        .select("*")
-        .eq("synthesis_run_id", run_id)
-        .execute()
+    themes = db.fetch(
+        "SELECT * FROM synthesis_themes WHERE synthesis_run_id = %s::uuid",
+        [run_id],
     )
 
-    if not themes_res.data:
+    if not themes:
         return pd.DataFrame()
 
-    themes = themes_res.data
     issue_themes = [t for t in themes if t["theme_type"] == "issue"]
     intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
 
     # Get theme assignments to link themes to extractions
-    assignments_res = (
-        vectorization_service.supabase.table("theme_assignments")
-        .select("*")
-        .eq("synthesis_run_id", run_id)
-        .execute()
+    assignments = db.fetch(
+        "SELECT * FROM theme_assignments WHERE synthesis_run_id = %s::uuid",
+        [run_id],
     )
-
-    assignments = assignments_res.data or []
 
     # Build mappings: theme_id -> [extraction_ids]
     theme_to_extractions = {}
     for assignment in assignments:
         if not assignment:
             continue
-        theme_id = assignment.get("synthesis_theme_id")
-        extraction_id = assignment.get("extraction_id")
+        theme_id = str(assignment.get("synthesis_theme_id") or "")
+        extraction_id = str(assignment.get("extraction_id") or "")
         if theme_id and extraction_id:
             if theme_id not in theme_to_extractions:
                 theme_to_extractions[theme_id] = []
             theme_to_extractions[theme_id].append(extraction_id)
 
     # Get all extractions for this project
-    extractions_res = (
-        vectorization_service.supabase.table("analysis_extractions")
-        .select("*")
-        .eq("analysis_project_id", project_id)
-        .execute()
+    extractions = db.fetch(
+        "SELECT * FROM analysis_extractions WHERE analysis_project_id = %s::uuid",
+        [project_id],
     )
-
-    extractions = extractions_res.data or []
     extractions_by_id = {str(e["id"]): e for e in extractions if e and e.get("id")}
 
     # Get documents for metadata and scores
-    docs_result = (
-        vectorization_service.supabase.table("analysis_documents")
-        .select("*")
-        .eq("analysis_project_id", project_id)
-        .execute()
+    documents = db.fetch(
+        "SELECT * FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+        [project_id],
     )
-
-    documents = docs_result.data or []
     docs_by_id = {str(d["id"]): d for d in documents if d and d.get("id")}
 
     # Build flattened CSV data
     csv_rows = []
 
     for issue_theme in issue_themes:
-        issue_theme_id = issue_theme["id"]
+        issue_theme_id = str(issue_theme["id"])
         issue_theme_name = issue_theme["theme_name"]
         issue_theme_description = issue_theme.get("summary_description", "")
         issue_frequency = issue_theme.get("frequency", 0)
@@ -1590,7 +1487,7 @@ def prepare_interventions_csv_data(project_id: str) -> pd.DataFrame:
         issue_extraction_ids = theme_to_extractions.get(issue_theme_id, [])
 
         for intervention_theme in intervention_themes:
-            intervention_theme_id = intervention_theme["id"]
+            intervention_theme_id = str(intervention_theme["id"])
             intervention_theme_name = intervention_theme["theme_name"]
             intervention_description = intervention_theme.get("summary_description", "")
 
@@ -1702,14 +1599,10 @@ def prepare_documents_csv_data(project_id: str) -> pd.DataFrame:
     """Prepare documents data for CSV export"""
     try:
         # Get all documents for this project
-        docs_result = (
-            vectorization_service.supabase.table("analysis_documents")
-            .select("*")
-            .eq("analysis_project_id", project_id)
-            .execute()
+        documents = db.fetch(
+            "SELECT * FROM analysis_documents WHERE analysis_project_id = %s::uuid",
+            [project_id],
         )
-
-        documents = docs_result.data or []
         logger.info(f"Found {len(documents)} documents for project {project_id}")
 
         if not documents:
@@ -1864,27 +1757,21 @@ async def get_project_feedback(
     """Get user feedback for a specific project from the user_feedback table"""
     try:
         # Check if project exists
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("id")
-            .eq("id", project_id)
-            .execute()
-        )
-        if not project_result.data:
+        if not db.fetchone(
+            "SELECT id FROM analysis_projects WHERE id = %s::uuid", [project_id]
+        ):
             raise HTTPException(status_code=404, detail="Project not found")
 
         # Get feedback for this user and project
-        feedback_result = (
-            vectorization_service.supabase.table("user_feedback")
-            .select("rating, comment, updated_at")
-            .eq("project_id", project_id)
-            .eq("user_id", current_user.user_id)
-            .order("updated_at", desc=True)
-            .limit(1)
-            .execute()
+        feedback = db.fetchone(
+            """
+            SELECT rating, comment, updated_at FROM user_feedback
+            WHERE project_id = %s::uuid AND user_id = %s
+            ORDER BY updated_at DESC LIMIT 1
+            """,
+            [project_id, current_user.user_id],
         )
-        if feedback_result.data and len(feedback_result.data) > 0:
-            feedback = feedback_result.data[0]
+        if feedback:
             return {
                 "feedback": {
                     "rating": feedback.get("rating"),
@@ -1920,15 +1807,12 @@ async def save_project_feedback(
                 status_code=400, detail="Comment must be 500 characters or less"
             )
         # Check if project exists
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("id")
-            .eq("id", project_id)
-            .execute()
-        )
-        if not project_result.data:
+        if not db.fetchone(
+            "SELECT id FROM analysis_projects WHERE id = %s::uuid", [project_id]
+        ):
             raise HTTPException(status_code=404, detail="Project not found")
         # Insert new feedback row
+        now = datetime.utcnow().isoformat()
         feedback_data = {
             "project_id": project_id,
             "user_id": current_user.user_id,
@@ -1936,22 +1820,16 @@ async def save_project_feedback(
             "user_name": getattr(current_user, "name", None),
             "rating": rating,
             "comment": comment,
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "created_at": now,
+            "updated_at": now,
         }
-        result = (
-            vectorization_service.supabase.table("user_feedback")
-            .insert(feedback_data)
-            .execute()
-        )
-        if not result.data:
-            raise HTTPException(status_code=500, detail="Failed to save feedback")
+        db.insert("user_feedback", feedback_data)
         return {
             "message": "Feedback saved successfully",
             "feedback": {
                 "rating": rating,
                 "comment": comment,
-                "updated_at": feedback_data["updated_at"],
+                "updated_at": now,
             },
         }
     except HTTPException:

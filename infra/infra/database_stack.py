@@ -9,6 +9,7 @@ from aws_cdk import (
     Stack,
     Duration,
     RemovalPolicy,
+    BundlingOptions,
     aws_rds as rds,
     aws_ec2 as ec2,
     aws_iam as iam,
@@ -40,21 +41,39 @@ class DatabaseStack(Stack):
             allow_all_outbound=True
         )
 
+        if db_config["readers"] == 0:
+            readers = None
+        else:
+            readers = []
+            for _ in range(db_config["readers"]):
+                readers.append(
+                    rds.ClusterInstance.provisioned(
+                        "PolicyAtlasDBReaderInstance" + str(_),
+                        instance_type=ec2.InstanceType(db_config["reader_instance_size"]),
+                        instance_identifier=f"policy-atlas-db-reader-{_}",
+                    )
+                )
+
+        writer = rds.ClusterInstance.provisioned(
+            "PolicyAtlasDBWriterInstance",
+            instance_type=ec2.InstanceType(db_config["writer_instance_size"]),
+            instance_identifier=f"policy-atlas-db-writer",
+        )
+
         # Create the RDS Aurora cluster.
         cluster = rds.DatabaseCluster(self, "PolicyAtlasDBCluster",
             engine=rds.DatabaseClusterEngine.aurora_postgres(
-                version=rds.AuroraPostgresEngineVersion.VER_14_6),
-            instance_props=rds.InstanceProps(
-                instance_type=ec2.InstanceType(db_config["instance_size"]),
-                vpc=vpc,
-                security_groups=[db_security_group],
-                vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_NAT)
-            ),
-            instances=db_config["cluster_instances"],
+                version=rds.AuroraPostgresEngineVersion.VER_17_7),
+            writer=writer,
+            readers=readers,
             default_database_name="policy_atlas_db",
             credentials=rds.Credentials.from_generated_secret("dbadmin"),
             removal_policy=RemovalPolicy.SNAPSHOT,
             deletion_protection=False,
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            cluster_identifier="policy-atlas-db-cluster",
+            security_groups=[db_security_group]
         )
 
         # Before we proceed, prepare a Lambda function for use within this deployment.
@@ -91,12 +110,6 @@ class DatabaseStack(Stack):
             description="Allow Supabase Studio access to RDS cluster"
         )
 
-        # Store the RDS cluster's security group ID in SSM Parameter Store.
-        ssm.StringParameter(self, "DBSecurityGroupIdParameter",
-            parameter_name="/policy_atlas/db/security_group_id",
-            string_value=db_security_group.security_group_id
-        )
-
         # Set up an ECS cluster, via Fargate, to run the Supabase Studio container.
         studio_cluster = ecs.Cluster(self, "StudioCluster", vpc=vpc,
             cluster_name=f"policy-atlas-studio-cluster",
@@ -116,28 +129,80 @@ class DatabaseStack(Stack):
                          execute_before=[task_definition]
         )
 
+        # Create a security group for the migration Lambda.
+        # Needs outbound access to reach RDS and Secrets Manager (via VPC endpoint or NAT).
+        migration_sg = ec2.SecurityGroup(self, "MigrationLambdaSG",
+            vpc=vpc,
+            description="Security group for DB migration Lambda",
+            allow_all_outbound=True
+        )
+
+        # Allow the migration Lambda to connect to RDS on port 5432.
+        db_security_group.add_ingress_rule(
+            peer=migration_sg,
+            connection=ec2.Port.tcp(5432),
+            description="Allow migration Lambda to connect to RDS"
+        )
+
+        # Lambda that applies all SQL migrations against the freshly provisioned RDS cluster.
+        # Runs on every deploy; all migrations use IF NOT EXISTS / IF EXISTS so re-runs are safe.
+        # Dependencies: pg8000 (pure-Python Postgres driver), sqlparse (splits multi-statement
+        # SQL files correctly, including $$-quoted PL/pgSQL function bodies).
+        migration_function = _lambda.Function(self, "RunMigrationsFunction",
+            runtime=_lambda.Runtime.PYTHON_3_12,
+            handler="run_migrations.handler",
+            code=_lambda.Code.from_asset(
+                "infra/deploy_functions/run_migrations"
+            ),
+            environment={"SECRET_NAME": cluster.secret.secret_name},
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            security_groups=[migration_sg],
+            timeout=Duration.minutes(5),
+            memory_size=256,
+        )
+
+        cluster.secret.grant_read(migration_function)
+
+        # Trigger migrations after the cluster is ready, before the Studio comes up.
+        # Runs in parallel with LoadSecretTrigger (no dependency between them).
+        triggers.Trigger(self, "RunMigrationsTrigger",
+            handler=migration_function,
+            execute_after=[cluster],
+            execute_before=[task_definition]
+        )
+
         task_definition.add_container("SupabaseStudioContainer",
             image=ecs.ContainerImage.from_registry(f"public.ecr.aws/supabase/studio:{db_config['studio_tag']}"),
             port_mappings=[ecs.PortMapping(container_port=3000)],
             environment={
-                "DB_HOST": cluster.cluster_endpoint.hostname,
-                "DB_PORT": str(cluster.cluster_endpoint.port),
-                "DB_NAME": "policy_atlas_db",
-                "DB_USER": "dbadmin",
+                # Studio communicates with postgres-meta (co-located in the same task) for all DB introspection.
+                "STUDIO_PG_META_URL": "http://localhost:8080",
+                "DEFAULT_ORGANIZATION_NAME": "Policy Atlas",
+                "DEFAULT_PROJECT_NAME": "Policy Atlas",
+                "NEXT_PUBLIC_ENABLE_LOGS": "false",
             },
             secrets={
-                    "DB_PASSWORD": ecs.Secret.from_secrets_manager(cluster.secret, field="password")
+                "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(cluster.secret, field="password")
             },
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="SupabaseStudio")
-        ) 
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="SupabaseStudio"),
+        )
 
-        # This one only takes in a fully populated URL.
-        # We give it one directly after synthesizing it so we don't expose secret data in logs.
+        # postgres-meta provides the REST API that Studio uses for schema introspection.
+        # Listens on port 8080 (default). Uses individual PG_META_DB_* vars (not DATABASE_URL).
         task_definition.add_container("PostgresMetaContainer",
             image=ecs.ContainerImage.from_registry(f"public.ecr.aws/supabase/postgres-meta:{db_config['postgres_meta_tag']}"),
-            port_mappings=[ecs.PortMapping(container_port=3001)],
+            port_mappings=[ecs.PortMapping(container_port=8080)],
+            environment={
+                "PG_META_PORT": "8080",
+                "PG_META_DB_NAME": "policy_atlas_db",
+                "PG_META_DB_SSL_MODE": "require",
+            },
             secrets={
-                "DATABASE_URL": ecs.Secret.from_secrets_manager(cluster.secret, field="db_connection_string")
+                "PG_META_DB_HOST": ecs.Secret.from_secrets_manager(cluster.secret, field="host"),
+                "PG_META_DB_PORT": ecs.Secret.from_secrets_manager(cluster.secret, field="port"),
+                "PG_META_DB_USER": ecs.Secret.from_secrets_manager(cluster.secret, field="username"),
+                "PG_META_DB_PASSWORD": ecs.Secret.from_secrets_manager(cluster.secret, field="password"),
             },
             logging=ecs.LogDrivers.aws_logs(stream_prefix="PostgresMeta")
         )
@@ -163,6 +228,17 @@ class DatabaseStack(Stack):
         )
 
         listener = alb.add_listener("StudioListener", port=443, protocol=elbv2.ApplicationProtocol.HTTPS)
+        
+        # Add a holding action for default routing.
+        # Users should never see this unless they're trying to bypass
+        # DNS, which they won't.
+        listener.add_action("DefaultAction",
+            action=elbv2.ListenerAction.fixed_response(
+                status_code=404,
+                content_type="text/plain",
+                message_body="Not Found"
+        ))
+
         listener.add_targets("StudioTarget",
             port=3000,
             protocol=elbv2.ApplicationProtocol.HTTP,
@@ -170,12 +246,30 @@ class DatabaseStack(Stack):
                 container_name="SupabaseStudioContainer",
                 container_port=3000,
                 protocol=ecs.Protocol.TCP
-            )]
+            )],
+            health_check=elbv2.HealthCheck(
+                path="/",
+                interval=Duration.seconds(30),
+                timeout=Duration.seconds(5),
+                healthy_threshold_count=2,
+                unhealthy_threshold_count=5,
+                healthy_http_codes="200-399"
+            ),
+            conditions=[elbv2.ListenerCondition.host_headers(
+                [f"{db_config['studio_subdomain']}.{db_config['base_domain_name']}"])],
+            priority=20
         )
 
         # Import R53 hosted zone.
         hosted_zone = r53.HostedZone.from_lookup(self, "HostedZone",
             domain_name=db_config["base_domain_name"]
+        )
+
+        # Import R53 local hosted zone.
+        local_hosted_zone = r53.HostedZone.from_lookup(self, "LocalHostedZone",
+            domain_name=db_config["local_domain_name"],
+            private_zone=True,
+            vpc_id=vpc.vpc_id                                
         )
 
         # Add A record - for studio access.
@@ -185,10 +279,49 @@ class DatabaseStack(Stack):
             target=r53.RecordTarget.from_alias(r53_targets.LoadBalancerTarget(alb))
         )
 
+        local_db_record = "db." + db_config["local_domain_name"]
+
+        # Add internal A record - for easy database access.
+        r53.CnameRecord(self, "DatabaseLocalEndpoint",
+                    zone=local_hosted_zone,
+                    record_name=local_db_record,
+                    domain_name=cluster.cluster_endpoint.hostname
+        )
+
+        # Store the DNS name for the DB endpoint in SSM
+        ssm.StringParameter(self, "DBEndpointParameter",
+            parameter_name="/policy_atlas/db/endpoint",
+            string_value=local_db_record
+        )
+
+        # Store the security group for the database in SSM
+        ssm.StringParameter(self, "DBSecurityGroupParameter",
+            parameter_name="/policy_atlas/db/security_group_id",
+            string_value=db_security_group.security_group_id
+        )
+
+        # Store the DB secret ARN in SSM so PolicyAtlasStack can import it.
+        ssm.StringParameter(self, "DBSecretNameParameter",
+            parameter_name="/policy_atlas/db/secret_name",
+            string_value=cluster.secret.secret_name
+        )
+
+        # Store the ALB ID in SSM for application connection.
+        ssm.StringParameter(self, "ALBIdParameter",
+            parameter_name="/policy_atlas/studio/alb_id",
+            string_value=alb.load_balancer_arn
+        )
+
         # Request a certificate for the ALB.
         certificate = acm.Certificate(self, "StudioCertificate",
             domain_name=f"{db_config['studio_subdomain']}.{db_config['base_domain_name']}",
             validation=acm.CertificateValidation.from_dns(hosted_zone)
+        )
+
+        # And store the certificate ARN in SSM for later use.
+        ssm.StringParameter(self, "StudioCertificateArnParameter",
+            parameter_name="/policy_atlas/studio/certificate_arn",
+            string_value=certificate.certificate_arn
         )
 
         # Update the ALB listener to use the certificate.

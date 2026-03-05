@@ -1,5 +1,5 @@
 """
-Supabase-based caching for synthesis agent runs.
+Database caching for synthesis agent runs.
 
 Handles reading/writing synthesis results to:
 - synthesis_runs: Main run records
@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Optional, List, Set
 
-from app.core.config import settings
+import app.core.database as db
 from app.services.synthesis.schemas import (
     SynthesisSummary,
     KeyIssue,
@@ -31,7 +31,6 @@ from app.services.synthesis.nodes.impact_synthesis import (
     detect_scale_type,
     _normalise_unit_key,
 )
-from supabase import create_client
 
 logger = logging.getLogger(__name__)
 
@@ -50,67 +49,41 @@ def _parse_json_field(value: Optional[object]) -> Optional[Dict]:
     return None
 
 
-def get_supabase():
-    """Get Supabase client."""
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
-
-
 async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
     """Read cached synthesis summary for a project."""
-    supabase = get_supabase()
-
-    # Get most recent completed run
-    runs_res = (
-        supabase.table("synthesis_runs")
-        .select("*")
-        .eq("analysis_project_id", project_id)
-        .eq("status", "completed")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
+    run = db.fetchone(
+        """
+        SELECT * FROM synthesis_runs
+        WHERE analysis_project_id = %s AND status = 'completed'
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        [project_id],
     )
-
-    if not runs_res.data:
+    if not run:
         return None
 
-    run = runs_res.data[0]
-    run_id = run["id"]
+    run_id = str(run["id"])
 
-    # Get themes
-    themes_res = (
-        supabase.table("synthesis_themes")
-        .select("*")
-        .eq("synthesis_run_id", run_id)
-        .execute()
+    themes = db.fetch(
+        "SELECT * FROM synthesis_themes WHERE synthesis_run_id = %s", [run_id]
     )
-    outcome_themes_res = (
-        supabase.table("synthesis_outcome_themes")
-        .select("*")
-        .eq("synthesis_run_id", run_id)
-        .execute()
+    outcome_themes = db.fetch(
+        "SELECT * FROM synthesis_outcome_themes WHERE synthesis_run_id = %s", [run_id]
     )
-    citations_res = (
-        supabase.table("synthesis_citations")
-        .select("*")
-        .eq("synthesis_run_id", run_id)
-        .execute()
+    citations = db.fetch(
+        "SELECT * FROM synthesis_citations WHERE synthesis_run_id = %s", [run_id]
     )
 
-    themes = themes_res.data or []
     issue_themes = [t for t in themes if t["theme_type"] == "issue"]
     intervention_themes = [t for t in themes if t["theme_type"] == "intervention"]
     risk_theme_rows = [t for t in themes if t["theme_type"] == "risk"]
 
     # Map doc UUIDs to doc_ids
-    docs_res = (
-        supabase.table("analysis_documents")
-        .select("id, doc_id")
-        .eq("analysis_project_id", project_id)
-        .execute()
+    docs = db.fetch(
+        "SELECT id, doc_id FROM analysis_documents WHERE analysis_project_id = %s",
+        [project_id],
     )
-    uuid_to_docid = {
-        str(d["id"]): str(d.get("doc_id") or "") for d in (docs_res.data or [])
-    }
+    uuid_to_docid = {str(d["id"]): str(d.get("doc_id") or "") for d in docs}
 
     # Build issues
     key_issues = []
@@ -180,10 +153,10 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
             )
 
     # Build outcome themes
-    outcome_themes: List[OutcomeTheme] = []
-    for ot in outcome_themes_res.data or []:
+    outcome_theme_objects: List[OutcomeTheme] = []
+    for ot in outcome_themes:
         if ot.get("outcome_name"):
-            outcome_themes.append(
+            outcome_theme_objects.append(
                 OutcomeTheme(
                     outcome_name=ot["outcome_name"],
                     outcome_description=ot.get("outcome_description") or "",
@@ -210,7 +183,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
 
     # Build citation map
     citation_map: Dict[str, CitationInfo] = {}
-    for cit in citations_res.data or []:
+    for cit in citations:
         cit_key = cit.get("citation_key", "")
         if cit_key:
             citation_map[cit_key] = CitationInfo(
@@ -245,19 +218,13 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
             logger.warning(f"Failed to parse structured_briefing: {e}")
 
     logger.info(f"Read {len(citation_map)} citations from DB for project {project_id}")
-    if citation_map:
-        sample_key = next(iter(citation_map.keys()))
-        sample_cit = citation_map[sample_key]
-        logger.info(
-            f"Sample citation - key: {sample_key}, number: {sample_cit.citation_number}, title: {sample_cit.title}, author: {sample_cit.author_short}"
-        )
 
     return SynthesisSummary(
         executive_briefing=run.get("executive_briefing") or "",
         structured_briefing=structured_briefing,
         key_issues=key_issues,
         interventions=interventions,
-        outcome_themes=outcome_themes,
+        outcome_themes=outcome_theme_objects,
         risk_themes=risk_themes,
         evidence_coverage=evidence_coverage,
         citation_map=citation_map,
@@ -266,8 +233,6 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
 
 async def write_run_from_state(project_id: str, final_state: Dict) -> None:
     """Write synthesis agent final state to cache tables."""
-    supabase = get_supabase()
-
     # Prepare evidence coverage
     ec = final_state.get("evidence_coverage")
     ec_data = (
@@ -303,20 +268,18 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             "total_outcomes": len(final_state.get("aggregated_outcomes") or []),
         },
     }
-    supabase.table("synthesis_runs").insert(run_data).execute()
+    db.insert("synthesis_runs", run_data)
 
-    # Write all citations (keyed by citation_number for frontend lookup)
+    # Write citations
     citation_map = final_state.get("citation_map") or {}
     logger.info(f"Writing {len(citation_map)} citations for run {run_id}")
 
     if citation_map:
         citations_to_insert = []
-
         for i, (cit_key, info) in enumerate(citation_map.items(), 1):
             info_dict = info.model_dump() if hasattr(info, "model_dump") else info
             if not isinstance(info_dict, dict):
                 continue
-
             citations_to_insert.append(
                 {
                     "id": str(uuid.uuid4()),
@@ -333,13 +296,9 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                     "created_at": datetime.utcnow().isoformat(),
                 }
             )
-
-        logger.info(f"Inserting {len(citations_to_insert)} citations")
         if citations_to_insert:
             try:
-                supabase.table("synthesis_citations").insert(
-                    citations_to_insert
-                ).execute()
+                db.insert_many("synthesis_citations", citations_to_insert)
             except Exception as e:
                 logger.warning(f"Failed to insert citations batch: {e}")
 
@@ -402,7 +361,8 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
     for issue in final_state.get("aggregated_issues") or []:
         issue_dict = issue.model_dump() if hasattr(issue, "model_dump") else issue
         theme_id = str(uuid.uuid4())
-        supabase.table("synthesis_themes").insert(
+        db.insert(
+            "synthesis_themes",
             {
                 "id": theme_id,
                 "synthesis_run_id": run_id,
@@ -412,9 +372,8 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "frequency": issue_dict.get("frequency", 0),
                 "source_doc_ids": issue_dict.get("source_doc_ids", []),
                 "created_at": datetime.utcnow().isoformat(),
-            }
-        ).execute()
-
+            },
+        )
         for ex_id in theme_to_ex_ids.get(issue_dict.get("issue_theme", ""), []):
             theme_assignments.append(
                 {
@@ -432,7 +391,8 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
         intv_dict = intv.model_dump() if hasattr(intv, "model_dump") else intv
         theme_id = str(uuid.uuid4())
         intervention_name = intv_dict.get("intervention_name")
-        supabase.table("synthesis_themes").insert(
+        db.insert(
+            "synthesis_themes",
             {
                 "id": theme_id,
                 "synthesis_run_id": run_id,
@@ -456,12 +416,10 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "impact_score_label": intv_dict.get("impact_score_label"),
                 "impact_score_breakdown": intv_dict.get("impact_score_breakdown"),
                 "created_at": datetime.utcnow().isoformat(),
-            }
-        ).execute()
-
+            },
+        )
         if intervention_name:
             intervention_id_by_name[intervention_name] = theme_id
-
         for ex_id in theme_to_ex_ids.get(intervention_name or "", []):
             theme_assignments.append(
                 {
@@ -481,7 +439,8 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
         intervention_link = out_dict.get("intervention_theme_id")
         if intervention_link in intervention_id_by_name:
             intervention_link = intervention_id_by_name[intervention_link]
-        supabase.table("synthesis_outcome_themes").insert(
+        db.insert(
+            "synthesis_outcome_themes",
             {
                 "id": outcome_id,
                 "synthesis_run_id": run_id,
@@ -504,9 +463,8 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "causal_mechanism_detail": out_dict.get("causal_mechanism_detail"),
                 "intervention_theme_id": intervention_link,
                 "created_at": datetime.utcnow().isoformat(),
-            }
-        ).execute()
-
+            },
+        )
         for ex_id in theme_to_ex_ids.get(out_dict.get("outcome_name", ""), []):
             outcome_assignments.append(
                 {
@@ -524,11 +482,11 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
     # Batch insert assignments
     if theme_assignments:
         unique = _dedupe_assignments(theme_assignments, "synthesis_theme_id")
-        supabase.table("theme_assignments").insert(unique).execute()
+        db.insert_many("theme_assignments", unique)
 
     if outcome_assignments:
         unique = _dedupe_assignments(outcome_assignments, "synthesis_outcome_theme_id")
-        supabase.table("outcome_theme_assignments").insert(unique).execute()
+        db.insert_many("outcome_theme_assignments", unique)
 
     # Write risk themes
     for risk in final_state.get("final_risk_themes") or []:
@@ -537,7 +495,8 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
         linked = risk_dict.get("linked_intervention_theme_id")
         if linked in intervention_id_by_name:
             linked = intervention_id_by_name[linked]
-        supabase.table("synthesis_themes").insert(
+        db.insert(
+            "synthesis_themes",
             {
                 "id": risk_theme_id,
                 "synthesis_run_id": run_id,
@@ -549,15 +508,15 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                 "has_harm_warning": risk_dict.get("has_harm_warning", False),
                 "linked_intervention_theme_id": linked,
                 "created_at": datetime.utcnow().isoformat(),
-            }
-        ).execute()
-
+            },
+        )
         linked_interventions = risk_dict.get("linked_interventions") or []
         for item in linked_interventions:
             intervention_name = item.get("intervention_name")
             link_strength = item.get("link_strength", "secondary")
             if intervention_name in intervention_id_by_name:
-                supabase.table("theme_intervention_links").insert(
+                db.insert(
+                    "theme_intervention_links",
                     {
                         "theme_id": risk_theme_id,
                         "intervention_theme_id": intervention_id_by_name[
@@ -565,10 +524,10 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                         ],
                         "link_strength": link_strength,
                         "created_at": datetime.utcnow().isoformat(),
-                    }
-                ).execute()
+                    },
+                )
 
-    # Persist calibrated document scores (overwrite strategy)
+    # Persist calibrated document scores
     doc_scores = final_state.get("doc_scores") or {}
     if doc_scores:
         for doc_uuid, score_entry in doc_scores.items():
@@ -580,13 +539,17 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
             if impact_score is None:
                 continue
             try:
-                supabase.table("analysis_documents").update(
-                    {
-                        "impact_score": impact_score,
-                        "impact_score_label": impact_label,
-                        "impact_score_breakdown": impact_breakdown,
-                    }
-                ).eq("id", doc_uuid).execute()
+                db.execute(
+                    """
+                    UPDATE analysis_documents
+                    SET impact_score = %s,
+                        impact_score_label = %s,
+                        impact_score_breakdown = %s
+                    WHERE id = %s::uuid
+                    """,
+                    [impact_score, impact_label,
+                     psycopg2_json(impact_breakdown), doc_uuid],
+                )
             except Exception as exc:
                 logger.warning(
                     f"Failed to persist document impact score for {doc_uuid}: {exc}"
@@ -611,63 +574,68 @@ def _dedupe_assignments(assignments: List[Dict], theme_key: str) -> List[Dict]:
     return unique
 
 
+def psycopg2_json(v):
+    """Wrap a value in Json() if it's a dict/list, else return as-is."""
+    import psycopg2.extras
+    if isinstance(v, (dict, list)):
+        return psycopg2.extras.Json(v)
+    return v
+
+
 async def get_synthesis_status(project_id: str) -> str:
     """Get current synthesis status for a project."""
-    supabase = get_supabase()
-    runs_res = (
-        supabase.table("synthesis_runs")
-        .select("status")
-        .eq("analysis_project_id", project_id)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
+    row = db.fetchone(
+        """
+        SELECT status FROM synthesis_runs
+        WHERE analysis_project_id = %s
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        [project_id],
     )
-    return runs_res.data[0].get("status", "none") if runs_res.data else "none"
+    return row.get("status", "none") if row else "none"
 
 
 async def invalidate_cache(project_id: str) -> None:
     """Invalidate cached synthesis results for a project."""
-    supabase = get_supabase()
-    supabase.table("synthesis_runs").update({"status": "invalidated"}).eq(
-        "analysis_project_id", project_id
-    ).eq("status", "completed").execute()
+    db.execute(
+        """
+        UPDATE synthesis_runs SET status = 'invalidated'
+        WHERE analysis_project_id = %s AND status = 'completed'
+        """,
+        [project_id],
+    )
 
 
 async def create_synthesis_run_placeholder(project_id: str) -> str:
-    """Create a 'running' synthesis run to prevent duplicates.
-
-    Returns:
-        run_id: The ID of the created synthesis run.
-    """
-    supabase = get_supabase()
+    """Create a 'running' synthesis run to prevent duplicates."""
     run_id = str(uuid.uuid4())
-    run_data = {
-        "id": run_id,
-        "analysis_project_id": project_id,
-        "status": "running",
-        "version": 4,
-        "executive_briefing": "",
-        "model_info": {},
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    supabase.table("synthesis_runs").insert(run_data).execute()
+    db.insert(
+        "synthesis_runs",
+        {
+            "id": run_id,
+            "analysis_project_id": project_id,
+            "status": "running",
+            "version": 4,
+            "executive_briefing": "",
+            "model_info": {},
+            "created_at": datetime.utcnow().isoformat(),
+        },
+    )
     return run_id
 
 
 async def mark_synthesis_complete(run_id: str) -> None:
     """Mark a synthesis run as completed."""
-    supabase = get_supabase()
-    supabase.table("synthesis_runs").update({"status": "completed"}).eq(
-        "id", run_id
-    ).execute()
+    db.execute(
+        "UPDATE synthesis_runs SET status = 'completed' WHERE id = %s::uuid",
+        [run_id],
+    )
 
 
 async def mark_synthesis_failed(run_id: str, error: str) -> None:
     """Mark a synthesis run as failed."""
-    supabase = get_supabase()
-    supabase.table("synthesis_runs").update(
-        {
-            "status": "failed",
-            "model_info": {"error": error[:500]},
-        }
-    ).eq("id", run_id).execute()
+    import psycopg2.extras
+    db.execute(
+        "UPDATE synthesis_runs SET status = 'failed', model_info = %s WHERE id = %s::uuid",
+        [psycopg2.extras.Json({"error": error[:500]}), run_id],
+    )

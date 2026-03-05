@@ -14,7 +14,7 @@ aws ecr get-login-password --profile "$AWS_PROFILE" --region "$REGION" \
   | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
 echo "==> Building backend image"
-docker build -t "${ECR_BASE}:backend" ./backend
+docker build --platform linux/amd64 --provenance=false -t "${ECR_BASE}:backend" ./backend
 
 echo "==> Pushing backend image"
 docker push "${ECR_BASE}:backend"
@@ -23,7 +23,7 @@ CLERK_PUBLISHABLE_KEY=$(aws secretsmanager get-secret-value --profile "$AWS_PROF
   --secret-id "policy_atlas/frontend" --query SecretString --output text | jq -r .NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
 
 echo "==> Building frontend image"
-docker build \
+docker build --platform linux/amd64 --provenance=false \
   --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$CLERK_PUBLISHABLE_KEY" \
   -t "${ECR_BASE}:frontend" ./frontend
 

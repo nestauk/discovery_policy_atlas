@@ -4,15 +4,20 @@
         "aws_region": "eu-west-2",
         "policy_atlas_config": {
             "vpc_id": "vpc-084b7d566e2715422",
+            "domain_name": "staging.policyatlas.uk",
+            "frontend_subdomain": null,
+            "backend_subdomain": "api",
             "frontend": {
                 "cpu": 512,
                 "memory_limit_mib": 1024,
                 "desired_count": 1,
                 "min_capacity": 1,
                 "max_capacity": 2,
-                "internal_http_port": 80,
+                "internal_port": 3000,
                 "cpu_target_utilization_percent": 50,
-                "memory_target_utilization_percent": 50
+                "memory_target_utilization_percent": 50,
+                "registry_tag": "frontend",
+                "secret_name": "policy_atlas/frontend"
             },
             "backend": {
                 "cpu": 512,
@@ -23,10 +28,9 @@
                 "internal_port": 8000,
                 "cpu_target_utilization_percent": 50,
                 "memory_target_utilization_percent": 50,
-                "supabase_secret_name": "/policy-atlas/supabase"
+                "registry_tag": "backend",
+                "secret_name": "policy_atlas/backend"
             }
-        },
-        "domain_name": "staging.policyatlas.uk",
-        "internal_domain_name": "staging.policyatlas.local"
+        }
     }
 }

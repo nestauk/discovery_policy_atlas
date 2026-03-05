@@ -5,7 +5,7 @@ These endpoints serve read-only project data for projects marked as public.
 
 from fastapi import APIRouter, HTTPException
 
-from app.services.vectorization import vectorization_service
+import app.core.database as db
 from app.services.synthesis.schemas import SynthesisSummary
 from app.services.synthesis.logbook import get_synthesis_status
 from app.utils.project_data import (
@@ -29,17 +29,13 @@ def get_public_project(project_id: str, select: str = "*") -> dict:
     if select != "*" and "is_public" not in select:
         select = f"{select}, is_public"
 
-    result = (
-        vectorization_service.supabase.table("analysis_projects")
-        .select(select)
-        .eq("id", project_id)
-        .execute()
+    project = db.fetchone(
+        f"SELECT {select} FROM analysis_projects WHERE id = %s::uuid",
+        [project_id],
     )
 
-    if not result.data:
+    if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-
-    project = result.data[0]
 
     if not project.get("is_public"):
         raise HTTPException(status_code=403, detail="This project is not public")
