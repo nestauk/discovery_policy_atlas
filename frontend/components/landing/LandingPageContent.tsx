@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { SignInButton } from '@clerk/nextjs'
+import { SignInButton } from '@/components/auth/providers'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'

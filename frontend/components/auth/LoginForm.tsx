@@ -1,11 +1,6 @@
-'use client'
+/**
+ * Provider-agnostic LoginForm component.
+ * Re-exports from the active auth provider.
+ */
 
-import { SignIn } from "@clerk/nextjs"
-
-export function LoginForm() {
-  return (
-    <div className="flex justify-center items-center min-h-[400px]">
-      <SignIn />
-    </div>
-  )
-}
+export { LoginForm, SignIn } from './providers';

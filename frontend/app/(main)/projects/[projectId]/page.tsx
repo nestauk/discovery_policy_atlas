@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
-import { useAuth } from '@clerk/nextjs'
+import { useAuthToken } from '@/lib/auth'
 import { SynthesisSummary } from '@/types/search'
 import { ExecutiveBriefing } from '../../results/ExecutiveBriefing'
 import { ChatInterface } from '@/components/chatbot/ChatInterface'
@@ -143,7 +143,7 @@ export default function ProjectResultsPage() {
 
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
-  const { getToken } = useAuth()
+  const { getToken } = useAuthToken()
 
   // Update URL when tab changes (without full navigation)
   const updateUrl = useCallback((tab: TabType, subtab?: EvidenceSubTabType) => {

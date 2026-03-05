@@ -7,7 +7,7 @@ import { useChatStore, ChatMessage } from '@/lib/chatStore'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
 import ReactMarkdown from 'react-markdown'
-import { useUser } from '@clerk/nextjs'
+import { useAuthUser } from '@/lib/auth'
 import Image from 'next/image'
 
 // Helper function to process in-text citations
@@ -50,7 +50,7 @@ export function ChatInterface({
   } = useChatStore()
   
   const { activeProject } = useAnalysisProjectStore()
-  const { user } = useUser()
+  const { user } = useAuthUser()
   const [inputMessage, setInputMessage] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { fetchWithAuth } = useAPI()

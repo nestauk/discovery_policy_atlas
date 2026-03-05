@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
-import { useAuth } from '@clerk/nextjs'
+import { useAuthToken } from '@/lib/auth'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -211,7 +211,7 @@ export function InterventionsNavigator({
 }: InterventionsNavigatorProps) {
   const { activeProject } = useAnalysisProjectStore()
   const { fetchWithAuth } = useAPI()
-  const { getToken } = useAuth()
+  const { getToken } = useAuthToken()
   
   const [data, setData] = useState<NavigatorData | null>(null)
   const [loading, setLoading] = useState(false)

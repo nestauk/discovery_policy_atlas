@@ -1,4 +1,4 @@
-import { useAuth } from "@clerk/nextjs";
+import { useAuthToken, getTokenExternal } from "@/lib/auth";
 import { AnalysisProject } from "./analysisProjectStore";
 
 export const pingBackend = async (): Promise<boolean> => {
@@ -25,12 +25,9 @@ export const fetchWithAuthExternal = async (
 ) => {
   let token: string | null = null;
   try {
-    if (typeof window !== 'undefined' && (window as unknown as { Clerk?: { session?: { getToken: () => Promise<string> } } }).Clerk?.session) {
-      const clerkWindow = window as unknown as { Clerk?: { session?: { getToken: () => Promise<string> } } }
-      token = await clerkWindow.Clerk!.session!.getToken();
-    }
+    token = await getTokenExternal();
   } catch (err) {
-    console.error('Failed to get Clerk token from window:', err);
+    console.error('Failed to get auth token:', err);
   }
 
   if (!token) {
@@ -79,7 +76,7 @@ export const fetchWithAuthExternal = async (
 };
 
 export function useAPI() {
-  const { getToken } = useAuth();
+  const { getToken } = useAuthToken();
   
   const fetchWithAuth = async (url: string, options: RequestInit = {}, isStreaming: boolean = false) => {
     const token = await getToken();
