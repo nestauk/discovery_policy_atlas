@@ -125,6 +125,8 @@ class LLMProcessor:
     async def _invoke_llm(
         self, input_text: str, _id: str, max_retries: int = 2
     ) -> Optional[Dict]:
+        if max_retries < 1:
+            raise ValueError("max_retries must be >= 1")
         start_time = datetime.now(tz=timezone.utc).isoformat()
         structured_llm = self.llm.with_structured_output(self.schema)
         tags = self.component_tags + [
@@ -177,7 +179,10 @@ class LLMProcessor:
                     return None
 
     async def _process_batch(
-        self, batch: List[str], batch_ids: List[str], prompt_template: str
+        self,
+        batch: List[str],
+        batch_ids: List[str],
+        prompt_template: ChatPromptTemplate,
     ) -> List[Dict]:
         tasks = [
             self._invoke_llm(prompt_template.format(input=text), bid)
