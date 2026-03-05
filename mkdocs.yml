@@ -56,6 +56,8 @@ nav:
     - User Management: backend/user-management.md
   - Frontend:
     - Overview: frontend/overview.md
+    - Testing: frontend/testing.md
+    - Testing Coverage: frontend/testing_coverage.md
 
 # Markdown extensions
 markdown_extensions:
