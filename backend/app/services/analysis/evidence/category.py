@@ -300,20 +300,13 @@ class EvidenceCategoryService:
 
             categorised = df["evidence_category"].notna().sum()
             uncategorised = len(docs_to_process) - categorised
-            if uncategorised:
-                logger.warning(
-                    "Evidence categorisation: %d/%d succeeded (project %s)",
-                    categorised,
-                    len(docs_to_process),
-                    self.project_id,
-                )
-            else:
-                logger.info(
-                    "Evidence categorisation: %d/%d succeeded (project %s)",
-                    categorised,
-                    len(docs_to_process),
-                    self.project_id,
-                )
+            log = logger.warning if uncategorised else logger.info
+            log(
+                "Evidence categorisation: %d/%d succeeded (project %s)",
+                categorised,
+                len(docs_to_process),
+                self.project_id,
+            )
             return references_csv_path
 
         except Exception as e:

@@ -163,31 +163,26 @@ class LLMProcessor:
                 response["temperature"] = self.temperature
                 return response
             except Exception as e:
+                log = logger.warning if attempt == max_retries else logger.debug
+                log(
+                    "LLM call failed for %s (attempt %d/%d): %s",
+                    _id,
+                    attempt,
+                    max_retries,
+                    e,
+                )
                 if attempt < max_retries:
-                    logger.debug(
-                        "LLM call failed for %s (attempt %d/%d): %s",
-                        _id,
-                        attempt,
-                        max_retries,
-                        e,
-                    )
-                    await asyncio.sleep(1 * attempt)
+                    await asyncio.sleep(attempt)
                 else:
-                    logger.debug(
-                        "LLM call failed for %s after %d attempts: %s",
-                        _id,
-                        max_retries,
-                        e,
-                    )
                     return None
 
     async def _process_batch(
         self, batch: List[str], batch_ids: List[str], prompt_template: str
     ) -> List[Dict]:
-        tasks = []
-        for idx, text_data in enumerate(batch):
-            formatted_prompt = prompt_template.format(input=text_data)
-            tasks.append(self._invoke_llm(formatted_prompt, batch_ids[idx]))
+        tasks = [
+            self._invoke_llm(prompt_template.format(input=text), bid)
+            for text, bid in zip(batch, batch_ids)
+        ]
 
         results = await asyncio.gather(*tasks)
         return [r for r in results if r is not None]
