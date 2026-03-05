@@ -1,11 +1,11 @@
 import os
-import time
 from dotenv import load_dotenv
 from typing import Optional
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 from jwt import PyJWKClient
+from cachetools import TTLCache
 from app.core.models import CurrentUser
 import httpx
 
@@ -26,20 +26,19 @@ JWKS_URL = f"{CLERK_JWT_ISSUER}/.well-known/jwks.json"
 jwks_client = PyJWKClient(JWKS_URL)
 
 # Simple in-memory cache for user details (fallback if not in JWT)
-# Format: {user_id: (email, name, timestamp)}
-_user_cache: dict[str, tuple[Optional[str], Optional[str], float]] = {}
-_CACHE_TTL_SECONDS = 3600  # 1 hour
+# TTLCache provides automatic expiry + LRU eviction when maxsize is reached
+_user_cache: TTLCache[str, tuple[Optional[str], Optional[str]]] = TTLCache(
+    maxsize=1000, ttl=3600
+)
 
 
 async def fetch_user_from_clerk_cached(
     user_id: str
 ) -> tuple[Optional[str], Optional[str]]:
     """Fetch user details from Clerk API with caching."""
-    # Check cache first
+    # Check cache first - TTLCache handles expiry automatically
     if user_id in _user_cache:
-        email, name, timestamp = _user_cache[user_id]
-        if time.time() - timestamp < _CACHE_TTL_SECONDS:
-            return email, name
+        return _user_cache[user_id]
 
     # Fetch from API
     try:
@@ -81,8 +80,8 @@ async def fetch_user_from_clerk_cached(
                 elif email:
                     name = email.split("@")[0]
 
-                # Cache the result
-                _user_cache[user_id] = (email, name, time.time())
+                # Cache the result - TTLCache handles timestamp internally
+                _user_cache[user_id] = (email, name)
                 return email, name
             else:
                 return None, None

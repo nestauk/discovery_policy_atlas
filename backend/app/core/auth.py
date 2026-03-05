@@ -12,7 +12,6 @@ match provider := AUTH_PROVIDER.lower():
     case "clerk":
         from app.core.auth_providers.clerk import get_current_user  # noqa
     case "keycloak":
-        raise NotImplementedError("Keycloak auth provider is not yet implemented.")
-        # from app.core.auth_providers.keycloak import get_current_user
+        from app.core.auth_providers.keycloak import get_current_user  # noqa
     case _:
         raise NotImplementedError(f"Unsupported AUTH_PROVIDER: {AUTH_PROVIDER}")
