@@ -14,7 +14,7 @@ repos:
         entry: bash -c 'cd frontend && npm run lint'
         language: node
         types: [file]
-        files: ^frontend/.*\.(js|jsx|ts|tsx)$
-        pass_filenames: true
+        files: ^frontend/(?!\.next/).*\.(js|jsx|ts|tsx)$
+        pass_filenames: false
         always_run: false
-        stages: [pre-commit] 
+        stages: [pre-commit]

@@ -1,13 +1,12 @@
 repos:
-  - repo: https://github.com/pre-commit/mirrors-eslint
-    rev: v8.56.0  # Use the version you have installed
+  - repo: local
     hooks:
-      - id: eslint
-        files: \.(js|jsx|ts|tsx)$
+      - id: frontend-lint
+        name: Frontend ESLint
+        entry: bash -c 'npm run lint'
+        language: node
         types: [file]
-        additional_dependencies:
-          - eslint@8.56.0
-          - '@typescript-eslint/parser'
-          - '@typescript-eslint/eslint-plugin'
-          - 'eslint-plugin-react'
-          - 'eslint-plugin-react-hooks' 
+        files: ^(app|components|lib|__tests__|public|proxy\.ts|vitest\.config\.ts|vitest\.setup\.ts).*(\.js|\.jsx|\.ts|\.tsx)$
+        pass_filenames: true
+        always_run: false
+        stages: [pre-commit]
