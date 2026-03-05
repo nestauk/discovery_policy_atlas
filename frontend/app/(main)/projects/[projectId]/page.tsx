@@ -536,14 +536,14 @@ export default function ProjectResultsPage() {
       const project = projectData.project
       setActiveProject(project)
 
-      const isTerminal = project.status === 'completed' || project.status === 'failed' || project.status === 'created'
-      if (isTerminal) {
+      const isStable = project.status === 'completed' || project.status === 'failed' || project.status === 'created'
+      if (isStable) {
         setAnalysisComplete(project.status === 'completed' || project.status === 'created')
         if (project.status === 'failed') {
           setError('Analysis failed. Please try again.')
         }
       }
-      return { project, isTerminal }
+      return { project, isStable }
     }
 
     const startPolling = () => {
@@ -561,7 +561,7 @@ export default function ProjectResultsPage() {
         await refreshData()
 
         try {
-          const { isTerminal: done } = await fetchAndCheckStatus()
+          const { isStable: done } = await fetchAndCheckStatus()
           if (done) {
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current)
@@ -579,9 +579,9 @@ export default function ProjectResultsPage() {
 
     const verifyAndPoll = async () => {
       try {
-        const { isTerminal } = await fetchAndCheckStatus()
+        const { isStable } = await fetchAndCheckStatus()
 
-        if (isTerminal) return
+        if (isStable) return
 
         // Prevent duplicate polling if another effect started during the await
         if (hasStartedPollingRef.current === projectId) return
