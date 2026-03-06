@@ -94,7 +94,7 @@ class ParsingService:
             should_skip, skip_reason = should_skip_large_pdf(file_size)
             if should_skip:
                 logger.warning("Skipping PDF %s: %s", doc_id, skip_reason)
-                raise ParsingError(skip_reason)
+                return None
 
         try:
             # Run parsing in executor to avoid blocking event loop
@@ -120,7 +120,7 @@ class ParsingService:
 
         except asyncio.TimeoutError:
             logger.warning("Parsing timeout for %s after %.1fs", doc_id, timeout)
-            raise ParsingError(f"Parsing timed out after {timeout:.0f} seconds")
+            return None
         except ParsingError:
             raise  # Re-raise user-friendly parsing errors
         except Exception as e:
