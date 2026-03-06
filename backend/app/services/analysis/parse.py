@@ -121,8 +121,6 @@ class ParsingService:
         except asyncio.TimeoutError:
             logger.warning("Parsing timeout for %s after %.1fs", doc_id, timeout)
             return None
-        except ParsingError:
-            raise  # Re-raise user-friendly parsing errors
         except Exception as e:
             logger.warning("Parsing failed for %s: %s", doc_id, e)
             return None
