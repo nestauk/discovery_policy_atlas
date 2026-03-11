@@ -10,7 +10,6 @@ import json
 import logging
 import math
 import pandas as pd
-import psycopg2.extras
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import app.core.database as db
@@ -26,10 +25,6 @@ from .chunking import chunk_document_text
 from .evidence.strength import calculate_document_evidence_score
 from ..vectorization import VectorizationService
 
-
-def _adapt_params(params: list) -> list:
-    """Wrap dicts/lists with Json() so psycopg2 serialises them as JSONB."""
-    return [psycopg2.extras.Json(v) if isinstance(v, (dict, list)) else v for v in params]
 
 logger = logging.getLogger(__name__)
 
@@ -403,7 +398,7 @@ class AnalysisStorageService:
             )
 
             set_clause = ", ".join(f'"{k}" = %s' for k in doc_update)
-            set_values = _adapt_params(list(doc_update.values())) + [project_id, doc_id]
+            set_values = db.adapt_params(list(doc_update.values())) + [project_id, doc_id]
             loop = asyncio.get_event_loop()
             updated = await loop.run_in_executor(
                 None,
@@ -1137,6 +1132,7 @@ class AnalysisStorageService:
                                 "analysis_documents",
                                 d,
                                 ["analysis_project_id", "doc_id", "source"],
+                                conflict_where="upload_step <> 'deleted'",
                             ),
                         )
                     except Exception as doc_error:
@@ -1153,7 +1149,7 @@ class AnalysisStorageService:
         for update in updates:
             doc_id = update.pop("doc_id")
             set_clause = ", ".join(f'"{k}" = %s' for k in update)
-            values = _adapt_params(list(update.values())) + [project_id, doc_id]
+            values = db.adapt_params(list(update.values())) + [project_id, doc_id]
             updated = await loop.run_in_executor(
                 None,
                 lambda sc=set_clause, v=values: db.fetchone(

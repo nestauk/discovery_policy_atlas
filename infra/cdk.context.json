@@ -1,68 +1,76 @@
 {
-  "vpc-provider:account=715413099986:filter.vpc-id=vpc-084b7d566e2715422:region=eu-west-2:returnAsymmetricSubnets=true": {
-    "vpcId": "vpc-084b7d566e2715422",
+  "availability-zones:account=715413099986:region=eu-west-2": [
+    "eu-west-2a",
+    "eu-west-2b",
+    "eu-west-2c"
+  ],
+  "ami:account=715413099986:filters.image-type.0=machine:filters.name.0=fck-nat-al2023-*-arm64-ebs:filters.state.0=available:owners.0=568608671756:region=eu-west-2": "ami-0dab0e00dc1b2dc72",
+  "ssm:account=715413099986:parameterName=/policy_atlas/vpc_id:region=eu-west-2": "vpc-0806f4812b7f5e02b",
+  "hosted-zone:account=715413099986:domainName=staging.policyatlas.uk:region=eu-west-2": {
+    "Id": "/hostedzone/Z0682443S3R3Q16ZM838",
+    "Name": "staging.policyatlas.uk."
+  },
+  "ssm:account=715413099986:parameterName=/policy_atlas/db/secret_name:region=eu-west-2": "DatabaseStackPolicyAtlasDBC-UPTGSSExPhx2",
+  "ssm:account=715413099986:parameterName=/policy_atlas/db/security_group_id:region=eu-west-2": "sg-06a57c9d8587bdd35",
+  "vpc-provider:account=715413099986:filter.vpc-id=vpc-0806f4812b7f5e02b:region=eu-west-2:returnAsymmetricSubnets=true": {
+    "vpcId": "vpc-0806f4812b7f5e02b",
     "vpcCidrBlock": "10.0.0.0/16",
     "ownerAccountId": "715413099986",
     "availabilityZones": [],
     "subnetGroups": [
       {
-        "name": "Private",
-        "type": "Private",
+        "name": "PublicSubnet",
+        "type": "Public",
         "subnets": [
           {
-            "subnetId": "subnet-0d8f86016730c5524",
-            "cidr": "10.0.128.0/20",
+            "subnetId": "subnet-0bac4739e152f78d4",
+            "cidr": "10.0.0.0/19",
             "availabilityZone": "eu-west-2a",
-            "routeTableId": "rtb-01523776671428e6f"
+            "routeTableId": "rtb-067e813bd7172d0a7"
           },
           {
-            "subnetId": "subnet-040ac19fb5c28dbdf",
-            "cidr": "10.0.144.0/20",
+            "subnetId": "subnet-0eb7e3f9e83773154",
+            "cidr": "10.0.32.0/19",
             "availabilityZone": "eu-west-2b",
-            "routeTableId": "rtb-034c037d4be32cf15"
+            "routeTableId": "rtb-07a759ccf03e91a91"
           },
           {
-            "subnetId": "subnet-0e7fd8a3c3bfe335a",
-            "cidr": "10.0.160.0/20",
+            "subnetId": "subnet-05e0480fc7ae51828",
+            "cidr": "10.0.64.0/19",
             "availabilityZone": "eu-west-2c",
-            "routeTableId": "rtb-05c74b08e10e2259f"
+            "routeTableId": "rtb-0dd0d4ac90f00c0cc"
           }
         ]
       },
       {
-        "name": "Public",
-        "type": "Public",
+        "name": "PrivateSubnet",
+        "type": "Private",
         "subnets": [
           {
-            "subnetId": "subnet-05d1fc87d0db1472a",
-            "cidr": "10.0.0.0/20",
+            "subnetId": "subnet-032fd1cdb3a1ec97b",
+            "cidr": "10.0.96.0/19",
             "availabilityZone": "eu-west-2a",
-            "routeTableId": "rtb-0e08041b03229d019"
+            "routeTableId": "rtb-0bca1a1d2116b0f7b"
           },
           {
-            "subnetId": "subnet-0399712f1c2cd2351",
-            "cidr": "10.0.16.0/20",
+            "subnetId": "subnet-0b811cb4a508a6617",
+            "cidr": "10.0.128.0/19",
             "availabilityZone": "eu-west-2b",
-            "routeTableId": "rtb-0e08041b03229d019"
+            "routeTableId": "rtb-01f75bdd8e6afa24b"
           },
           {
-            "subnetId": "subnet-05ab03d7094fb019a",
-            "cidr": "10.0.32.0/20",
+            "subnetId": "subnet-0d545424fed4bf909",
+            "cidr": "10.0.160.0/19",
             "availabilityZone": "eu-west-2c",
-            "routeTableId": "rtb-0e08041b03229d019"
+            "routeTableId": "rtb-0245886c9501a2deb"
           }
         ]
       }
     ]
   },
-  "hosted-zone:account=715413099986:domainName=staging.policyatlas.local:privateZone=true:region=eu-west-2:vpcId=vpc-084b7d566e2715422": {
-    "Id": "/hostedzone/Z01862302DV896CW4NSVS",
+  "hosted-zone:account=715413099986:domainName=staging.policyatlas.local:privateZone=true:region=eu-west-2:vpcId=vpc-0806f4812b7f5e02b": {
+    "Id": "/hostedzone/Z07006361JM453B3EOPV",
     "Name": "staging.policyatlas.local."
   },
-  "hosted-zone:account=715413099986:domainName=staging.policyatlas.uk:region=eu-west-2": {
-    "Id": "/hostedzone/Z0682443S3R3Q16ZM838",
-    "Name": "staging.policyatlas.uk."
-  },
-  "ssm:account=715413099986:parameterName=/policy_atlas/db/secret_name:region=eu-west-2": "DatabaseStackPolicyAtlasDBC-AniS6syZZpsT",
-  "ssm:account=715413099986:parameterName=/policy_atlas/db/security_group_id:region=eu-west-2": "sg-04109675957383b7a"
+  "ssm:account=715413099986:parameterName=/policy_atlas/frontend/next_publishable_key:region=eu-west-2": "pk_test_YnVzeS1zaWxrd29ybS02LmNsZXJrLmFjY291bnRzLmRldiQ"
 }

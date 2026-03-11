@@ -45,7 +45,7 @@ class VectorizationService:
             embedding_str = db.fmt_vector(query_embedding)
 
             rows = db.fetch(
-                "SELECT * FROM match_chunks(%s::vector, %s, %s, %s::uuid)",
+                "SELECT * FROM match_chunks(%s::vector, %s, %s, %s::text)",
                 [embedding_str, match_threshold, match_count, project_id],
             )
             return rows

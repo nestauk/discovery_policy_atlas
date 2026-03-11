@@ -2,7 +2,6 @@
     "staging": {
         "aws_account_id": "715413099986",
         "aws_region": "eu-west-2",
-        "vpc_id": "vpc-084b7d566e2715422",
         "writer_instance_size": "t3.medium",
         "reader_instance_size": "t3.medium",
         "readers": 0,

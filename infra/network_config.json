@@ -1,0 +1,11 @@
+{
+    "staging": {
+        "aws_account_id": "715413099986",
+        "aws_region": "eu-west-2",
+        "fck_nat": {
+            "instance_type": "t4g.nano"
+        },
+        "local_dns_zone_name": "staging.policyatlas.local",
+        "azs": 3
+    }
+}

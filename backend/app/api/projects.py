@@ -517,8 +517,8 @@ async def delete_analysis_project(
 
         # 1. Chunks (no CASCADE path from project)
         if doc_ids:
-            db.execute("DELETE FROM chunks WHERE document_id = ANY(%s)", [doc_ids])
-        db.execute("DELETE FROM chunks WHERE project_id = %s::uuid", [project_id])
+            db.execute("DELETE FROM chunks WHERE document_id IN %s", [tuple(doc_ids)])
+        db.execute("DELETE FROM chunks WHERE project_id = %s", [project_id])
 
         # 2. Synthesis leaf tables -> parents (by run_id)
         if run_ids:
@@ -529,7 +529,7 @@ async def delete_analysis_project(
                 "synthesis_outcome_themes",
                 "synthesis_themes",
             ]:
-                db.execute(f'DELETE FROM "{table}" WHERE synthesis_run_id = ANY(%s)', [run_ids])
+                db.execute(f'DELETE FROM "{table}" WHERE synthesis_run_id IN %s', [tuple(run_ids)])
             db.execute(
                 "DELETE FROM synthesis_runs WHERE analysis_project_id = %s::uuid",
                 [project_id],
@@ -705,132 +705,31 @@ async def trigger_synthesis_for_project(
         raise
 
 
-@router.post("/{project_id}/run-analysis")
-async def run_analysis_for_project(
+async def _run_analysis_background(
     project_id: str,
-    request: dict,
-    current_user: CurrentUser = Depends(get_current_user),
+    config,
+    search_query_data: dict,
+    user_id: str,
+    user_name: str,
 ):
-    """Run analysis service for a specific project"""
+    """Background task: run analysis then synthesis, updating project status throughout."""
+    from app.services.analysis.service import AnalysisService
+    from app.core.config import settings
+
+    loop = asyncio.get_event_loop()
     try:
-        from app.services.analysis.service import AnalysisService
-        from app.services.analysis.schemas import RunConfig
-        from app.core.config import settings
-
-        # Check authorization (also verifies project exists)
-        get_project_with_auth_check(project_id, current_user, "id, organization_id")
-
-        # Build run config from request (query comes from search, not from project)
-        query = request.get("query", "").strip()
-        if not query:
-            raise HTTPException(
-                status_code=400, detail="Query is required for analysis"
-            )
-
-        # Extract search_context if provided (from new wizard)
-        search_context = None
-        if request.get("search_context"):
-            from app.services.analysis.schemas import SearchContext
-
-            try:
-                search_context = SearchContext(**request["search_context"])
-            except Exception as e:
-                logger.warning(f"Failed to parse search_context: {e}")
-
-        # Get sources - prefer from search_context, fallback to request
-        sources = search_context.sources if search_context else []
-        if not sources:
-            sources = request.get("sources", ["openalex", "overton"])
-
-        limit_value = request.get(
-            "limit",
-            search_context.max_results if search_context else 200,
-        )
-        if limit_value is None:
-            limit_value = 200
-
-        config = RunConfig(
-            query=query,
-            sources=sources,
-            date_from=request.get("date_from")
-            or request.get("since"),  # Support both chat and legacy formats
-            date_to=request.get("date_to") or request.get("until"),
-            limit=int(limit_value),
-            screening_enabled=bool(request.get("screening", False)),
-            relevance_enabled=bool(request.get("relevance_enabled", True)),
-            retrieval_mode=request.get("mode", "semantic"),
-            boolean_query=request.get("boolean_query"),
-            use_abstracts_only=bool(request.get("use_abstracts_only", False)),
-            # Chat interface parameters
-            geography_filter=request.get("geography_filter"),
-            sub_questions=request.get("sub_questions"),
-            # New search wizard context
-            search_context=search_context,
-        )
-
-        # Prepare search query metadata to save with the project
-        if search_context:
-            ctx = search_context.model_dump()
-            search_query_data = {
-                **ctx,
-                "limit": ctx.get("max_results", config.limit),
-                "mode": config.retrieval_mode,
-                "relevance_enabled": config.relevance_enabled,
-                "use_abstracts_only": config.use_abstracts_only,
-                "boolean_queries": None,
-                "semantic_query": None,
-            }
-            # Ensure optional fields are populated for storage consistency
-            search_query_data.setdefault("sources", sources)
-            search_query_data.setdefault(
-                "geography", request.get("geography_filter", [])
-            )
-            search_query_data.setdefault("time_from", config.date_from)
-            search_query_data.setdefault("time_to", config.date_to)
-        else:
-            # Fallback for legacy requests without search_context
-            search_query_data = {
-                "research_question": query,
-                "population": [],
-                "outcome": [],
-                "screening_factors": [],
-                "sources": sources,
-                "geography": request.get("geography_filter", []),
-                "time_preset": request.get("time_preset"),
-                "time_from": config.date_from,
-                "time_to": config.date_to,
-                "limit": config.limit,
-                "mode": config.retrieval_mode,
-                "relevance_enabled": config.relevance_enabled,
-                "use_abstracts_only": config.use_abstracts_only,
-                "boolean_queries": None,
-                "semantic_query": None,
-            }
-
-        # Update project status to running (async to avoid blocking)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: db.execute(
-                'UPDATE "analysis_projects" SET "status" = %s, "search_query" = %s WHERE id = %s::uuid',
-                ["running", search_query_data, project_id],
-            ),
-        )
-
-        # Run analysis
         service = AnalysisService(export_dir=settings.EXPORT_FILES_DIR)
         result = await service.run(
             config,
             project_id=project_id,
-            user_id=current_user.user_id,
-            user_name=current_user.name,
+            user_id=user_id,
+            user_name=user_name,
         )
 
-        # Update search query data with the generated queries
+        # Patch search_query_data with the generated queries
         search_query_data["boolean_queries"] = result.boolean_queries
         search_query_data["semantic_query"] = result.semantic_query
 
-        # Update project with analysis results but keep status as "running" (async to avoid blocking)
         await loop.run_in_executor(
             None,
             lambda: db.execute(
@@ -839,12 +738,10 @@ async def run_analysis_for_project(
             ),
         )
 
-        # Trigger synthesis automatically
         try:
             await trigger_synthesis_for_project(project_id)
         except Exception as e:
             logger.error(f"Synthesis failed for project {project_id}: {e}")
-            # Even if synthesis fails, mark analysis as completed (async to avoid blocking)
             await loop.run_in_executor(
                 None,
                 lambda: db.execute(
@@ -853,20 +750,8 @@ async def run_analysis_for_project(
                 ),
             )
 
-        return {
-            "project_id": project_id,
-            "run_id": result.run_id,
-            "total_references": result.total_references,
-            "relevant_references": result.relevant_references,
-            "references_csv_path": result.references_csv_path,
-            "extractions_json_path": result.extractions_json_path,
-        }
-
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Error running analysis for project {project_id}: {e}")
-        # Mark project as failed
+        logger.error(f"Background analysis failed for project {project_id}: {e}")
         try:
             db.execute(
                 'UPDATE "analysis_projects" SET "status" = %s WHERE id = %s::uuid',
@@ -874,7 +759,131 @@ async def run_analysis_for_project(
             )
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail=f"Failed to run analysis: {str(e)}")
+
+
+@router.post("/{project_id}/run-analysis")
+async def run_analysis_for_project(
+    project_id: str,
+    request: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Kick off analysis + synthesis for a project and return 202 immediately.
+
+    The heavy lifting runs in a background asyncio task so the HTTP response
+    is returned before the ALB idle timeout fires.  The frontend should poll
+    GET /{project_id} and watch the ``status`` field for progress.
+    """
+    from app.services.analysis.schemas import RunConfig
+
+    # Check authorization (also verifies project exists)
+    get_project_with_auth_check(project_id, current_user, "id, organization_id")
+
+    # Validate required fields up-front so we can return 4xx synchronously
+    query = request.get("query", "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required for analysis")
+
+    # Extract search_context if provided (from new wizard)
+    search_context = None
+    if request.get("search_context"):
+        from app.services.analysis.schemas import SearchContext
+
+        try:
+            search_context = SearchContext(**request["search_context"])
+        except Exception as e:
+            logger.warning(f"Failed to parse search_context: {e}")
+
+    # Get sources - prefer from search_context, fallback to request
+    sources = search_context.sources if search_context else []
+    if not sources:
+        sources = request.get("sources", ["openalex", "overton"])
+
+    limit_value = request.get(
+        "limit",
+        search_context.max_results if search_context else 200,
+    )
+    if limit_value is None:
+        limit_value = 200
+
+    config = RunConfig(
+        query=query,
+        sources=sources,
+        date_from=request.get("date_from")
+        or request.get("since"),  # Support both chat and legacy formats
+        date_to=request.get("date_to") or request.get("until"),
+        limit=int(limit_value),
+        screening_enabled=bool(request.get("screening", False)),
+        relevance_enabled=bool(request.get("relevance_enabled", True)),
+        retrieval_mode=request.get("mode", "semantic"),
+        boolean_query=request.get("boolean_query"),
+        use_abstracts_only=bool(request.get("use_abstracts_only", False)),
+        # Chat interface parameters
+        geography_filter=request.get("geography_filter"),
+        sub_questions=request.get("sub_questions"),
+        # New search wizard context
+        search_context=search_context,
+    )
+
+    # Prepare search query metadata to save with the project
+    if search_context:
+        ctx = search_context.model_dump()
+        search_query_data = {
+            **ctx,
+            "limit": ctx.get("max_results", config.limit),
+            "mode": config.retrieval_mode,
+            "relevance_enabled": config.relevance_enabled,
+            "use_abstracts_only": config.use_abstracts_only,
+            "boolean_queries": None,
+            "semantic_query": None,
+        }
+        search_query_data.setdefault("sources", sources)
+        search_query_data.setdefault("geography", request.get("geography_filter", []))
+        search_query_data.setdefault("time_from", config.date_from)
+        search_query_data.setdefault("time_to", config.date_to)
+    else:
+        search_query_data = {
+            "research_question": query,
+            "population": [],
+            "outcome": [],
+            "screening_factors": [],
+            "sources": sources,
+            "geography": request.get("geography_filter", []),
+            "time_preset": request.get("time_preset"),
+            "time_from": config.date_from,
+            "time_to": config.date_to,
+            "limit": config.limit,
+            "mode": config.retrieval_mode,
+            "relevance_enabled": config.relevance_enabled,
+            "use_abstracts_only": config.use_abstracts_only,
+            "boolean_queries": None,
+            "semantic_query": None,
+        }
+
+    # Mark project as running before we hand off to the background task
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        lambda: db.execute(
+            'UPDATE "analysis_projects" SET "status" = %s, "search_query" = %s WHERE id = %s::uuid',
+            ["running", search_query_data, project_id],
+        ),
+    )
+
+    # Fire and forget — response returns before ALB idle timeout
+    asyncio.create_task(
+        _run_analysis_background(
+            project_id=project_id,
+            config=config,
+            search_query_data=search_query_data,
+            user_id=current_user.user_id,
+            user_name=current_user.name,
+        )
+    )
+
+    return JSONResponse(
+        status_code=202,
+        content={"project_id": project_id, "status": "running"},
+    )
 
 
 @router.post("/{project_id}/rerun-synthesis")

@@ -393,7 +393,10 @@ class LangChainExtractorService:
     ) -> None:
         """Update references CSV with extraction status and metadata."""
         try:
-            df = pd.read_csv(references_csv)
+            df = pd.read_csv(
+                references_csv,
+                dtype={"text_source": object, "extraction_status": object, "extraction_error": object},
+            )
 
             # Create mapping of doc_id to extraction status
             extraction_mapping = {}

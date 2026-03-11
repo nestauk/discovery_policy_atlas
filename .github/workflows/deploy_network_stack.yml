@@ -1,0 +1,19 @@
+name: Deploy Network Stack
+on:
+    workflow_dispatch:
+        inputs:
+            env_name:
+                description: 'Environment name (e.g., staging, production)'
+                required: true
+                default: 'staging'
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v3
+
+            - name: Set up Node.js
+              uses: actions/setup-node@v3
+
+              

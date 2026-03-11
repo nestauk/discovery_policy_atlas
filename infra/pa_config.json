@@ -3,7 +3,6 @@
         "aws_account_id": "715413099986",
         "aws_region": "eu-west-2",
         "policy_atlas_config": {
-            "vpc_id": "vpc-084b7d566e2715422",
             "domain_name": "staging.policyatlas.uk",
             "frontend_subdomain": null,
             "backend_subdomain": "api",

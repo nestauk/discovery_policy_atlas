@@ -547,8 +547,7 @@ async def write_run_from_state(project_id: str, final_state: Dict) -> None:
                         impact_score_breakdown = %s
                     WHERE id = %s::uuid
                     """,
-                    [impact_score, impact_label,
-                     psycopg2_json(impact_breakdown), doc_uuid],
+                    [impact_score, impact_label, impact_breakdown, doc_uuid],
                 )
             except Exception as exc:
                 logger.warning(
@@ -573,13 +572,6 @@ def _dedupe_assignments(assignments: List[Dict], theme_key: str) -> List[Dict]:
             unique.append(a)
     return unique
 
-
-def psycopg2_json(v):
-    """Wrap a value in Json() if it's a dict/list, else return as-is."""
-    import psycopg2.extras
-    if isinstance(v, (dict, list)):
-        return psycopg2.extras.Json(v)
-    return v
 
 
 async def get_synthesis_status(project_id: str) -> str:
@@ -634,8 +626,7 @@ async def mark_synthesis_complete(run_id: str) -> None:
 
 async def mark_synthesis_failed(run_id: str, error: str) -> None:
     """Mark a synthesis run as failed."""
-    import psycopg2.extras
     db.execute(
         "UPDATE synthesis_runs SET status = 'failed', model_info = %s WHERE id = %s::uuid",
-        [psycopg2.extras.Json({"error": error[:500]}), run_id],
+        [{"error": error[:500]}, run_id],
     )

@@ -25,6 +25,7 @@ CLERK_PUBLISHABLE_KEY=$(aws secretsmanager get-secret-value --profile "$AWS_PROF
 echo "==> Building frontend image"
 docker build --platform linux/amd64 --provenance=false \
   --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$CLERK_PUBLISHABLE_KEY" \
+  --build-arg API_URL="https://api.staging.policyatlas.uk" \
   -t "${ECR_BASE}:frontend" ./frontend
 
 echo "==> Pushing frontend image"

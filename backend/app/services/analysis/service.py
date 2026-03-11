@@ -343,7 +343,10 @@ class AnalysisService:
     ) -> None:
         """Update references CSV with acquisition status and results."""
         try:
-            df = pd.read_csv(references_csv_path)
+            df = pd.read_csv(
+                references_csv_path,
+                dtype={"file_path": object, "acquisition_status": object, "acquisition_error": object},
+            )
 
             # Create mapping of doc_id to acquisition results
             acquisition_mapping = {}

@@ -16,6 +16,7 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_ecs as ecs,
     aws_ecr as ecr,
+    aws_ecr_assets as ecr_assets,
     aws_iam as iam,
     aws_elasticloadbalancingv2 as elbv2,
     aws_secretsmanager as secretsmanager,
@@ -23,11 +24,14 @@ from aws_cdk import (
     aws_route53 as r53,
     aws_route53_targets as r53_targets,
     aws_certificatemanager as acm,
+    aws_cloudwatch as cloudwatch,
+    aws_logs as logs,
+
 )
 
 
 class PolicyAtlasStack(Stack):
-    def __init__(self, scope: Stack, id: str, pa_config: dict, **kwargs) -> None:
+    def __init__(self, scope: Stack, id: str, pa_config: dict, env_name: str, **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
 
         pa_app_config = pa_config["policy_atlas_config"]
@@ -39,7 +43,9 @@ class PolicyAtlasStack(Stack):
         fe_domain = f"{fe_subdomain}.{domain_name}" if fe_subdomain else domain_name
         be_domain = f"{pa_app_config['backend_subdomain']}.{domain_name}"
 
-        vpc = ec2.Vpc.from_lookup(self, "VPC", vpc_id=pa_app_config["vpc_id"])
+        vpc_id = ssm.StringParameter.value_from_lookup(self, parameter_name="/policy_atlas/vpc_id")
+
+        vpc = ec2.Vpc.from_lookup(self, "VPC", vpc_id=vpc_id)
 
         ecr_registry = ecr.Repository.from_repository_name(self, "PolicyAtlasECRRepo",
             repository_name=self.node.try_get_context("@policy-atlas/ecr:repositoryName")
@@ -52,6 +58,11 @@ class PolicyAtlasStack(Stack):
         # DB secret: ARN stored in SSM by DatabaseStack after its first deploy.
         db_secret_name = ssm.StringParameter.value_from_lookup(self,
             parameter_name="/policy_atlas/db/secret_name"
+        )
+
+        shared_log_group = logs.LogGroup(self, "PolicyAtlasLogGroup",
+            log_group_name="/policy_atlas/application",
+            retention=logs.RetentionDays.ONE_MONTH,
         )
 
         db_secret = secretsmanager.Secret.from_secret_name_v2(self, "DBSecret",
@@ -138,13 +149,20 @@ class PolicyAtlasStack(Stack):
             family="policy-atlas-frontend",
         )
 
+        next_js_publishable_key = ssm.StringParameter.value_from_lookup(self, parameter_name="/policy_atlas/frontend/next_publishable_key")
+
         fe_task_def.add_container("policy-atlas-frontend-container",
-            image=ecs.ContainerImage.from_ecr_repository(
-                ecr_registry, tag=fe_config["registry_tag"]
+            image=ecs.ContainerImage.from_asset("../frontend",
+                platform=ecr_assets.Platform.LINUX_AMD64,
+                build_args={
+                    "NEXT_PUBLIC_API_URL": f"https://{be_domain}",
+                    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": next_js_publishable_key,
+                },
             ),
             cpu=fe_config["cpu"],
             memory_limit_mib=fe_config["memory_limit_mib"],
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="PolicyAtlasFrontend"),
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="PolicyAtlasFrontend",
+                                            log_group=shared_log_group),
             environment={
                 # NEXT_PUBLIC_ vars must also be set as Docker build-args at image build time
                 # to be available in client-side bundles. This env var covers server-side use.
@@ -156,9 +174,12 @@ class PolicyAtlasStack(Stack):
                     fe_secret, field="NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"),
                 "CLERK_SECRET_KEY": ecs.Secret.from_secrets_manager(
                     fe_secret, field="CLERK_SECRET_KEY"),
-                "NEXT_PUBLIC_CLERK_SIGN_URL": ecs.Secret.from_secrets_manager(
-                    fe_secret, field="NEXT_PUBLIC_"
-                )
+                "NEXT_PUBLIC_CLERK_SIGN_IN_URL": ecs.Secret.from_secrets_manager(
+                    fe_secret, field="NEXT_PUBLIC_CLERK_SIGN_IN_URL"),
+                "NEXT_PUBLIC_CLERK_SIGN_UP_URL": ecs.Secret.from_secrets_manager(
+                    fe_secret, field="NEXT_PUBLIC_CLERK_SIGN_UP_URL"),
+                "NEXT_PUBLIC_CKERL_AFTER_SIGN_IN_URL": ecs.Secret.from_secrets_manager(
+                    fe_secret, field="NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL"),
             },
             port_mappings=[ecs.PortMapping(
                 container_port=fe_config["internal_port"],
@@ -241,13 +262,19 @@ class PolicyAtlasStack(Stack):
             family="policy-atlas-backend",
         )
 
+
+
         be_task_def.add_container("policy-atlas-backend-container",
-            image=ecs.ContainerImage.from_ecr_repository(
-                ecr_registry, tag=be_config["registry_tag"]
+            image=ecs.ContainerImage.from_asset("../backend",
+                platform=ecr_assets.Platform.LINUX_AMD64,
+                build_args={
+                    "BACKEND_CORS_ORIGINS": f'["https://{fe_domain}"]',
+                },
             ),
             cpu=be_config["cpu"],
             memory_limit_mib=be_config["memory_limit_mib"],
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="PolicyAtlasBackend"),
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="PolicyAtlasBackend",
+                                            log_group=shared_log_group),
             environment={
                 "BACKEND_CORS_ORIGINS": f'["https://{fe_domain}"]',
                 "LOG_LEVEL": "INFO",
@@ -263,6 +290,11 @@ class PolicyAtlasStack(Stack):
                 "OPENALEX_EMAIL": ecs.Secret.from_secrets_manager(be_secret, field="OPENALEX_EMAIL"),
                 "OPENALEX_API_KEY": ecs.Secret.from_secrets_manager(be_secret, field="OPENALEX_API_KEY"),
                 "OVERTON_API_KEY": ecs.Secret.from_secrets_manager(be_secret, field="OVERTON_API_KEY"),
+                "LANGFUSE_SECRET_KEY": ecs.Secret.from_secrets_manager(be_secret, field="LANGFUSE_SECRET_KEY"),
+                "LANGFUSE_PUBLIC_KEY": ecs.Secret.from_secrets_manager(be_secret, field="LANGFUSE_PUBLIC_KEY"),
+                "LANGFUSE_HOST": ecs.Secret.from_secrets_manager(be_secret, field="LANGFUSE_HOST"),
+                "LANGFUSE_USER_ID": ecs.Secret.from_secrets_manager(be_secret, field="LANGFUSE_USER_ID"),
+                "DEMO_ORG_ID": ecs.Secret.from_secrets_manager(be_secret, field="DEMO_ORG_ID"),
             },
             port_mappings=[ecs.PortMapping(
                 container_port=be_config["internal_port"],

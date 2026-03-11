@@ -44,6 +44,11 @@ def _adapt_value(v: Any) -> Any:
     return v
 
 
+def adapt_params(params: List[Any]) -> List[Any]:
+    """Adapt a list of parameter values for psycopg2 (wraps dicts/lists with Json)."""
+    return [_adapt_value(p) for p in params]
+
+
 # ---------------------------------------------------------------------------
 # Read helpers
 # ---------------------------------------------------------------------------
@@ -95,6 +100,8 @@ def _write_conn():
 
 def execute(sql: str, params=None) -> None:
     """Execute a DML statement (INSERT/UPDATE/DELETE) with no return value."""
+    if params is not None:
+        params = [_adapt_value(p) for p in params]
     with _write_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
@@ -130,13 +137,23 @@ def insert_many(table: str, rows: List[Dict]) -> None:
             cur.executemany(sql, values_list)
 
 
-def upsert(table: str, data: Dict, conflict_cols: List[str]) -> Optional[Dict]:
-    """Insert or update on conflict.  Returns the upserted row."""
+def upsert(
+    table: str,
+    data: Dict,
+    conflict_cols: List[str],
+    conflict_where: Optional[str] = None,
+) -> Optional[Dict]:
+    """Insert or update on conflict.  Returns the upserted row.
+
+    conflict_where: optional SQL predicate for partial-index conflict targets,
+    e.g. ``"upload_step <> 'deleted'"`` — must match the index's WHERE clause.
+    """
     keys = list(data.keys())
     values = [_adapt_value(data[k]) for k in keys]
     cols = ", ".join(f'"{k}"' for k in keys)
     placeholders = ", ".join(["%s"] * len(keys))
     conflict = ", ".join(f'"{c}"' for c in conflict_cols)
+    where_clause = f" WHERE {conflict_where}" if conflict_where else ""
     update_set = ", ".join(
         f'"{k}" = EXCLUDED."{k}"'
         for k in keys
@@ -144,7 +161,7 @@ def upsert(table: str, data: Dict, conflict_cols: List[str]) -> Optional[Dict]:
     )
     sql = (
         f'INSERT INTO "{table}" ({cols}) VALUES ({placeholders}) '
-        f"ON CONFLICT ({conflict}) DO UPDATE SET {update_set} RETURNING *"
+        f"ON CONFLICT ({conflict}){where_clause} DO UPDATE SET {update_set} RETURNING *"
     )
     with _write_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -153,14 +170,23 @@ def upsert(table: str, data: Dict, conflict_cols: List[str]) -> Optional[Dict]:
     return dict(row) if row else None
 
 
-def upsert_many(table: str, rows: List[Dict], conflict_cols: List[str]) -> None:
-    """Batch upsert rows.  Uses executemany — no RETURNING."""
+def upsert_many(
+    table: str,
+    rows: List[Dict],
+    conflict_cols: List[str],
+    conflict_where: Optional[str] = None,
+) -> None:
+    """Batch upsert rows.  Uses executemany — no RETURNING.
+
+    conflict_where: optional SQL predicate for partial-index conflict targets.
+    """
     if not rows:
         return
     keys = list(rows[0].keys())
     cols = ", ".join(f'"{k}"' for k in keys)
     placeholders = ", ".join(["%s"] * len(keys))
     conflict = ", ".join(f'"{c}"' for c in conflict_cols)
+    where_clause = f" WHERE {conflict_where}" if conflict_where else ""
     update_set = ", ".join(
         f'"{k}" = EXCLUDED."{k}"'
         for k in keys
@@ -168,7 +194,7 @@ def upsert_many(table: str, rows: List[Dict], conflict_cols: List[str]) -> None:
     )
     sql = (
         f'INSERT INTO "{table}" ({cols}) VALUES ({placeholders}) '
-        f"ON CONFLICT ({conflict}) DO UPDATE SET {update_set}"
+        f"ON CONFLICT ({conflict}){where_clause} DO UPDATE SET {update_set}"
     )
     with _write_conn() as conn:
         with conn.cursor() as cur:

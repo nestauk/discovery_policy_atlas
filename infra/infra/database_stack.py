@@ -28,11 +28,13 @@ import json
 
 class DatabaseStack(Stack):
     def __init__(self, scope: Stack, id: str,
-                 db_config: dict, **kwargs) -> None:
+                 db_config: dict, env_name: str, **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
 
         # Get the VPC by ID.
-        vpc = ec2.Vpc.from_lookup(self, "VPC", vpc_id=db_config["vpc_id"])
+        vpc_id = ssm.StringParameter.value_from_lookup(self, parameter_name="/policy_atlas/vpc_id")
+
+        vpc = ec2.Vpc.from_lookup(self, "VPC", vpc_id=vpc_id)
 
         # Create a security group for the RDS cluster.
         db_security_group = ec2.SecurityGroup(self, "DBSecurityGroup",
