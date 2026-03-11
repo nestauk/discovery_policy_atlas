@@ -288,18 +288,33 @@ class EvidenceCategoryService:
         try:
             results_df = await self._screen_batch(documents)
             if results_df.empty:
-                logger.warning("Evidence categorisation returned no results")
+                logger.error(
+                    "Evidence categorisation: 0/%d succeeded (project %s)",
+                    len(documents),
+                    self.project_id,
+                )
                 return references_csv_path
 
             df = self._merge_evidence_results(df, results_df)
             df.to_csv(references_csv_path, index=False)
 
             categorised = df["evidence_category"].notna().sum()
-            logger.info(f"Categorised {categorised} documents")
+            uncategorised = len(docs_to_process) - categorised
+            log = logger.warning if uncategorised else logger.info
+            log(
+                "Evidence categorisation: %d/%d succeeded (project %s)",
+                categorised,
+                len(docs_to_process),
+                self.project_id,
+            )
             return references_csv_path
 
         except Exception as e:
-            logger.error(f"Evidence categorisation failed: {e}")
+            logger.error(
+                "Evidence categorisation failed (project %s): %s",
+                self.project_id,
+                e,
+            )
             return references_csv_path
 
     def _format_document(self, row: pd.Series) -> str:
