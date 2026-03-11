@@ -150,13 +150,14 @@ class PolicyAtlasStack(Stack):
         )
 
         next_js_publishable_key = ssm.StringParameter.value_from_lookup(self, parameter_name="/policy_atlas/frontend/next_publishable_key")
-
+        next_js_enc_key = ssm.StringParameter.value_from_lookup(self, parameter_name="/policy_atlas/frontend/next_encryption_key")
         fe_task_def.add_container("policy-atlas-frontend-container",
             image=ecs.ContainerImage.from_asset("../frontend",
                 platform=ecr_assets.Platform.LINUX_AMD64,
                 build_args={
                     "NEXT_PUBLIC_API_URL": f"https://{be_domain}",
                     "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": next_js_publishable_key,
+                    "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY": next_js_enc_key,
                 },
             ),
             cpu=fe_config["cpu"],

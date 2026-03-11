@@ -72,5 +72,6 @@
     "Id": "/hostedzone/Z07006361JM453B3EOPV",
     "Name": "staging.policyatlas.local."
   },
-  "ssm:account=715413099986:parameterName=/policy_atlas/frontend/next_publishable_key:region=eu-west-2": "pk_test_YnVzeS1zaWxrd29ybS02LmNsZXJrLmFjY291bnRzLmRldiQ"
+  "ssm:account=715413099986:parameterName=/policy_atlas/frontend/next_publishable_key:region=eu-west-2": "pk_test_YnVzeS1zaWxrd29ybS02LmNsZXJrLmFjY291bnRzLmRldiQ",
+  "ssm:account=715413099986:parameterName=/policy_atlas/frontend/next_encryption_key:region=eu-west-2": "ODkxZGU2ZmE4NDkxYzI4YzcyZmQ5OWY5MDY4ODRmMzMyNzRkODM5YzI1ZmIzMzFmYWMyODNiNTM5Y2Y0M2VhYQ=="
 }
