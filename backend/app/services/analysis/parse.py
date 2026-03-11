@@ -26,14 +26,16 @@ class ParsingError(Exception):
 
 
 def should_skip_large_pdf(
-    file_size_bytes: int, page_count: int = None
+    file_size_bytes: int,
 ) -> tuple[bool, str | None]:
     """
-    Check if a PDF should be skipped based on size and page count.
+    Check if a PDF should be skipped based on file size.
+
+    PDFs exceeding the page limit are truncated during parsing rather than
+    skipped entirely (see _parse_pdf).
 
     Args:
         file_size_bytes: Size of the PDF file in bytes
-        page_count: Number of pages in the PDF (optional, if available)
 
     Returns:
         Tuple of (should_skip: bool, reason: str | None)
@@ -44,12 +46,6 @@ def should_skip_large_pdf(
         return (
             True,
             f"File size {size_mb:.1f}MB exceeds limit of {settings.MAX_PDF_SIZE_MB}MB",
-        )
-
-    if page_count and page_count > settings.MAX_PDF_PAGES:
-        return (
-            True,
-            f"Page count {page_count} exceeds limit of {settings.MAX_PDF_PAGES}",
         )
 
     return False, None
