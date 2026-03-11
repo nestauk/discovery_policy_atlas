@@ -7,7 +7,7 @@ import uuid
 import json
 
 from app.core.auth import get_current_user, CurrentUser
-from app.services.analysis.parse import ParsingService, ParsingError
+from app.services.analysis.parse import ParsingService, should_skip_large_pdf
 from app.services.analysis.normalize import normalize_text
 from app.services.analysis.workflows import create_workflow
 from app.services.analysis.prompts import (
@@ -353,6 +353,12 @@ async def test_extraction(
                 temp_file_path = temp_file.name
 
             try:
+                # Check file size before parsing
+                file_size = Path(temp_file_path).stat().st_size
+                should_skip, skip_reason = should_skip_large_pdf(file_size)
+                if should_skip:
+                    raise HTTPException(status_code=400, detail=skip_reason)
+
                 # Parse PDF using existing service
                 temp_dir = Path(tempfile.mkdtemp())
                 parser = ParsingService(export_dir=str(temp_dir))
@@ -446,8 +452,6 @@ async def test_extraction(
 
     except HTTPException:
         raise
-    except ParsingError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Test extraction failed: {e}")
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
