@@ -1,4 +1,4 @@
-name: Deploy Network Stack
+name: Deploy Database Stack
 on:
     workflow_dispatch:
         inputs:
@@ -29,10 +29,10 @@ jobs:
             - name: Install AWS CDK
               run: npm install -g aws-cdk
             
-            - name: Deploy CDK (Network Stack)
+            - name: Deploy CDK (Database Stack)
               run: |
                 cd infra
-                cdk deploy NetworkStack -c env_name=${{ github.event.inputs.env_name }} --require-approval never --verbose
+                cdk deploy DatabaseStack -c env_name=${{ github.event.inputs.env_name }} --require-approval never --verbose
               
             
 
