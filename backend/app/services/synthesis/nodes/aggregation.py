@@ -173,7 +173,7 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
         for i in range(0, len(all_ex_ids), 100):
             chunk = all_ex_ids[i : i + 100]
             exts = db.fetch(
-                "SELECT id, analysis_document_id, raw_data FROM analysis_extractions WHERE id = ANY(%s)",
+                "SELECT id, analysis_document_id, raw_data FROM analysis_extractions WHERE id = ANY(%s::uuid[])",
                 [chunk],
             )
             for r in exts:

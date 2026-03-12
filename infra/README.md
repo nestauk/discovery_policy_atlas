@@ -29,7 +29,7 @@ The CDK context is mostly unused - for ease of configuration, most configuration
 
 ## Configuration
 
-Configuration is stored in the `pa_config.json` and `db_config.json` files, and has the following structure:
+Configuration is stored in the `pa_config.json`, `db_config.json` and `network_config.json` files, and has the following structure:
 
 ```json
 {
@@ -43,3 +43,5 @@ Configuration is stored in the `pa_config.json` and `db_config.json` files, and 
 ```
 
 The `env_name` parameter is passed to the build process as a context variable (via `cdk deploy --c env_name="env_name"`) and the appropriate configuration is loaded.
+
+[Detailed information on the config entries can be found here.](./CONFIG.md)

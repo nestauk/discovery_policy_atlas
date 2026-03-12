@@ -520,7 +520,7 @@ class AnalysisStorageService:
             await loop.run_in_executor(
                 None,
                 lambda: db.execute(
-                    "DELETE FROM chunks WHERE document_id = %s::uuid AND project_id = %s::uuid",
+                    "DELETE FROM chunks WHERE document_id = %s::uuid AND project_id = %s",
                     [analysis_doc_uuid, project_id],
                 ),
             )

@@ -1304,7 +1304,7 @@ async def get_navigator_stats(
         unique_labels: set[str] = set()
         if extraction_ids:
             extractions = db.fetch(
-                "SELECT label FROM analysis_extractions WHERE id = ANY(%s)",
+                "SELECT label FROM analysis_extractions WHERE id = ANY(%s::uuid[])",
                 [extraction_ids],
             )
             for e in extractions:

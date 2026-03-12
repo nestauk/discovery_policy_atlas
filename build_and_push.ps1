@@ -26,6 +26,7 @@ $CLERK_PUBLISHABLE_KEY = ($SECRET_JSON | ConvertFrom-Json).NEXT_PUBLIC_CLERK_PUB
 Write-Host "==> Building frontend image"
 docker build --platform linux/amd64 --provenance=false `
     --build-arg "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$CLERK_PUBLISHABLE_KEY" `
+    --build-arg "API_URL=https://api.staging.policyatlas.uk" `
     -t "${ECR_BASE}:frontend" ./frontend
 
 Write-Host "==> Pushing frontend image"

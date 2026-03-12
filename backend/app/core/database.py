@@ -37,8 +37,19 @@ def _get_pool() -> ThreadedConnectionPool:
     return _pool
 
 
+class PgArray:
+    """Wrap a list so _adapt_value passes it as a native PostgreSQL array (text[])
+    instead of serialising it as JSONB. Use this for text[] / uuid[] columns."""
+
+    def __init__(self, items: list):
+        self.items = items
+
+
 def _adapt_value(v: Any) -> Any:
-    """Wrap dicts/lists with Json() so psycopg2 serialises them as JSONB."""
+    """Wrap dicts/lists with Json() so psycopg2 serialises them as JSONB.
+    PgArray instances are unwrapped so psycopg2 uses its native array adapter."""
+    if isinstance(v, PgArray):
+        return v.items
     if isinstance(v, (dict, list)):
         return psycopg2.extras.Json(v)
     return v

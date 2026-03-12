@@ -344,7 +344,7 @@ def get_outcome_contributions_data(project_id: str, outcome_theme_id: str) -> Di
         return {"documents": []}
 
     extractions = db.fetch(
-        "SELECT id, analysis_document_id, label, raw_data FROM analysis_extractions WHERE id = ANY(%s)",
+        "SELECT id, analysis_document_id, label, raw_data FROM analysis_extractions WHERE id = ANY(%s::uuid[])",
         [extraction_ids],
     )
     extractions = filter_prevalence_only_extractions(extractions)

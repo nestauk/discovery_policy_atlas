@@ -136,7 +136,11 @@ class RelevanceService:
             results_df = await self._screen_batch(documents, session_name)
 
             if results_df.empty:
-                logger.warning("Relevance assessment returned no results")
+                logger.warning(
+                    "Relevance assessment returned no results; defaulting all documents to not relevant"
+                )
+                df = self._merge_relevance_results(df, results_df)
+                df.to_csv(references_csv_path, index=False)
                 return references_csv_path
 
             # Merge results back into references DataFrame
@@ -156,6 +160,16 @@ class RelevanceService:
 
         except Exception as e:
             logger.error(f"Relevance checking failed: {e}")
+            # Ensure is_relevant column always exists so downstream steps don't hard-fail
+            for col, default in [
+                ("is_relevant", False),
+                ("relevance_confidence", 0.0),
+                ("relevance_reason", "Relevance check failed"),
+                ("top_line", ""),
+            ]:
+                if col not in df.columns:
+                    df[col] = default
+            df.to_csv(references_csv_path, index=False)
             return references_csv_path
 
     def _merge_relevance_results(
