@@ -105,6 +105,19 @@ class DatabaseStack(Stack):
             allow_all_outbound=True
         )
 
+        whitelist_ips = db_config.get("studio_whitelist_ips", [])
+        if not whitelist_ips:
+            # Do nothing - open to world.
+            pass
+        else:
+            for ip in whitelist_ips:
+                studio_security_group.add_ingress_rule(
+                    peer=ec2.Peer.ipv4(ip),
+                    connection=ec2.Port.tcp(443),
+                    description=f"Allow Supabase Studio access from {ip}"
+                )
+
+
         # Allow inbound access to the RDS cluster from the Supabase Studio security group.
         db_security_group.add_ingress_rule(
             peer=studio_security_group,
