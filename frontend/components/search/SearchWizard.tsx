@@ -34,6 +34,17 @@ const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
 const Chip = ({ active, children, onClick }: { active?: boolean; children: React.ReactNode; onClick?: () => void }) => (
   <button type="button" onClick={onClick} className={cx("px-3 py-2 rounded-full text-sm transition ring-1", active ? "bg-blue-600 !text-white ring-blue-600" : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50")}>{children}</button>
 );
+const HelpHint = ({ content }: { content: React.ReactNode }) => (
+  <Tooltip content={<div className="max-w-xs text-sm">{content}</div>}>
+    <button
+      type="button"
+      className="inline-flex items-center justify-center h-5 w-5 rounded-full border border-gray-300 text-xs text-gray-600 hover:bg-gray-50"
+      aria-label="More information"
+    >
+      ?
+    </button>
+  </Tooltip>
+);
 
 // ---------------- TYPES & CONSTANTS ----------------
 type Step = "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
@@ -182,7 +193,7 @@ const INITIAL_WIZARD_STATE = {
   generatedAdditionalQuestions: [] as string[],
   isGeneratingOptions: false,
   parameters: {
-    sources: [] as ("openalex" | "overton")[],
+    sources: ["openalex", "overton"] as ("openalex" | "overton")[],
     access: { academic: true, policy: true },
     geography: [ANYWHERE_VALUE],
     timePreset: "LAST_10_YEARS" as TimePreset,
@@ -232,13 +243,18 @@ export const useWizard = create<WizardState>((set, get) => ({
   },
   buildContext: () => {
     const s = get();
+    const fallbackSources: ("openalex" | "overton")[] = [];
+    if (s.parameters.access.academic) fallbackSources.push("openalex");
+    if (s.parameters.access.policy) fallbackSources.push("overton");
+    const normalizedSources =
+      s.parameters.sources.length > 0 ? s.parameters.sources : fallbackSources;
     return {
       researchQuestion: s.researchQuestion,
       population: s.population.noPreference ? [] : s.population.selected,
       innerSetting: s.innerSetting.noPreference ? [] : s.innerSetting.selected,
       outcome: s.outcome.noPreference ? [] : s.outcome.selected,
       implementationConstraints: s.implementationConstraints,
-      parameters: s.parameters,
+      parameters: { ...s.parameters, sources: normalizedSources },
       screeningFactors: s.screeningFactors,
       additionalQuestions: s.additionalQuestions,
       maxResults: s.maxResults,
@@ -249,7 +265,9 @@ export const useWizard = create<WizardState>((set, get) => ({
     const innerSetting = sq.inner_setting || [];
     const outcome = sq.outcome || [];
     const screeningFactors = sq.screening_factors || [];
-    const sources = (sq.sources || []) as ("openalex" | "overton")[];
+    const sources = ((sq.sources && sq.sources.length > 0
+      ? sq.sources
+      : ["openalex", "overton"]) || []) as ("openalex" | "overton")[];
     const geography = sq.geography_filter || sq.geography || [ANYWHERE_VALUE];
     const timePreset = (sq.time_preset || "LAST_10_YEARS") as TimePreset;
     const constraints = sq.implementation_constraints;
@@ -440,6 +458,16 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
   }
   
   return parts.join(" ") + "?";
+}
+
+function estimateSearchDuration(maxResults: number, sourceCount: number): { minMinutes: number; maxMinutes: number } {
+  const effectiveSources = Math.max(1, sourceCount);
+  const totalDocs = maxResults * effectiveSources;
+  const baseMinutes = 2 + 18 + (totalDocs * 15) / 60;
+  const roundedMin = Math.max(10, Math.round((baseMinutes * 0.7) / 5) * 5);
+  const roundedMax = Math.max(roundedMin + 5, Math.round((baseMinutes * 1.3) / 5) * 5);
+
+  return { minMinutes: roundedMin, maxMinutes: roundedMax };
 }
 
 // ---------------- SCREENS ----------------
@@ -968,7 +996,10 @@ function ScreenParameters() {
             </p>
           )}
           <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
-            <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Retrieval limit</div>
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500 mb-2">
+              <span>Retrieval limit</span>
+              <HelpHint content="Higher limits make the search more comprehensive, but increase processing time." />
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               <span className="font-medium">Max results to screen per source:</span>
               <div className="inline-flex items-center gap-2">
@@ -1372,6 +1403,8 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
     context.parameters.timePreset === "CUSTOM" &&
     (context.parameters.customFrom || context.parameters.customTo);
   const timeWindowLabel = TIME_PRESET_LABELS[context.parameters.timePreset];
+  const selectedSourceCount = context.parameters.sources.length;
+  const estimatedDuration = estimateSearchDuration(s.maxResults, selectedSourceCount || 1);
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 px-8 pt-16 pb-2">
@@ -1528,6 +1561,17 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
           </div>
         </CardContent>
       </Card>
+
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+        <p className="text-sm font-medium text-blue-900">
+          Estimated time: {estimatedDuration.minMinutes}-{estimatedDuration.maxMinutes} minutes
+        </p>
+        <p className="mt-1 text-sm text-blue-800">
+          {selectedSourceCount > 0
+            ? "This estimate is based on your selected sources and retrieval limit. You can close this tab after starting and check back later."
+            : "Select at least one source to get a tailored estimate for this search."}
+        </p>
+      </div>
 
     </div>
   );

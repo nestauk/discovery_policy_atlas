@@ -214,6 +214,12 @@ export default function ProjectsPage() {
                 <p className="text-slate-600 mb-6">
                   Run your first analysis to create a project with structured policy research data and insights.
                 </p>
+                <div className="text-sm text-slate-600 mb-6 space-y-1">
+                  <p>1. Define your research question</p>
+                  <p>2. We search policy and academic sources</p>
+                  <p>3. AI analyses the retrieved evidence</p>
+                  <p>4. You get an executive briefing and evidence explorer</p>
+                </div>
                 <Button 
                   onClick={() => setShowInfoDialog(true)}
                   className="bg-blue-600 hover:bg-blue-700"

@@ -103,7 +103,7 @@ export function ThemeList({
   }
 
   return (
-    <div className="space-y-2">
+    <div data-tutorial="interventions-list" className="space-y-2">
       <div className="hidden md:grid grid-cols-12 gap-4 px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide border-b border-gray-100">
         <button
           onClick={() => handleSort('theme')}

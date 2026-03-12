@@ -45,6 +45,7 @@ import { InterventionsNavigator } from '@/components/interventions/Interventions
 import type { InterventionData } from '@/components/interventions/InterventionsTable'
 import { PapersTable } from '@/components/documents/PapersTable'
 import { SearchPlanModal } from '@/components/results/SearchPlanModal'
+import { ResultsTutorial } from '@/components/results/ResultsTutorial'
 import { getEvidenceCategoryRank } from '@/lib/evidenceCategories'
 
 interface AnalysisDocument {
@@ -105,6 +106,25 @@ interface AnalysisDocument {
 type TabType = 'summary' | 'evidence' | 'assistant'
 type EvidenceSubTabType = 'interventions' | 'documents'
 
+function estimateDurationRangeMinutes(maxResults: number, sourceCount: number): { min: number; max: number } {
+  const effectiveSources = Math.max(1, sourceCount)
+  const totalDocs = maxResults * effectiveSources
+  const baseMinutes = 2 + 18 + (totalDocs * 15) / 60
+  const min = Math.max(10, Math.round((baseMinutes * 0.7) / 5) * 5)
+  const max = Math.max(min + 5, Math.round((baseMinutes * 1.3) / 5) * 5)
+  return { min, max }
+}
+
+function estimateRemainingRangeMinutes(baseMinutes: number): { min: number; max: number } {
+  const min = Math.max(5, Math.round((baseMinutes * 0.7) / 5) * 5)
+  const max = Math.max(min + 5, Math.round((baseMinutes * 1.3) / 5) * 5)
+  return { min, max }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
 export default function ProjectResultsPage() {
   const params = useParams()
   const searchParams = useSearchParams()
@@ -161,6 +181,7 @@ export default function ProjectResultsPage() {
 
   const [projectLoading, setProjectLoading] = useState(false)
   const [parentProjectTitle, setParentProjectTitle] = useState<string | null>(null)
+  const [currentMinuteTick, setCurrentMinuteTick] = useState<number>(Date.now())
 
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
@@ -759,21 +780,78 @@ export default function ProjectResultsPage() {
     }
   }, [interventions])
 
+  const elapsedMinutes = useMemo(() => {
+    if (!activeProject?.created_at) return null
+    const createdAtMs = new Date(activeProject.created_at).getTime()
+    if (Number.isNaN(createdAtMs)) return null
+    return Math.max(0, Math.floor((currentMinuteTick - createdAtMs) / 60000))
+  }, [activeProject?.created_at, currentMinuteTick])
+
+  useEffect(() => {
+    if (activeProject?.status !== 'running' && activeProject?.status !== 'synthesising') return
+    setCurrentMinuteTick(Date.now())
+    const interval = setInterval(() => setCurrentMinuteTick(Date.now()), 60000)
+    return () => clearInterval(interval)
+  }, [activeProject?.status])
+
   // Calculate progress
   const progressInfo = useMemo(() => {
     if (!projectId || !activeProject) {
-      return { stage: 'idle', progress: 0, text: 'No project selected' }
+      return {
+        stage: 'idle',
+        progress: 0,
+        text: 'No project selected',
+        stageDescription: '',
+        remainingRange: null as { min: number; max: number } | null,
+      }
     }
 
     const status = activeProject.status
+    const backendProgress = activeProject.progress
+    const configuredMaxResults = activeProject.search_query?.max_results ?? activeProject.search_query?.limit ?? 30
+    const configuredSourcesCount = activeProject.search_query?.sources?.length ?? 2
+    const configuredDocs = Math.max(1, configuredMaxResults * Math.max(1, configuredSourcesCount))
+    const defaultRelevantRatio = 0.6
+    const observedRelevantDocs = documents.filter((doc) => doc.is_relevant !== false).length
+    const estimatedRelevantDocs = Math.max(
+      1,
+      observedRelevantDocs > 0 ? observedRelevantDocs : Math.round(configuredDocs * defaultRelevantRatio),
+    )
+    const overheadMinutes = 2
+    const extractionMinutes = estimatedRelevantDocs * (15 / 60)
+    const synthesisMinutes = 18
+    const estimatedTotalMinutes = overheadMinutes + extractionMinutes + synthesisMinutes
+    const retrievalEndProgress = clamp(Math.round((overheadMinutes / estimatedTotalMinutes) * 100), 10, 30)
+    const extractionEndProgress = clamp(
+      Math.round(((overheadMinutes + extractionMinutes) / estimatedTotalMinutes) * 100),
+      retrievalEndProgress + 25,
+      88,
+    )
+    const estimatedTotalRange = estimateDurationRangeMinutes(configuredMaxResults, configuredSourcesCount)
     
     if (status === 'created') {
-      return { stage: 'created', progress: 0, text: 'Analysis not started' }
+      return {
+        stage: 'created',
+        progress: 0,
+        text: 'Analysis not started',
+        stageDescription: 'Your project is created and ready to run.',
+        remainingRange: null,
+      }
     }
     
     if (status === 'running') {
       if (documents.length === 0) {
-        return { stage: 'retrieving', progress: 25, text: 'Retrieving and screening documents...' }
+        const retrievalProgressFromElapsed =
+          elapsedMinutes !== null
+            ? Math.round(retrievalEndProgress * clamp(elapsedMinutes / overheadMinutes, 0, 1))
+            : retrievalEndProgress
+        return {
+          stage: 'retrieving',
+          progress: Math.max(5, retrievalProgressFromElapsed),
+          text: 'Retrieving and screening documents...',
+          stageDescription: 'Searching academic databases and policy repositories for relevant documents.',
+          remainingRange: estimatedTotalRange,
+        }
       }
       
       const relevantDocs = documents.filter(doc => doc.is_relevant !== false)
@@ -783,35 +861,88 @@ export default function ProjectResultsPage() {
       ).length
       
       if (extractedDocs === 0) {
-        return { stage: 'extracting', progress: 50, text: 'Extracting intervention data from documents...' }
+        return {
+          stage: 'extracting',
+          progress: retrievalEndProgress,
+          text: 'Extracting intervention data from documents...',
+          stageDescription: 'Reading documents and extracting intervention details with AI. This is usually the longest stage.',
+          remainingRange: estimateRemainingRangeMinutes(18 + (totalRelevantDocs * 15) / 60),
+        }
       }
       
-      const extractionProgress = Math.round((extractedDocs / totalRelevantDocs) * 20) + 50
+      const extractionFraction = totalRelevantDocs > 0 ? extractedDocs / totalRelevantDocs : 0
+      const extractionProgress =
+        retrievalEndProgress +
+        Math.round((extractionEndProgress - retrievalEndProgress) * clamp(extractionFraction, 0, 1))
+      const remainingDocs = Math.max(totalRelevantDocs - extractedDocs, 0)
       return { 
         stage: 'extracting', 
-        progress: Math.min(extractionProgress, 70), 
-        text: `Extracting intervention data from documents... (${extractedDocs}/${totalRelevantDocs})` 
+        progress: Math.min(extractionProgress, extractionEndProgress), 
+        text: `Extracting intervention data from documents... (${extractedDocs}/${totalRelevantDocs})`,
+        stageDescription: 'Reading documents and extracting intervention details with AI. This is usually the longest stage.',
+        remainingRange: estimateRemainingRangeMinutes(18 + (remainingDocs * 15) / 60),
       }
     }
     
     if (status === 'synthesising') {
+      if (backendProgress) {
+        const stepText =
+          backendProgress.step_total > 0
+            ? ` (${backendProgress.step_index}/${backendProgress.step_total})`
+            : ''
+        return {
+          stage: 'synthesising',
+          progress: clamp(backendProgress.percent, extractionEndProgress, 95),
+          text: `${backendProgress.stage_label}${stepText}`,
+          stageDescription: backendProgress.stage_description,
+          remainingRange: estimateRemainingRangeMinutes(18),
+        }
+      }
+
+      const synthElapsedMinutes =
+        elapsedMinutes !== null ? Math.max(0, elapsedMinutes - (overheadMinutes + extractionMinutes)) : 0
+      const synthProgressFraction =
+        synthesisMinutes > 0 ? clamp(synthElapsedMinutes / synthesisMinutes, 0, 0.95) : 0.6
+      const synthesisProgress =
+        extractionEndProgress +
+        Math.round((95 - extractionEndProgress) * synthProgressFraction)
       return { 
         stage: 'synthesising', 
-        progress: 85, 
-        text: 'Generating summary and insights...' 
+        progress: Math.max(extractionEndProgress, synthesisProgress), 
+        text: 'Generating summary and insights...',
+        stageDescription: 'Combining findings into themes and generating your executive briefing.',
+        remainingRange: estimateRemainingRangeMinutes(18),
       }
     }
     
     if (status === 'completed') {
-      return { stage: 'completed', progress: 100, text: 'Analysis completed' }
+      return {
+        stage: 'completed',
+        progress: 100,
+        text: 'Analysis completed',
+        stageDescription: 'Your results are ready to explore.',
+        remainingRange: null,
+      }
     }
     
     if (status === 'failed') {
-      return { stage: 'failed', progress: 0, text: 'Analysis failed' }
+      return {
+        stage: 'failed',
+        progress: 0,
+        text: 'Analysis failed',
+        stageDescription: 'Something went wrong while processing this analysis.',
+        remainingRange: null,
+      }
     }
     
-    return { stage: 'unknown', progress: 0, text: 'Unknown status' }
-  }, [projectId, activeProject, documents])
+    return {
+      stage: 'unknown',
+      progress: 0,
+      text: 'Unknown status',
+      stageDescription: '',
+      remainingRange: null,
+    }
+  }, [projectId, activeProject, documents, elapsedMinutes])
 
   // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
@@ -940,21 +1071,41 @@ export default function ProjectResultsPage() {
             )}
             {/* Progress Indicator */}
             {projectId && activeProject && (
-              <div className="flex items-center gap-3 mt-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-32 bg-slate-200 rounded-full h-2">
-                    <div 
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
-                      style={{ width: `${progressInfo.progress}%` }}
-                    />
+              <div data-tutorial="progress-bar" className="mt-2 mb-3 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-32 bg-slate-200 rounded-full h-2">
+                      <div
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+                        style={{ width: `${progressInfo.progress}%` }}
+                      />
+                    </div>
+                    <span className="text-sm text-slate-600 font-medium">
+                      {progressInfo.progress}%
+                    </span>
                   </div>
-                  <span className="text-sm text-slate-600 font-medium">
-                    {progressInfo.progress}%
-                  </span>
+                  <span className="text-sm text-slate-600">{progressInfo.text}</span>
                 </div>
-                <span className="text-sm text-slate-600">
-                  {progressInfo.text}
-                </span>
+                {progressInfo.stageDescription && (
+                  <p className="text-xs text-slate-500">{progressInfo.stageDescription}</p>
+                )}
+                {(activeProject.status === 'running' || activeProject.status === 'synthesising') && (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                    {elapsedMinutes !== null && (
+                      <span>Running for {elapsedMinutes} minute{elapsedMinutes === 1 ? '' : 's'}</span>
+                    )}
+                    {progressInfo.remainingRange && (
+                      <span>
+                        Estimated remaining: ~{progressInfo.remainingRange.min}-{progressInfo.remainingRange.max} minutes
+                      </span>
+                    )}
+                  </div>
+                )}
+                {(activeProject.status === 'running' || activeProject.status === 'synthesising') && (
+                  <p className="text-xs text-slate-500">
+                    You can safely close this tab. Your analysis will continue running and results will be ready when you return.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -1083,8 +1234,11 @@ export default function ProjectResultsPage() {
             <div className="text-center p-8">
               <FileText className="h-16 w-16 text-slate-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-slate-900 mb-2">No Project Selected</h3>
+              <p className="text-slate-600 mb-3">
+                Projects store your full search output: summary insights, interventions, and source documents.
+              </p>
               <p className="text-slate-600 mb-6">
-                Please select a project or start a new analysis to view results.
+                Select an existing project or start a new search to create one.
               </p>
               <div className="flex gap-3 justify-center">
                 <Button onClick={() => router.push('/projects')} variant="outline">
@@ -1187,7 +1341,11 @@ export default function ProjectResultsPage() {
                     <div className="text-center py-12">
                       <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                       <h3 className="text-lg font-medium text-slate-900 mb-2">No Summary Available</h3>
-                      <p className="text-slate-600">Open the Summary tab after analysis completes to load aggregated insights.</p>
+                      <p className="text-slate-600">
+                        {activeProject?.status === 'running' || activeProject?.status === 'synthesising'
+                          ? 'Your summary is still being generated. This usually appears once extraction and synthesis finish.'
+                          : 'No summary could be generated for this project. Try refining your search parameters and running again.'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1213,6 +1371,7 @@ export default function ProjectResultsPage() {
                           size="sm"
                           onClick={() => handleSubTabChange('documents')}
                           className="flex items-center gap-2"
+                          data-tutorial="documents-subtab"
                         >
                           <FileText className="h-3 w-3" />
                           Documents ({showOnlyRelevant ? relevantCount : `${relevantCount}+${transformedPapers.length - relevantCount}`})
@@ -1282,7 +1441,7 @@ export default function ProjectResultsPage() {
                   )}
 
                   {urlSubTab === 'documents' && (
-                    <div>
+                    <div data-tutorial="documents-table">
                       {loadingData ? (
                         <div className="flex items-center justify-center py-12">
                           <div className="text-center">
@@ -1309,13 +1468,19 @@ export default function ProjectResultsPage() {
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                           <h3 className="text-lg font-medium text-slate-900 mb-2">No Relevant Documents</h3>
-                          <p className="text-slate-600">All {documents.length} documents in this project were marked as non-relevant.</p>
+                          <p className="text-slate-600">
+                            All {documents.length} documents were marked non-relevant. Try broadening your question, geography, or time window.
+                          </p>
                         </div>
                       ) : (
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                           <h3 className="text-lg font-medium text-slate-900 mb-2">No Documents Available</h3>
-                          <p className="text-slate-600">Documents will appear here once the analysis is processed.</p>
+                          <p className="text-slate-600">
+                            {activeProject?.status === 'running' || activeProject?.status === 'synthesising'
+                              ? 'Documents are being retrieved and screened. Check back shortly.'
+                              : 'No documents matched this search. Try broadening your search terms or filters.'}
+                          </p>
                         </div>
                       )}
                     </div>
@@ -1334,6 +1499,13 @@ export default function ProjectResultsPage() {
           </Tabs>
         )}
       </div>
+
+      <ResultsTutorial
+        enabled={Boolean(projectId && activeProject?.status === 'completed')}
+        onShowSummary={() => updateUrl('summary')}
+        onShowEvidenceInterventions={() => updateUrl('evidence', 'interventions')}
+        onShowEvidenceDocuments={() => updateUrl('evidence', 'documents')}
+      />
 
       {/* Floating Chatbot Widget */}
       <ChatbotWidget />

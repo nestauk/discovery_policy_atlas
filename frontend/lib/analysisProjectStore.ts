@@ -51,6 +51,14 @@ export interface AnalysisProject {
     relevance_enabled?: boolean
     use_abstracts_only?: boolean
   }
+  progress?: {
+    stage_key: string
+    stage_label: string
+    stage_description: string
+    step_index: number
+    step_total: number
+    percent: number
+  } | null
 }
 
 export interface AnalysisDocument {
