@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { create } from "zustand";
 import { useAPI } from '@/lib/api';
 import type { AnalysisProject } from '@/lib/analysisProjectStore';
+import { estimateTotalAnalysisMinutes } from '@/lib/analysisTimingHeuristic';
 import { RefineTutorial } from './RefineTutorial';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -461,9 +462,7 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
 }
 
 function estimateSearchDuration(maxResults: number, sourceCount: number): { minMinutes: number; maxMinutes: number } {
-  const effectiveSources = Math.max(1, sourceCount);
-  const totalDocs = maxResults * effectiveSources;
-  const baseMinutes = 2 + 18 + (totalDocs * 15) / 60;
+  const baseMinutes = estimateTotalAnalysisMinutes(maxResults, sourceCount);
   const roundedMin = Math.max(10, Math.round((baseMinutes * 0.7) / 5) * 5);
   const roundedMax = Math.max(roundedMin + 5, Math.round((baseMinutes * 1.3) / 5) * 5);
 

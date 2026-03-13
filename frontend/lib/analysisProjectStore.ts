@@ -52,12 +52,9 @@ export interface AnalysisProject {
     use_abstracts_only?: boolean
   }
   progress?: {
-    stage_key: string
     stage_label: string
-    stage_description: string
     step_index: number
-    step_total: number
-    percent: number
+    stage_started_at?: string | null
   } | null
 }
 

@@ -163,9 +163,6 @@ class RunResult(BaseModel):
 class AnalysisProjectProgress(BaseModel):
     """User-facing progress payload for long-running project processing."""
 
-    stage_key: str
     stage_label: str
-    stage_description: str
     step_index: int
-    step_total: int
-    percent: int
+    stage_started_at: Optional[str] = None

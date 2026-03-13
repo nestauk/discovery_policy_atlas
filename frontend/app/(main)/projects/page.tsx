@@ -13,6 +13,8 @@ import { useAnalysisProjectStore, AnalysisProject } from '@/lib/analysisProjectS
 import { Switch } from '@/components/ui/switch'
 import { useUser, useOrganization } from '@clerk/nextjs'
 
+const PROJECTS_LOAD_TIMEOUT_MS = 15000
+
 export default function ProjectsPage() {
   const router = useRouter()
   const { 
@@ -27,8 +29,6 @@ export default function ProjectsPage() {
     setProjects, 
     removeProject,
     setActiveProject,
-    setLoading,
-    isLoading,
     error,
     setError
   } = useAnalysisProjectStore()
@@ -39,6 +39,7 @@ export default function ProjectsPage() {
   const [showInfoDialog, setShowInfoDialog] = useState(false)
   const [projectForm, setProjectForm] = useState({ title: '', description: '' })
   const [isCreating, setIsCreating] = useState(false)
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false)
   const [editProjectDialog, setEditProjectDialog] = useState<AnalysisProject | null>(null)
   const [editForm, setEditForm] = useState({ title: '', description: '' })
   const [showAllOrgProjects, setShowAllOrgProjects] = useState(false)
@@ -49,13 +50,23 @@ export default function ProjectsPage() {
 
   const loadProjects = async () => {
     try {
-      setLoading(true)
-      const response = await getAnalysisProjects()
+      setIsLoadingProjects(true)
+      const response = (await Promise.race([
+        getAnalysisProjects(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timed out while loading projects')), PROJECTS_LOAD_TIMEOUT_MS),
+        ),
+      ])) as { projects: AnalysisProject[] }
       setProjects(response.projects)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load analysis projects')
+      const message = err instanceof Error ? err.message : 'Failed to load analysis projects'
+      if (message.includes('Timed out')) {
+        setError('Loading projects is taking longer than expected. Showing cached projects.')
+      } else {
+        setError(message)
+      }
     } finally {
-      setLoading(false)
+      setIsLoadingProjects(false)
     }
   }
 
@@ -202,7 +213,7 @@ export default function ProjectsPage() {
             </div>
           </div>
 
-          {isLoading ? (
+          {isLoadingProjects && displayedProjects.length === 0 ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-slate-500">Loading projects...</div>
             </div>

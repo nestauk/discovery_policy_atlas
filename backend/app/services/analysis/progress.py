@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.services.analysis.schemas import AnalysisProjectProgress
@@ -15,19 +16,13 @@ SYNTHESIS_STEP_LABELS = {
     3: "Writing executive briefing",
     4: "Finalising recommendations",
 }
-SYNTHESIS_STEP_DESCRIPTIONS = {
-    1: "Grouping extracted findings into coherent issue, intervention, outcome, and risk themes.",
-    2: "Aggregating evidence, retrieving supporting citations, and preparing synthesis-ready context.",
-    3: "Drafting the executive briefing narrative from the synthesised evidence.",
-    4: "Finalising recommendations and assembling the structured final briefing output.",
-}
 
 
-def map_synthesis_stage_to_step(stage_name: Optional[str]) -> tuple[int, str]:
+def map_synthesis_stage_to_step(stage_name: Optional[str]) -> int:
     """Map granular synthesis stage keys to consolidated user-facing steps."""
     key = (stage_name or "").strip()
     if not key:
-        return 1, "synthesis/unknown"
+        return 1
 
     if key.startswith("briefing/"):
         if key in {
@@ -35,11 +30,11 @@ def map_synthesis_stage_to_step(stage_name: Optional[str]) -> tuple[int, str]:
             "briefing/recommendations",
             "briefing/build_structured",
         }:
-            return 4, key
-        return 3, key
+            return 4
+        return 3
 
     if key == "generate_briefing":
-        return 3, key
+        return 3
 
     step_one_keys = {
         "create_canonical_concepts",
@@ -49,7 +44,7 @@ def map_synthesis_stage_to_step(stage_name: Optional[str]) -> tuple[int, str]:
         "process_risk_themes",
     }
     if key in step_one_keys:
-        return 1, key
+        return 1
 
     step_two_keys = {
         "load_raw_extractions",
@@ -64,17 +59,43 @@ def map_synthesis_stage_to_step(stage_name: Optional[str]) -> tuple[int, str]:
         "apply_rcs_to_outcome_evidence",
     }
     if key in step_two_keys:
-        return 2, key
+        return 2
 
-    return 2, key
+    return 2
 
 
-def _get_latest_synthesis_stage_name(project_id: str) -> Optional[str]:
-    """Fetch the latest persisted synthesis stage name for a project."""
+def _parse_iso_datetime(value: object) -> Optional[datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _estimate_stage_started_at_iso(timing_row: dict) -> Optional[str]:
+    created_at = _parse_iso_datetime(timing_row.get("created_at"))
+    if created_at is None:
+        return None
+
+    duration_seconds_raw = timing_row.get("duration_seconds")
+    try:
+        duration_seconds = (
+            float(duration_seconds_raw) if duration_seconds_raw is not None else 0.0
+        )
+    except (TypeError, ValueError):
+        duration_seconds = 0.0
+
+    estimated_started_at = created_at - timedelta(seconds=max(0.0, duration_seconds))
+    return estimated_started_at.isoformat()
+
+
+def _get_latest_synthesis_stage_timing(project_id: str) -> Optional[dict]:
+    """Fetch the latest persisted synthesis timing row for a project."""
     try:
         timing_res = (
             vectorization_service.supabase.table("pipeline_timings")
-            .select("stage_name")
+            .select("stage_name,created_at,duration_seconds")
             .eq("project_id", project_id)
             .eq("pipeline_type", "synthesis")
             .order("created_at", desc=True)
@@ -83,7 +104,7 @@ def _get_latest_synthesis_stage_name(project_id: str) -> Optional[str]:
         )
         if not timing_res.data:
             return None
-        return timing_res.data[0].get("stage_name")
+        return timing_res.data[0]
     except Exception as e:
         logger.warning(
             "Failed to read latest synthesis timing stage for project %s: %s",
@@ -100,17 +121,13 @@ def get_synthesis_project_progress(
     if project_status != "synthesising":
         return None
 
-    latest_stage_name = _get_latest_synthesis_stage_name(project_id)
-    step_index, stage_key = map_synthesis_stage_to_step(latest_stage_name)
-
-    # Keep synthesis below completion state until status flips to completed.
-    percent = min(95, 65 + (step_index - 1) * 10)
+    latest_stage_timing = _get_latest_synthesis_stage_timing(project_id) or {}
+    latest_stage_name = latest_stage_timing.get("stage_name")
+    stage_started_at = _estimate_stage_started_at_iso(latest_stage_timing)
+    step_index = map_synthesis_stage_to_step(latest_stage_name)
 
     return AnalysisProjectProgress(
-        stage_key=stage_key,
         stage_label=SYNTHESIS_STEP_LABELS[step_index],
-        stage_description=SYNTHESIS_STEP_DESCRIPTIONS[step_index],
         step_index=step_index,
-        step_total=SYNTHESIS_STEP_TOTAL,
-        percent=percent,
+        stage_started_at=stage_started_at,
     )

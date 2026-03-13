@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Image from 'next/image'
 import { Card, CardContent } from '@/components/ui/card'
 import { ChevronDown, ChevronRight, HelpCircle, Star } from 'lucide-react'
 import { fetchEvidenceCategories, getEvidenceCategories, type EvidenceCategory } from '@/lib/evidenceCategories'
@@ -98,10 +99,12 @@ These categories form the basis for a score (1–5) reflecting evidence strength
 
       {/* Evidence Pyramid Image */}
       <div className="flex justify-center py-4">
-        <img
+        <Image
           src="/images/evidence-pyramid.png"
           alt="Evidence hierarchy pyramid showing study types ranked by methodological strength"
           className="max-w-md w-full rounded-lg border border-slate-200"
+          width={768}
+          height={768}
         />
       </div>
 
