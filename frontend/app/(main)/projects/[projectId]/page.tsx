@@ -173,6 +173,7 @@ export default function ProjectResultsPage() {
   const [projectLoading, setProjectLoading] = useState(false)
   const [parentProjectTitle, setParentProjectTitle] = useState<string | null>(null)
   const [currentMinuteTick, setCurrentMinuteTick] = useState<number>(Date.now())
+  const [statusDotCount, setStatusDotCount] = useState(1)
 
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
@@ -822,6 +823,27 @@ export default function ProjectResultsPage() {
     [projectId, activeProject, documents, elapsedMinutes],
   )
 
+  const isProjectInProgress = activeProject?.status === 'running' || activeProject?.status === 'synthesising'
+
+  useEffect(() => {
+    if (!isProjectInProgress) {
+      setStatusDotCount(1)
+      return
+    }
+    const interval = setInterval(() => {
+      setStatusDotCount((previousCount) => (previousCount >= 3 ? 1 : previousCount + 1))
+    }, 700)
+    return () => clearInterval(interval)
+  }, [isProjectInProgress])
+
+  const animatedProgressText = useMemo(() => {
+    if (!isProjectInProgress) {
+      return progressInfo.text
+    }
+    const baseText = progressInfo.text.replace(/\.{1,3}$/, '').trim()
+    return `${baseText}${'.'.repeat(statusDotCount)}`
+  }, [progressInfo.text, isProjectInProgress, statusDotCount])
+
   // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
     const allTransformed = documents.map((doc: AnalysisDocument) => {
@@ -927,7 +949,7 @@ export default function ProjectResultsPage() {
     <div className="flex-1 flex flex-col bg-slate-50">
       {/* Header */}
       <div className="border-b border-slate-200 bg-white px-8 py-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
               Results
@@ -946,51 +968,6 @@ export default function ProjectResultsPage() {
                   {parentProjectTitle}
                 </Link>
               </p>
-            )}
-            {/* Progress Indicator */}
-            {projectId && activeProject && (
-              <div data-tutorial="progress-bar" className="mt-3 mb-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-40 bg-slate-200 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
-                        style={{ width: `${progressInfo.progress}%` }}
-                      />
-                    </div>
-                    <span className="text-sm text-slate-700 font-semibold tabular-nums min-w-[2.5rem]">
-                      {progressInfo.progress}%
-                    </span>
-                  </div>
-                  <span className="text-sm font-medium text-slate-700 leading-tight">{progressInfo.text}</span>
-                </div>
-                {(activeProject.status === 'running' || activeProject.status === 'synthesising') && (
-                  <p className="mt-1.5 text-xs text-slate-600">
-                    {elapsedMinutes !== null && (
-                      <>
-                        <span className="font-medium text-slate-700">Elapsed</span> {elapsedMinutes}m
-                      </>
-                    )}
-                    {elapsedMinutes !== null && progressInfo.remainingRange && (
-                      <span className="mx-1.5 text-slate-400">•</span>
-                    )}
-                    {progressInfo.remainingRange && (
-                      <>
-                        <span className="font-medium text-slate-700">Remaining ~</span>{''}
-                        {progressInfo.remainingRange.min}-{progressInfo.remainingRange.max}m
-                      </>
-                    )}
-                  </p>
-                )}
-                {(activeProject.status === 'running' || activeProject.status === 'synthesising') && (
-                  <p className="mt-1.5 flex items-start gap-2 text-xs text-slate-600">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
-                    <span>
-                      You can safely close this tab. Your analysis continues in the background and will be ready when you return.
-                    </span>
-                  </p>
-                )}
-              </div>
             )}
           </div>
           <div className="flex items-center gap-3">
@@ -1079,6 +1056,47 @@ export default function ProjectResultsPage() {
             )}
           </div>
         </div>
+        {/* Progress Indicator */}
+        {projectId && activeProject && (
+          <div data-tutorial="progress-bar" className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3">
+            <div className="flex flex-col gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="h-2 flex-1 min-w-[12rem] max-w-xl rounded-full bg-slate-200">
+                  <div
+                    className="h-2 rounded-full bg-blue-600 transition-all duration-300 ease-out"
+                    style={{ width: `${progressInfo.progress}%` }}
+                  />
+                </div>
+                <span className="min-w-[2.5rem] text-sm font-semibold tabular-nums text-slate-700">
+                  {progressInfo.progress}%
+                </span>
+                <span className="truncate text-sm font-medium leading-tight text-slate-700">
+                  <span className="mx-0.5 text-slate-400">·</span>
+                  {animatedProgressText}
+                </span>
+              </div>
+            </div>
+            {(activeProject.status === 'running' || activeProject.status === 'synthesising') && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+                {elapsedMinutes !== null && (
+                  <span>
+                    <span className="font-medium text-slate-700">Elapsed</span> {elapsedMinutes}m
+                  </span>
+                )}
+                {progressInfo.remainingRange && (
+                  <span>
+                    <span className="font-medium text-slate-700">Remaining ~</span>
+                    {progressInfo.remainingRange.min}-{progressInfo.remainingRange.max}m
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                  You can safely close this tab. Your analysis continues in the background.
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Content */}
