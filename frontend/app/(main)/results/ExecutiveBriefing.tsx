@@ -371,7 +371,6 @@ function CitationLink({
 
   const linkElement = url ? (
     <a href={url} target="_blank" rel="noopener noreferrer" onClick={handleClick}
-       data-tutorial="citation-link"
        className={`inline-flex items-center cursor-pointer font-medium transition-colors mx-0.5 ${
          isActiveCitation
            ? "bg-blue-700 text-white hover:text-white hover:bg-blue-800 rounded px-1.5 ring-1 ring-blue-800"
@@ -381,7 +380,6 @@ function CitationLink({
     </a>
   ) : (
     <span onClick={handleClick}
-          data-tutorial="citation-link"
           className={`inline-flex items-center font-medium mx-0.5 ${
             isActiveCitation
               ? "bg-blue-700 text-white rounded px-1.5 ring-1 ring-blue-800"
@@ -426,7 +424,7 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
     .join(', ') || 'Various';
 
   return (
-    <div data-tutorial="evidence-base-card" className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
+    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
       <div className="flex items-center gap-2 mb-3">
         <BookOpen className="h-4 w-4 text-slate-500" />
         <span className="font-medium text-sm text-slate-700">Evidence Base</span>

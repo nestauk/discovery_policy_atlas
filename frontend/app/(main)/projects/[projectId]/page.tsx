@@ -45,7 +45,6 @@ import { InterventionsNavigator } from '@/components/interventions/Interventions
 import type { InterventionData } from '@/components/interventions/InterventionsTable'
 import { PapersTable } from '@/components/documents/PapersTable'
 import { SearchPlanModal } from '@/components/results/SearchPlanModal'
-import { ResultsTutorial } from '@/components/results/ResultsTutorial'
 import { getEvidenceCategoryRank } from '@/lib/evidenceCategories'
 import { computeProjectProgressInfo } from '@/lib/analysisTimingHeuristic'
 
@@ -1058,7 +1057,7 @@ export default function ProjectResultsPage() {
         </div>
         {/* Progress Indicator */}
         {projectId && activeProject && (
-          <div data-tutorial="progress-bar" className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3">
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3">
             <div className="flex flex-col gap-2">
               <div className="flex min-w-0 items-center gap-2.5">
                 <div className="h-2 flex-1 min-w-[12rem] max-w-xl rounded-full bg-slate-200">
@@ -1273,7 +1272,6 @@ export default function ProjectResultsPage() {
                           size="sm"
                           onClick={() => handleSubTabChange('documents')}
                           className="flex items-center gap-2"
-                          data-tutorial="documents-subtab"
                         >
                           <FileText className="h-3 w-3" />
                           Documents ({showOnlyRelevant ? relevantCount : `${relevantCount}+${transformedPapers.length - relevantCount}`})
@@ -1343,7 +1341,7 @@ export default function ProjectResultsPage() {
                   )}
 
                   {urlSubTab === 'documents' && (
-                    <div data-tutorial="documents-table">
+                    <div>
                       {loadingData ? (
                         <div className="flex items-center justify-center py-12">
                           <div className="text-center">
@@ -1401,13 +1399,6 @@ export default function ProjectResultsPage() {
           </Tabs>
         )}
       </div>
-
-      <ResultsTutorial
-        enabled={Boolean(projectId && activeProject?.status === 'completed')}
-        onShowSummary={() => updateUrl('summary')}
-        onShowEvidenceInterventions={() => updateUrl('evidence', 'interventions')}
-        onShowEvidenceDocuments={() => updateUrl('evidence', 'documents')}
-      />
 
       {/* Floating Chatbot Widget */}
       <ChatbotWidget />
