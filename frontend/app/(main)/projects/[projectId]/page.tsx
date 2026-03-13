@@ -580,6 +580,8 @@ export default function ProjectResultsPage() {
             setIsPolling(false)
             hasStartedPollingRef.current = null
             await refreshData()
+            invalidateProjectCache(projectId)
+            summaryLoadedRef.current = null
           }
         } catch (error) {
           console.error('Failed to poll project status:', error)
@@ -664,8 +666,20 @@ export default function ProjectResultsPage() {
       setIsLoadingSummary(true)
       try {
         const data = await fetchWithAuth(`api/analysis-projects/${projectId}/summary`)
-        setSummaryData(data as SynthesisSummary)
-        setProjectCache('summary', projectId, data)
+        const summary = data as Partial<SynthesisSummary> | null
+        const hasBriefing = Boolean(
+          (typeof summary?.executive_briefing === 'string' && summary.executive_briefing.trim()) ||
+          summary?.structured_briefing
+        )
+
+        if (!hasBriefing) {
+          setSummaryData(null)
+          summaryLoadedRef.current = null
+          return
+        }
+
+        setSummaryData(summary as SynthesisSummary)
+        setProjectCache('summary', projectId, summary)
       } catch (err) {
         console.error('Failed to fetch summary data', err)
         setSummaryData(null)
