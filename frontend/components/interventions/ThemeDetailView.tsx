@@ -425,7 +425,7 @@ export function ThemeDetailView({
   const hasRisks = riskThemes && riskThemes.length > 0
   
   return (
-    <div className="space-y-6">
+    <div data-tutorial="theme-detail-view" className="space-y-6">
       {/* Back button */}
       <div className="pb-1">
         <button

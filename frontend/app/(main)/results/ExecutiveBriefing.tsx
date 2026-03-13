@@ -372,6 +372,7 @@ function CitationLink({
   const linkElement = url ? (
     <a href={url} target="_blank" rel="noopener noreferrer" onClick={handleClick}
        data-tutorial="citation-link"
+       data-citation-inspectable={canInspectInContext ? 'true' : 'false'}
        className={`inline-flex items-center cursor-pointer font-medium transition-colors mx-0.5 ${
          isActiveCitation
            ? "bg-blue-700 text-white hover:text-white hover:bg-blue-800 rounded px-1.5 ring-1 ring-blue-800"
@@ -382,6 +383,7 @@ function CitationLink({
   ) : (
     <span onClick={handleClick}
           data-tutorial="citation-link"
+          data-citation-inspectable={canInspectInContext ? 'true' : 'false'}
           className={`inline-flex items-center font-medium mx-0.5 ${
             isActiveCitation
               ? "bg-blue-700 text-white rounded px-1.5 ring-1 ring-blue-800"

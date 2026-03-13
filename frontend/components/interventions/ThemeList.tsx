@@ -138,6 +138,7 @@ export function ThemeList({
       {filteredAndSorted.map(theme => (
         <div
           key={theme.theme_name}
+          data-tutorial="intervention-theme-row"
           className="bg-white border border-gray-100 rounded-xl px-6 py-5 hover:bg-gray-50 hover:border-gray-200 transition-colors cursor-pointer"
           onClick={() => onSelectTheme(theme)}
           role="button"

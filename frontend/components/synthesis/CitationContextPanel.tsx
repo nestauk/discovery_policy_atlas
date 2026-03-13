@@ -387,6 +387,7 @@ export function CitationContextPanel({
 
   return (
     <aside
+      data-tutorial="citation-context-panel"
       className={`fixed inset-y-0 right-0 z-40 w-[30vw] min-w-[360px] max-w-[500px] border-l border-slate-200 bg-white shadow-xl transition-transform duration-300 ${
         isOpen ? "translate-x-0" : "translate-x-full"
       }`}
