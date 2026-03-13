@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { create } from "zustand";
 import { useAPI } from '@/lib/api';
 import type { AnalysisProject } from '@/lib/analysisProjectStore';
-import { estimateTotalAnalysisMinutes } from '@/lib/analysisTimingHeuristic';
+import { estimateAnalysisDurationRange } from '@/lib/analysisTimingHeuristic';
 import { RefineTutorial } from './RefineTutorial';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -51,6 +51,8 @@ const HelpHint = ({ content }: { content: React.ReactNode }) => (
 type Step = "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
 type TimePreset = "LAST_YEAR" | "LAST_2_YEARS" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
+const DEFAULT_SOURCES = ["openalex", "overton"] as const;
+type SourceType = (typeof DEFAULT_SOURCES)[number];
 const TIME_PRESET_LABELS: Record<TimePreset, string> = {
   LAST_YEAR: "Last year",
   LAST_2_YEARS: "Last 2 years",
@@ -60,10 +62,21 @@ const TIME_PRESET_LABELS: Record<TimePreset, string> = {
   ANY: "Any time",
   CUSTOM: "Custom range",
 };
-const SOURCE_LABELS: Record<"openalex" | "overton", string> = {
+const SOURCE_LABELS: Record<SourceType, string> = {
   openalex: "Academic literature",
   overton: "Grey literature",
 };
+
+function resolveSources(access: Access, sources?: SourceType[]): SourceType[] {
+  const selected = Array.from(
+    new Set((sources || []).filter((source) => source === "openalex" || source === "overton")),
+  ) as SourceType[]
+  if (selected.length > 0) return selected
+  const fromAccess: SourceType[] = []
+  if (access.academic) fromAccess.push("openalex")
+  if (access.policy) fromAccess.push("overton")
+  return fromAccess.length > 0 ? fromAccess : [...DEFAULT_SOURCES]
+}
 
 // Fallback population examples (used if LLM generation fails)
 const FALLBACK_POPULATION_EXAMPLES = [
@@ -127,7 +140,7 @@ export type SearchContext = {
     implementationComplexity: string;
   };
   parameters: {
-    sources: ("openalex" | "overton")[];
+    sources: SourceType[];
     access: Access;
     geography: string[];
     timePreset: TimePreset;
@@ -157,7 +170,7 @@ interface WizardState {
   generatedAdditionalQuestions: string[];
   isGeneratingOptions: boolean;
   parameters: {
-    sources: ("openalex" | "overton")[];
+    sources: SourceType[];
     access: Access;
     geography: string[];
     timePreset: TimePreset;
@@ -194,7 +207,7 @@ const INITIAL_WIZARD_STATE = {
   generatedAdditionalQuestions: [] as string[],
   isGeneratingOptions: false,
   parameters: {
-    sources: ["openalex", "overton"] as ("openalex" | "overton")[],
+    sources: [...DEFAULT_SOURCES],
     access: { academic: true, policy: true },
     geography: [ANYWHERE_VALUE],
     timePreset: "LAST_10_YEARS" as TimePreset,
@@ -244,11 +257,7 @@ export const useWizard = create<WizardState>((set, get) => ({
   },
   buildContext: () => {
     const s = get();
-    const fallbackSources: ("openalex" | "overton")[] = [];
-    if (s.parameters.access.academic) fallbackSources.push("openalex");
-    if (s.parameters.access.policy) fallbackSources.push("overton");
-    const normalizedSources =
-      s.parameters.sources.length > 0 ? s.parameters.sources : fallbackSources;
+    const normalizedSources = resolveSources(s.parameters.access, s.parameters.sources);
     return {
       researchQuestion: s.researchQuestion,
       population: s.population.noPreference ? [] : s.population.selected,
@@ -266,9 +275,10 @@ export const useWizard = create<WizardState>((set, get) => ({
     const innerSetting = sq.inner_setting || [];
     const outcome = sq.outcome || [];
     const screeningFactors = sq.screening_factors || [];
-    const sources = ((sq.sources && sq.sources.length > 0
-      ? sq.sources
-      : ["openalex", "overton"]) || []) as ("openalex" | "overton")[];
+    const sources = resolveSources(
+      { academic: true, policy: true },
+      sq.sources as SourceType[] | undefined,
+    );
     const geography = sq.geography_filter || sq.geography || [ANYWHERE_VALUE];
     const timePreset = (sq.time_preset || "LAST_10_YEARS") as TimePreset;
     const constraints = sq.implementation_constraints;
@@ -302,7 +312,10 @@ export const useWizard = create<WizardState>((set, get) => ({
       screeningFactors,
       parameters: {
         sources,
-        access: { academic: true, policy: true },
+        access: {
+          academic: sources.includes("openalex"),
+          policy: sources.includes("overton"),
+        },
         geography,
         timePreset,
         customFrom: sq.time_from || undefined,
@@ -459,14 +472,6 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
   }
   
   return parts.join(" ") + "?";
-}
-
-function estimateSearchDuration(maxResults: number, sourceCount: number): { minMinutes: number; maxMinutes: number } {
-  const baseMinutes = estimateTotalAnalysisMinutes(maxResults, sourceCount);
-  const roundedMin = Math.max(10, Math.round((baseMinutes * 0.7) / 5) * 5);
-  const roundedMax = Math.max(roundedMin + 5, Math.round((baseMinutes * 1.3) / 5) * 5);
-
-  return { minMinutes: roundedMin, maxMinutes: roundedMax };
 }
 
 // ---------------- SCREENS ----------------
@@ -927,6 +932,7 @@ function ScreenOutcome() {
 function ScreenParameters() {
   const s = useWizard();
   const [selectedCountry, setSelectedCountry] = useState("");
+  const selectedSources = resolveSources(s.parameters.access);
   const hasSelectedSource =
     s.parameters.access.academic || s.parameters.access.policy;
   const hasInvalidCustomDateRange =
@@ -936,7 +942,14 @@ function ScreenParameters() {
     s.parameters.customFrom > s.parameters.customTo;
 
   const toggleAccess = (k: keyof Access) => {
-    s.set({ parameters: { ...s.parameters, access: { ...s.parameters.access, [k]: !s.parameters.access[k] } } });
+    const nextAccess = { ...s.parameters.access, [k]: !s.parameters.access[k] };
+    s.set({
+      parameters: {
+        ...s.parameters,
+        access: nextAccess,
+        sources: resolveSources(nextAccess),
+      },
+    });
   };
 
   const addGeo = (g: string) => {
@@ -960,15 +973,6 @@ function ScreenParameters() {
       },
     });
   };
-
-  // Update sources based on access
-  React.useEffect(() => {
-    const sources: ("openalex" | "overton")[] = [];
-    if (s.parameters.access.academic) sources.push("openalex");
-    if (s.parameters.access.policy) sources.push("overton");
-    s.set({ parameters: { ...s.parameters, sources } });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.parameters.access.academic, s.parameters.access.policy]);
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
@@ -1017,7 +1021,7 @@ function ScreenParameters() {
                 >+</button>
               </div>
               <span className="text-xs text-gray-500">
-                {s.parameters.sources.length || 0} source{s.parameters.sources.length === 1 ? "" : "s"} selected
+                {selectedSources.length || 0} source{selectedSources.length === 1 ? "" : "s"} selected
               </span>
             </div>
           </div>
@@ -1403,7 +1407,10 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
     (context.parameters.customFrom || context.parameters.customTo);
   const timeWindowLabel = TIME_PRESET_LABELS[context.parameters.timePreset];
   const selectedSourceCount = context.parameters.sources.length;
-  const estimatedDuration = estimateSearchDuration(s.maxResults, selectedSourceCount || 1);
+  const estimatedDuration =
+    selectedSourceCount > 0
+      ? estimateAnalysisDurationRange(s.maxResults, selectedSourceCount)
+      : null;
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 px-8 pt-16 pb-2">
@@ -1562,9 +1569,13 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
       </Card>
 
       <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-        <p className="text-sm font-medium text-blue-900">
-          Estimated time: {estimatedDuration.minMinutes}-{estimatedDuration.maxMinutes} minutes
-        </p>
+        {estimatedDuration ? (
+          <p className="text-sm font-medium text-blue-900">
+            Estimated time: {estimatedDuration.minMinutes}-{estimatedDuration.maxMinutes} minutes
+          </p>
+        ) : (
+          <p className="text-sm font-medium text-blue-900">Estimated time: unavailable</p>
+        )}
         <p className="mt-1 text-sm text-blue-800">
           {selectedSourceCount > 0
             ? "This estimate is based on your selected sources and retrieval limit. You can close this tab after starting and check back later."

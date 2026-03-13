@@ -106,6 +106,15 @@ interface AnalysisDocument {
 
 type TabType = 'summary' | 'evidence' | 'assistant'
 type EvidenceSubTabType = 'interventions' | 'documents'
+type ProjectStatus = 'created' | 'running' | 'synthesising' | 'uploading' | 'completed' | 'failed' | string
+
+function isActivelyProcessingStatus(status: ProjectStatus | null | undefined): boolean {
+  return status === 'running' || status === 'synthesising' || status === 'uploading'
+}
+
+function isPreCompletionStatus(status: ProjectStatus | null | undefined): boolean {
+  return status === 'created' || isActivelyProcessingStatus(status)
+}
 
 export default function ProjectResultsPage() {
   const params = useParams()
@@ -211,6 +220,11 @@ export default function ProjectResultsPage() {
     updateUrl('evidence', subtab)
   }, [updateUrl])
 
+  const activeProjectId = activeProject?.id
+  const activeProjectStatus = activeProject?.status
+  const activeProjectHasSearchQuery =
+    !!activeProject && Object.prototype.hasOwnProperty.call(activeProject, 'search_query')
+
   // Load project from API if not in store or different project.
   // Running projects are handled by the polling effect below.
   useEffect(() => {
@@ -221,20 +235,12 @@ export default function ProjectResultsPage() {
       }
 
       // verifyAndPoll handles the fetch for in-progress projects
-      const storeStatus = activeProject?.id === projectId ? activeProject.status : null
-      if (
-        storeStatus === 'created' ||
-        storeStatus === 'running' ||
-        storeStatus === 'synthesising' ||
-        storeStatus === 'uploading'
-      ) return
+      const storeStatus = activeProjectId === projectId ? activeProjectStatus : null
+      if (isActivelyProcessingStatus(storeStatus)) return
 
       // If we already have this project in store with full payload, no need to fetch.
       // The projects list endpoint omits search_query, so we must refetch when that field is missing.
-      const hasSearchQueryField =
-        !!activeProject &&
-        Object.prototype.hasOwnProperty.call(activeProject, 'search_query')
-      if (activeProject?.id === projectId && hasSearchQueryField) return
+      if (activeProjectId === projectId && activeProjectHasSearchQuery) return
       
       setProjectLoading(true)
       setError(null)
@@ -261,7 +267,7 @@ export default function ProjectResultsPage() {
     }
     
     loadProjectIfNeeded()
-  }, [projectId, activeProject, getAnalysisProject, setActiveProject, router])
+  }, [projectId, activeProjectId, activeProjectStatus, activeProjectHasSearchQuery, getAnalysisProject, setActiveProject, router])
 
   // Fetch parent project title for "Refined from" indicator
   useEffect(() => {
@@ -544,16 +550,18 @@ export default function ProjectResultsPage() {
       const project = projectData.project
       setActiveProject(project)
 
-      const isTerminal = project.status === 'completed' || project.status === 'failed'
+      const status = project.status as ProjectStatus
+      const isTerminal = status === 'completed' || status === 'failed'
+      const isActivelyProcessing = isActivelyProcessingStatus(status)
       if (isTerminal) {
-        setAnalysisComplete(project.status === 'completed')
-        if (project.status === 'failed') {
+        setAnalysisComplete(status === 'completed')
+        if (status === 'failed') {
           setError('Analysis failed. Please try again.')
         }
       } else {
         setAnalysisComplete(false)
       }
-      return { project, isTerminal }
+      return { project, isTerminal, isActivelyProcessing }
     }
 
     const startPolling = () => {
@@ -591,9 +599,9 @@ export default function ProjectResultsPage() {
 
     const verifyAndPoll = async () => {
       try {
-        const { isTerminal } = await fetchAndCheckStatus()
+        const { isTerminal, isActivelyProcessing } = await fetchAndCheckStatus()
 
-        if (isTerminal) return
+        if (isTerminal || !isActivelyProcessing) return
 
         // Prevent duplicate polling if another effect started during the await
         if (hasStartedPollingRef.current === projectId) return
@@ -603,12 +611,7 @@ export default function ProjectResultsPage() {
         console.error('Failed to verify project status:', error)
         // Fallback to store status if API is unreachable
         const storeStatus = activeProject?.id === projectId ? activeProject.status : null
-        if (
-          storeStatus === 'created' ||
-          storeStatus === 'running' ||
-          storeStatus === 'synthesising' ||
-          storeStatus === 'uploading'
-        ) {
+        if (isActivelyProcessingStatus(storeStatus)) {
           startPolling()
         }
       }
@@ -1223,10 +1226,7 @@ export default function ProjectResultsPage() {
                       <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                       <h3 className="text-lg font-medium text-slate-900 mb-2">No Summary Available</h3>
                       <p className="text-slate-600">
-                        {activeProject?.status === 'created' ||
-                        activeProject?.status === 'running' ||
-                        activeProject?.status === 'synthesising' ||
-                        activeProject?.status === 'uploading'
+                        {isPreCompletionStatus(activeProject?.status)
                           ? 'Your summary is still being generated. This usually appears once extraction and synthesis finish.'
                           : 'No summary could be generated for this project. Try refining your search parameters and running again.'}
                       </p>
@@ -1361,10 +1361,7 @@ export default function ProjectResultsPage() {
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                           <h3 className="text-lg font-medium text-slate-900 mb-2">No Documents Available</h3>
                           <p className="text-slate-600">
-                            {activeProject?.status === 'created' ||
-                            activeProject?.status === 'running' ||
-                            activeProject?.status === 'synthesising' ||
-                            activeProject?.status === 'uploading'
+                            {isPreCompletionStatus(activeProject?.status)
                               ? 'Documents are being retrieved and screened. Check back shortly.'
                               : 'No documents matched this search. Try broadening your search terms or filters.'}
                           </p>

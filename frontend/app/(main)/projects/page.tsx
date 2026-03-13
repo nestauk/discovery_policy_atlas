@@ -49,24 +49,29 @@ export default function ProjectsPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadProjects = async () => {
+    let hasTimedOut = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
     try {
       setIsLoadingProjects(true)
-      const response = (await Promise.race([
-        getAnalysisProjects(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timed out while loading projects')), PROJECTS_LOAD_TIMEOUT_MS),
-        ),
-      ])) as { projects: AnalysisProject[] }
+      timeoutId = setTimeout(() => {
+        hasTimedOut = true
+        setIsLoadingProjects(false)
+        setError('Loading projects is taking longer than expected. We will update this list as soon as results arrive.')
+      }, PROJECTS_LOAD_TIMEOUT_MS)
+
+      const response = (await getAnalysisProjects()) as { projects: AnalysisProject[] }
       setProjects(response.projects)
+      setError(null)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load analysis projects'
-      if (message.includes('Timed out')) {
-        setError('Loading projects is taking longer than expected. Showing cached projects.')
-      } else {
-        setError(message)
-      }
+      setError(message)
     } finally {
-      setIsLoadingProjects(false)
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+      if (!hasTimedOut) {
+        setIsLoadingProjects(false)
+      }
     }
   }
 

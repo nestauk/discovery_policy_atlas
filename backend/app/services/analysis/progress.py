@@ -9,13 +9,30 @@ from app.services.vectorization import vectorization_service
 
 logger = logging.getLogger(__name__)
 
-SYNTHESIS_STEP_TOTAL = 4
 SYNTHESIS_STEP_LABELS = {
     1: "Identifying themes",
     2: "Preparing evidence for synthesis",
     3: "Writing executive briefing",
     4: "Finalising recommendations",
 }
+
+STEP_ONE_STAGE_KEYS = frozenset(
+    {
+        "create_canonical_concepts",
+        "process_issue_themes",
+        "process_intervention_themes",
+        "process_outcome_themes",
+        "process_risk_themes",
+    }
+)
+
+STEP_FOUR_BRIEFING_KEYS = frozenset(
+    {
+        "briefing/core_answer",
+        "briefing/recommendations",
+        "briefing/build_structured",
+    }
+)
 
 
 def map_synthesis_stage_to_step(stage_name: Optional[str]) -> int:
@@ -25,42 +42,17 @@ def map_synthesis_stage_to_step(stage_name: Optional[str]) -> int:
         return 1
 
     if key.startswith("briefing/"):
-        if key in {
-            "briefing/core_answer",
-            "briefing/recommendations",
-            "briefing/build_structured",
-        }:
+        if key in STEP_FOUR_BRIEFING_KEYS:
             return 4
         return 3
 
     if key == "generate_briefing":
         return 3
 
-    step_one_keys = {
-        "create_canonical_concepts",
-        "process_issue_themes",
-        "process_intervention_themes",
-        "process_outcome_themes",
-        "process_risk_themes",
-    }
-    if key in step_one_keys:
+    if key in STEP_ONE_STAGE_KEYS:
         return 1
 
-    step_two_keys = {
-        "load_raw_extractions",
-        "compute_evidence_coverage",
-        "build_aggregated_tables",
-        "compute_impact_syntheses",
-        "retrieve_evidence_for_themes",
-        "retrieve_evidence_for_issues",
-        "retrieve_evidence_for_outcomes",
-        "apply_rcs_to_theme_evidence",
-        "apply_rcs_to_issue_evidence",
-        "apply_rcs_to_outcome_evidence",
-    }
-    if key in step_two_keys:
-        return 2
-
+    # Remaining stages map to evidence-preparation work.
     return 2
 
 
@@ -118,7 +110,8 @@ def get_synthesis_project_progress(
     project_id: str, project_status: str
 ) -> Optional[AnalysisProjectProgress]:
     """Build user-facing progress details for synthesising projects."""
-    if project_status != "synthesising":
+    normalized_status = (project_status or "").strip().lower()
+    if normalized_status != "synthesising":
         return None
 
     latest_stage_timing = _get_latest_synthesis_stage_timing(project_id) or {}

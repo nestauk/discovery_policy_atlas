@@ -541,7 +541,11 @@ async def get_analysis_project(
         )
         project = get_project_with_auth_check(project_id, current_user, select_fields)
         status = project.get("status", "unknown")
-        progress = get_synthesis_project_progress(project_id, status)
+        progress = (
+            get_synthesis_project_progress(project_id, status)
+            if status == "synthesising"
+            else None
+        )
 
         return {
             "project": {

@@ -20,14 +20,13 @@ const TOOLTIP_GAP = 16
 const STEP_RENDER_DELAY_MS = 300
 
 type Phase = 'idle' | 'intro' | 1 | 2 | 3 | 4
-type Placement = 'below' | 'above' | 'above-right'
+type Placement = 'below' | 'above'
 
 interface StepConfig {
   selector: string
   placement: Placement
   body: string
   primaryLabel: string
-  autoScroll: boolean
 }
 
 interface ResultsTutorialProps {
@@ -43,28 +42,24 @@ const STEPS: StepConfig[] = [
     placement: 'below',
     body: 'This card summarises the evidence behind your briefing, including source volume, evidence types, and geographic coverage.',
     primaryLabel: 'Next',
-    autoScroll: true,
   },
   {
     selector: '[data-tutorial="citation-link"]',
     placement: 'below',
-    body: 'Citations are clickable. Click one to open the context panel with direct supporting quotes and document quality metadata.',
+    body: 'Citations are clickable and open a context panel with supporting quotes and document quality metadata.',
     primaryLabel: 'Next',
-    autoScroll: true,
   },
   {
     selector: '[data-tutorial="interventions-list"]',
     placement: 'above',
-    body: 'Each intervention theme is clickable. Open one to view detailed outcomes, implementation considerations, and risk assessments.',
+    body: 'Each intervention theme can be opened to view detailed outcomes, implementation considerations, and risk assessments.',
     primaryLabel: 'Next',
-    autoScroll: true,
   },
   {
     selector: '[data-tutorial="documents-table"]',
     placement: 'above',
     body: 'The Documents view contains the full evidence base, with relevance, evidence categories, and impact scores for each source.',
     primaryLabel: 'Done',
-    autoScroll: true,
   },
 ]
 
@@ -130,12 +125,6 @@ function computeTooltipPosition(rect: DOMRect, placement: Placement): React.CSSP
       return computeTooltipPosition(rect, 'above')
     }
     return { ...base, top, left: centerX }
-  }
-
-  if (placement === 'above-right') {
-    const top = rect.top - p - TOOLTIP_GAP - TOOLTIP_HEIGHT_ESTIMATE
-    const left = Math.min(rect.right - w, maxX)
-    return { ...base, top: Math.max(top, 16), left: Math.max(left, minX) }
   }
 
   const top = rect.top - p - TOOLTIP_GAP - TOOLTIP_HEIGHT_ESTIMATE
@@ -235,24 +224,19 @@ export function ResultsTutorial({
 
   const advanceTo = useCallback(
     async (step: 1 | 2 | 3 | 4) => {
-      const config = STEPS[step - 1]
-      const el = await prepareStepTarget(step)
+      for (let index = step; index <= 4; index += 1) {
+        const currentStep = index as 1 | 2 | 3 | 4
+        const el = await prepareStepTarget(currentStep)
+        if (!el) continue
 
-      if (!el) {
-        if (step < 4) {
-          advanceTo((step + 1) as 2 | 3 | 4)
-        } else {
-          complete()
-        }
+        await scrollToElement(el)
+
+        setTargetRect(el.getBoundingClientRect())
+        setPhase(currentStep)
         return
       }
 
-      if (config.autoScroll) {
-        await scrollToElement(el)
-      }
-
-      setTargetRect(el.getBoundingClientRect())
-      setPhase(step)
+      complete()
     },
     [complete, prepareStepTarget],
   )

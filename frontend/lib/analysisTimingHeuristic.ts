@@ -23,6 +23,32 @@ export function estimateTotalAnalysisMinutes(maxResults: number, sourceCount: nu
   return ANALYSIS_TIMING_HEURISTIC.retrievalOverheadMinutes + extractionMinutes + synthesisMinutes
 }
 
+type AnalysisDurationRange = { minMinutes: number; maxMinutes: number }
+
+export function estimateAnalysisDurationRange(
+  maxResults: number,
+  sourceCount: number,
+  options: {
+    minMultiplier?: number
+    maxMultiplier?: number
+    roundingMinutes?: number
+    minMinutesFloor?: number
+    minSpreadMinutes?: number
+  } = {},
+): AnalysisDurationRange {
+  const minMultiplier = options.minMultiplier ?? 0.7
+  const maxMultiplier = options.maxMultiplier ?? 1.3
+  const roundingMinutes = options.roundingMinutes ?? 5
+  const minMinutesFloor = options.minMinutesFloor ?? 10
+  const minSpreadMinutes = options.minSpreadMinutes ?? 5
+  const baseMinutes = estimateTotalAnalysisMinutes(maxResults, sourceCount)
+  const roundToStep = (value: number) => Math.round(value / roundingMinutes) * roundingMinutes
+  const minMinutes = Math.max(minMinutesFloor, roundToStep(baseMinutes * minMultiplier))
+  const maxMinutes = Math.max(minMinutes + minSpreadMinutes, roundToStep(baseMinutes * maxMultiplier))
+
+  return { minMinutes, maxMinutes }
+}
+
 type RemainingRange = { min: number; max: number } | null
 type RemainingRangeOptions = {
   varianceRatio?: number
