@@ -1049,12 +1049,8 @@ async def run_analysis_for_project(
             .execute(),
         )
 
-        # Trigger synthesis automatically
-        try:
-            await trigger_synthesis_for_project(project_id)
-        except Exception as e:
-            logger.error(f"Synthesis failed for project {project_id}: {e}")
-            # Even if synthesis fails, mark analysis as completed (async to avoid blocking)
+        # For preview runs (abstracts only), skip synthesis and mark as completed
+        if config.use_abstracts_only:
             await loop.run_in_executor(
                 None,
                 lambda: vectorization_service.supabase.table("analysis_projects")
@@ -1062,6 +1058,20 @@ async def run_analysis_for_project(
                 .eq("id", project_id)
                 .execute(),
             )
+        else:
+            # Trigger synthesis automatically
+            try:
+                await trigger_synthesis_for_project(project_id)
+            except Exception as e:
+                logger.error(f"Synthesis failed for project {project_id}: {e}")
+                # Even if synthesis fails, mark analysis as completed (async to avoid blocking)
+                await loop.run_in_executor(
+                    None,
+                    lambda: vectorization_service.supabase.table("analysis_projects")
+                    .update({"status": "completed"})
+                    .eq("id", project_id)
+                    .execute(),
+                )
 
         return {
             "project_id": project_id,

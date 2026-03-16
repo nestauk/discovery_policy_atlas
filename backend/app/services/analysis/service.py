@@ -265,6 +265,43 @@ class AnalysisService:
                 )
                 monitor.record_metric("parsed_count", parsed_count)
 
+        # Early return for preview mode — skip extraction and synthesis
+        if config.use_abstracts_only:
+            result = RunResult(
+                run_id=run_id,
+                total_references=total_references,
+                relevant_references=relevant_references,
+                references_csv_path=str(references_csv),
+                extractions_json_path=None,
+                boolean_queries=generated_boolean_queries,
+                semantic_query=generated_semantic_query,
+            )
+
+            try:
+                with StageTimer(monitor, "storage"):
+                    logger.info("Starting Supabase upload for preview run %s", run_id)
+                    storage_service = AnalysisStorageService()
+                    storage_project_id = await storage_service.store_analysis_run(
+                        config, result, project_id, user_id, user_name
+                    )
+                    logger.info(
+                        "Successfully stored preview run %s to project %s",
+                        run_id,
+                        storage_project_id or project_id,
+                    )
+            except Exception as e:
+                logger.error(
+                    "Failed to store preview run %s in Supabase: %s", run_id, e
+                )
+
+            if not settings.DEBUG_ANALYSIS_FILES:
+                self._cleanup_run_files(run_export_dir)
+
+            monitor.log_snapshot("Preview pipeline complete (abstracts only)")
+            monitor.log_summary()
+
+            return result
+
         # Step 4: extraction using LangChain workflow
         with StageTimer(monitor, "extraction"):
             extractor = LangChainExtractorService(
