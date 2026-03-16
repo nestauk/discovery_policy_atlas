@@ -57,6 +57,7 @@ def map_synthesis_stage_to_step(stage_name: Optional[str]) -> int:
 
 
 def _parse_iso_datetime(value: object) -> Optional[datetime]:
+    """Safely parse an ISO timestamp string into a datetime, or None."""
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -66,6 +67,7 @@ def _parse_iso_datetime(value: object) -> Optional[datetime]:
 
 
 def _estimate_stage_started_at_iso(timing_row: dict) -> Optional[str]:
+    """Estimate when a stage started by subtracting its duration from its finish time."""
     created_at = _parse_iso_datetime(timing_row.get("created_at"))
     if created_at is None:
         return None
