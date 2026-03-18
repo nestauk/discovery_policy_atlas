@@ -1,0 +1,4 @@
+supabase
+pandas
+openpyxl
+python-dotenv
