@@ -10,7 +10,7 @@ This script queries Supabase for completed projects with description
 from __future__ import annotations
 
 import argparse
-import json
+import os
 import re
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -25,8 +25,24 @@ from supabase import Client, create_client
 BASE_PUBLIC_PROJECT_URL = (
     "https://discoverypolicyatlas-production.up.railway.app/public/projects"
 )
-TARGET_DESCRIPTION = "Agency & Resilience"
 INSUFFICIENT_VERDICTS = {"insufficient_evidence", "insufficient evidence"}
+
+# Maps a short key to (project description filter, Google Sheet ID).
+# Add new entries here as new export targets are defined.
+EXPORT_TARGETS: dict[str, dict[str, str]] = {
+    "ar_bottom_up": {
+        "description": "Agency & Resilience",
+        "sheet_id": "1zkpErwBZcyvlKEmxJrT8sfCeLA_5Md3787S0gR702rw",
+    },
+    "ar_top_down": {
+        "description": "AR Top down",
+        "sheet_id": "1TBZhimzQ2y066VCLyteiAP3kBaPoo8ivYSmNiIKre-U",
+    },
+    "ar_wildcard": {
+        "description": "AR wildcard",
+        "sheet_id": "12_D2WTjXnoHmkgXioXKmb1v3JkAIMXMwD-I_wqRL1lQ",
+    },
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +65,24 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Output directory (defaults to scripts/exports/output).",
     )
+    parser.add_argument(
+        "--target",
+        type=str,
+        default="ar_bottom_up",
+        choices=list(EXPORT_TARGETS.keys()),
+        help="Export target key (default: ar_bottom_up).",
+    )
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload results to the Google Sheet configured for this target.",
+    )
+    parser.add_argument(
+        "--google-credentials",
+        type=Path,
+        default=None,
+        help="Path to Google service account JSON. Auto-detected if not provided.",
+    )
     return parser.parse_args()
 
 
@@ -66,8 +100,6 @@ def load_config(repo_root: Path) -> Client:
     """
     env_path = repo_root / "backend" / ".env"
     load_dotenv(env_path)
-
-    import os
 
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_KEY")
@@ -220,15 +252,15 @@ def _to_markdown_table(rows: list[dict[str, Any]], columns: list[str]) -> str:
     return "\n".join([header, divider, *body])
 
 
-def fetch_projects(client: Client) -> list[dict[str, Any]]:
-    """Fetch completed Agency & Resilience projects."""
+def fetch_projects(client: Client, description: str) -> list[dict[str, Any]]:
+    """Fetch completed projects matching the given description."""
     response = (
         client.table("analysis_projects")
         .select(
             "id,title,description,status,created_at,created_by_name,"
             "relevant_references,search_query"
         )
-        .eq("description", TARGET_DESCRIPTION)
+        .eq("description", description)
         .eq("status", "completed")
         .order("created_at", desc=True)
         .execute()
@@ -264,7 +296,8 @@ def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any
                 "id,synthesis_run_id,theme_type,theme_name,summary_description,"
                 "frequency,effect_consensus,positive_count,negative_count,null_count,"
                 "countries,study_types,has_harm_warning,"
-                "transferability_breakdown,linked_intervention_theme_id"
+                "transferability_breakdown,linked_intervention_theme_id,"
+                "source_doc_ids"
             )
             .eq("synthesis_run_id", run_id)
             .execute()
@@ -278,7 +311,8 @@ def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any
                 "id,synthesis_run_id,outcome_name,outcome_description,"
                 "effect_consensus,positive_count,negative_count,null_count,"
                 "frequency,verdict_label,predicted_magnitude,"
-                "primary_causal_mechanism,intervention_theme_id"
+                "primary_causal_mechanism,intervention_theme_id,"
+                "source_doc_ids"
             )
             .eq("synthesis_run_id", run_id)
             .execute()
@@ -289,8 +323,8 @@ def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any
     documents = (
         client.table("analysis_documents")
         .select(
-            "id,analysis_project_id,title,authors,year,evidence_category,"
-            "top_line,doi,citation_count,source_country,is_relevant"
+            "id,doc_id,analysis_project_id,title,authors,author_institutions,year,"
+            "evidence_category,top_line,doi,citation_count,source_country,is_relevant"
         )
         .eq("analysis_project_id", project_id)
         .eq("is_relevant", True)
@@ -303,6 +337,18 @@ def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any
         t["id"]: t["theme_name"] for t in themes if t.get("theme_type") == "intervention"
     }
 
+    # Lookup for evidence category resolution.
+    # source_doc_ids contains a mix of bare DOIs and custom doc_id values,
+    # so we index documents by both doc_id and bare DOI.
+    doc_by_source_id: dict[str, dict[str, Any]] = {}
+    for doc in documents:
+        if doc.get("doc_id"):
+            doc_by_source_id[doc["doc_id"]] = doc
+        doi = doc.get("doi") or ""
+        bare = doi.replace("https://doi.org/", "").replace("http://doi.org/", "")
+        if bare:
+            doc_by_source_id[bare] = doc
+
     return {
         "project": project,
         "run": run,
@@ -310,6 +356,7 @@ def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any
         "outcomes": outcomes,
         "documents": documents,
         "intervention_lookup": intervention_lookup,
+        "doc_by_source_id": doc_by_source_id,
     }
 
 
@@ -321,6 +368,20 @@ def build_projects_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
         run = payload["run"] or {}
         themes = payload["themes"]
         outcomes = payload["outcomes"]
+        documents = payload["documents"]
+
+        # Count author and institution frequency across all relevant documents
+        author_counts: dict[str, int] = defaultdict(int)
+        institution_counts: dict[str, int] = defaultdict(int)
+        for doc in documents:
+            for author in _as_list(doc.get("authors")):
+                name = str(author).strip()
+                if name:
+                    author_counts[name] += 1
+            for institution in _as_list(doc.get("author_institutions")):
+                name = str(institution).strip()
+                if name:
+                    institution_counts[name] += 1
 
         evidence_coverage = _as_dict(run.get("evidence_coverage"))
         years_map = _as_dict(evidence_coverage.get("years"))
@@ -364,6 +425,8 @@ def build_projects_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
                 "Search Filters": _format_search_filters(search_query),
                 "Geography Filter": _format_simple_list(search_query.get("geography")),
                 "Time Filter": _format_time_filter(search_query),
+                "Top 10 Authors": _format_count_map(dict(author_counts), top_n=10),
+                "Top 10 Institutions": _format_count_map(dict(institution_counts), top_n=10),
             }
         )
 
@@ -414,6 +477,45 @@ def _extract_geo_fit_and_note(theme: dict[str, Any]) -> tuple[str, str]:
     return geography_fit, geography_note
 
 
+def _evidence_category_breakdown(
+    theme: dict[str, Any], doc_by_source_id: dict[str, dict[str, Any]]
+) -> str:
+    """Build evidence category breakdown string from a theme's source documents.
+
+    source_doc_ids contains a mix of bare DOIs and custom doc_ids.
+    """
+    source_dois = _as_list(theme.get("source_doc_ids"))
+    if not source_dois:
+        return "None"
+    counts: dict[str, int] = defaultdict(int)
+    for doi in source_dois:
+        doc = doc_by_source_id.get(str(doi))
+        if doc:
+            category = doc.get("evidence_category") or "Unknown"
+            counts[category] += 1
+    if not counts:
+        return "None"
+    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{k} ({v})" for k, v in items)
+
+
+def _source_doc_categories(
+    theme: dict[str, Any], doc_by_source_id: dict[str, dict[str, Any]]
+) -> str:
+    """Build pipe-separated 'doc_id::category' pairs for dedup in downstream viz."""
+    source_ids = _as_list(theme.get("source_doc_ids"))
+    if not source_ids:
+        return ""
+    parts: list[str] = []
+    for sid in source_ids:
+        doc = doc_by_source_id.get(str(sid))
+        if doc:
+            doc_id = doc.get("doc_id") or str(sid)
+            category = doc.get("evidence_category") or "Unknown"
+            parts.append(f"{doc_id}::{category}")
+    return " | ".join(parts)
+
+
 def build_interventions_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
     """Build Tab 2 dataframe."""
     rows: list[dict[str, Any]] = []
@@ -422,6 +524,7 @@ def build_interventions_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFr
         project_title = payload["project"].get("title") or ""
         themes = payload["themes"]
         outcomes = payload["outcomes"]
+        doc_by_source_id = payload.get("doc_by_source_id", {})
 
         for theme in themes:
             if str(theme.get("theme_type") or "") != "intervention":
@@ -436,6 +539,9 @@ def build_interventions_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFr
                     "Intervention Name": theme.get("theme_name") or "",
                     "Summary Description": theme.get("summary_description") or "",
                     "Source Documents": _safe_int(theme.get("frequency")),
+                    "Evidence Category Breakdown": _evidence_category_breakdown(
+                        theme, doc_by_source_id
+                    ),
                     "Effect Consensus": theme.get("effect_consensus") or "unknown",
                     "Positive / Negative / Null": _format_pos_neg_null(theme),
                     "Outcome Verdicts & Magnitudes": _format_outcome_verdicts_and_magnitudes(
@@ -445,10 +551,47 @@ def build_interventions_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFr
                     "Geography Context Explanation": geography_note,
                     "Countries": _format_simple_list(theme.get("countries")),
                     "Study Types": _format_count_map(theme.get("study_types")),
+                    "Source Doc IDs": " | ".join(
+                        str(s) for s in _as_list(theme.get("source_doc_ids"))
+                    ),
+                    "Source Doc Categories": _source_doc_categories(
+                        theme, doc_by_source_id
+                    ),
                 }
             )
 
     return pd.DataFrame(rows)
+
+
+def _format_source_studies(
+    theme: dict[str, Any], doc_by_source_id: dict[str, dict[str, Any]]
+) -> str:
+    """Build a compact source-studies string with top-line summaries.
+
+    Format per study: "Author (Year, Category): top-line summary"
+    """
+    source_ids = _as_list(theme.get("source_doc_ids"))
+    if not source_ids:
+        return ""
+    parts: list[str] = []
+    for sid in source_ids:
+        doc = doc_by_source_id.get(str(sid))
+        if not doc:
+            continue
+        authors = doc.get("authors") or "Unknown"
+        if isinstance(authors, list):
+            authors = authors[0] if authors else "Unknown"
+        year = doc.get("year") or "n.d."
+        category = doc.get("evidence_category") or ""
+        top_line = doc.get("top_line") or ""
+        label = f"{authors} ({year}"
+        if category:
+            label += f", {category}"
+        label += ")"
+        if top_line:
+            label += f": {top_line}"
+        parts.append(label)
+    return " | ".join(parts)
 
 
 def build_outcomes_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
@@ -457,6 +600,7 @@ def build_outcomes_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
     for payload in project_payloads:
         project_title = payload["project"].get("title") or ""
         intervention_lookup = payload["intervention_lookup"]
+        doc_by_source_id = payload.get("doc_by_source_id", {})
 
         for outcome in payload["outcomes"]:
             if not _is_sufficient_outcome(outcome):
@@ -475,6 +619,7 @@ def build_outcomes_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
                     "Effect Direction": outcome.get("effect_consensus") or "unknown",
                     "Positive / Negative / Null": _format_pos_neg_null(outcome),
                     "Causal Mechanism": outcome.get("primary_causal_mechanism") or "",
+                    "Source Studies": _format_source_studies(outcome, doc_by_source_id),
                 }
             )
 
@@ -930,23 +1075,164 @@ def generate_notebooklm_sources(
     )
 
 
+def _find_google_credentials(explicit_path: Path | None) -> Path:
+    """Locate Google service account credentials JSON.
+
+    Search order:
+    1. Explicit --google-credentials path
+    2. GOOGLE_SHEETS_CREDENTIALS env var (absolute or relative to cwd)
+    3. Known location from discovery_mission_radar venv
+    """
+    if explicit_path and explicit_path.is_file():
+        return explicit_path
+
+    env_val = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
+    if env_val:
+        p = Path(env_val).expanduser()
+        if p.is_file():
+            return p
+
+    # Default: .credentials/ next to this script
+    local = Path(__file__).resolve().parent / ".credentials" / "horizonscanning.json"
+    if local.is_file():
+        return local
+
+    raise FileNotFoundError(
+        "Could not find Google service account credentials. "
+        "Place horizonscanning.json in scripts/exports/.credentials/, "
+        "provide --google-credentials, or set GOOGLE_SHEETS_CREDENTIALS env var."
+    )
+
+
+def _format_worksheet(worksheet: Any, num_rows: int, num_cols: int) -> None:
+    """Apply table-like formatting: frozen header, bold header, banding, filters."""
+    # Freeze header row
+    worksheet.freeze(rows=1)
+
+    # Bold + background colour on header row
+    worksheet.format("1:1", {
+        "textFormat": {"bold": True},
+        "backgroundColor": {"red": 0.9, "green": 0.93, "blue": 0.98},
+    })
+
+    # Remove existing banding before adding new
+    sheet_meta = None
+    for s in worksheet.spreadsheet.fetch_sheet_metadata()["sheets"]:
+        if s["properties"]["sheetId"] == worksheet.id:
+            sheet_meta = s
+            break
+    requests = []
+    if sheet_meta:
+        for banding in sheet_meta.get("bandedRanges", []):
+            requests.append({"deleteBanding": {"bandedRangeId": banding["bandedRangeId"]}})
+
+    # Clear existing filter if present
+    if sheet_meta and "basicFilter" in sheet_meta:
+        requests.append({"clearBasicFilter": {"sheetId": worksheet.id}})
+
+    # Add alternating row colours (banding)
+    requests += [
+        {
+            "addBanding": {
+                "bandedRange": {
+                    "range": {
+                        "sheetId": worksheet.id,
+                        "startRowIndex": 0,
+                        "endRowIndex": num_rows,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": num_cols,
+                    },
+                    "rowProperties": {
+                        "headerColor": {
+                            "red": 0.9, "green": 0.93, "blue": 0.98, "alpha": 1,
+                        },
+                        "firstBandColor": {
+                            "red": 1, "green": 1, "blue": 1, "alpha": 1,
+                        },
+                        "secondBandColor": {
+                            "red": 0.95, "green": 0.96, "blue": 0.98, "alpha": 1,
+                        },
+                    },
+                }
+            }
+        },
+        # Add auto-filter on header row
+        {
+            "setBasicFilter": {
+                "filter": {
+                    "range": {
+                        "sheetId": worksheet.id,
+                        "startRowIndex": 0,
+                        "endRowIndex": num_rows,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": num_cols,
+                    }
+                }
+            }
+        },
+    ]
+    worksheet.spreadsheet.batch_update({"requests": requests})
+
+
+def upload_to_google_sheets(
+    sheet_id: str,
+    credentials_path: Path,
+    dataframes: dict[str, pd.DataFrame],
+) -> None:
+    """Upload dataframes as tabs to an existing Google Sheet."""
+    import gspread
+    from gspread.exceptions import WorksheetNotFound
+
+    gc = gspread.service_account(filename=str(credentials_path))
+    spreadsheet = gc.open_by_key(sheet_id)
+    print(f"Connected to Google Sheet: {spreadsheet.title}")
+
+    for sheet_name, df in dataframes.items():
+        # Convert dataframe to list of lists (header + rows)
+        values = [df.columns.tolist()] + df.fillna("").astype(str).values.tolist()
+
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+            worksheet.clear()
+        except WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(
+                title=sheet_name, rows=len(values), cols=len(values[0])
+            )
+
+        print(f"  Uploading tab: {sheet_name} ({len(df)} rows)")
+        worksheet.update(values, value_input_option="RAW")
+        _format_worksheet(worksheet, num_rows=len(values), num_cols=len(values[0]))
+
+    print("Google Sheets upload complete.")
+
+
 def main() -> None:
     """Run export workflow."""
     args = parse_args()
+    target_config = EXPORT_TARGETS[args.target]
+    target_description = target_config["description"]
+
+    if not target_description:
+        raise ValueError(
+            f"Target '{args.target}' has no description configured in EXPORT_TARGETS."
+        )
+
     repo_root = args.repo_root.resolve()
     output_dir = (
         args.output_dir.resolve()
         if args.output_dir
-        else (repo_root / "scripts" / "exports" / "output")
+        else (repo_root / "scripts" / "output" / args.target / "data")
     )
-    notebook_dir = output_dir / "notebooklm_sources"
+    notebook_dir = output_dir.parent / "notebooklm_sources"
     qa_path = output_dir / "qa_review.xlsx"
 
+    print(f"Target: {args.target} (filtering: \"{target_description}\")")
+
     client = load_config(repo_root)
-    projects = fetch_projects(client)
+    projects = fetch_projects(client, target_description)
     if not projects:
         raise RuntimeError(
-            "No completed Agency & Resilience projects were found to export."
+            f"No completed projects with description \"{target_description}\" found."
         )
 
     payloads: list[dict[str, Any]] = []
@@ -964,6 +1250,25 @@ def main() -> None:
 
     print(f"Export complete. QA spreadsheet: {qa_path}")
     print(f"NotebookLM sources: {notebook_dir}")
+
+    if args.upload:
+        sheet_id = target_config["sheet_id"]
+        if not sheet_id:
+            raise ValueError(
+                f"No Google Sheet ID configured for target '{args.target}'. "
+                "Fill in the sheet_id in EXPORT_TARGETS."
+            )
+        credentials_path = _find_google_credentials(args.google_credentials)
+        print(f"Using Google credentials: {credentials_path}")
+        upload_to_google_sheets(
+            sheet_id=sheet_id,
+            credentials_path=credentials_path,
+            dataframes={
+                "Projects": projects_df,
+                "Intervention Themes": interventions_df,
+                "Outcome Themes": outcomes_df,
+            },
+        )
 
 
 if __name__ == "__main__":

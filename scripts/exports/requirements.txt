@@ -2,3 +2,4 @@ supabase
 pandas
 openpyxl
 python-dotenv
+gspread

@@ -42,6 +42,7 @@ next-env.d.ts
 .env
 .env.*
 !**/.env.example
+**/.credentials/
 
 # ========================================
 # 🔧 Logs and Debugging
