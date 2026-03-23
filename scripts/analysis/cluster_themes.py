@@ -57,7 +57,7 @@ OUTPUT_DEFAULT = SCRIPTS_ROOT / "output" / "ar_bottom_up"
 XLSX_DEFAULT = OUTPUT_DEFAULT / "data" / "qa_review.xlsx"
 ENV_PATH = Path(__file__).resolve().parents[2] / "backend" / ".env"
 
-SHABEER = "Shabeer Rauf"
+DEFAULT_RUN_BY = "Shabeer Rauf"
 CACHE_VERSION = 1
 
 
@@ -95,6 +95,11 @@ def parse_args() -> argparse.Namespace:
         help="Skip LLM-based cluster merge review",
     )
     parser.add_argument(
+        "--run-by", type=str, default=DEFAULT_RUN_BY,
+        help="Filter to projects run by this user (default: 'Shabeer Rauf'). "
+             "Use 'all' to include all projects.",
+    )
+    parser.add_argument(
         "--from-cache", action="store_true",
         help="Load cached clustering results (skip clustering/LLM, regenerate outputs only).",
     )
@@ -103,16 +108,20 @@ def parse_args() -> argparse.Namespace:
 
 def load_filtered_data(
     xlsx_path: Path,
+    run_by: str = DEFAULT_RUN_BY,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load xlsx and filter to Shabeer's searches only."""
+    """Load xlsx and optionally filter to a specific user's searches."""
     projects = pd.read_excel(xlsx_path, sheet_name="Projects")
     interventions = pd.read_excel(xlsx_path, sheet_name="Intervention Themes")
     outcomes = pd.read_excel(xlsx_path, sheet_name="Outcome Themes")
 
-    shabeer_titles = set(projects[projects["Run By"] == SHABEER]["Project Title"])
-
-    interventions = interventions[interventions["Project Title"].isin(shabeer_titles)].copy()
-    outcomes = outcomes[outcomes["Project Title"].isin(shabeer_titles)].copy()
+    if run_by.lower() != "all":
+        user_titles = set(projects[projects["Run By"] == run_by]["Project Title"])
+        interventions = interventions[interventions["Project Title"].isin(user_titles)].copy()
+        outcomes = outcomes[outcomes["Project Title"].isin(user_titles)].copy()
+        logger.info("User filter: kept projects run by '%s'", run_by)
+    else:
+        logger.info("No user filter applied — using all projects")
 
     interventions["_intervention_key"] = _build_intervention_key_series(
         interventions, "Intervention Name"
@@ -143,7 +152,7 @@ def load_filtered_data(
     interventions = interventions.reset_index(drop=True)
     outcomes = outcomes.reset_index(drop=True)
 
-    logger.info("Loaded %d interventions, %d outcomes (Shabeer only)", len(interventions), len(outcomes))
+    logger.info("Loaded %d interventions, %d outcomes", len(interventions), len(outcomes))
     return projects, interventions, outcomes
 
 
@@ -444,7 +453,7 @@ def main() -> None:
         logger.warning("OPENAI_API_KEY not found, falling back to TF-IDF labels")
         args.no_llm = True
 
-    _, interventions, outcomes = load_filtered_data(args.input)
+    _, interventions, outcomes = load_filtered_data(args.input, run_by=args.run_by)
     cache_metadata = _build_cache_metadata(args.input, interventions, outcomes)
 
     if args.from_cache:
