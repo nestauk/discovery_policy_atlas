@@ -440,6 +440,43 @@ function ProgressBar({
   );
 }
 
+function ResearchQuestionContext({
+  researchQuestion,
+  onEdit,
+}: {
+  researchQuestion: string;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="w-full border-b border-gray-100 bg-gradient-to-b from-gray-50/90 to-gray-50/40 px-4 pt-3 pb-2 sm:px-6 sm:pt-4 sm:pb-2">
+      <div
+        className={cx(
+          "mx-auto max-w-5xl rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-200/60",
+          "flex flex-col gap-4 sm:flex-row sm:items-stretch sm:justify-between sm:gap-5 sm:p-5"
+        )}
+      >
+        <div className="min-w-0 flex-1 rounded-l-lg border-l-[3px] border-blue-600 pl-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+            Research question
+          </p>
+          <p className="mt-2 max-h-28 overflow-y-auto text-base font-medium leading-relaxed text-gray-900">
+            {researchQuestion}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center sm:border-l sm:border-gray-100 sm:pl-5">
+          <Button
+            variant="secondary"
+            className="w-full sm:w-auto !bg-[#A5D6E1]/50 !text-gray-900 hover:!bg-[#A5D6E1] border-0 ring-1 ring-gray-200/70 px-4 py-2.5 text-sm font-medium"
+            onClick={onEdit}
+          >
+            Edit question
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function generateImpliedResearchQuestion(context: SearchContext): string {
   const parts: string[] = [];
   
@@ -574,7 +611,7 @@ function ScreenPopulation() {
   const customOptions = s.population.selected.filter(pop => !exampleOptions.includes(pop));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you targeting a particular population?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise evidence for the populations you care about.</p>
@@ -721,7 +758,7 @@ function ScreenInnerSetting() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular settings?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise context-matched evidence and assess transferability.</p>
@@ -846,7 +883,7 @@ function ScreenOutcome() {
   const customOptions = s.outcome.selected.filter(outcome => !exampleOptions.includes(outcome));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular outcomes?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise evidence measuring your outcomes of interest.</p>
@@ -975,7 +1012,7 @@ function ScreenParameters() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
         <p className="text-gray-600 text-lg">We use these filters to narrow the evidence set before ranking.</p>
@@ -1149,7 +1186,7 @@ function ScreenScreening() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Additional criteria</h2>
         <p className="text-gray-600 text-lg">
@@ -1326,7 +1363,7 @@ function ScreenAdditionalQuestions() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Specific research questions?</h2>
         <p className="text-gray-600 text-lg">We will use these to shape the summary write-up</p>
@@ -1413,7 +1450,7 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
       : null;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 px-8 pt-16 pb-2">
+    <div className="max-w-4xl mx-auto space-y-8 px-8 pt-8 pb-2">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Summary</h2>
       </div>
@@ -1597,6 +1634,7 @@ interface SearchWizardProps {
 export default function SearchWizard({ onRunAnalysis, isRunning = false }: SearchWizardProps) {
   const s = useWizard();
   const context = s.buildContext();
+  const trimmedResearchQuestion = s.researchQuestion.trim();
   const hasSelectedSource = context.parameters.sources.length > 0;
   const hasInvalidCustomDateRange =
     context.parameters.timePreset === "CUSTOM" &&
@@ -1606,6 +1644,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
 
   const isSummaryStep = s.step === "SUMMARY";
   const showActionBar = s.step !== "ASK";
+  const showResearchQuestionContext = s.step !== "ASK" && !!trimmedResearchQuestion;
 
   const getPrimaryAction = () => {
     if (isSummaryStep) {
@@ -1649,6 +1688,12 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
         onStepClick={(step) => s.set({ step })}
         allStepsVisited={s.allStepsVisited}
       />
+      {showResearchQuestionContext && (
+        <ResearchQuestionContext
+          researchQuestion={trimmedResearchQuestion}
+          onEdit={() => s.set({ step: "ASK" })}
+        />
+      )}
       <div className={isSummaryStep ? "" : "flex-1"}>
         {s.step === "ASK" && <ScreenAsk />}
         {s.step === "POPULATION" && <ScreenPopulation />}
