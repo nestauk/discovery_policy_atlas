@@ -1,3 +1,6 @@
+// Per-step synthesis duration estimates (seconds), index i = user-facing step i + 1.
+// Keep aligned with SYNTHESIS_STEP_LABELS and map_synthesis_stage_to_step in
+// backend/app/services/analysis/progress.py — same four-step model; update both if the model changes.
 const SYNTHESIS_STEP_SECONDS = [119, 133, 518, 304] as const
 
 export const ANALYSIS_TIMING_HEURISTIC = {
@@ -166,7 +169,7 @@ export function computeProjectProgressInfo({
   const configuredSourcesCount = activeProject.search_query?.sources?.length ?? 2
   const configuredDocs = Math.max(1, configuredMaxResults * Math.max(1, configuredSourcesCount))
   const defaultRelevantRatio = ANALYSIS_TIMING_HEURISTIC.defaultRelevantRatio
-  const observedRelevantDocs = documents.filter((doc) => doc.is_relevant !== false).length
+  const observedRelevantDocs = documents.filter((doc) => doc.is_relevant === true).length
   const estimatedRelevantDocs = Math.max(
     1,
     observedRelevantDocs > 0 ? observedRelevantDocs : Math.round(configuredDocs * defaultRelevantRatio),
@@ -200,7 +203,7 @@ export function computeProjectProgressInfo({
       }
     }
 
-    const relevantDocs = documents.filter((doc) => doc.is_relevant !== false)
+    const relevantDocs = documents.filter((doc) => doc.is_relevant === true)
     const totalRelevantDocs = relevantDocs.length
     const extractedDocs = relevantDocs.filter(
       (doc) => doc.extraction_status === 'completed' || doc.extraction_status === 'success',

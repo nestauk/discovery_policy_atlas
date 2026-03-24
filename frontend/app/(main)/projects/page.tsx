@@ -233,7 +233,10 @@ export default function ProjectsPage() {
                 <div className="text-sm text-slate-600 mb-6 space-y-1">
                   <p>1. Define your research question</p>
                   <p>2. We search policy and academic sources</p>
-                  <p>3. AI analyses the retrieved evidence</p>
+                  <p>
+                    3. AI analyses the evidence and surfaces themes—policy issues, interventions,
+                    outcomes, and risks
+                  </p>
                   <p>4. You get an executive briefing and evidence explorer</p>
                 </div>
                 <Button 

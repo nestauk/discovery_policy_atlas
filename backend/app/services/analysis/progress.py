@@ -9,6 +9,9 @@ from app.services.vectorization import vectorization_service
 
 logger = logging.getLogger(__name__)
 
+# User-facing synthesis steps (1–4) from map_synthesis_stage_to_step. ETA durations for the
+# same steps live in frontend/lib/analysisTimingHeuristic.ts (SYNTHESIS_STEP_SECONDS); keep in sync
+# if this model or ordering changes.
 SYNTHESIS_STEP_LABELS = {
     1: "Identifying themes",
     2: "Preparing evidence for synthesis",
