@@ -158,3 +158,11 @@ class RunResult(BaseModel):
         List[str]
     ] = None  # Generated boolean queries used for search (list for multi-query support)
     semantic_query: Optional[str] = None  # Generated semantic query used for Overton
+
+
+class AnalysisProjectProgress(BaseModel):
+    """User-facing progress payload for long-running project processing."""
+
+    stage_label: str
+    step_index: int
+    stage_started_at: Optional[str] = None

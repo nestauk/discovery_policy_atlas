@@ -36,6 +36,7 @@ from app.services.analysis.schemas import (
     AdditionalQuestionsRequest,
     AdditionalQuestionsResponse,
 )
+from app.services.analysis.progress import get_synthesis_project_progress
 from app.services.analysis.evidence.strength import get_or_calculate_document_evidence
 from app.services.synthesis.utils import (
     normalize_source_type,
@@ -539,6 +540,12 @@ async def get_analysis_project(
             "parent_project_id"
         )
         project = get_project_with_auth_check(project_id, current_user, select_fields)
+        status = project.get("status", "unknown")
+        progress = (
+            get_synthesis_project_progress(project_id, status)
+            if status == "synthesising"
+            else None
+        )
 
         return {
             "project": {
@@ -549,7 +556,7 @@ async def get_analysis_project(
                 "query": project["query"],
                 "total_references": project.get("total_references", 0),
                 "relevant_references": project.get("relevant_references", 0),
-                "status": project.get("status", "unknown"),
+                "status": status,
                 "created_at": project["created_at"],
                 "created_by_user_id": project.get("created_by_user_id"),
                 "created_by_name": project.get("created_by_name"),
@@ -557,6 +564,7 @@ async def get_analysis_project(
                 "search_query": project.get("search_query"),
                 "is_public": project.get("is_public", False),
                 "parent_project_id": project.get("parent_project_id"),
+                "progress": progress.model_dump() if progress else None,
             },
         }
 

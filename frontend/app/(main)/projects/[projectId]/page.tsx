@@ -46,6 +46,7 @@ import type { InterventionData } from '@/components/interventions/InterventionsT
 import { PapersTable } from '@/components/documents/PapersTable'
 import { SearchPlanModal } from '@/components/results/SearchPlanModal'
 import { getEvidenceCategoryRank } from '@/lib/evidenceCategories'
+import { computeProjectProgressInfo } from '@/lib/analysisTimingHeuristic'
 
 interface AnalysisDocument {
   id: string
@@ -104,6 +105,15 @@ interface AnalysisDocument {
 
 type TabType = 'summary' | 'evidence' | 'assistant'
 type EvidenceSubTabType = 'interventions' | 'documents'
+type ProjectStatus = 'created' | 'running' | 'synthesising' | 'uploading' | 'completed' | 'failed' | string
+
+function isActivelyProcessingStatus(status: ProjectStatus | null | undefined): boolean {
+  return status === 'running' || status === 'synthesising' || status === 'uploading'
+}
+
+function isPreCompletionStatus(status: ProjectStatus | null | undefined): boolean {
+  return status === 'created' || isActivelyProcessingStatus(status)
+}
 
 export default function ProjectResultsPage() {
   const params = useParams()
@@ -161,6 +171,8 @@ export default function ProjectResultsPage() {
 
   const [projectLoading, setProjectLoading] = useState(false)
   const [parentProjectTitle, setParentProjectTitle] = useState<string | null>(null)
+  const [currentMinuteTick, setCurrentMinuteTick] = useState<number>(Date.now())
+  const [statusDotCount, setStatusDotCount] = useState(1)
 
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
@@ -208,6 +220,11 @@ export default function ProjectResultsPage() {
     updateUrl('evidence', subtab)
   }, [updateUrl])
 
+  const activeProjectId = activeProject?.id
+  const activeProjectStatus = activeProject?.status
+  const activeProjectHasSearchQuery =
+    !!activeProject && Object.prototype.hasOwnProperty.call(activeProject, 'search_query')
+
   // Load project from API if not in store or different project.
   // Running projects are handled by the polling effect below.
   useEffect(() => {
@@ -217,16 +234,13 @@ export default function ProjectResultsPage() {
         return
       }
 
-      // verifyAndPoll handles the fetch for running projects
-      const storeStatus = activeProject?.id === projectId ? activeProject.status : null
-      if (storeStatus === 'running' || storeStatus === 'synthesising') return
+      // verifyAndPoll handles the fetch for in-progress projects
+      const storeStatus = activeProjectId === projectId ? activeProjectStatus : null
+      if (isActivelyProcessingStatus(storeStatus)) return
 
       // If we already have this project in store with full payload, no need to fetch.
       // The projects list endpoint omits search_query, so we must refetch when that field is missing.
-      const hasSearchQueryField =
-        !!activeProject &&
-        Object.prototype.hasOwnProperty.call(activeProject, 'search_query')
-      if (activeProject?.id === projectId && hasSearchQueryField) return
+      if (activeProjectId === projectId && activeProjectHasSearchQuery) return
       
       setProjectLoading(true)
       setError(null)
@@ -253,7 +267,7 @@ export default function ProjectResultsPage() {
     }
     
     loadProjectIfNeeded()
-  }, [projectId, activeProject?.id, getAnalysisProject, setActiveProject, router])
+  }, [projectId, activeProjectId, activeProjectStatus, activeProjectHasSearchQuery, getAnalysisProject, setActiveProject, router])
 
   // Fetch parent project title for "Refined from" indicator
   useEffect(() => {
@@ -536,14 +550,18 @@ export default function ProjectResultsPage() {
       const project = projectData.project
       setActiveProject(project)
 
-      const isStable = project.status === 'completed' || project.status === 'failed' || project.status === 'created'
-      if (isStable) {
-        setAnalysisComplete(project.status === 'completed' || project.status === 'created')
-        if (project.status === 'failed') {
+      const status = project.status as ProjectStatus
+      const isTerminal = status === 'completed' || status === 'failed'
+      const isActivelyProcessing = isActivelyProcessingStatus(status)
+      if (isTerminal) {
+        setAnalysisComplete(status === 'completed')
+        if (status === 'failed') {
           setError('Analysis failed. Please try again.')
         }
+      } else {
+        setAnalysisComplete(false)
       }
-      return { project, isStable }
+      return { project, isTerminal, isActivelyProcessing }
     }
 
     const startPolling = () => {
@@ -561,7 +579,7 @@ export default function ProjectResultsPage() {
         await refreshData()
 
         try {
-          const { isStable: done } = await fetchAndCheckStatus()
+          const { isTerminal: done } = await fetchAndCheckStatus()
           if (done) {
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current)
@@ -581,9 +599,9 @@ export default function ProjectResultsPage() {
 
     const verifyAndPoll = async () => {
       try {
-        const { isStable } = await fetchAndCheckStatus()
+        const { isTerminal, isActivelyProcessing } = await fetchAndCheckStatus()
 
-        if (isStable) return
+        if (isTerminal || !isActivelyProcessing) return
 
         // Prevent duplicate polling if another effect started during the await
         if (hasStartedPollingRef.current === projectId) return
@@ -593,7 +611,7 @@ export default function ProjectResultsPage() {
         console.error('Failed to verify project status:', error)
         // Fallback to store status if API is unreachable
         const storeStatus = activeProject?.id === projectId ? activeProject.status : null
-        if (storeStatus === 'running' || storeStatus === 'synthesising') {
+        if (isActivelyProcessingStatus(storeStatus)) {
           startPolling()
         }
       }
@@ -628,6 +646,12 @@ export default function ProjectResultsPage() {
     const fetchSummary = async () => {
       if (urlTab !== 'summary') return
       if (!projectId) return
+      const projectStatus = activeProject?.status
+      if (activeProject?.id !== projectId) return
+      if (projectStatus !== 'completed') {
+        setIsLoadingSummary(false)
+        return
+      }
 
       // Skip if already loaded for this project
       if (summaryLoadedRef.current === projectId) return
@@ -668,8 +692,7 @@ export default function ProjectResultsPage() {
       }
     }
     fetchSummary()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlTab, projectId, analysisComplete])
+  }, [urlTab, projectId, activeProject?.id, activeProject?.status, isLoadingSummary, fetchWithAuth, getCached, setProjectCache])
 
   // Navigator stats for summary tab
   const [navigatorStats, setNavigatorStats] = useState({
@@ -773,59 +796,52 @@ export default function ProjectResultsPage() {
     }
   }, [interventions])
 
-  // Calculate progress
-  const progressInfo = useMemo(() => {
-    if (!projectId || !activeProject) {
-      return { stage: 'idle', progress: 0, text: 'No project selected' }
-    }
+  const elapsedMinutes = useMemo(() => {
+    if (!activeProject?.created_at) return null
+    const createdAtMs = new Date(activeProject.created_at).getTime()
+    if (Number.isNaN(createdAtMs)) return null
+    return Math.max(0, Math.floor((currentMinuteTick - createdAtMs) / 60000))
+  }, [activeProject?.created_at, currentMinuteTick])
 
-    const status = activeProject.status
-    
-    if (status === 'created') {
-      return { stage: 'created', progress: 0, text: 'Analysis not started' }
+  useEffect(() => {
+    if (activeProject?.status !== 'running' && activeProject?.status !== 'synthesising') return
+    setCurrentMinuteTick(Date.now())
+    const interval = setInterval(() => setCurrentMinuteTick(Date.now()), 60000)
+    return () => clearInterval(interval)
+  }, [activeProject?.status])
+
+  // Calculate progress
+  const progressInfo = useMemo(
+    () =>
+      computeProjectProgressInfo({
+        projectId,
+        activeProject,
+        documents,
+        elapsedMinutes,
+      }),
+    [projectId, activeProject, documents, elapsedMinutes],
+  )
+
+  const isProjectInProgress = activeProject?.status === 'running' || activeProject?.status === 'synthesising'
+
+  useEffect(() => {
+    if (!isProjectInProgress) {
+      setStatusDotCount(1)
+      return
     }
-    
-    if (status === 'running') {
-      if (documents.length === 0) {
-        return { stage: 'retrieving', progress: 25, text: 'Retrieving and screening documents...' }
-      }
-      
-      const relevantDocs = documents.filter(doc => doc.is_relevant !== false)
-      const totalRelevantDocs = relevantDocs.length
-      const extractedDocs = relevantDocs.filter(doc => 
-        doc.extraction_status === 'completed' || doc.extraction_status === 'success'
-      ).length
-      
-      if (extractedDocs === 0) {
-        return { stage: 'extracting', progress: 50, text: 'Extracting intervention data from documents...' }
-      }
-      
-      const extractionProgress = Math.round((extractedDocs / totalRelevantDocs) * 20) + 50
-      return { 
-        stage: 'extracting', 
-        progress: Math.min(extractionProgress, 70), 
-        text: `Extracting intervention data from documents... (${extractedDocs}/${totalRelevantDocs})` 
-      }
+    const interval = setInterval(() => {
+      setStatusDotCount((previousCount) => (previousCount >= 3 ? 1 : previousCount + 1))
+    }, 700)
+    return () => clearInterval(interval)
+  }, [isProjectInProgress])
+
+  const animatedProgressText = useMemo(() => {
+    if (!isProjectInProgress) {
+      return progressInfo.text
     }
-    
-    if (status === 'synthesising') {
-      return { 
-        stage: 'synthesising', 
-        progress: 85, 
-        text: 'Generating summary and insights...' 
-      }
-    }
-    
-    if (status === 'completed') {
-      return { stage: 'completed', progress: 100, text: 'Analysis completed' }
-    }
-    
-    if (status === 'failed') {
-      return { stage: 'failed', progress: 0, text: 'Analysis failed' }
-    }
-    
-    return { stage: 'unknown', progress: 0, text: 'Unknown status' }
-  }, [projectId, activeProject, documents])
+    const baseText = progressInfo.text.replace(/\.{1,3}$/, '').trim()
+    return `${baseText}${'.'.repeat(statusDotCount)}`
+  }, [progressInfo.text, isProjectInProgress, statusDotCount])
 
   // Transform documents for table display
   const { transformedPapers, relevantCount } = useMemo(() => {
@@ -932,7 +948,7 @@ export default function ProjectResultsPage() {
     <div className="flex-1 flex flex-col bg-slate-50">
       {/* Header */}
       <div className="border-b border-slate-200 bg-white px-8 py-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
               Results
@@ -951,25 +967,6 @@ export default function ProjectResultsPage() {
                   {parentProjectTitle}
                 </Link>
               </p>
-            )}
-            {/* Progress Indicator */}
-            {projectId && activeProject && (
-              <div className="flex items-center gap-3 mt-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-32 bg-slate-200 rounded-full h-2">
-                    <div 
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
-                      style={{ width: `${progressInfo.progress}%` }}
-                    />
-                  </div>
-                  <span className="text-sm text-slate-600 font-medium">
-                    {progressInfo.progress}%
-                  </span>
-                </div>
-                <span className="text-sm text-slate-600">
-                  {progressInfo.text}
-                </span>
-              </div>
             )}
           </div>
           <div className="flex items-center gap-3">
@@ -1058,6 +1055,47 @@ export default function ProjectResultsPage() {
             )}
           </div>
         </div>
+        {/* Progress Indicator */}
+        {projectId && activeProject && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/70 px-4 py-3">
+            <div className="flex flex-col gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="h-2 flex-1 min-w-[12rem] max-w-xl rounded-full bg-slate-200">
+                  <div
+                    className="h-2 rounded-full bg-blue-600 transition-all duration-300 ease-out"
+                    style={{ width: `${progressInfo.progress}%` }}
+                  />
+                </div>
+                <span className="min-w-[2.5rem] text-sm font-semibold tabular-nums text-slate-700">
+                  {progressInfo.progress}%
+                </span>
+                <span className="truncate text-sm font-medium leading-tight text-slate-700">
+                  <span className="mx-0.5 text-slate-400">·</span>
+                  {animatedProgressText}
+                </span>
+              </div>
+            </div>
+            {(activeProject.status === 'running' || activeProject.status === 'synthesising') && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+                {elapsedMinutes !== null && (
+                  <span>
+                    <span className="font-medium text-slate-700">Elapsed</span> {elapsedMinutes}m
+                  </span>
+                )}
+                {progressInfo.remainingRange && (
+                  <span>
+                    <span className="font-medium text-slate-700">Remaining ~</span>
+                    {progressInfo.remainingRange.min}-{progressInfo.remainingRange.max}m
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                  You can safely close this tab. Your analysis continues in the background.
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Content */}
@@ -1097,8 +1135,11 @@ export default function ProjectResultsPage() {
             <div className="text-center p-8">
               <FileText className="h-16 w-16 text-slate-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-slate-900 mb-2">No Project Selected</h3>
+              <p className="text-slate-600 mb-3">
+                Projects store your full search output: summary insights, interventions, and source documents.
+              </p>
               <p className="text-slate-600 mb-6">
-                Please select a project or start a new analysis to view results.
+                Select an existing project or start a new search to create one.
               </p>
               <div className="flex gap-3 justify-center">
                 <Button onClick={() => router.push('/projects')} variant="outline">
@@ -1201,7 +1242,11 @@ export default function ProjectResultsPage() {
                     <div className="text-center py-12">
                       <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                       <h3 className="text-lg font-medium text-slate-900 mb-2">No Summary Available</h3>
-                      <p className="text-slate-600">Open the Summary tab after analysis completes to load aggregated insights.</p>
+                      <p className="text-slate-600">
+                        {isPreCompletionStatus(activeProject?.status)
+                          ? 'Your summary is still being generated. This usually appears once extraction and synthesis finish.'
+                          : 'No summary could be generated for this project. Try refining your search parameters and running again.'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1323,13 +1368,19 @@ export default function ProjectResultsPage() {
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                           <h3 className="text-lg font-medium text-slate-900 mb-2">No Relevant Documents</h3>
-                          <p className="text-slate-600">All {documents.length} documents in this project were marked as non-relevant.</p>
+                          <p className="text-slate-600">
+                            All {documents.length} documents were marked non-relevant. Try broadening your question, geography, or time window.
+                          </p>
                         </div>
                       ) : (
                         <div className="text-center py-12">
                           <FileText className="h-12 w-12 text-slate-400 mx-auto mb-4" />
                           <h3 className="text-lg font-medium text-slate-900 mb-2">No Documents Available</h3>
-                          <p className="text-slate-600">Documents will appear here once the analysis is processed.</p>
+                          <p className="text-slate-600">
+                            {isPreCompletionStatus(activeProject?.status)
+                              ? 'Documents are being retrieved and screened. Check back shortly.'
+                              : 'No documents matched this search. Try broadening your search terms or filters.'}
+                          </p>
                         </div>
                       )}
                     </div>

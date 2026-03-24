@@ -13,6 +13,8 @@ import { useAnalysisProjectStore, AnalysisProject } from '@/lib/analysisProjectS
 import { Switch } from '@/components/ui/switch'
 import { useUser, useOrganization } from '@clerk/nextjs'
 
+const PROJECTS_LOAD_TIMEOUT_MS = 15000
+
 export default function ProjectsPage() {
   const router = useRouter()
   const { 
@@ -27,8 +29,6 @@ export default function ProjectsPage() {
     setProjects, 
     removeProject,
     setActiveProject,
-    setLoading,
-    isLoading,
     error,
     setError
   } = useAnalysisProjectStore()
@@ -39,6 +39,7 @@ export default function ProjectsPage() {
   const [showInfoDialog, setShowInfoDialog] = useState(false)
   const [projectForm, setProjectForm] = useState({ title: '', description: '' })
   const [isCreating, setIsCreating] = useState(false)
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false)
   const [editProjectDialog, setEditProjectDialog] = useState<AnalysisProject | null>(null)
   const [editForm, setEditForm] = useState({ title: '', description: '' })
   const [showAllOrgProjects, setShowAllOrgProjects] = useState(false)
@@ -48,14 +49,29 @@ export default function ProjectsPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadProjects = async () => {
+    let hasTimedOut = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
     try {
-      setLoading(true)
-      const response = await getAnalysisProjects()
+      setIsLoadingProjects(true)
+      timeoutId = setTimeout(() => {
+        hasTimedOut = true
+        setIsLoadingProjects(false)
+        setError('Loading projects is taking longer than expected. We will update this list as soon as results arrive.')
+      }, PROJECTS_LOAD_TIMEOUT_MS)
+
+      const response = (await getAnalysisProjects()) as { projects: AnalysisProject[] }
       setProjects(response.projects)
+      setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load analysis projects')
+      const message = err instanceof Error ? err.message : 'Failed to load analysis projects'
+      setError(message)
     } finally {
-      setLoading(false)
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+      if (!hasTimedOut) {
+        setIsLoadingProjects(false)
+      }
     }
   }
 
@@ -202,7 +218,7 @@ export default function ProjectsPage() {
             </div>
           </div>
 
-          {isLoading ? (
+          {isLoadingProjects && displayedProjects.length === 0 ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-slate-500">Loading projects...</div>
             </div>
@@ -214,6 +230,15 @@ export default function ProjectsPage() {
                 <p className="text-slate-600 mb-6">
                   Run your first analysis to create a project with structured policy research data and insights.
                 </p>
+                <div className="text-sm text-slate-600 mb-6 space-y-1">
+                  <p>1. Define your research question</p>
+                  <p>2. We search policy and academic sources</p>
+                  <p>
+                    3. AI analyses the evidence and surfaces themes—policy issues, interventions,
+                    outcomes, and risks
+                  </p>
+                  <p>4. You get an executive briefing and evidence explorer</p>
+                </div>
                 <Button 
                   onClick={() => setShowInfoDialog(true)}
                   className="bg-blue-600 hover:bg-blue-700"

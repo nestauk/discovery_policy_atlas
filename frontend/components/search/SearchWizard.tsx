@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { create } from "zustand";
 import { useAPI } from '@/lib/api';
 import type { AnalysisProject } from '@/lib/analysisProjectStore';
+import { estimateAnalysisDurationRange } from '@/lib/analysisTimingHeuristic';
 import { RefineTutorial } from './RefineTutorial';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -34,11 +35,24 @@ const Input = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
 const Chip = ({ active, children, onClick }: { active?: boolean; children: React.ReactNode; onClick?: () => void }) => (
   <button type="button" onClick={onClick} className={cx("px-3 py-2 rounded-full text-sm transition ring-1", active ? "bg-blue-600 !text-white ring-blue-600" : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50")}>{children}</button>
 );
+const HelpHint = ({ content }: { content: React.ReactNode }) => (
+  <Tooltip content={<div className="max-w-xs text-sm">{content}</div>}>
+    <button
+      type="button"
+      className="inline-flex items-center justify-center h-5 w-5 rounded-full border border-gray-300 text-xs text-gray-600 hover:bg-gray-50"
+      aria-label="More information"
+    >
+      ?
+    </button>
+  </Tooltip>
+);
 
 // ---------------- TYPES & CONSTANTS ----------------
 type Step = "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
 type TimePreset = "LAST_YEAR" | "LAST_2_YEARS" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
+const DEFAULT_SOURCES = ["openalex", "overton"] as const;
+type SourceType = (typeof DEFAULT_SOURCES)[number];
 const TIME_PRESET_LABELS: Record<TimePreset, string> = {
   LAST_YEAR: "Last year",
   LAST_2_YEARS: "Last 2 years",
@@ -48,10 +62,21 @@ const TIME_PRESET_LABELS: Record<TimePreset, string> = {
   ANY: "Any time",
   CUSTOM: "Custom range",
 };
-const SOURCE_LABELS: Record<"openalex" | "overton", string> = {
+const SOURCE_LABELS: Record<SourceType, string> = {
   openalex: "Academic literature",
   overton: "Grey literature",
 };
+
+function resolveSources(access: Access, sources?: SourceType[]): SourceType[] {
+  const selected = Array.from(
+    new Set((sources || []).filter((source) => source === "openalex" || source === "overton")),
+  ) as SourceType[]
+  if (selected.length > 0) return selected
+  const fromAccess: SourceType[] = []
+  if (access.academic) fromAccess.push("openalex")
+  if (access.policy) fromAccess.push("overton")
+  return fromAccess.length > 0 ? fromAccess : [...DEFAULT_SOURCES]
+}
 
 // Fallback population examples (used if LLM generation fails)
 const FALLBACK_POPULATION_EXAMPLES = [
@@ -115,7 +140,7 @@ export type SearchContext = {
     implementationComplexity: string;
   };
   parameters: {
-    sources: ("openalex" | "overton")[];
+    sources: SourceType[];
     access: Access;
     geography: string[];
     timePreset: TimePreset;
@@ -145,7 +170,7 @@ interface WizardState {
   generatedAdditionalQuestions: string[];
   isGeneratingOptions: boolean;
   parameters: {
-    sources: ("openalex" | "overton")[];
+    sources: SourceType[];
     access: Access;
     geography: string[];
     timePreset: TimePreset;
@@ -182,7 +207,7 @@ const INITIAL_WIZARD_STATE = {
   generatedAdditionalQuestions: [] as string[],
   isGeneratingOptions: false,
   parameters: {
-    sources: [] as ("openalex" | "overton")[],
+    sources: [...DEFAULT_SOURCES],
     access: { academic: true, policy: true },
     geography: [ANYWHERE_VALUE],
     timePreset: "LAST_10_YEARS" as TimePreset,
@@ -232,13 +257,14 @@ export const useWizard = create<WizardState>((set, get) => ({
   },
   buildContext: () => {
     const s = get();
+    const normalizedSources = resolveSources(s.parameters.access, s.parameters.sources);
     return {
       researchQuestion: s.researchQuestion,
       population: s.population.noPreference ? [] : s.population.selected,
       innerSetting: s.innerSetting.noPreference ? [] : s.innerSetting.selected,
       outcome: s.outcome.noPreference ? [] : s.outcome.selected,
       implementationConstraints: s.implementationConstraints,
-      parameters: s.parameters,
+      parameters: { ...s.parameters, sources: normalizedSources },
       screeningFactors: s.screeningFactors,
       additionalQuestions: s.additionalQuestions,
       maxResults: s.maxResults,
@@ -249,7 +275,10 @@ export const useWizard = create<WizardState>((set, get) => ({
     const innerSetting = sq.inner_setting || [];
     const outcome = sq.outcome || [];
     const screeningFactors = sq.screening_factors || [];
-    const sources = (sq.sources || []) as ("openalex" | "overton")[];
+    const sources = resolveSources(
+      { academic: true, policy: true },
+      sq.sources as SourceType[] | undefined,
+    );
     const geography = sq.geography_filter || sq.geography || [ANYWHERE_VALUE];
     const timePreset = (sq.time_preset || "LAST_10_YEARS") as TimePreset;
     const constraints = sq.implementation_constraints;
@@ -283,7 +312,10 @@ export const useWizard = create<WizardState>((set, get) => ({
       screeningFactors,
       parameters: {
         sources,
-        access: { academic: true, policy: true },
+        access: {
+          academic: sources.includes("openalex"),
+          policy: sources.includes("overton"),
+        },
         geography,
         timePreset,
         customFrom: sq.time_from || undefined,
@@ -403,6 +435,43 @@ function ProgressBar({
             </React.Fragment>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function ResearchQuestionContext({
+  researchQuestion,
+  onEdit,
+}: {
+  researchQuestion: string;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="w-full border-b border-gray-100 bg-gradient-to-b from-gray-50/90 to-gray-50/40 px-4 pt-3 pb-2 sm:px-6 sm:pt-4 sm:pb-2">
+      <div
+        className={cx(
+          "mx-auto max-w-5xl rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-200/60",
+          "flex flex-col gap-4 sm:flex-row sm:items-stretch sm:justify-between sm:gap-5 sm:p-5"
+        )}
+      >
+        <div className="min-w-0 flex-1 rounded-l-lg border-l-[3px] border-blue-600 pl-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+            Research question
+          </p>
+          <p className="mt-2 max-h-28 overflow-y-auto text-base font-medium leading-relaxed text-gray-900">
+            {researchQuestion}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center sm:border-l sm:border-gray-100 sm:pl-5">
+          <Button
+            variant="secondary"
+            className="w-full sm:w-auto !bg-[#A5D6E1]/50 !text-gray-900 hover:!bg-[#A5D6E1] border-0 ring-1 ring-gray-200/70 px-4 py-2.5 text-sm font-medium"
+            onClick={onEdit}
+          >
+            Edit question
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -542,7 +611,7 @@ function ScreenPopulation() {
   const customOptions = s.population.selected.filter(pop => !exampleOptions.includes(pop));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you targeting a particular population?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise evidence for the populations you care about.</p>
@@ -689,7 +758,7 @@ function ScreenInnerSetting() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular settings?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise context-matched evidence and assess transferability.</p>
@@ -814,7 +883,7 @@ function ScreenOutcome() {
   const customOptions = s.outcome.selected.filter(outcome => !exampleOptions.includes(outcome));
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Are you interested in particular outcomes?</h2>
         <p className="text-gray-600 text-lg">We use this to prioritise evidence measuring your outcomes of interest.</p>
@@ -900,6 +969,7 @@ function ScreenOutcome() {
 function ScreenParameters() {
   const s = useWizard();
   const [selectedCountry, setSelectedCountry] = useState("");
+  const selectedSources = resolveSources(s.parameters.access);
   const hasSelectedSource =
     s.parameters.access.academic || s.parameters.access.policy;
   const hasInvalidCustomDateRange =
@@ -909,7 +979,14 @@ function ScreenParameters() {
     s.parameters.customFrom > s.parameters.customTo;
 
   const toggleAccess = (k: keyof Access) => {
-    s.set({ parameters: { ...s.parameters, access: { ...s.parameters.access, [k]: !s.parameters.access[k] } } });
+    const nextAccess = { ...s.parameters.access, [k]: !s.parameters.access[k] };
+    s.set({
+      parameters: {
+        ...s.parameters,
+        access: nextAccess,
+        sources: resolveSources(nextAccess),
+      },
+    });
   };
 
   const addGeo = (g: string) => {
@@ -934,17 +1011,8 @@ function ScreenParameters() {
     });
   };
 
-  // Update sources based on access
-  React.useEffect(() => {
-    const sources: ("openalex" | "overton")[] = [];
-    if (s.parameters.access.academic) sources.push("openalex");
-    if (s.parameters.access.policy) sources.push("overton");
-    s.set({ parameters: { ...s.parameters, sources } });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.parameters.access.academic, s.parameters.access.policy]);
-
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Sources, time window, and geography</h2>
         <p className="text-gray-600 text-lg">We use these filters to narrow the evidence set before ranking.</p>
@@ -968,7 +1036,10 @@ function ScreenParameters() {
             </p>
           )}
           <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
-            <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Retrieval limit</div>
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500 mb-2">
+              <span>Retrieval limit</span>
+              <HelpHint content="Higher limits make the search more comprehensive, but increase processing time." />
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               <span className="font-medium">Max results to screen per source:</span>
               <div className="inline-flex items-center gap-2">
@@ -987,7 +1058,7 @@ function ScreenParameters() {
                 >+</button>
               </div>
               <span className="text-xs text-gray-500">
-                {s.parameters.sources.length || 0} source{s.parameters.sources.length === 1 ? "" : "s"} selected
+                {selectedSources.length || 0} source{selectedSources.length === 1 ? "" : "s"} selected
               </span>
             </div>
           </div>
@@ -1115,7 +1186,7 @@ function ScreenScreening() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Additional criteria</h2>
         <p className="text-gray-600 text-lg">
@@ -1292,7 +1363,7 @@ function ScreenAdditionalQuestions() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-16 pb-4">
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-8 pb-4">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Specific research questions?</h2>
         <p className="text-gray-600 text-lg">We will use these to shape the summary write-up</p>
@@ -1372,9 +1443,14 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
     context.parameters.timePreset === "CUSTOM" &&
     (context.parameters.customFrom || context.parameters.customTo);
   const timeWindowLabel = TIME_PRESET_LABELS[context.parameters.timePreset];
+  const selectedSourceCount = context.parameters.sources.length;
+  const estimatedDuration =
+    selectedSourceCount > 0
+      ? estimateAnalysisDurationRange(s.maxResults, selectedSourceCount)
+      : null;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 px-8 pt-16 pb-2">
+    <div className="max-w-4xl mx-auto space-y-8 px-8 pt-8 pb-2">
       <div className="text-center space-y-3">
         <h2 className="text-2xl font-semibold">Summary</h2>
       </div>
@@ -1529,6 +1605,21 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
         </CardContent>
       </Card>
 
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+        {estimatedDuration ? (
+          <p className="text-sm font-medium text-blue-900">
+            Estimated time: {estimatedDuration.minMinutes}-{estimatedDuration.maxMinutes} minutes
+          </p>
+        ) : (
+          <p className="text-sm font-medium text-blue-900">Estimated time: unavailable</p>
+        )}
+        <p className="mt-1 text-sm text-blue-800">
+          {selectedSourceCount > 0
+            ? "This estimate is based on your selected sources and retrieval limit. You can close this tab after starting and check back later."
+            : "Select at least one source to get a tailored estimate for this search."}
+        </p>
+      </div>
+
     </div>
   );
 }
@@ -1543,6 +1634,7 @@ interface SearchWizardProps {
 export default function SearchWizard({ onRunAnalysis, isRunning = false }: SearchWizardProps) {
   const s = useWizard();
   const context = s.buildContext();
+  const trimmedResearchQuestion = s.researchQuestion.trim();
   const hasSelectedSource = context.parameters.sources.length > 0;
   const hasInvalidCustomDateRange =
     context.parameters.timePreset === "CUSTOM" &&
@@ -1552,6 +1644,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
 
   const isSummaryStep = s.step === "SUMMARY";
   const showActionBar = s.step !== "ASK";
+  const showResearchQuestionContext = s.step !== "ASK" && !!trimmedResearchQuestion;
 
   const getPrimaryAction = () => {
     if (isSummaryStep) {
@@ -1595,6 +1688,12 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
         onStepClick={(step) => s.set({ step })}
         allStepsVisited={s.allStepsVisited}
       />
+      {showResearchQuestionContext && (
+        <ResearchQuestionContext
+          researchQuestion={trimmedResearchQuestion}
+          onEdit={() => s.set({ step: "ASK" })}
+        />
+      )}
       <div className={isSummaryStep ? "" : "flex-1"}>
         {s.step === "ASK" && <ScreenAsk />}
         {s.step === "POPULATION" && <ScreenPopulation />}
