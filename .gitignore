@@ -87,3 +87,4 @@ backend/testing/r_and_d/boolean_queries/outputs/*
 backend/testing/r_and_d/screening/outputs/*
 backend/testing/evals/screening/results/*
 scripts/context/
+scripts/exports/output/*

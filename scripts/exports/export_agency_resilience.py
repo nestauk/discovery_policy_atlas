@@ -3,7 +3,7 @@
 
 This script queries Supabase for completed projects with description
 "Agency & Resilience" and generates:
-1) A QA spreadsheet with 3 tabs.
+1) A QA spreadsheet with theme and extraction tabs.
 2) NotebookLM-ready markdown source files.
 """
 
@@ -31,8 +31,10 @@ INSUFFICIENT_VERDICTS = {"insufficient_evidence", "insufficient evidence"}
 # Add new entries here as new export targets are defined.
 EXPORT_TARGETS: dict[str, dict[str, str]] = {
     "ar_bottom_up": {
-        "description": "Agency & Resilience",
-        "sheet_id": "1zkpErwBZcyvlKEmxJrT8sfCeLA_5Md3787S0gR702rw",
+        #"description": "Agency & Resilience",
+        #"sheet_id": "1zkpErwBZcyvlKEmxJrT8sfCeLA_5Md3787S0gR702rw",
+        "description": "AR bottom up",
+        "sheet_id": "1s6jM46z65H3Nc_OMYWEZNfm12BLCQwXge58k2zmHna4",
     },
     "ar_top_down": {
         "description": "AR Top down",
@@ -268,6 +270,155 @@ def fetch_projects(client: Client, description: str) -> list[dict[str, Any]]:
     return response.data or []
 
 
+def _chunk_list(values: list[str], chunk_size: int = 200) -> list[list[str]]:
+    """Split list values into fixed-size chunks.
+
+    Args:
+        values: Input values to chunk.
+        chunk_size: Maximum values per chunk.
+
+    Returns:
+        List of chunks preserving input order.
+    """
+    if chunk_size <= 0:
+        return [values]
+    return [values[i : i + chunk_size] for i in range(0, len(values), chunk_size)]
+
+
+def fetch_theme_extractions(
+    client: Client, run_id: str
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch extraction rows linked to synthesis themes for one run.
+
+    Args:
+        client: Initialised Supabase client.
+        run_id: Synthesis run identifier.
+
+    Returns:
+        Mapping of synthesis theme id to extraction rows.
+    """
+    if not run_id:
+        return {}
+
+    assignments = (
+        client.table("theme_assignments")
+        .select("synthesis_theme_id,extraction_id")
+        .eq("synthesis_run_id", run_id)
+        .execute()
+        .data
+        or []
+    )
+    if not assignments:
+        return {}
+
+    extraction_ids = list(
+        {
+            str(a.get("extraction_id"))
+            for a in assignments
+            if str(a.get("extraction_id") or "").strip()
+        }
+    )
+    if not extraction_ids:
+        return {}
+
+    extraction_by_id: dict[str, dict[str, Any]] = {}
+    for chunk in _chunk_list(extraction_ids, chunk_size=200):
+        rows = (
+            client.table("analysis_extractions")
+            .select("id,label,description,supporting_quote")
+            .in_("id", chunk)
+            .execute()
+            .data
+            or []
+        )
+        for row in rows:
+            row_id = str(row.get("id") or "")
+            if row_id:
+                extraction_by_id[row_id] = row
+
+    mapping: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for assignment in assignments:
+        theme_id = str(assignment.get("synthesis_theme_id") or "")
+        extraction_id = str(assignment.get("extraction_id") or "")
+        extraction = extraction_by_id.get(extraction_id)
+        if theme_id and extraction:
+            mapping[theme_id].append(extraction)
+
+    return dict(mapping)
+
+
+def fetch_outcome_extractions(
+    client: Client, run_id: str, sufficient_outcome_ids: set[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch extraction rows linked to sufficient-evidence outcome themes.
+
+    Args:
+        client: Initialised Supabase client.
+        run_id: Synthesis run identifier.
+        sufficient_outcome_ids: Outcome theme ids that pass sufficient evidence filter.
+
+    Returns:
+        Mapping of synthesis outcome theme id to extraction rows.
+    """
+    if not run_id or not sufficient_outcome_ids:
+        return {}
+
+    outcome_ids = sorted(str(v) for v in sufficient_outcome_ids if str(v).strip())
+    if not outcome_ids:
+        return {}
+
+    assignments: list[dict[str, Any]] = []
+    for chunk in _chunk_list(outcome_ids, chunk_size=200):
+        rows = (
+            client.table("outcome_theme_assignments")
+            .select("synthesis_outcome_theme_id,extraction_id")
+            .eq("synthesis_run_id", run_id)
+            .in_("synthesis_outcome_theme_id", chunk)
+            .execute()
+            .data
+            or []
+        )
+        assignments.extend(rows)
+
+    if not assignments:
+        return {}
+
+    extraction_ids = list(
+        {
+            str(a.get("extraction_id"))
+            for a in assignments
+            if str(a.get("extraction_id") or "").strip()
+        }
+    )
+    if not extraction_ids:
+        return {}
+
+    extraction_by_id: dict[str, dict[str, Any]] = {}
+    for chunk in _chunk_list(extraction_ids, chunk_size=200):
+        rows = (
+            client.table("analysis_extractions")
+            .select("id,label,description,supporting_quote")
+            .in_("id", chunk)
+            .execute()
+            .data
+            or []
+        )
+        for row in rows:
+            row_id = str(row.get("id") or "")
+            if row_id:
+                extraction_by_id[row_id] = row
+
+    mapping: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for assignment in assignments:
+        outcome_id = str(assignment.get("synthesis_outcome_theme_id") or "")
+        extraction_id = str(assignment.get("extraction_id") or "")
+        extraction = extraction_by_id.get(extraction_id)
+        if outcome_id and extraction:
+            mapping[outcome_id].append(extraction)
+
+    return dict(mapping)
+
+
 def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any]:
     """Fetch all required data for one project."""
     project_id = project["id"]
@@ -288,6 +439,8 @@ def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any
 
     themes: list[dict[str, Any]] = []
     outcomes: list[dict[str, Any]] = []
+    theme_extractions: dict[str, list[dict[str, Any]]] = {}
+    outcome_extractions: dict[str, list[dict[str, Any]]] = {}
     if run:
         run_id = run["id"]
         themes = (
@@ -318,6 +471,16 @@ def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any
             .execute()
             .data
             or []
+        )
+
+        sufficient_outcome_ids = {
+            str(o["id"])
+            for o in outcomes
+            if o.get("id") and _is_sufficient_outcome(o)
+        }
+        theme_extractions = fetch_theme_extractions(client, run_id)
+        outcome_extractions = fetch_outcome_extractions(
+            client, run_id, sufficient_outcome_ids
         )
 
     documents = (
@@ -357,6 +520,8 @@ def fetch_project_data(client: Client, project: dict[str, Any]) -> dict[str, Any
         "documents": documents,
         "intervention_lookup": intervention_lookup,
         "doc_by_source_id": doc_by_source_id,
+        "theme_extractions": theme_extractions,
+        "outcome_extractions": outcome_extractions,
     }
 
 
@@ -626,6 +791,138 @@ def build_outcomes_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def build_issue_themes_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
+    """Build issue themes summary tab."""
+    rows: list[dict[str, Any]] = []
+    for payload in project_payloads:
+        project_title = payload["project"].get("title") or ""
+        doc_by_source_id = payload.get("doc_by_source_id", {})
+        for theme in payload["themes"]:
+            if str(theme.get("theme_type") or "") != "issue":
+                continue
+            rows.append(
+                {
+                    "Project Title": project_title,
+                    "Issue Theme": theme.get("theme_name") or "",
+                    "Summary Description": theme.get("summary_description") or "",
+                    "Frequency": _safe_int(theme.get("frequency")),
+                    "Evidence Category Breakdown": _evidence_category_breakdown(
+                        theme, doc_by_source_id
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def build_risk_themes_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
+    """Build risk themes summary tab."""
+    rows: list[dict[str, Any]] = []
+    for payload in project_payloads:
+        project_title = payload["project"].get("title") or ""
+        intervention_lookup = payload.get("intervention_lookup", {})
+        for theme in payload["themes"]:
+            if str(theme.get("theme_type") or "") != "risk":
+                continue
+            linked_id = str(theme.get("linked_intervention_theme_id") or "").strip()
+            if linked_id:
+                linked_intervention = intervention_lookup.get(
+                    linked_id, f"Unknown intervention ({linked_id})"
+                )
+            else:
+                linked_intervention = "Unlinked"
+            rows.append(
+                {
+                    "Project Title": project_title,
+                    "Linked Intervention": linked_intervention,
+                    "Risk Theme": theme.get("theme_name") or "",
+                    "Summary Description": theme.get("summary_description") or "",
+                    "Frequency": _safe_int(theme.get("frequency")),
+                    "Harm Warning": "Yes" if bool(theme.get("has_harm_warning")) else "No",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def build_issue_extractions_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
+    """Build issue extractions tab."""
+    rows: list[dict[str, Any]] = []
+    for payload in project_payloads:
+        project_title = payload["project"].get("title") or ""
+        theme_extractions = payload.get("theme_extractions", {})
+        for theme in payload["themes"]:
+            if str(theme.get("theme_type") or "") != "issue":
+                continue
+            theme_id = str(theme.get("id") or "")
+            for extraction in theme_extractions.get(theme_id, []):
+                rows.append(
+                    {
+                        "Project Title": project_title,
+                        "Issue Theme": theme.get("theme_name") or "",
+                        "Label": extraction.get("label") or "",
+                        "Description": extraction.get("description") or "",
+                        "Supporting Quote": extraction.get("supporting_quote") or "",
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def build_intervention_extractions_tab(
+    project_payloads: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """Build intervention extractions tab."""
+    rows: list[dict[str, Any]] = []
+    for payload in project_payloads:
+        project_title = payload["project"].get("title") or ""
+        theme_extractions = payload.get("theme_extractions", {})
+        for theme in payload["themes"]:
+            if str(theme.get("theme_type") or "") != "intervention":
+                continue
+            theme_id = str(theme.get("id") or "")
+            for extraction in theme_extractions.get(theme_id, []):
+                rows.append(
+                    {
+                        "Project Title": project_title,
+                        "Intervention Theme": theme.get("theme_name") or "",
+                        "Label": extraction.get("label") or "",
+                        "Description": extraction.get("description") or "",
+                        "Supporting Quote": extraction.get("supporting_quote") or "",
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def build_outcome_extractions_tab(
+    project_payloads: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """Build outcome extractions tab for sufficient-evidence outcomes."""
+    rows: list[dict[str, Any]] = []
+    for payload in project_payloads:
+        project_title = payload["project"].get("title") or ""
+        intervention_lookup = payload.get("intervention_lookup", {})
+        outcome_extractions = payload.get("outcome_extractions", {})
+        for outcome in payload["outcomes"]:
+            if not _is_sufficient_outcome(outcome):
+                continue
+            outcome_id = str(outcome.get("id") or "")
+            if not outcome_id:
+                continue
+            linked_theme_name = intervention_lookup.get(
+                str(outcome.get("intervention_theme_id") or ""), "Unknown intervention"
+            )
+            for extraction in outcome_extractions.get(outcome_id, []):
+                rows.append(
+                    {
+                        "Project Title": project_title,
+                        "Outcome Theme": outcome.get("outcome_name") or "",
+                        "Linked Intervention": linked_theme_name,
+                        "Label": extraction.get("label") or "",
+                        "Description": extraction.get("description") or "",
+                        "Supporting Quote": extraction.get("supporting_quote") or "",
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
 def _autosize_excel_columns(writer: pd.ExcelWriter, sheet_names: list[str]) -> None:
     """Auto-size worksheet columns for readability."""
     for name in sheet_names:
@@ -645,16 +942,40 @@ def generate_qa_spreadsheet(
     projects_df: pd.DataFrame,
     interventions_df: pd.DataFrame,
     outcomes_df: pd.DataFrame,
+    issue_themes_df: pd.DataFrame,
+    risk_themes_df: pd.DataFrame,
+    issue_extractions_df: pd.DataFrame,
+    intervention_extractions_df: pd.DataFrame,
+    outcome_extractions_df: pd.DataFrame,
     output_path: Path,
 ) -> None:
-    """Generate QA spreadsheet with 3 tabs."""
+    """Generate QA spreadsheet with theme and extraction tabs."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         projects_df.to_excel(writer, sheet_name="Projects", index=False)
         interventions_df.to_excel(writer, sheet_name="Intervention Themes", index=False)
         outcomes_df.to_excel(writer, sheet_name="Outcome Themes", index=False)
+        issue_themes_df.to_excel(writer, sheet_name="Issue Themes", index=False)
+        risk_themes_df.to_excel(writer, sheet_name="Risk Themes", index=False)
+        issue_extractions_df.to_excel(writer, sheet_name="Issue Extractions", index=False)
+        intervention_extractions_df.to_excel(
+            writer, sheet_name="Intervention Extractions", index=False
+        )
+        outcome_extractions_df.to_excel(
+            writer, sheet_name="Outcome Extractions", index=False
+        )
         _autosize_excel_columns(
-            writer, ["Projects", "Intervention Themes", "Outcome Themes"]
+            writer,
+            [
+                "Projects",
+                "Intervention Themes",
+                "Outcome Themes",
+                "Issue Themes",
+                "Risk Themes",
+                "Issue Extractions",
+                "Intervention Extractions",
+                "Outcome Extractions",
+            ],
         )
 
 
@@ -916,8 +1237,25 @@ def generate_notebooklm_sources(
     )
 
     # 13 intervention evidence analysis
+    intervention_extractions_lookup: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for payload in project_payloads:
+        project_title = payload["project"].get("title") or ""
+        theme_extractions = payload.get("theme_extractions", {})
+        for theme in payload["themes"]:
+            if str(theme.get("theme_type") or "") != "intervention":
+                continue
+            theme_id = str(theme.get("id") or "")
+            theme_name = str(theme.get("theme_name") or "")
+            intervention_extractions_lookup[(project_title, theme_name)] = (
+                theme_extractions.get(theme_id, [])
+            )
+
     interventions_lines = ["# Intervention Evidence Analysis", ""]
     for row in interventions_df.to_dict(orient="records"):
+        extraction_rows = intervention_extractions_lookup.get(
+            (str(row.get("Project Title") or ""), str(row.get("Intervention Name") or "")),
+            [],
+        )
         interventions_lines.extend(
             [
                 f"## {row.get('Intervention Name')}",
@@ -935,6 +1273,23 @@ def generate_notebooklm_sources(
                 "",
                 str(row.get("Summary Description") or "No description available."),
                 "",
+                "### Specific Interventions Tested",
+                "",
+            ]
+        )
+        if extraction_rows:
+            for extraction in extraction_rows:
+                label = extraction.get("label") or "Unnamed extraction"
+                description = extraction.get("description") or "No description available."
+                quote = extraction.get("supporting_quote") or "No quote available."
+                interventions_lines.append(
+                    f"- **{label}**: {description} (Supporting quote: \"{quote}\")"
+                )
+        else:
+            interventions_lines.append("_No linked extractions available._")
+        interventions_lines.extend(
+            [
+                "",
                 "### Outcome Verdicts and Magnitudes",
                 "",
                 str(
@@ -949,6 +1304,19 @@ def generate_notebooklm_sources(
     )
 
     # 14 issues
+    issue_extractions_lookup: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for payload in project_payloads:
+        project_title = payload["project"].get("title") or ""
+        theme_extractions = payload.get("theme_extractions", {})
+        for theme in payload["themes"]:
+            if str(theme.get("theme_type") or "") != "issue":
+                continue
+            theme_id = str(theme.get("id") or "")
+            theme_name = str(theme.get("theme_name") or "")
+            issue_extractions_lookup[(project_title, theme_name)] = theme_extractions.get(
+                theme_id, []
+            )
+
     issues_lines = ["# Issues and Problem Space", ""]
     for payload in project_payloads:
         project_title = payload["project"].get("title") or ""
@@ -963,11 +1331,30 @@ def generate_notebooklm_sources(
             issues_lines.append("")
             continue
         for issue in issues:
+            issue_name = str(issue.get("theme_name") or "")
+            extraction_rows = issue_extractions_lookup.get((project_title, issue_name), [])
             issues_lines.extend(
                 [
                     f"### {issue.get('theme_name') or 'Unnamed issue'}",
                     "",
                     issue.get("summary_description") or "No description available.",
+                    "",
+                    "#### Underlying Extractions",
+                    "",
+                ]
+            )
+            if extraction_rows:
+                for extraction in extraction_rows:
+                    label = extraction.get("label") or "Unnamed extraction"
+                    description = extraction.get("description") or "No description available."
+                    quote = extraction.get("supporting_quote") or "No quote available."
+                    issues_lines.append(
+                        f"- **{label}**: {description} (Supporting quote: \"{quote}\")"
+                    )
+            else:
+                issues_lines.append("_No linked extractions available._")
+            issues_lines.extend(
+                [
                     "",
                     f"Frequency: {_safe_int(issue.get('frequency'))}",
                     "",
@@ -981,6 +1368,25 @@ def generate_notebooklm_sources(
     outcomes_by_name: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in outcomes_df.to_dict(orient="records"):
         outcomes_by_name[str(row.get("Outcome Name") or "Unnamed outcome")].append(row)
+
+    outcome_extractions_lookup: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for payload in project_payloads:
+        project_title = payload["project"].get("title") or ""
+        intervention_lookup = payload.get("intervention_lookup", {})
+        outcome_extractions = payload.get("outcome_extractions", {})
+        for outcome in payload["outcomes"]:
+            if not _is_sufficient_outcome(outcome):
+                continue
+            outcome_id = str(outcome.get("id") or "")
+            if not outcome_id:
+                continue
+            linked_theme_name = intervention_lookup.get(
+                str(outcome.get("intervention_theme_id") or ""), "Unknown intervention"
+            )
+            outcome_name = str(outcome.get("outcome_name") or "")
+            outcome_extractions_lookup[
+                (project_title, outcome_name, linked_theme_name)
+            ] = outcome_extractions.get(outcome_id, [])
 
     outcomes_lines = ["# Outcomes as Dimensions", ""]
     for outcome_name in sorted(outcomes_by_name.keys()):
@@ -1002,6 +1408,27 @@ def generate_notebooklm_sources(
             )
         )
         outcomes_lines.append("")
+        outcomes_lines.append("### Underlying Outcome Extractions")
+        outcomes_lines.append("")
+        for row in outcome_rows:
+            project_title = str(row.get("Project Title") or "")
+            linked_intervention = str(row.get("Linked Intervention") or "")
+            extraction_rows = outcome_extractions_lookup.get(
+                (project_title, outcome_name, linked_intervention), []
+            )
+            outcomes_lines.append(f"#### {project_title} - {linked_intervention}")
+            outcomes_lines.append("")
+            if extraction_rows:
+                for extraction in extraction_rows:
+                    label = extraction.get("label") or "Unnamed extraction"
+                    description = extraction.get("description") or "No description available."
+                    quote = extraction.get("supporting_quote") or "No quote available."
+                    outcomes_lines.append(
+                        f"- **{label}**: {description} (Supporting quote: \"{quote}\")"
+                    )
+            else:
+                outcomes_lines.append("_No linked extractions available._")
+            outcomes_lines.append("")
         outcomes_lines.append(
             f"Instances across projects/interventions: {len(outcome_rows)}"
         )
@@ -1242,8 +1669,23 @@ def main() -> None:
     projects_df = build_projects_tab(payloads)
     interventions_df = build_interventions_tab(payloads)
     outcomes_df = build_outcomes_tab(payloads)
+    issue_themes_df = build_issue_themes_tab(payloads)
+    risk_themes_df = build_risk_themes_tab(payloads)
+    issue_extractions_df = build_issue_extractions_tab(payloads)
+    intervention_extractions_df = build_intervention_extractions_tab(payloads)
+    outcome_extractions_df = build_outcome_extractions_tab(payloads)
 
-    generate_qa_spreadsheet(projects_df, interventions_df, outcomes_df, qa_path)
+    generate_qa_spreadsheet(
+        projects_df=projects_df,
+        interventions_df=interventions_df,
+        outcomes_df=outcomes_df,
+        issue_themes_df=issue_themes_df,
+        risk_themes_df=risk_themes_df,
+        issue_extractions_df=issue_extractions_df,
+        intervention_extractions_df=intervention_extractions_df,
+        outcome_extractions_df=outcome_extractions_df,
+        output_path=qa_path,
+    )
     generate_notebooklm_sources(
         payloads, notebook_dir, projects_df, interventions_df, outcomes_df
     )
@@ -1267,6 +1709,11 @@ def main() -> None:
                 "Projects": projects_df,
                 "Intervention Themes": interventions_df,
                 "Outcome Themes": outcomes_df,
+                "Issue Themes": issue_themes_df,
+                "Risk Themes": risk_themes_df,
+                "Issue Extractions": issue_extractions_df,
+                "Intervention Extractions": intervention_extractions_df,
+                "Outcome Extractions": outcome_extractions_df,
             },
         )
 
