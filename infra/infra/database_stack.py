@@ -22,6 +22,7 @@ from aws_cdk import (
     aws_certificatemanager as acm,
     aws_lambda as _lambda,
     triggers,
+    aws_logs as logs,
 )
 
 import json
@@ -187,6 +188,16 @@ class DatabaseStack(Stack):
             execute_before=[task_definition]
         )
 
+        log_group = logs.LogGroup(self, "StudioLogGroup",
+                                  log_group_name="/policy_atlas/studio",
+                                  retention=logs.RetentionDays.ONE_WEEK,
+                                  removal_policy=RemovalPolicy.DESTROY)
+        
+        meta_log_group = logs.LogGroup(self, "PostgresMetaLogGroup",
+                                  log_group_name="/policy_atlas/postgres_meta",
+                                  retention=logs.RetentionDays.ONE_WEEK,
+                                  removal_policy=RemovalPolicy.DESTROY)
+
         task_definition.add_container("SupabaseStudioContainer",
             image=ecs.ContainerImage.from_registry(f"public.ecr.aws/supabase/studio:{db_config['studio_tag']}"),
             port_mappings=[ecs.PortMapping(container_port=3000)],
@@ -200,7 +211,7 @@ class DatabaseStack(Stack):
             secrets={
                 "POSTGRES_PASSWORD": ecs.Secret.from_secrets_manager(cluster.secret, field="password")
             },
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="SupabaseStudio"),
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="SupabaseStudio", log_group=log_group),
         )
 
         # postgres-meta provides the REST API that Studio uses for schema introspection.
@@ -219,7 +230,7 @@ class DatabaseStack(Stack):
                 "PG_META_DB_USER": ecs.Secret.from_secrets_manager(cluster.secret, field="username"),
                 "PG_META_DB_PASSWORD": ecs.Secret.from_secrets_manager(cluster.secret, field="password"),
             },
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="PostgresMeta")
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="PostgresMeta", log_group=meta_log_group)
         )
 
 
