@@ -103,20 +103,8 @@ class DatabaseStack(Stack):
         studio_security_group = ec2.SecurityGroup(self, "StudioSecurityGroup",
             vpc=vpc,
             description="Security group for Supabase Studio",
-            allow_all_outbound=True
+            allow_all_outbound=True,
         )
-
-        whitelist_ips = db_config.get("studio_whitelist_ips", [])
-        if not whitelist_ips:
-            # Do nothing - open to world.
-            pass
-        else:
-            for ip in whitelist_ips:
-                studio_security_group.add_ingress_rule(
-                    peer=ec2.Peer.ipv4(ip),
-                    connection=ec2.Port.tcp(443),
-                    description=f"Allow Supabase Studio access from {ip}"
-                )
 
 
         # Allow inbound access to the RDS cluster from the Supabase Studio security group.
@@ -244,12 +232,33 @@ class DatabaseStack(Stack):
             assign_public_ip=False
         )
 
+        studio_elb_sg = ec2.SecurityGroup(self, "StudioELBSecurityGroup",
+            vpc=vpc,
+            description="Security group for Studio ALB",
+            allow_all_outbound=True
+        )
+
+        whitelist_ips = db_config.get("studio_whitelist_ips", [])
+        if not whitelist_ips:
+            studio_elb_sg.add_ingress_rule(
+                peer=ec2.Peer.any_ipv4(),
+                connection=ec2.Port.tcp(443),
+                description="Allow Supabase Studio access from anywhere (no whitelist IPs configured)"
+            )
+        else:
+            for ip in whitelist_ips:
+                studio_elb_sg.add_ingress_rule(
+                    peer=ec2.Peer.ipv4(ip),
+                    connection=ec2.Port.tcp(443),
+                    description=f"Allow Supabase Studio access from {ip}"
+                )
+
         # Front it via ALB, so it can be accessed.
         # Only Studio should be exposed.
         alb = elbv2.ApplicationLoadBalancer(self, "StudioALB",
             vpc=vpc,
             internet_facing=True,
-            security_group=studio_security_group,
+            security_group=studio_elb_sg,
             load_balancer_name=f"policy-atlas-studio-alb"
         )
 

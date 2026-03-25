@@ -15,7 +15,9 @@
         "postgres_meta_tag": "v0.96.0",
         "studio_tag": "v1.24.05",
         "studio_whitelist_ips": [
-
+            "104.30.169.130/32",
+            "104.30.178.239/32",
+            "167.98.16.36/32"
         ]
     },
     "production": {
