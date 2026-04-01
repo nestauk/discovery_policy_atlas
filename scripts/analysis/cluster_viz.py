@@ -670,3 +670,470 @@ def generate_meta_theme_drilldown(
         _write_figure_outputs(fig, out_path, width=chart_width, height=chart_height)
         logger.debug("Drilldown: %s", out_path.name)
 
+
+# ---------------------------------------------------------------------------
+# Author & Institution analysis
+# ---------------------------------------------------------------------------
+
+MIN_AUTHOR_PAPERS = 2
+TOP_N_AUTHORS = 5
+
+# Cross-theme thresholds for the all-themes bar charts
+CROSS_THEME_AUTHOR_MIN = 4
+CROSS_THEME_INSTITUTION_MIN = 6
+
+# Semantic colour mapping for meta-themes in cross-theme bar charts.
+# Falls back to _NESTA_THEME_OVERFLOW for themes not in this map.
+META_THEME_COLOURS: dict[str, str] = {
+    # Reference themes
+    "Climate & place-based adaptation": "#18A48C",       # Green (Nesta) — nature/environment
+    "Community resilience & social capital": "#0F294A",   # Navy (Nesta) — trust/foundations
+    "Mental health, behaviour & individual capability": "#A59BEE",  # Violet (Nesta) — wellbeing
+    "Early years & family foundations": "#FDB633",        # Yellow (Nesta) — warmth/nurture
+    "Digital & information resilience": "#97D9E3",        # Aqua (Nesta) — digital/tech
+    "Institutional & governance reform": "#D2C9C0",       # Sand (Nesta) — institutions/neutral
+    # Common emergent themes
+    "Economic security & livelihoods": "#E07B54",         # Muted terracotta — economic warmth
+    "Community safety & emergency resilience": "#EB003B", # Red (Nesta) — safety/emergency
+    "Economic systems & market reform": "#7A9CC6",        # Steel blue — systems/markets
+}
+
+# Overflow colours for any themes not in the semantic map above
+_NESTA_THEME_OVERFLOW = [
+    "#F6A4B7",  # Pink (Nesta)
+    "#646363",  # Dark Grey (Nesta)
+    "#8BB174",  # Sage green
+    "#C490B0",  # Dusty rose
+    "#9A1BBE",  # Purple (Nesta)
+    "#FF6E47",  # Orange (Nesta)
+]
+
+
+def _parse_doc_entities(raw: str) -> list[tuple[str, str]]:
+    """Parse 'doc_id::entity | ...' into (doc_id, entity) pairs.
+
+    Works for both author and institution columns which share the same format.
+    """
+    if not raw or raw.strip() == "":
+        return []
+    pairs = []
+    for part in raw.split(" | "):
+        part = part.strip()
+        if "::" in part:
+            doc_id, entity = part.split("::", 1)
+            pairs.append((doc_id.strip(), entity.strip()))
+    return pairs
+
+
+def _has_column_data(df: pd.DataFrame, col: str) -> bool:
+    """Check whether a DataFrame column exists and has non-empty data."""
+    return (
+        col in df.columns
+        and df[col].notna().any()
+        and (df[col].astype(str).str.strip() != "").any()
+    )
+
+
+def _collect_institution_names(df: pd.DataFrame) -> set[str]:
+    """Collect all institution names from the DataFrame for author dedup."""
+    names: set[str] = set()
+    col = "Source Doc Institutions"
+    if col not in df.columns:
+        return names
+    for raw in df[col].dropna():
+        for _, institution in _parse_doc_entities(str(raw)):
+            if institution:
+                names.add(institution)
+    return names
+
+
+def _build_entity_theme_data(
+    df: pd.DataFrame,
+    entity_col: str,
+    category_col: str = "Source Doc Categories",
+    exclude_names: set[str] | None = None,
+) -> dict[str, dict[str, dict[str, set[str]]]]:
+    """Build {meta_theme: {entity_name: {category: {doc_ids}}}} from the DataFrame.
+
+    Counts distinct papers per entity per meta-theme, tracking evidence category.
+    If exclude_names is provided, any entity whose name appears in the set is skipped
+    (used to filter organisational authors that also appear as institutions).
+    """
+    result: dict[str, dict[str, dict[str, set[str]]]] = {}
+    missing_count = 0
+    excluded_count = 0
+    skip = exclude_names or set()
+
+    for _, row in df.iterrows():
+        meta_theme = row.get("meta_theme", "")
+        if not meta_theme or meta_theme == "Unclustered":
+            continue
+
+        entity_pairs = _parse_doc_entities(str(row.get(entity_col) or ""))
+        if not entity_pairs:
+            missing_count += 1
+            continue
+
+        cat_pairs = _parse_doc_categories(str(row.get(category_col) or ""))
+        doc_to_cat = {doc_id: cat for doc_id, cat in cat_pairs}
+
+        if meta_theme not in result:
+            result[meta_theme] = {}
+
+        for doc_id, entity_name in entity_pairs:
+            if not entity_name:
+                continue
+            if entity_name in skip:
+                excluded_count += 1
+                continue
+            if entity_name not in result[meta_theme]:
+                result[meta_theme][entity_name] = {}
+            cat = doc_to_cat.get(doc_id, "Unknown / Insufficient information")
+            if cat not in result[meta_theme][entity_name]:
+                result[meta_theme][entity_name][cat] = set()
+            result[meta_theme][entity_name][cat].add(doc_id)
+
+    if missing_count:
+        logger.warning(
+            "Author/institution analysis: %d intervention rows had no %s data",
+            missing_count, entity_col,
+        )
+    if excluded_count:
+        logger.info(
+            "Author dedup: excluded %d author-document entries that matched institution names",
+            excluded_count,
+        )
+
+    return result
+
+
+def _top_entities_for_theme(
+    theme_data: dict[str, dict[str, set[str]]],
+    min_papers: int = MIN_AUTHOR_PAPERS,
+    top_n: int = TOP_N_AUTHORS,
+) -> list[tuple[str, int, dict[str, int]]]:
+    """Return top entities for a theme as [(name, total_papers, {cat: count}), ...].
+
+    Filters to entities with >= min_papers distinct papers, takes top_n.
+    """
+    entity_totals: list[tuple[str, int, dict[str, int]]] = []
+    for entity_name, cat_docs in theme_data.items():
+        total = sum(len(docs) for docs in cat_docs.values())
+        if total < min_papers:
+            continue
+        cat_counts = {cat: len(docs) for cat, docs in cat_docs.items()}
+        entity_totals.append((entity_name, total, cat_counts))
+
+    entity_totals.sort(key=lambda x: (-x[1], x[0]))
+    return entity_totals[:top_n]
+
+
+def generate_author_charts(
+    df: pd.DataFrame,
+    topics: list[int],
+    meta_map: dict[int, str],
+    output_dir: Path,
+    emergent_themes: set[str] | None = None,
+    min_papers: int = MIN_AUTHOR_PAPERS,
+    top_n: int = TOP_N_AUTHORS,
+) -> None:
+    """Generate per-meta-theme horizontal bar charts of top authors.
+
+    Excludes organisational authors (names that also appear as institutions).
+    """
+    institution_names = _collect_institution_names(df)
+    _generate_entity_charts(
+        df, topics, meta_map, output_dir,
+        entity_col="Source Doc Authors",
+        entity_label="Authors",
+        file_prefix="top_authors",
+        emergent_themes=emergent_themes,
+        exclude_names=institution_names,
+        min_papers=min_papers,
+        top_n=top_n,
+    )
+
+
+def generate_institution_charts(
+    df: pd.DataFrame,
+    topics: list[int],
+    meta_map: dict[int, str],
+    output_dir: Path,
+    emergent_themes: set[str] | None = None,
+    min_papers: int = MIN_AUTHOR_PAPERS,
+    top_n: int = TOP_N_AUTHORS,
+) -> None:
+    """Generate per-meta-theme horizontal bar charts of top institutions."""
+    _generate_entity_charts(
+        df, topics, meta_map, output_dir,
+        entity_col="Source Doc Institutions",
+        entity_label="Institutions",
+        file_prefix="top_institutions",
+        emergent_themes=emergent_themes,
+        min_papers=min_papers,
+        top_n=top_n,
+    )
+
+
+def _generate_entity_charts(
+    df: pd.DataFrame,
+    topics: list[int],
+    meta_map: dict[int, str],
+    output_dir: Path,
+    entity_col: str,
+    entity_label: str,
+    file_prefix: str,
+    emergent_themes: set[str] | None = None,
+    exclude_names: set[str] | None = None,
+    min_papers: int = MIN_AUTHOR_PAPERS,
+    top_n: int = TOP_N_AUTHORS,
+) -> None:
+    """Generate per-meta-theme horizontal stacked bar charts for an entity type."""
+    import plotly.graph_objects as go
+
+    if not _has_column_data(df, entity_col):
+        logger.info("Skipping %s charts — no %s data available", entity_label, entity_col)
+        return
+
+    df = df.copy()
+    df["cluster_id"] = topics
+    df["meta_theme"] = df["cluster_id"].map(meta_map).fillna("Unclustered")
+    df = df[df["meta_theme"] != "Unclustered"]
+
+    if df.empty:
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    emergent = emergent_themes or set()
+
+    entity_data = _build_entity_theme_data(df, entity_col, exclude_names=exclude_names)
+
+    charts_generated = 0
+    for meta_theme in sorted(entity_data.keys()):
+        top = _top_entities_for_theme(entity_data[meta_theme], min_papers=min_papers, top_n=top_n)
+        if not top:
+            continue
+
+        # Reverse for horizontal bar (top entity at top)
+        top = list(reversed(top))
+        names = [wrap_label(t[0], max_chars=40) for t in top]
+
+        # Collect all categories present
+        all_cats: set[str] = set()
+        for _, _, cat_counts in top:
+            all_cats.update(cat_counts.keys())
+        ordered_cats = _ordered_items(all_cats, EVIDENCE_CATEGORY_ORDER)
+
+        fig = go.Figure()
+        for cat in ordered_cats:
+            values = [t[2].get(cat, 0) for t in top]
+            if sum(values) == 0:
+                continue
+            fig.add_trace(go.Bar(
+                y=names,
+                x=values,
+                name=cat,
+                marker_color=EVIDENCE_CATEGORY_COLORS.get(cat, "#CCCCCC"),
+                orientation="h",
+            ))
+
+        tag = " [NEW]" if meta_theme in emergent else ""
+        chart_width = 1000
+        chart_height = max(400, len(top) * 60 + 150)
+        fig.update_layout(
+            title=f"{meta_theme}{tag} — Top {entity_label} (by distinct papers)",
+            template="plotly_white",
+            barmode="stack",
+            width=chart_width,
+            height=chart_height,
+            xaxis=dict(title="Distinct Papers"),
+            yaxis=dict(tickfont=dict(size=10)),
+            legend=dict(
+                font=dict(size=10),
+                orientation="v",
+                yanchor="top", y=0.99,
+                xanchor="left", x=1.02,
+            ),
+            margin=dict(l=250, r=40, t=60, b=60),
+        )
+
+        out_path = output_dir / f"{file_prefix}_{slugify(meta_theme)}.png"
+        _write_figure_outputs(fig, out_path, width=chart_width, height=chart_height)
+        charts_generated += 1
+
+    logger.info("%s charts: %d generated in %s", entity_label, charts_generated, output_dir)
+
+
+def generate_cross_theme_entity_barchart(
+    df: pd.DataFrame,
+    topics: list[int],
+    meta_map: dict[int, str],
+    output_dir: Path,
+    entity_col: str,
+    entity_label: str,
+    output_filename: str,
+    min_papers: int,
+    emergent_themes: set[str] | None = None,
+    exclude_names: set[str] | None = None,
+) -> None:
+    """Generate a cross-theme stacked bar chart for authors or institutions.
+
+    Each bar = one entity, stacked by meta-theme (Nesta colours).
+    Only entities with >= min_papers total distinct papers across all themes are shown.
+    """
+    import plotly.graph_objects as go
+
+    if not _has_column_data(df, entity_col):
+        logger.info("Skipping %s cross-theme bar chart — no data", entity_label)
+        return
+
+    df = df.copy()
+    df["cluster_id"] = topics
+    df["meta_theme"] = df["cluster_id"].map(meta_map).fillna("Unclustered")
+    df = df[df["meta_theme"] != "Unclustered"]
+
+    if df.empty:
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    emergent = emergent_themes or set()
+
+    entity_data = _build_entity_theme_data(df, entity_col, exclude_names=exclude_names)
+
+    # Count total distinct papers per entity across all themes
+    entity_totals: dict[str, int] = {}
+    entity_theme_counts: dict[str, dict[str, int]] = {}
+    for theme, theme_data in entity_data.items():
+        for entity_name, cat_docs in theme_data.items():
+            paper_count = len({doc for docs in cat_docs.values() for doc in docs})
+            if entity_name not in entity_totals:
+                entity_totals[entity_name] = 0
+                entity_theme_counts[entity_name] = {}
+            entity_totals[entity_name] += paper_count
+            entity_theme_counts[entity_name][theme] = paper_count
+
+    # Filter to entities meeting the threshold
+    qualifying = {
+        name: total for name, total in entity_totals.items() if total >= min_papers
+    }
+
+    if not qualifying:
+        logger.info(
+            "No %s met the %d-paper threshold for cross-theme bar chart",
+            entity_label, min_papers,
+        )
+        return
+
+    # Sort by total descending, then reverse for horizontal bar (top at top)
+    sorted_entities = sorted(qualifying.keys(), key=lambda n: qualifying[n])
+    display_names = [wrap_label(n, max_chars=45) for n in sorted_entities]
+
+    # Determine theme order by total papers across all qualifying entities
+    theme_totals: dict[str, int] = {}
+    for entity in sorted_entities:
+        for theme, count in entity_theme_counts[entity].items():
+            theme_totals[theme] = theme_totals.get(theme, 0) + count
+    theme_order = sorted(theme_totals.keys(), key=lambda t: -theme_totals[t])
+
+    # Assign colours: use semantic map first, overflow for unknown themes
+    overflow_idx = 0
+    theme_colours: dict[str, str] = {}
+    for theme in theme_order:
+        if theme in META_THEME_COLOURS:
+            theme_colours[theme] = META_THEME_COLOURS[theme]
+        else:
+            theme_colours[theme] = _NESTA_THEME_OVERFLOW[
+                overflow_idx % len(_NESTA_THEME_OVERFLOW)
+            ]
+            overflow_idx += 1
+
+    fig = go.Figure()
+    for theme in theme_order:
+        values = [entity_theme_counts[e].get(theme, 0) for e in sorted_entities]
+        if sum(values) == 0:
+            continue
+        tag = " [NEW]" if theme in emergent else ""
+        fig.add_trace(go.Bar(
+            y=display_names,
+            x=values,
+            name=f"{theme}{tag}",
+            marker_color=theme_colours[theme],
+            orientation="h",
+        ))
+
+    chart_width = 1200
+    chart_height = max(500, len(sorted_entities) * 45 + 200)
+    fig.update_layout(
+        title=f"{entity_label} Across Meta-Themes ({min_papers}+ distinct papers)",
+        template="plotly_white",
+        barmode="stack",
+        width=chart_width,
+        height=chart_height,
+        xaxis=dict(title="Distinct Papers"),
+        yaxis=dict(tickfont=dict(size=10)),
+        legend=dict(
+            font=dict(size=10),
+            orientation="v",
+            yanchor="top", y=0.99,
+            xanchor="left", x=1.02,
+        ),
+        margin=dict(l=280, r=40, t=60, b=60),
+    )
+
+    out_path = output_dir / output_filename
+    _write_figure_outputs(fig, out_path, width=chart_width, height=chart_height)
+    logger.info("Cross-theme %s bar chart: %s", entity_label.lower(), out_path)
+
+
+def build_author_summary_table(
+    df: pd.DataFrame,
+    topics: list[int],
+    meta_map: dict[int, str],
+) -> pd.DataFrame:
+    """Build a summary table of authors/institutions per meta-theme for xlsx export."""
+    df = df.copy()
+    df["cluster_id"] = topics
+    df["meta_theme"] = df["cluster_id"].map(meta_map).fillna("Unclustered")
+    df = df[df["meta_theme"] != "Unclustered"]
+
+    rows: list[dict[str, object]] = []
+    institution_names = _collect_institution_names(df)
+
+    for entity_col, entity_type, exclude in [
+        ("Source Doc Authors", "Author", institution_names),
+        ("Source Doc Institutions", "Institution", None),
+    ]:
+        if not _has_column_data(df, entity_col):
+            continue
+
+        entity_data = _build_entity_theme_data(df, entity_col, exclude_names=exclude)
+
+        for meta_theme in sorted(entity_data.keys()):
+            for entity_name, cat_docs in entity_data[meta_theme].items():
+                total = sum(len(docs) for docs in cat_docs.values())
+                if total < MIN_AUTHOR_PAPERS:
+                    continue
+                cat_breakdown = ", ".join(
+                    f"{count} {cat}"
+                    for cat, count in sorted(
+                        ((c, len(d)) for c, d in cat_docs.items()),
+                        key=lambda x: -x[1],
+                    )
+                )
+                rows.append({
+                    "Meta-Theme": meta_theme,
+                    "Entity Type": entity_type,
+                    "Name": entity_name,
+                    "Paper Count": total,
+                    "Evidence Categories": cat_breakdown,
+                })
+
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        result = result.sort_values(
+            ["Meta-Theme", "Entity Type", "Paper Count"],
+            ascending=[True, True, False],
+        ).reset_index(drop=True)
+
+    return result
+

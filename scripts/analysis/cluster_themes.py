@@ -45,6 +45,15 @@ from clustering import (
     slugify,
 )
 from cluster_viz import (
+    CROSS_THEME_AUTHOR_MIN,
+    CROSS_THEME_INSTITUTION_MIN,
+    MIN_AUTHOR_PAPERS,
+    TOP_N_AUTHORS,
+    _collect_institution_names,
+    build_author_summary_table,
+    generate_author_charts,
+    generate_cross_theme_entity_barchart,
+    generate_institution_charts,
     generate_meta_theme_barchart,
     generate_meta_theme_drilldown,
     generate_search_cluster_heatmap,
@@ -103,12 +112,36 @@ def parse_args() -> argparse.Namespace:
         "--from-cache", action="store_true",
         help="Load cached clustering results (skip clustering/LLM, regenerate outputs only).",
     )
+    # Author/institution chart thresholds
+    parser.add_argument(
+        "--min-author-papers", type=int, default=MIN_AUTHOR_PAPERS,
+        help="Min distinct papers for an author to appear in per-theme charts (default %(default)s)",
+    )
+    parser.add_argument(
+        "--top-n-authors", type=int, default=TOP_N_AUTHORS,
+        help="Max authors/institutions shown per meta-theme chart (default %(default)s)",
+    )
+    parser.add_argument(
+        "--cross-theme-author-min", type=int, default=CROSS_THEME_AUTHOR_MIN,
+        help="Min distinct papers for an author in the cross-theme chart (default %(default)s)",
+    )
+    parser.add_argument(
+        "--cross-theme-institution-min", type=int, default=CROSS_THEME_INSTITUTION_MIN,
+        help="Min distinct papers for an institution in the cross-theme chart (default %(default)s)",
+    )
+    parser.add_argument(
+        "--geography-scope", type=str, default=None,
+        help="Filter projects by search-level Geography Filter (e.g. 'United Kingdom'). "
+             "Only projects whose Geography Filter contains this substring are included. "
+             "Omit to include all projects.",
+    )
     return parser.parse_args()
 
 
 def load_filtered_data(
     xlsx_path: Path,
     run_by: str = DEFAULT_RUN_BY,
+    geography_scope: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load xlsx and optionally filter to a specific user's searches."""
     projects = pd.read_excel(xlsx_path, sheet_name="Projects")
@@ -122,6 +155,37 @@ def load_filtered_data(
         logger.info("User filter: kept projects run by '%s'", run_by)
     else:
         logger.info("No user filter applied — using all projects")
+
+    # Filter by search-level geography scope (e.g. "United Kingdom")
+    # Prefix with "!" to invert (e.g. "!United Kingdom" keeps non-UK projects)
+    if geography_scope:
+        geo_col = "Search Geography"
+        if geo_col in interventions.columns:
+            invert = geography_scope.startswith("!")
+            scope_term = geography_scope[1:] if invert else geography_scope
+
+            def _geo_mask(df: pd.DataFrame) -> pd.Series:
+                mask = df[geo_col].fillna("").astype(str).str.contains(
+                    scope_term, case=False, na=False
+                )
+                return ~mask if invert else mask
+
+            before_intv = len(interventions)
+            before_out = len(outcomes)
+            interventions = interventions[_geo_mask(interventions)].copy()
+            outcomes = outcomes[_geo_mask(outcomes)].copy() if geo_col in outcomes.columns else outcomes
+            label = f"NOT {scope_term}" if invert else scope_term
+            logger.info(
+                "Geography scope filter '%s': kept %d/%d interventions, %d/%d outcomes",
+                label, len(interventions), before_intv,
+                len(outcomes), before_out,
+            )
+        else:
+            logger.warning(
+                "Geography scope requested but '%s' column not found — "
+                "re-run the export to add Search Geography columns",
+                geo_col,
+            )
 
     interventions["_intervention_key"] = _build_intervention_key_series(
         interventions, "Intervention Name"
@@ -441,9 +505,10 @@ def main() -> None:
     intv_viz_dir = viz_dir / "interventions"
     out_viz_dir = viz_dir / "outcomes"
     drilldown_dir = out_viz_dir / "drilldowns"
+    authors_viz_dir = viz_dir / "authors"
     logs_dir = args.output / "logs"
     cache_dir = args.output / ".cache"
-    for d in [data_dir, intv_viz_dir, out_viz_dir, drilldown_dir, logs_dir, cache_dir]:
+    for d in [data_dir, intv_viz_dir, out_viz_dir, drilldown_dir, authors_viz_dir, logs_dir, cache_dir]:
         d.mkdir(parents=True, exist_ok=True)
     cache_file = cache_dir / "cluster_cache.pkl"
 
@@ -453,7 +518,9 @@ def main() -> None:
         logger.warning("OPENAI_API_KEY not found, falling back to TF-IDF labels")
         args.no_llm = True
 
-    _, interventions, outcomes = load_filtered_data(args.input, run_by=args.run_by)
+    _, interventions, outcomes = load_filtered_data(
+        args.input, run_by=args.run_by, geography_scope=args.geography_scope,
+    )
     cache_metadata = _build_cache_metadata(args.input, interventions, outcomes)
 
     if args.from_cache:
@@ -632,6 +699,16 @@ def main() -> None:
         out_cluster_sim.to_excel(writer, sheet_name="Outcome Cluster Sim", index=False)
         outcome_dupes.to_excel(writer, sheet_name="Outcome Duplicates", index=False)
 
+        # Author summary (only if meta-themes and author data exist)
+        if intv_meta_map:
+            author_summary = build_author_summary_table(
+                interventions, intv_topics, intv_meta_map,
+            )
+            if not author_summary.empty:
+                author_summary.to_excel(
+                    writer, sheet_name="Author Summary", index=False,
+                )
+
     logger.info("Spreadsheet: %s", xlsx_out)
 
     # --- Visualisations ---
@@ -734,6 +811,43 @@ def main() -> None:
                 output_dir=drilldown_dir,
                 verdict_filter=POSITIVE_VERDICTS,
                 emergent_themes=out_emergent,
+            )
+
+            # --- Author & Institution analysis ---
+            logger.info("Generating author & institution charts...")
+            generate_author_charts(
+                interventions, intv_topics, intv_meta_map,
+                output_dir=authors_viz_dir,
+                emergent_themes=intv_emergent,
+                min_papers=args.min_author_papers,
+                top_n=args.top_n_authors,
+            )
+            generate_institution_charts(
+                interventions, intv_topics, intv_meta_map,
+                output_dir=authors_viz_dir,
+                emergent_themes=intv_emergent,
+                min_papers=args.min_author_papers,
+                top_n=args.top_n_authors,
+            )
+            institution_names = _collect_institution_names(interventions)
+            generate_cross_theme_entity_barchart(
+                interventions, intv_topics, intv_meta_map,
+                output_dir=authors_viz_dir,
+                entity_col="Source Doc Authors",
+                entity_label="Authors",
+                output_filename="cross_theme_authors.png",
+                min_papers=args.cross_theme_author_min,
+                emergent_themes=intv_emergent,
+                exclude_names=institution_names,
+            )
+            generate_cross_theme_entity_barchart(
+                interventions, intv_topics, intv_meta_map,
+                output_dir=authors_viz_dir,
+                entity_col="Source Doc Institutions",
+                entity_label="Institutions",
+                output_filename="cross_theme_institutions.png",
+                min_papers=args.cross_theme_institution_min,
+                emergent_themes=intv_emergent,
             )
 
     # --- Per-meta-theme CSVs (positive outcomes) ---

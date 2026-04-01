@@ -31,13 +31,11 @@ INSUFFICIENT_VERDICTS = {"insufficient_evidence", "insufficient evidence"}
 # Add new entries here as new export targets are defined.
 EXPORT_TARGETS: dict[str, dict[str, str]] = {
     "ar_bottom_up": {
-        #"description": "Agency & Resilience",
-        #"sheet_id": "1zkpErwBZcyvlKEmxJrT8sfCeLA_5Md3787S0gR702rw",
         "description": "AR bottom up",
         "sheet_id": "1s6jM46z65H3Nc_OMYWEZNfm12BLCQwXge58k2zmHna4",
     },
     "ar_top_down": {
-        "description": "AR Top down",
+        "description": "Final Top Down AR",
         "sheet_id": "1TBZhimzQ2y066VCLyteiAP3kBaPoo8ivYSmNiIKre-U",
     },
     "ar_wildcard": {
@@ -84,6 +82,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Path to Google service account JSON. Auto-detected if not provided.",
+    )
+    parser.add_argument(
+        "--date-from",
+        type=str,
+        default=None,
+        help="Include only projects created on or after this date (YYYY-MM-DD).",
     )
     return parser.parse_args()
 
@@ -254,9 +258,19 @@ def _to_markdown_table(rows: list[dict[str, Any]], columns: list[str]) -> str:
     return "\n".join([header, divider, *body])
 
 
-def fetch_projects(client: Client, description: str) -> list[dict[str, Any]]:
-    """Fetch completed projects matching the given description."""
-    response = (
+def fetch_projects(
+    client: Client,
+    description: str,
+    date_from: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch completed projects matching the given description.
+
+    Args:
+        client: Supabase client.
+        description: Project description filter.
+        date_from: Include projects created on or after this date (YYYY-MM-DD).
+    """
+    query = (
         client.table("analysis_projects")
         .select(
             "id,title,description,status,created_at,created_by_name,"
@@ -264,9 +278,10 @@ def fetch_projects(client: Client, description: str) -> list[dict[str, Any]]:
         )
         .eq("description", description)
         .eq("status", "completed")
-        .order("created_at", desc=True)
-        .execute()
     )
+    if date_from:
+        query = query.gte("created_at", f"{date_from}T00:00:00Z")
+    response = query.order("created_at", desc=True).execute()
     return response.data or []
 
 
@@ -582,8 +597,8 @@ def build_projects_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
                 "Countries Covered": len(countries_map),
                 "Top 3 Countries": _format_count_map(countries_map, top_n=3),
                 "Source Type Breakdown": _format_count_map(source_types_map),
-                "Top Evidence Categories": _format_count_map(
-                    evidence_categories_map, top_n=4
+                "Evidence Categories": _format_count_map(
+                    evidence_categories_map
                 ),
                 "Intervention Theme Count": intervention_count,
                 "Outcome Theme Count (sufficient evidence)": sufficient_outcome_count,
@@ -681,12 +696,55 @@ def _source_doc_categories(
     return " | ".join(parts)
 
 
+def _source_doc_authors(
+    theme: dict[str, Any], doc_by_source_id: dict[str, dict[str, Any]]
+) -> str:
+    """Build pipe-separated 'doc_id::author' pairs for downstream author analysis."""
+    source_ids = _as_list(theme.get("source_doc_ids"))
+    if not source_ids:
+        return ""
+    parts: list[str] = []
+    for sid in source_ids:
+        doc = doc_by_source_id.get(str(sid))
+        if not doc:
+            continue
+        doc_id = doc.get("doc_id") or str(sid)
+        for author in _as_list(doc.get("authors")):
+            name = str(author).strip()
+            if name:
+                parts.append(f"{doc_id}::{name}")
+    return " | ".join(parts)
+
+
+def _source_doc_institutions(
+    theme: dict[str, Any], doc_by_source_id: dict[str, dict[str, Any]]
+) -> str:
+    """Build pipe-separated 'doc_id::institution' pairs for downstream analysis."""
+    source_ids = _as_list(theme.get("source_doc_ids"))
+    if not source_ids:
+        return ""
+    parts: list[str] = []
+    for sid in source_ids:
+        doc = doc_by_source_id.get(str(sid))
+        if not doc:
+            continue
+        doc_id = doc.get("doc_id") or str(sid)
+        for institution in _as_list(doc.get("author_institutions")):
+            name = str(institution).strip()
+            if name:
+                parts.append(f"{doc_id}::{name}")
+    return " | ".join(parts)
+
+
 def build_interventions_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
     """Build Tab 2 dataframe."""
     rows: list[dict[str, Any]] = []
 
     for payload in project_payloads:
-        project_title = payload["project"].get("title") or ""
+        project = payload["project"]
+        project_title = project.get("title") or ""
+        search_query = _as_dict(project.get("search_query"))
+        search_geo = _format_simple_list(search_query.get("geography"))
         themes = payload["themes"]
         outcomes = payload["outcomes"]
         doc_by_source_id = payload.get("doc_by_source_id", {})
@@ -701,6 +759,8 @@ def build_interventions_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFr
             rows.append(
                 {
                     "Project Title": project_title,
+                    "Date Run": _parse_iso_date(project.get("created_at")),
+                    "Search Geography": search_geo,
                     "Intervention Name": theme.get("theme_name") or "",
                     "Summary Description": theme.get("summary_description") or "",
                     "Source Documents": _safe_int(theme.get("frequency")),
@@ -720,6 +780,12 @@ def build_interventions_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFr
                         str(s) for s in _as_list(theme.get("source_doc_ids"))
                     ),
                     "Source Doc Categories": _source_doc_categories(
+                        theme, doc_by_source_id
+                    ),
+                    "Source Doc Authors": _source_doc_authors(
+                        theme, doc_by_source_id
+                    ),
+                    "Source Doc Institutions": _source_doc_institutions(
                         theme, doc_by_source_id
                     ),
                 }
@@ -763,7 +829,10 @@ def build_outcomes_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
     """Build Tab 3 dataframe."""
     rows: list[dict[str, Any]] = []
     for payload in project_payloads:
-        project_title = payload["project"].get("title") or ""
+        project = payload["project"]
+        project_title = project.get("title") or ""
+        search_query = _as_dict(project.get("search_query"))
+        search_geo = _format_simple_list(search_query.get("geography"))
         intervention_lookup = payload["intervention_lookup"]
         doc_by_source_id = payload.get("doc_by_source_id", {})
 
@@ -776,6 +845,8 @@ def build_outcomes_tab(project_payloads: list[dict[str, Any]]) -> pd.DataFrame:
             rows.append(
                 {
                     "Project Title": project_title,
+                    "Date Run": _parse_iso_date(project.get("created_at")),
+                    "Search Geography": search_geo,
                     "Outcome Name": outcome.get("outcome_name") or "",
                     "Outcome Description": outcome.get("outcome_description") or "",
                     "Linked Intervention": linked_theme_name,
@@ -950,18 +1021,41 @@ def generate_qa_spreadsheet(
     output_path: Path,
 ) -> None:
     """Generate QA spreadsheet with theme and extraction tabs."""
+    # Strip control characters that openpyxl rejects (illegal XML chars).
+    _ILLEGAL_CHAR_RE = re.compile(
+        r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ufdd0-\ufdef\ufffe\uffff]"
+    )
+
+    def _sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        for col in df.select_dtypes(include="object").columns:
+            df[col] = df[col].apply(
+                lambda v: _ILLEGAL_CHAR_RE.sub("", v) if isinstance(v, str) else v
+            )
+        return df
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        projects_df.to_excel(writer, sheet_name="Projects", index=False)
-        interventions_df.to_excel(writer, sheet_name="Intervention Themes", index=False)
-        outcomes_df.to_excel(writer, sheet_name="Outcome Themes", index=False)
-        issue_themes_df.to_excel(writer, sheet_name="Issue Themes", index=False)
-        risk_themes_df.to_excel(writer, sheet_name="Risk Themes", index=False)
-        issue_extractions_df.to_excel(writer, sheet_name="Issue Extractions", index=False)
-        intervention_extractions_df.to_excel(
+        _sanitize_df(projects_df).to_excel(writer, sheet_name="Projects", index=False)
+        _sanitize_df(interventions_df).to_excel(
+            writer, sheet_name="Intervention Themes", index=False
+        )
+        _sanitize_df(outcomes_df).to_excel(
+            writer, sheet_name="Outcome Themes", index=False
+        )
+        _sanitize_df(issue_themes_df).to_excel(
+            writer, sheet_name="Issue Themes", index=False
+        )
+        _sanitize_df(risk_themes_df).to_excel(
+            writer, sheet_name="Risk Themes", index=False
+        )
+        _sanitize_df(issue_extractions_df).to_excel(
+            writer, sheet_name="Issue Extractions", index=False
+        )
+        _sanitize_df(intervention_extractions_df).to_excel(
             writer, sheet_name="Intervention Extractions", index=False
         )
-        outcome_extractions_df.to_excel(
+        _sanitize_df(outcome_extractions_df).to_excel(
             writer, sheet_name="Outcome Extractions", index=False
         )
         _autosize_excel_columns(
@@ -1653,10 +1747,11 @@ def main() -> None:
     notebook_dir = output_dir.parent / "notebooklm_sources"
     qa_path = output_dir / "qa_review.xlsx"
 
-    print(f"Target: {args.target} (filtering: \"{target_description}\")")
+    date_label = f" | from {args.date_from}" if args.date_from else ""
+    print(f"Target: {args.target} (filtering: \"{target_description}\"{date_label})")
 
     client = load_config(repo_root)
-    projects = fetch_projects(client, target_description)
+    projects = fetch_projects(client, target_description, date_from=args.date_from)
     if not projects:
         raise RuntimeError(
             f"No completed projects with description \"{target_description}\" found."
