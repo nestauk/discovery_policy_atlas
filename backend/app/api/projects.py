@@ -1414,8 +1414,10 @@ async def chat_with_project(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in chat for project {project_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to process chat message")
+        logger.exception(f"Error in chat for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Chat request failed. Please try again."
+        )
 
 
 @router.get(

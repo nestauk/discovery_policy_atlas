@@ -28,56 +28,87 @@ class ChatbotService:
 
     async def chat(self, project_id: str, request: ChatRequest) -> ChatResponse:
         """Generate a chat response using RAG over project evidence."""
-        try:
-            # Search for relevant chunks
-            relevant_chunks = await self._search_relevant_chunks(
-                project_id, request.message
-            )
+        # Search for relevant chunks
+        relevant_chunks = await self._search_relevant_chunks(
+            project_id, request.message
+        )
 
-            if not relevant_chunks:
-                return ChatResponse(
-                    message="I don't have any relevant evidence in this project to answer that question. Try asking about topics related to your research question or search for more evidence.",
-                    references=[],
-                )
-
-            # Get neighboring chunks for better context
-            enriched_chunks = await self._get_chunks_with_neighbors(
-                project_id, relevant_chunks
-            )
-
-            # Get document details for references
-            chunks_with_docs = await self._enrich_with_document_details(enriched_chunks)
-
-            # Build context for LLM
-            context = self._build_context(chunks_with_docs)
-
-            # Generate response using OpenAI
-            response_text = await self._generate_response(
-                request.message, context, request.recent_messages
-            )
-
-            # Build document references
-            references = self._build_references(chunks_with_docs)
-
-            return ChatResponse(message=response_text, references=references)
-
-        except Exception as e:
-            logger.error(f"Error in chatbot service: {e}")
+        if not relevant_chunks:
             return ChatResponse(
-                message="I'm sorry, I encountered an error while processing your question. Please try again.",
+                message="I don't have any relevant evidence in this project to answer that question. Try asking about topics related to your research question or search for more evidence.",
                 references=[],
             )
+
+        # Get neighboring chunks for better context
+        enriched_chunks = await self._get_chunks_with_neighbors(
+            project_id, relevant_chunks
+        )
+
+        # Get document details for references
+        chunks_with_docs = await self._enrich_with_document_details(enriched_chunks)
+
+        # Build context for LLM
+        context = self._build_context(chunks_with_docs)
+
+        # Generate response using OpenAI
+        response_text = await self._generate_response(
+            request.message, context, request.recent_messages
+        )
+
+        # Build document references
+        references = self._build_references(chunks_with_docs)
+
+        return ChatResponse(message=response_text, references=references)
 
     async def _search_relevant_chunks(
         self, project_id: str, query: str, max_chunks: int = 10
     ) -> List[Dict[str, Any]]:
         """Search for relevant chunks using vector similarity."""
+        retrieval_query = await self._build_retrieval_query(project_id, query)
+
         return await vectorization_service.search_similar_content(
-            query=query,
+            query=retrieval_query,
             project_id=project_id,
             match_threshold=0.51,
             match_count=max_chunks,
+            raise_on_error=True,
         )
+
+    async def _build_retrieval_query(self, project_id: str, query: str) -> str:
+        """Anchor vague questions with the project title before vector search."""
+        project_title = await self._get_project_title(project_id)
+        if not project_title:
+            return query
+
+        return f"Project: {project_title}\nQuestion: {query}"
+
+    async def _get_project_title(self, project_id: str) -> Optional[str]:
+        """Fetch the project title used to anchor retrieval queries."""
+        try:
+            result = (
+                vectorization_service.supabase.table("analysis_projects")
+                .select("title")
+                .eq("id", project_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch project title for retrieval query %s: %s",
+                project_id,
+                exc,
+            )
+            return None
+
+        if not result.data:
+            return None
+
+        title = result.data[0].get("title")
+        if not isinstance(title, str):
+            return None
+
+        title = title.strip()
+        return title or None
 
     async def _get_chunks_with_neighbors(
         self, project_id: str, chunks: List[Dict[str, Any]]
@@ -263,24 +294,17 @@ AVAILABLE EVIDENCE:
 
 Answer the user's question based on this evidence."""
 
-        try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message},
-                ],
-                temperature=0.7,
-                max_tokens=1000,
-            )
+        response = await self.openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0.7,
+            max_tokens=1000,
+        )
 
-            return response.choices[0].message.content
-
-        except Exception as e:
-            logger.error(f"OpenAI API error: {e}")
-            return (
-                "I encountered an error while generating a response. Please try again."
-            )
+        return response.choices[0].message.content
 
     def _build_references(
         self, chunks: List[Dict[str, Any]]

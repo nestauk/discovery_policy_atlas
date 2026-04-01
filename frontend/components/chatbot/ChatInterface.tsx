@@ -40,10 +40,12 @@ export function ChatInterface({
   showHeader = false
 }: ChatInterfaceProps) {
   const {
-    messages, 
+    clearMessages,
+    getMessages,
     isLoading,
     error,
-    addMessage, 
+    addMessage,
+    removeLastMessage,
     setLoading,
     setError,
     clearError
@@ -54,6 +56,8 @@ export function ChatInterface({
   const [inputMessage, setInputMessage] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { fetchWithAuth } = useAPI()
+  const activeProjectId = activeProject?.id ?? null
+  const messages = activeProjectId ? getMessages(activeProjectId) : []
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -68,8 +72,19 @@ export function ChatInterface({
     }
   }, [autoFocus])
 
+  const handleNewChat = () => {
+    if (!activeProjectId) return
+
+    clearMessages(activeProjectId)
+    clearError()
+    setLoading(false)
+    setInputMessage('')
+  }
+
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading || !activeProject) return
+    const projectId = activeProject.id
+    const projectMessages = getMessages(projectId)
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -78,21 +93,21 @@ export function ChatInterface({
       timestamp: new Date()
     }
 
-    addMessage(userMessage)
+    addMessage(projectId, userMessage)
     setInputMessage('')
     setLoading(true)
     clearError()
 
     try {
       // Prepare recent messages for context (last 5 messages, excluding current)
-      const recentMessages = messages.slice(-5).map(msg => ({
+      const recentMessages = projectMessages.slice(-5).map(msg => ({
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp
       }))
 
       // Call the v2 chat API
-      const response = await fetchWithAuth(`/api/analysis-projects/${activeProject.id}/chat`, {
+      const response = await fetchWithAuth(`/api/analysis-projects/${projectId}/chat`, {
         method: 'POST',
         body: JSON.stringify({
           message: userMessage.content,
@@ -117,10 +132,11 @@ export function ChatInterface({
         assistantMessage.references = response.references
       }
       
-      addMessage(assistantMessage)
+      addMessage(projectId, assistantMessage)
 
     } catch (error) {
       console.error('Chat error:', error)
+      removeLastMessage(projectId)
       setError(error instanceof Error ? error.message : 'Failed to send message')
     } finally {
       setLoading(false)
@@ -160,6 +176,21 @@ export function ChatInterface({
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
+        {messages.length > 0 && (
+          <div className="sticky top-0 z-10 flex justify-end bg-white/95 py-3 backdrop-blur-sm">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleNewChat}
+              disabled={isLoading}
+              className="text-xs"
+            >
+              New chat
+            </Button>
+          </div>
+        )}
+
         {messages.length === 0 && (
           <div className="text-center py-8">
             <Bot className="h-8 w-8 text-gray-400 mx-auto mb-2" />
