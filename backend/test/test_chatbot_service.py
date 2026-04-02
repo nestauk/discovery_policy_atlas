@@ -12,11 +12,6 @@ from app.services.chatbot.models import ChatRequest
 @pytest.mark.asyncio
 async def test_chat_returns_grounded_answer_for_relevant_project(monkeypatch):
     service = ChatbotService()
-    retrieval_hit = {
-        "document_id": "doc-1",
-        "chunk_index": 0,
-        "content": "Housing First reduced time spent homeless in multiple evaluations.",
-    }
     enriched_hit = {
         "document_id": "doc-1",
         "chunk_index": 0,
@@ -29,34 +24,22 @@ async def test_chat_returns_grounded_answer_for_relevant_project(monkeypatch):
         "document_published_date": "2024-01-01",
         "document_year": 2024,
     }
-    fake_response = SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                message=SimpleNamespace(
-                    content=(
-                        "The evidence suggests Housing First improves housing stability "
-                        "and reduces time spent homeless [Document 1]."
-                    )
-                )
-            )
-        ]
-    )
-    fake_openai_client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=AsyncMock(return_value=fake_response))
+    fake_message = SimpleNamespace(
+        content=(
+            "The evidence suggests Housing First improves housing stability "
+            "and reduces time spent homeless [Document 1]."
         )
     )
+    monkeypatch.setattr(
+        service, "_run_agent_loop", AsyncMock(return_value=fake_message)
+    )
 
-    service._openai_client = fake_openai_client
-    monkeypatch.setattr(
-        service, "_search_relevant_chunks", AsyncMock(return_value=[retrieval_hit])
-    )
-    monkeypatch.setattr(
-        service, "_get_chunks_with_neighbors", AsyncMock(return_value=[retrieval_hit])
-    )
-    monkeypatch.setattr(
-        service, "_enrich_with_document_details", AsyncMock(return_value=[enriched_hit])
-    )
+    # Simulate the tool handler having stored evidence chunks
+    async def _fake_run(messages, handlers):
+        service._last_evidence_chunks = [enriched_hit]
+        return fake_message
+
+    monkeypatch.setattr(service, "_run_agent_loop", _fake_run)
 
     response = await service.chat(
         "project-1",
@@ -70,57 +53,32 @@ async def test_chat_returns_grounded_answer_for_relevant_project(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_chat_returns_no_evidence_message_when_retrieval_has_no_hits(monkeypatch):
+async def test_chat_returns_no_evidence_message_when_no_hits(monkeypatch):
     service = ChatbotService()
-    monkeypatch.setattr(service, "_search_relevant_chunks", AsyncMock(return_value=[]))
+    fake_message = SimpleNamespace(
+        content="I don't have any relevant evidence to answer that question."
+    )
+    monkeypatch.setattr(
+        service, "_run_agent_loop", AsyncMock(return_value=fake_message)
+    )
 
     response = await service.chat("project-1", ChatRequest(message="test"))
 
     assert response.references == []
-    assert response.message.startswith("I don't have any relevant evidence")
+    assert "don't have any relevant evidence" in response.message
 
 
 @pytest.mark.asyncio
-async def test_chat_propagates_retrieval_errors(monkeypatch):
+async def test_chat_propagates_agent_loop_errors(monkeypatch):
     service = ChatbotService()
     monkeypatch.setattr(
         service,
-        "_search_relevant_chunks",
-        AsyncMock(side_effect=RuntimeError("vector search unavailable")),
-    )
-
-    with pytest.raises(RuntimeError, match="vector search unavailable"):
-        await service.chat("project-1", ChatRequest(message="test"))
-
-
-@pytest.mark.asyncio
-async def test_chat_propagates_generation_errors(monkeypatch):
-    service = ChatbotService()
-    retrieval_hit = {"document_id": "doc-1", "content": "Relevant chunk"}
-    enriched_hit = {
-        "document_id": "doc-1",
-        "content": "Relevant chunk",
-        "document_title": "Doc 1",
-    }
-
-    monkeypatch.setattr(
-        service, "_search_relevant_chunks", AsyncMock(return_value=[retrieval_hit])
-    )
-    monkeypatch.setattr(
-        service, "_get_chunks_with_neighbors", AsyncMock(return_value=[retrieval_hit])
-    )
-    monkeypatch.setattr(
-        service, "_enrich_with_document_details", AsyncMock(return_value=[enriched_hit])
-    )
-    monkeypatch.setattr(service, "_build_context", lambda chunks: "context")
-    monkeypatch.setattr(
-        service,
-        "_generate_response",
+        "_run_agent_loop",
         AsyncMock(side_effect=RuntimeError("openai request failed")),
     )
 
     with pytest.raises(RuntimeError, match="openai request failed"):
-        await service.chat("project-1", ChatRequest(message="What works?"))
+        await service.chat("project-1", ChatRequest(message="test"))
 
 
 @pytest.mark.asyncio

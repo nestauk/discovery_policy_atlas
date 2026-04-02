@@ -2,14 +2,65 @@
 Simple RAG chatbot service for v2 analysis projects.
 """
 
+import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable
+
 from openai import AsyncOpenAI
 from app.core.config import settings
 from app.services.vectorization import vectorization_service
-from .models import ChatRequest, ChatResponse, ChatMessage, DocumentReference
+from .models import ChatRequest, ChatResponse, DocumentReference
+from .parliament import search_parliament
 
 logger = logging.getLogger(__name__)
+
+
+MAX_AGENT_ITERATIONS = 5
+
+TOOL_DEFINITIONS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_project_evidence",
+            "description": "Search the project's collected research documents and policy evidence for information relevant to the query.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to find relevant evidence.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_parliament",
+            "description": "Search UK Parliament Hansard records including debates, written statements, written answers, and individual contributions. The search is keyword-based — use short terms (1-3 words) rather than full sentences.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query for parliamentary records.",
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "Start date filter in YYYY-MM-DD format.",
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "End date filter in YYYY-MM-DD format.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
 
 
 class ChatbotService:
@@ -17,6 +68,11 @@ class ChatbotService:
 
     def __init__(self):
         self._openai_client = None
+        self._last_evidence_chunks: List[Dict[str, Any]] = []
+        self._last_parliament_items: List[Dict[str, Any]] = []
+        self._ordered_references: List[DocumentReference] = []
+        self._evidence_reference_numbers: Dict[str, int] = {}
+        self._parliament_reference_numbers: Dict[str, int] = {}
 
     @property
     def openai_client(self):
@@ -27,38 +83,78 @@ class ChatbotService:
         return self._openai_client
 
     async def chat(self, project_id: str, request: ChatRequest) -> ChatResponse:
-        """Generate a chat response using RAG over project evidence."""
-        # Search for relevant chunks
-        relevant_chunks = await self._search_relevant_chunks(
-            project_id, request.message
-        )
+        """Generate a chat response using tool-calling agent loop."""
+        self._last_evidence_chunks = []
+        self._last_parliament_items = []
+        self._reset_reference_state()
+        tool_handlers = self._build_tool_handlers(project_id)
 
-        if not relevant_chunks:
-            return ChatResponse(
-                message="I don't have any relevant evidence in this project to answer that question. Try asking about topics related to your research question or search for more evidence.",
-                references=[],
+        project_title = await self._get_project_title(project_id)
+
+        # Build messages
+        messages: List[Dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": self._build_system_prompt(project_title),
+            },
+        ]
+
+        # Add conversation history
+        if request.recent_messages:
+            for msg in request.recent_messages[-5:]:
+                messages.append({"role": msg.role.value, "content": msg.content})
+
+        messages.append({"role": "user", "content": request.message})
+
+        # Run agent loop
+        final_message = await self._run_agent_loop(messages, tool_handlers)
+
+        references = self._get_ordered_references()
+        if not references:
+            references = self._build_references(self._last_evidence_chunks)
+            references.extend(
+                self._build_parliament_references(self._last_parliament_items)
             )
 
-        # Get neighboring chunks for better context
-        enriched_chunks = await self._get_chunks_with_neighbors(
-            project_id, relevant_chunks
+        return ChatResponse(
+            message=final_message.content
+            or "I wasn't able to generate a response. Please try again.",
+            references=references,
         )
 
-        # Get document details for references
-        chunks_with_docs = await self._enrich_with_document_details(enriched_chunks)
+    def _reset_reference_state(self) -> None:
+        """Reset reference ordering for a new chat turn."""
+        self._ordered_references = []
+        self._evidence_reference_numbers = {}
+        self._parliament_reference_numbers = {}
 
-        # Build context for LLM
-        context = self._build_context(chunks_with_docs)
+    def _get_ordered_references(self) -> List[DocumentReference]:
+        """Return references in the same order used for [Document N] citations."""
+        return list(self._ordered_references)
 
-        # Generate response using OpenAI
-        response_text = await self._generate_response(
-            request.message, context, request.recent_messages
-        )
+    def _build_system_prompt(self, project_title: Optional[str] = None) -> str:
+        """Build system prompt for the tool-calling agent."""
+        project_context = ""
+        if project_title:
+            project_context = f"\nPROJECT CONTEXT:\nThis project is about: {project_title}\nUse this topic to craft specific, relevant search queries for both tools. For example, search for the policy topic by name rather than generic terms like 'top interventions'.\n"
 
-        # Build document references
-        references = self._build_references(chunks_with_docs)
+        return f"""You are a policy research assistant that helps users understand evidence from academic documents and policy research.
 
-        return ChatResponse(message=response_text, references=references)
+You have access to tools to search for information. Use them to find relevant evidence before answering.
+{project_context}
+TOOLS:
+- search_project_evidence: Search the project's collected research documents. Use this first for most questions.
+- search_parliament: Search UK Parliament Hansard records (debates, written statements, written answers, contributions). Use short keyword queries (1-3 terms) — the search is keyword-based, not semantic. Use this when the user asks about parliamentary activity, political feasibility, or government positions.
+
+GUIDELINES:
+1. Always search for evidence before answering — do not answer from memory alone
+2. Cite specific documents when referencing information using [Document 1], [Document 2], etc.
+3. If no relevant evidence is found, say so clearly
+4. Provide nuanced, evidence-based analysis
+5. Keep responses concise but comprehensive
+6. Focus on policy implications and actionable insights
+7. When multiple sources discuss the same topic, synthesize the information
+8. When searching, use specific policy topic terms rather than generic phrases"""
 
     async def _search_relevant_chunks(
         self, project_id: str, query: str, max_chunks: int = 10
@@ -223,7 +319,11 @@ class ChatbotService:
 
         return enriched_chunks
 
-    def _build_context(self, chunks: List[Dict[str, Any]]) -> str:
+    def _build_context(
+        self,
+        chunks: List[Dict[str, Any]],
+        document_numbers: Optional[Dict[str, int]] = None,
+    ) -> str:
         """Build context string from chunks for the LLM."""
         if not chunks:
             return ""
@@ -243,7 +343,8 @@ class ChatbotService:
 
         # Build context by document
         for i, (doc_id, doc_info) in enumerate(docs.items(), 1):
-            doc_context = f"\n--- DOCUMENT {i}: {doc_info['title']} ---\n"
+            doc_number = document_numbers.get(doc_id, i) if document_numbers else i
+            doc_context = f"\n--- DOCUMENT {doc_number}: {doc_info['title']} ---\n"
 
             # Sort chunks by index for coherent reading
             sorted_chunks = sorted(
@@ -259,52 +360,113 @@ class ChatbotService:
 
         return "\n".join(context_parts)
 
-    async def _generate_response(
+    async def _run_agent_loop(
         self,
-        user_message: str,
-        context: str,
-        recent_messages: Optional[List[ChatMessage]] = None,
-    ) -> str:
-        """Generate response using OpenAI."""
+        messages: List[Dict[str, Any]],
+        tool_handlers: Dict[str, Callable],
+    ) -> Any:
+        """Run the tool-calling agent loop. Returns the final assistant message."""
+        for iteration in range(MAX_AGENT_ITERATIONS):
+            logger.info("[chatbot] Agent loop iteration %d", iteration + 1)
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                tools=TOOL_DEFINITIONS,
+                temperature=0.7,
+                max_tokens=1500,
+            )
+            assistant_message = response.choices[0].message
 
-        # Build conversation history
-        conversation_context = ""
-        if recent_messages:
-            for msg in recent_messages[-5:]:  # Last 5 messages for context
-                role = "User" if msg.role == "user" else "Assistant"
-                conversation_context += f"{role}: {msg.content}\n"
+            if not assistant_message.tool_calls:
+                logger.info(
+                    "[chatbot] Final response (%d chars): %s",
+                    len(assistant_message.content or ""),
+                    (assistant_message.content or "")[:200],
+                )
+                return assistant_message
 
-        system_prompt = f"""You are a policy research assistant that helps users understand evidence from academic documents and policy research.
+            # Append assistant message (with tool_calls) to conversation
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in assistant_message.tool_calls
+                    ],
+                }
+            )
 
-You have access to relevant excerpts from research documents. Use this evidence to answer the user's questions accurately and helpfully.
+            # Execute each tool call
+            for tool_call in assistant_message.tool_calls:
+                tool_name = tool_call.function.name
+                logger.info(
+                    "[chatbot] Tool call: %s(%s)",
+                    tool_name,
+                    tool_call.function.arguments,
+                )
+                handler = tool_handlers.get(tool_name)
 
-IMPORTANT GUIDELINES:
-1. Base your answers ONLY on the evidence provided below
-2. Always cite specific documents when referencing information using [Document 1], [Document 2], etc.
-3. If the evidence doesn't contain relevant information, say so clearly
-4. Provide nuanced, evidence-based analysis
-5. Keep responses concise but comprehensive
-6. Focus on policy implications and actionable insights
-7. When multiple documents discuss the same topic, synthesize the information
+                if handler is None:
+                    tool_result = f"Error: Unknown tool '{tool_name}'"
+                else:
+                    try:
+                        kwargs = json.loads(tool_call.function.arguments)
+                        tool_result = await handler(**kwargs)
+                    except Exception as exc:
+                        logger.warning("Tool %s failed: %s", tool_name, exc)
+                        tool_result = f"Error executing {tool_name}: {exc}"
 
-AVAILABLE EVIDENCE:
-{context}
+                logger.info(
+                    "[chatbot] Tool result (%d chars): %s",
+                    len(str(tool_result)),
+                    str(tool_result)[:300],
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": str(tool_result),
+                    }
+                )
 
-{f"RECENT CONVERSATION:{conversation_context}" if conversation_context else ""}
+        # Hit iteration cap — return the last assistant message
+        return assistant_message
 
-Answer the user's question based on this evidence."""
+    def _build_tool_handlers(self, project_id: str) -> Dict[str, Callable]:
+        """Build tool handler dict for the agent loop."""
 
-        response = await self.openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=0.7,
-            max_tokens=1000,
-        )
+        async def _handle_search_evidence(query: str) -> str:
+            chunks = await self._search_relevant_chunks(project_id, query)
+            if not chunks:
+                return "No relevant evidence found in this project for that query."
 
-        return response.choices[0].message.content
+            enriched = await self._get_chunks_with_neighbors(project_id, chunks)
+            enriched = await self._enrich_with_document_details(enriched)
+            self._last_evidence_chunks.extend(enriched)
+            document_numbers = self._register_evidence_references(enriched)
+            return self._build_context(enriched, document_numbers=document_numbers)
+
+        async def _handle_search_parliament(**kwargs: Any) -> str:
+            text, items = await search_parliament(**kwargs)
+            if not items:
+                return text
+
+            self._last_parliament_items.extend(items)
+            document_numbers = self._register_parliament_references(items)
+            return self._build_parliament_context(items, document_numbers)
+
+        return {
+            "search_project_evidence": _handle_search_evidence,
+            "search_parliament": _handle_search_parliament,
+        }
 
     def _build_references(
         self, chunks: List[Dict[str, Any]]
@@ -344,6 +506,125 @@ Answer the user's question based on this evidence."""
                 )
 
         return references
+
+    def _register_evidence_references(
+        self, chunks: List[Dict[str, Any]]
+    ) -> Dict[str, int]:
+        """Assign stable [Document N] numbers to project evidence documents."""
+        document_numbers: Dict[str, int] = {}
+
+        for chunk in chunks:
+            doc_id = chunk.get("document_id")
+            if not doc_id:
+                continue
+
+            doc_number = self._evidence_reference_numbers.get(doc_id)
+            if doc_number is None:
+                doc_number = len(self._ordered_references) + 1
+                self._evidence_reference_numbers[doc_id] = doc_number
+                self._ordered_references.append(self._build_document_reference(chunk))
+
+            document_numbers[doc_id] = doc_number
+
+        return document_numbers
+
+    def _register_parliament_references(
+        self, items: List[Dict[str, Any]]
+    ) -> Dict[str, int]:
+        """Assign stable [Document N] numbers to Hansard search results."""
+        document_numbers: Dict[str, int] = {}
+
+        for item in items:
+            item_id = item.get("id")
+            if not item_id:
+                continue
+
+            doc_number = self._parliament_reference_numbers.get(item_id)
+            if doc_number is None:
+                doc_number = len(self._ordered_references) + 1
+                self._parliament_reference_numbers[item_id] = doc_number
+                self._ordered_references.append(self._build_parliament_reference(item))
+
+            document_numbers[item_id] = doc_number
+
+        return document_numbers
+
+    def _build_document_reference(self, chunk: Dict[str, Any]) -> DocumentReference:
+        """Build a single document reference from an enriched evidence chunk."""
+        doi = chunk.get("document_doi")
+        overton_url = chunk.get("document_overton_url")
+        url = None
+
+        if doi:
+            url = f"https://doi.org/{doi}" if not doi.startswith("http") else doi
+        elif overton_url:
+            url = overton_url
+
+        return DocumentReference(
+            document_id=chunk.get("document_id", f"chunk-{id(chunk)}"),
+            title=chunk.get("document_title", "Unknown Document"),
+            authors=chunk.get("document_authors"),
+            doi=doi,
+            url=url,
+            chunk_type=chunk.get("chunk_type"),
+            published_date=chunk.get("document_published_date"),
+            year=chunk.get("document_year"),
+        )
+
+    def _build_parliament_reference(self, item: Dict[str, Any]) -> DocumentReference:
+        """Build a reference entry for a Hansard search result."""
+        return DocumentReference(
+            document_id=item.get("id", f"hansard-{id(item)}"),
+            title=item.get("title", "Parliamentary record"),
+            url=item.get("url"),
+            published_date=item.get("date"),
+        )
+
+    def _build_parliament_references(
+        self, items: List[Dict[str, Any]]
+    ) -> List[DocumentReference]:
+        """Build ordered parliament references without introducing duplicates."""
+        references: List[DocumentReference] = []
+        seen_ids = set()
+
+        for item in items:
+            item_id = item.get("id")
+            if item_id and item_id not in seen_ids:
+                seen_ids.add(item_id)
+                references.append(self._build_parliament_reference(item))
+
+        return references
+
+    def _build_parliament_context(
+        self,
+        items: List[Dict[str, Any]],
+        document_numbers: Dict[str, int],
+    ) -> str:
+        """Build Hansard tool context using stable [Document N] numbering."""
+        if not items:
+            return "No parliamentary results found for this topic."
+
+        parts = []
+        for item in items:
+            item_id = item.get("id")
+            if not item_id:
+                continue
+
+            doc_number = document_numbers.get(item_id)
+            if doc_number is None:
+                continue
+
+            part = f"\n--- DOCUMENT {doc_number}: {item['title']} ---\n"
+            part += f"Source: UK Parliament Hansard ({item['source_type']})\n"
+            part += f"Date: {item['date']}\n"
+            part += f"\n[CONTENT]: {item['content']}\n"
+            parts.append(part)
+
+        return (
+            "\n".join(parts)
+            if parts
+            else "No parliamentary results found for this topic."
+        )
 
 
 # Global instance
