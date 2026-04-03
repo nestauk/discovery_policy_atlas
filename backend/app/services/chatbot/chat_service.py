@@ -2,11 +2,13 @@
 Simple RAG chatbot service for v2 analysis projects.
 """
 
+import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import List, Dict, Any, Optional, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from openai import AsyncOpenAI
 from app.core.config import settings
@@ -18,7 +20,13 @@ from app.services.synthesis.schemas import (
     SynthesisSummary,
 )
 from app.services.vectorization import vectorization_service
-from .models import ChatRequest, ChatResponse, DocumentReference
+from .models import (
+    ChatEvent,
+    ChatRequest,
+    ChatResponse,
+    ChatStep,
+    DocumentReference,
+)
 from .parliament import search_parliament
 from .prompts import (
     EVIDENCE_RETRIEVAL_NOTE,
@@ -36,6 +44,7 @@ MAX_SYNTHESIS_INTERVENTIONS = 4
 MAX_SYNTHESIS_RECOMMENDATIONS = 3
 CHATBOT_MAX_COMPLETION_TOKENS = 4000
 EMPTY_ASSISTANT_FALLBACK = "I wasn't able to generate a response. Please try again."
+CHAT_STREAM_FAILURE_MESSAGE = "Chat request failed. Please try again."
 NO_PARLIAMENT_RESULTS_MESSAGE = "No parliamentary results found for this topic."
 NO_SYNTHESIS_SUMMARY_MESSAGE = (
     "No synthesised project summary is available for this project yet. "
@@ -61,6 +70,11 @@ POLICY_HEADING_RE = re.compile(
     r"\n(?:What this means for policy|Policy implication(?:s)?|Practical policy implications)\s*:\s*\n",
     re.IGNORECASE,
 )
+TOOL_LABELS = {
+    "get_project_synthesis": "Checking project synthesis",
+    "search_project_evidence": "Searching project evidence",
+    "search_parliament": "Looking up Parliament records",
+}
 
 TOOL_DEFINITIONS = [
     {
@@ -119,6 +133,17 @@ TOOL_DEFINITIONS = [
 ]
 
 
+@dataclass
+class ToolExecutionResult:
+    """Normalized tool output plus bounded UI metadata."""
+
+    content: str
+    summary: Optional[str] = None
+
+
+EventEmitter = Callable[[ChatEvent], Awaitable[None]]
+
+
 class ChatbotService:
     """Simple RAG chatbot service for analysis projects."""
 
@@ -140,10 +165,66 @@ class ChatbotService:
 
     async def chat(self, project_id: str, request: ChatRequest) -> ChatResponse:
         """Generate a chat response using tool-calling agent loop."""
+        return await self._execute_chat_turn(project_id, request)
+
+    async def stream_chat_events(
+        self, project_id: str, request: ChatRequest
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Stream structured step events for a single chat turn."""
+        queue: asyncio.Queue[Optional[ChatEvent]] = asyncio.Queue()
+
+        async def _emit(event: ChatEvent) -> None:
+            await queue.put(event)
+
+        async def _run() -> None:
+            try:
+                response = await self._execute_chat_turn(
+                    project_id,
+                    request,
+                    emit_event=_emit,
+                )
+                await _emit(
+                    ChatEvent(
+                        type="message.completed",
+                        message=response.message,
+                        references=response.references,
+                        activity_summary=response.activity_summary,
+                    )
+                )
+            except Exception:
+                logger.exception("Error streaming chat for project %s", project_id)
+                await _emit(
+                    ChatEvent(
+                        type="message.failed",
+                        error=CHAT_STREAM_FAILURE_MESSAGE,
+                    )
+                )
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(_run())
+
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield event.model_dump(mode="json", exclude_none=True)
+        finally:
+            await task
+
+    async def _execute_chat_turn(
+        self,
+        project_id: str,
+        request: ChatRequest,
+        emit_event: Optional[EventEmitter] = None,
+    ) -> ChatResponse:
+        """Run one chat turn and optionally emit step events while it executes."""
         self._last_evidence_chunks = []
         self._last_parliament_items = []
         self._reset_reference_state()
         tool_handlers = self._build_tool_handlers(project_id)
+        steps: List[ChatStep] = []
 
         project_title = await self._get_project_title(project_id)
 
@@ -163,7 +244,12 @@ class ChatbotService:
         messages.append({"role": "user", "content": request.message})
 
         # Run agent loop
-        final_message = await self._run_agent_loop(messages, tool_handlers)
+        final_message = await self._run_agent_loop(
+            messages,
+            tool_handlers,
+            steps=steps,
+            emit_event=emit_event,
+        )
         final_content = self._extract_assistant_text(final_message)
         has_final_content = bool(final_content)
         if not has_final_content:
@@ -185,9 +271,13 @@ class ChatbotService:
             )
             final_content = self._strip_unresolved_internal_citations(final_content)
 
+        activity_summary = self._build_activity_summary(steps, references)
+
         return ChatResponse(
             message=final_content,
             references=references,
+            steps=steps,
+            activity_summary=activity_summary,
         )
 
     def _reset_reference_state(self) -> None:
@@ -199,6 +289,184 @@ class ChatbotService:
     def _get_ordered_references(self) -> List[DocumentReference]:
         """Return references in the same order used for [Document N] citations."""
         return list(self._ordered_references)
+
+    def _build_activity_summary(
+        self,
+        steps: List[ChatStep],
+        references: List[DocumentReference],
+    ) -> str:
+        """Build the compact post-hoc summary shown above the final answer."""
+        action_count = sum(1 for step in steps if step.type == "tool")
+        source_count = len(references)
+        return (
+            f"Used {action_count} action{'s' if action_count != 1 else ''} "
+            f"and {source_count} source{'s' if source_count != 1 else ''}"
+        )
+
+    def _truncate_for_label(self, value: str, max_chars: int = 60) -> str:
+        """Shorten a query so status labels stay readable inside the chat UI."""
+        cleaned = re.sub(r"\s+", " ", value).strip()
+        if len(cleaned) <= max_chars:
+            return cleaned
+        return f"{cleaned[: max_chars - 3].rstrip()}..."
+
+    def _build_tool_step_label(
+        self,
+        tool_name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Map internal tools to user-facing labels with bounded context."""
+        arguments = arguments or {}
+        query = arguments.get("query")
+        if isinstance(query, str) and query.strip():
+            truncated_query = self._truncate_for_label(query)
+            if tool_name == "search_project_evidence":
+                return f'Searching project evidence for "{truncated_query}"'
+            if tool_name == "search_parliament":
+                return f'Looking up Parliament records for "{truncated_query}"'
+
+        return TOOL_LABELS.get(tool_name, "Working")
+
+    def _build_synthesis_summary(self, content: str) -> str:
+        """Summarize synthesis retrieval without exposing raw synthesis text."""
+        normalized = content.strip()
+        if normalized == NO_SYNTHESIS_SUMMARY_MESSAGE:
+            return "No synthesis summary available"
+        if normalized.startswith("Project synthesis could not be loaded"):
+            return "Synthesis could not be loaded"
+        return "Synthesis found"
+
+    def _format_count_summary(self, count: int, singular: str, plural: str) -> str:
+        """Render a short, human-readable count summary."""
+        noun = singular if count == 1 else plural
+        return f"{count} relevant {noun} found"
+
+    def _next_step_id(self, steps: List[ChatStep]) -> str:
+        """Generate a stable per-turn step identifier."""
+        return f"step-{len(steps) + 1}"
+
+    async def _emit_event(
+        self,
+        emit_event: Optional[EventEmitter],
+        event_type: str,
+        *,
+        step: Optional[ChatStep] = None,
+        message: Optional[str] = None,
+        references: Optional[List[DocumentReference]] = None,
+        activity_summary: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """Emit a structured chat event when a subscriber is attached."""
+        if emit_event is None:
+            return
+
+        await emit_event(
+            ChatEvent(
+                type=event_type,
+                step=step.model_copy(deep=True) if step is not None else None,
+                message=message,
+                references=references or [],
+                activity_summary=activity_summary,
+                error=error,
+            )
+        )
+
+    async def _start_status_step(
+        self,
+        steps: List[ChatStep],
+        label: str,
+        emit_event: Optional[EventEmitter],
+    ) -> ChatStep:
+        """Start a visible non-tool status step."""
+        step = ChatStep(
+            id=self._next_step_id(steps),
+            type="status",
+            label=label,
+            status="running",
+        )
+        steps.append(step)
+        await self._emit_event(emit_event, "agent.status", step=step)
+        return step
+
+    async def _start_tool_step(
+        self,
+        steps: List[ChatStep],
+        tool_name: str,
+        arguments: Dict[str, Any],
+        emit_event: Optional[EventEmitter],
+    ) -> ChatStep:
+        """Start a visible tool execution step."""
+        step = ChatStep(
+            id=self._next_step_id(steps),
+            type="tool",
+            label=self._build_tool_step_label(tool_name, arguments),
+            status="running",
+        )
+        steps.append(step)
+        await self._emit_event(emit_event, "tool.started", step=step)
+        return step
+
+    async def _complete_step(
+        self,
+        step: Optional[ChatStep],
+        emit_event: Optional[EventEmitter],
+        *,
+        event_type: str = "agent.status",
+        summary: Optional[str] = None,
+    ) -> None:
+        """Mark a step completed and emit the updated snapshot."""
+        if step is None or step.status in {"completed", "failed"}:
+            return
+        step.status = "completed"
+        if summary:
+            step.summary = summary
+        await self._emit_event(emit_event, event_type, step=step)
+
+    async def _fail_step(
+        self,
+        step: Optional[ChatStep],
+        emit_event: Optional[EventEmitter],
+        *,
+        summary: Optional[str] = None,
+    ) -> None:
+        """Mark a step failed and emit the updated snapshot."""
+        if step is None or step.status in {"completed", "failed"}:
+            return
+        step.status = "failed"
+        if summary:
+            step.summary = summary
+        await self._emit_event(emit_event, "tool.failed", step=step)
+
+    async def _ensure_drafting_step(
+        self,
+        steps: List[ChatStep],
+        active_status_step: Optional[ChatStep],
+        emit_event: Optional[EventEmitter],
+    ) -> ChatStep:
+        """Ensure the current non-tool step reflects answer drafting."""
+        if (
+            active_status_step is not None
+            and active_status_step.status == "running"
+            and active_status_step.label == "Drafting answer"
+        ):
+            return active_status_step
+
+        if active_status_step is not None and active_status_step.status == "running":
+            await self._complete_step(active_status_step, emit_event)
+
+        return await self._start_status_step(steps, "Drafting answer", emit_event)
+
+    def _parse_tool_arguments(self, raw_arguments: Any) -> Dict[str, Any]:
+        """Parse tool-call arguments into a dictionary."""
+        if raw_arguments in (None, ""):
+            return {}
+        if isinstance(raw_arguments, dict):
+            return raw_arguments
+
+        parsed = json.loads(raw_arguments)
+        if not isinstance(parsed, dict):
+            raise ValueError("Tool arguments must be a JSON object")
+        return parsed
 
     def _build_system_prompt(self, project_title: Optional[str] = None) -> str:
         """Build system prompt for the tool-calling agent."""
@@ -688,8 +956,18 @@ class ChatbotService:
         self,
         messages: List[Dict[str, Any]],
         tool_handlers: Dict[str, Callable],
+        *,
+        steps: Optional[List[ChatStep]] = None,
+        emit_event: Optional[EventEmitter] = None,
     ) -> Any:
         """Run the tool-calling agent loop. Returns the final assistant message."""
+        step_list = steps if steps is not None else []
+        active_status_step = await self._start_status_step(
+            step_list,
+            "Understanding your question",
+            emit_event,
+        )
+
         for iteration in range(MAX_AGENT_ITERATIONS):
             logger.info("[chatbot] Agent loop iteration %d", iteration + 1)
             response = await self._create_chat_completion(messages)
@@ -702,14 +980,22 @@ class ChatbotService:
                         "[chatbot] Empty final response after iteration %d; retrying without tools",
                         iteration + 1,
                     )
-                    return await self._request_final_answer(messages)
+                    return await self._request_final_answer(
+                        messages,
+                        steps=step_list,
+                        emit_event=emit_event,
+                        active_status_step=active_status_step,
+                    )
 
+                await self._complete_step(active_status_step, emit_event)
                 logger.info(
                     "[chatbot] Final response (%d chars): %s",
                     len(assistant_text),
                     assistant_text[:200],
                 )
                 return SimpleNamespace(content=assistant_text, tool_calls=None)
+
+            await self._complete_step(active_status_step, emit_event)
 
             # Append assistant message (with tool_calls) to conversation
             messages.append(
@@ -733,39 +1019,114 @@ class ChatbotService:
             # Execute each tool call
             for tool_call in assistant_message.tool_calls:
                 tool_name = tool_call.function.name
+                handler = tool_handlers.get(tool_name)
+
+                try:
+                    kwargs = self._parse_tool_arguments(tool_call.function.arguments)
+                except Exception as exc:
+                    logger.warning(
+                        "[chatbot] Failed to parse tool arguments for %s: %s",
+                        tool_name,
+                        exc,
+                    )
+                    kwargs = {}
+                    step = await self._start_tool_step(
+                        step_list,
+                        tool_name,
+                        kwargs,
+                        emit_event,
+                    )
+                    failure_reason = f"Invalid tool arguments: {exc}"
+                    await self._fail_step(
+                        step,
+                        emit_event,
+                        summary="Tool failed",
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": failure_reason,
+                        }
+                    )
+                    continue
+
                 logger.info(
                     "[chatbot] Tool call: %s(%s)",
                     tool_name,
                     tool_call.function.arguments,
                 )
-                handler = tool_handlers.get(tool_name)
+                step = await self._start_tool_step(
+                    step_list,
+                    tool_name,
+                    kwargs,
+                    emit_event,
+                )
 
                 if handler is None:
-                    tool_result = f"Error: Unknown tool '{tool_name}'"
+                    tool_result = ToolExecutionResult(
+                        content=f"Error: Unknown tool '{tool_name}'",
+                        summary="Tool unavailable",
+                    )
+                    await self._fail_step(
+                        step,
+                        emit_event,
+                        summary=tool_result.summary,
+                    )
                 else:
                     try:
-                        kwargs = json.loads(tool_call.function.arguments)
-                        tool_result = await handler(**kwargs)
+                        raw_tool_result = await handler(**kwargs)
+                        if isinstance(raw_tool_result, ToolExecutionResult):
+                            tool_result = raw_tool_result
+                        else:
+                            tool_result = ToolExecutionResult(
+                                content=str(raw_tool_result)
+                            )
+                        await self._complete_step(
+                            step,
+                            emit_event,
+                            event_type="tool.completed",
+                            summary=tool_result.summary,
+                        )
                     except Exception as exc:
                         logger.warning("Tool %s failed: %s", tool_name, exc)
-                        tool_result = f"Error executing {tool_name}: {exc}"
+                        tool_result = ToolExecutionResult(
+                            content=f"Error executing {tool_name}: {exc}",
+                            summary="Tool failed",
+                        )
+                        await self._fail_step(
+                            step,
+                            emit_event,
+                            summary=tool_result.summary,
+                        )
 
                 logger.info(
                     "[chatbot] Tool result (%d chars): %s",
-                    len(str(tool_result)),
-                    str(tool_result)[:300],
+                    len(tool_result.content),
+                    tool_result.content[:300],
                 )
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
-                        "content": str(tool_result),
+                        "content": tool_result.content,
                     }
                 )
 
+            active_status_step = await self._ensure_drafting_step(
+                step_list,
+                None,
+                emit_event,
+            )
+
         # Hit iteration cap — force one last plain-text answer.
         logger.warning("[chatbot] Hit agent iteration cap; forcing final answer")
-        return await self._request_final_answer(messages)
+        return await self._request_final_answer(
+            messages,
+            steps=step_list,
+            emit_event=emit_event,
+            active_status_step=active_status_step,
+        )
 
     async def _create_chat_completion(
         self,
@@ -792,8 +1153,23 @@ class ChatbotService:
 
         return await self.openai_client.chat.completions.create(**request_kwargs)
 
-    async def _request_final_answer(self, messages: List[Dict[str, Any]]) -> Any:
+    async def _request_final_answer(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        steps: Optional[List[ChatStep]] = None,
+        emit_event: Optional[EventEmitter] = None,
+        active_status_step: Optional[ChatStep] = None,
+    ) -> Any:
         """Force a plain-text answer using already retrieved tool outputs."""
+        step_list = steps if steps is not None else []
+        if step_list is not None:
+            active_status_step = await self._ensure_drafting_step(
+                step_list,
+                active_status_step,
+                emit_event,
+            )
+
         retry_messages = messages + [
             {"role": "user", "content": FINAL_ANSWER_RETRY_PROMPT}
         ]
@@ -803,6 +1179,11 @@ class ChatbotService:
         )
         assistant_message = response.choices[0].message
         assistant_text = self._extract_assistant_text(assistant_message)
+        await self._complete_step(
+            active_status_step,
+            emit_event,
+            summary="Answer drafted" if assistant_text else None,
+        )
         return SimpleNamespace(content=assistant_text, tool_calls=None)
 
     def _extract_assistant_text(self, message: Any) -> str:
@@ -832,28 +1213,62 @@ class ChatbotService:
     def _build_tool_handlers(self, project_id: str) -> Dict[str, Callable]:
         """Build tool handler dict for the agent loop."""
 
-        async def _handle_get_project_synthesis(**_: Any) -> str:
-            return await self._get_project_synthesis(project_id)
+        async def _handle_get_project_synthesis(**_: Any) -> ToolExecutionResult:
+            content = await self._get_project_synthesis(project_id)
+            return ToolExecutionResult(
+                content=content,
+                summary=self._build_synthesis_summary(content),
+            )
 
-        async def _handle_search_evidence(query: str) -> str:
+        async def _handle_search_evidence(query: str) -> ToolExecutionResult:
             chunks = await self._search_relevant_chunks(project_id, query)
             if not chunks:
-                return "No relevant evidence found in this project for that query."
+                return ToolExecutionResult(
+                    content="No relevant evidence found in this project for that query.",
+                    summary="No relevant documents found",
+                )
 
             enriched = await self._get_chunks_with_neighbors(project_id, chunks)
             enriched = await self._enrich_with_document_details(enriched)
             self._last_evidence_chunks.extend(enriched)
             document_numbers = self._register_evidence_references(enriched)
-            return self._build_context(enriched, document_numbers=document_numbers)
+            document_count = len(
+                {
+                    chunk.get("document_id")
+                    for chunk in enriched
+                    if chunk.get("document_id")
+                }
+            )
+            return ToolExecutionResult(
+                content=self._build_context(
+                    enriched,
+                    document_numbers=document_numbers,
+                ),
+                summary=self._format_count_summary(
+                    document_count,
+                    "document",
+                    "documents",
+                ),
+            )
 
-        async def _handle_search_parliament(**kwargs: Any) -> str:
+        async def _handle_search_parliament(**kwargs: Any) -> ToolExecutionResult:
             text, items = await search_parliament(**kwargs)
             if not items:
-                return text
+                return ToolExecutionResult(
+                    content=text,
+                    summary="No Parliament records found",
+                )
 
             self._last_parliament_items.extend(items)
             document_numbers = self._register_parliament_references(items)
-            return self._build_parliament_context(items, document_numbers)
+            return ToolExecutionResult(
+                content=self._build_parliament_context(items, document_numbers),
+                summary=self._format_count_summary(
+                    len(items),
+                    "record",
+                    "records",
+                ),
+            )
 
         return {
             "get_project_synthesis": _handle_get_project_synthesis,

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import asyncio
 from datetime import datetime
+import json
 import logging
 import os
 import time
@@ -1418,6 +1419,34 @@ async def chat_with_project(
         raise HTTPException(
             status_code=500, detail="Chat request failed. Please try again."
         )
+
+
+@router.post("/{project_id}/chat/stream")
+async def stream_chat_with_project(
+    project_id: str,
+    request: ChatRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream chat activity and the final assistant response for a project."""
+    try:
+        get_project_with_auth_check(project_id, current_user, "id, organization_id")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error authorizing chat stream for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Chat request failed. Please try again."
+        )
+
+    async def _event_stream():
+        async for event in chatbot_service.stream_chat_events(project_id, request):
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @router.get(

@@ -52,7 +52,7 @@ async def test_chat_compacts_and_filters_cited_references(monkeypatch):
         content="The most relevant items are [Documents 1 and 3]."
     )
 
-    async def _fake_run(messages, handlers):
+    async def _fake_run(messages, handlers, **_kwargs):
         service._ordered_references = [
             service._build_document_reference(first_hit),
             service._build_document_reference(second_hit),

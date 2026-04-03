@@ -221,6 +221,62 @@ async def test_agent_loop_retries_with_tool_choice_none_after_empty_final_turn()
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_emits_progress_steps():
+    from app.services.chatbot.chat_service import ChatbotService, ToolExecutionResult
+
+    service = ChatbotService()
+    fake_create = AsyncMock(
+        side_effect=[
+            _make_tool_call_response("search_project_evidence", {"query": "housing"}),
+            _make_text_response("Based on the evidence..."),
+        ]
+    )
+    service._openai_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
+    )
+
+    mock_handler = AsyncMock(
+        return_value=ToolExecutionResult(
+            content="Evidence about housing found.",
+            summary="2 relevant documents found",
+        )
+    )
+    steps = []
+    events = []
+
+    async def collect(event):
+        events.append(event)
+
+    result = await service._run_agent_loop(
+        messages=[{"role": "user", "content": "Tell me about housing"}],
+        tool_handlers={"search_project_evidence": mock_handler},
+        steps=steps,
+        emit_event=collect,
+    )
+
+    assert result.content == "Based on the evidence..."
+    assert [step.label for step in steps] == [
+        "Understanding your question",
+        'Searching project evidence for "housing"',
+        "Drafting answer",
+    ]
+    assert [step.status for step in steps] == [
+        "completed",
+        "completed",
+        "completed",
+    ]
+    assert steps[1].summary == "2 relevant documents found"
+    assert [event.type for event in events] == [
+        "agent.status",
+        "agent.status",
+        "tool.started",
+        "tool.completed",
+        "agent.status",
+        "agent.status",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_can_call_get_project_synthesis(monkeypatch):
     from app.services.chatbot.chat_service import ChatbotService
 

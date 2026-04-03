@@ -2,8 +2,13 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Send, Bot, User, ExternalLink } from 'lucide-react'
-import { useChatStore, ChatMessage } from '@/lib/chatStore'
+import { Send, Bot, User, ExternalLink, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react'
+import {
+  useChatStore,
+  ChatMessage,
+  ChatStep,
+  ChatStreamEvent,
+} from '@/lib/chatStore'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
 import ReactMarkdown from 'react-markdown'
@@ -11,6 +16,8 @@ import { useUser } from '@clerk/nextjs'
 import Image from 'next/image'
 
 const DOCUMENT_CITATION_BRACKET_RE = /\[([^\]]+)\]/g
+const EMPTY_CHAT_MESSAGES: ChatMessage[] = []
+const EMPTY_CHAT_STEPS: ChatStep[] = []
 
 function parseCitationGroup(bracketContent: string): number[] {
   const cleaned = bracketContent
@@ -79,6 +86,135 @@ function processInTextCitations(content: string, references: { url?: string }[])
   })
 }
 
+function upsertStep(existingSteps: ChatStep[] | undefined, nextStep: ChatStep): ChatStep[] {
+  const steps = existingSteps ?? []
+  const existingIndex = steps.findIndex((step) => step.id === nextStep.id)
+
+  if (existingIndex === -1) {
+    return [...steps, nextStep]
+  }
+
+  return steps.map((step, index) => (
+    index === existingIndex ? nextStep : step
+  ))
+}
+
+function getCurrentStep(steps: ChatStep[] | undefined): ChatStep | undefined {
+  const availableSteps = steps ?? EMPTY_CHAT_STEPS
+
+  for (let index = availableSteps.length - 1; index >= 0; index -= 1) {
+    const step = availableSteps[index]
+    if (step.status === 'running' || step.status === 'pending') {
+      return step
+    }
+  }
+
+  return undefined
+}
+
+function getActivityHeader(message: ChatMessage): string {
+  if (message.error) {
+    return message.error
+  }
+
+  if (message.isStreaming) {
+    return getCurrentStep(message.steps)?.label ?? 'Working'
+  }
+
+  return message.activitySummary ?? 'Workings available'
+}
+
+function markStreamingMessageFailed(message: ChatMessage, error: string): ChatMessage {
+  return {
+    ...message,
+    isStreaming: false,
+    activitySummary: 'Chat failed',
+    error,
+  }
+}
+
+function toPersistedAssistantMessage(message: ChatMessage): ChatMessage {
+  return {
+    id: message.id,
+    role: 'assistant',
+    content: message.content,
+    timestamp: message.timestamp,
+    references: message.references,
+    steps: message.steps,
+    activitySummary: message.activitySummary,
+  }
+}
+
+function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEvent): ChatMessage {
+  if (event.type === 'message.completed') {
+    return {
+      ...message,
+      content: event.message ?? message.content,
+      references: event.references ?? message.references,
+      isStreaming: false,
+      activitySummary: event.activity_summary ?? message.activitySummary,
+      error: undefined,
+    }
+  }
+
+  if (event.type === 'message.failed') {
+    return markStreamingMessageFailed(
+      message,
+      event.error ?? 'Chat request failed. Please try again.'
+    )
+  }
+
+  if (!event.step) {
+    return message
+  }
+
+  return {
+    ...message,
+    steps: upsertStep(message.steps, event.step),
+    activitySummary: message.activitySummary,
+    error: undefined,
+  }
+}
+
+async function consumeChatStream(
+  response: Response,
+  onEvent: (event: ChatStreamEvent) => void
+) {
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error('Streaming response body is unavailable')
+  }
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+
+    let newlineIndex = buffer.indexOf('\n')
+    while (newlineIndex >= 0) {
+      const line = buffer.slice(0, newlineIndex).trim()
+      buffer = buffer.slice(newlineIndex + 1)
+
+      if (line) {
+        onEvent(JSON.parse(line) as ChatStreamEvent)
+      }
+
+      newlineIndex = buffer.indexOf('\n')
+    }
+  }
+
+  const trailing = buffer.trim()
+  if (trailing) {
+    onEvent(JSON.parse(trailing) as ChatStreamEvent)
+  }
+}
+
 interface ChatInterfaceProps {
   className?: string
   placeholder?: string
@@ -98,7 +234,6 @@ export function ChatInterface({
     isLoading,
     error,
     addMessage,
-    removeLastMessage,
     setLoading,
     setError,
     clearError
@@ -107,15 +242,23 @@ export function ChatInterface({
   const { activeProject } = useAnalysisProjectStore()
   const { user } = useUser()
   const [inputMessage, setInputMessage] = useState('')
+  const [transientAssistantMessage, setTransientAssistantMessage] = useState<ChatMessage | null>(null)
+  const [expandedActivityIds, setExpandedActivityIds] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { fetchWithAuth } = useAPI()
   const activeProjectId = activeProject?.id ?? null
-  const messages = activeProjectId ? getMessages(activeProjectId) : []
+  const messages = activeProjectId ? getMessages(activeProjectId) : EMPTY_CHAT_MESSAGES
+  const displayMessages = (
+    transientAssistantMessage &&
+    !messages.some((message) => message.id === transientAssistantMessage.id)
+  )
+    ? [...messages, transientAssistantMessage]
+    : messages
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, transientAssistantMessage])
 
   // Auto-focus input if requested
   useEffect(() => {
@@ -125,6 +268,11 @@ export function ChatInterface({
     }
   }, [autoFocus])
 
+  useEffect(() => {
+    setTransientAssistantMessage(null)
+    setExpandedActivityIds([])
+  }, [activeProjectId])
+
   const handleNewChat = () => {
     if (!activeProjectId) return
 
@@ -132,21 +280,36 @@ export function ChatInterface({
     clearError()
     setLoading(false)
     setInputMessage('')
+    setTransientAssistantMessage(null)
+    setExpandedActivityIds([])
   }
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading || !activeProject) return
     const projectId = activeProject.id
     const projectMessages = getMessages(projectId)
+    const now = Date.now()
 
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
+      id: `${now}`,
       role: 'user',
       content: inputMessage.trim(),
       timestamp: new Date()
     }
 
+    const assistantMessageId = `${now + 1}`
+    const assistantPlaceholder: ChatMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true,
+      steps: [],
+      activitySummary: 'Working'
+    }
+
     addMessage(projectId, userMessage)
+    setTransientAssistantMessage(assistantPlaceholder)
     setInputMessage('')
     setLoading(true)
     clearError()
@@ -160,37 +323,58 @@ export function ChatInterface({
       }))
 
       // Call the v2 chat API
-      const response = await fetchWithAuth(`/api/analysis-projects/${projectId}/chat`, {
+      const response = await fetchWithAuth(`/api/analysis-projects/${projectId}/chat/stream`, {
         method: 'POST',
         body: JSON.stringify({
           message: userMessage.content,
           recent_messages: recentMessages
         })
-      })
+      }, true)
 
       if (!response) {
         throw new Error('No response from server')
       }
+      if (!(response instanceof Response)) {
+        throw new Error('Expected a streaming response from the server')
+      }
 
-      // Add assistant response with references
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response.message,
-        timestamp: new Date()
+      let sawTerminalEvent = false
+      let streamFailureMessage: string | null = null
+      let streamingSnapshot = assistantPlaceholder
+
+      await consumeChatStream(response, (event) => {
+        if (event.type === 'message.completed') {
+          sawTerminalEvent = true
+        }
+
+        if (event.type === 'message.failed') {
+          sawTerminalEvent = true
+          streamFailureMessage = event.error ?? 'Chat request failed. Please try again.'
+          setError(streamFailureMessage)
+        }
+
+        streamingSnapshot = applyChatStreamEvent(streamingSnapshot, event)
+        setTransientAssistantMessage(streamingSnapshot)
+      })
+
+      if (!sawTerminalEvent) {
+        throw new Error('Chat response ended unexpectedly')
       }
-      
-      // Store references in the message for later display
-      if (response.references && response.references.length > 0) {
-        assistantMessage.references = response.references
+
+      if (streamFailureMessage) {
+        throw new Error(streamFailureMessage)
       }
-      
-      addMessage(projectId, assistantMessage)
+
+      addMessage(projectId, toPersistedAssistantMessage(streamingSnapshot))
+      setTransientAssistantMessage(null)
 
     } catch (error) {
       console.error('Chat error:', error)
-      removeLastMessage(projectId)
-      setError(error instanceof Error ? error.message : 'Failed to send message')
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message'
+      setError(errorMessage)
+      setTransientAssistantMessage((currentMessage) => (
+        markStreamingMessageFailed(currentMessage ?? assistantPlaceholder, errorMessage)
+      ))
     } finally {
       setLoading(false)
     }
@@ -229,7 +413,7 @@ export function ChatInterface({
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
-        {messages.length > 0 && (
+        {displayMessages.length > 0 && (
           <div className="sticky top-0 z-10 flex justify-end bg-white/95 py-3 backdrop-blur-sm">
             <Button
               type="button"
@@ -244,7 +428,7 @@ export function ChatInterface({
           </div>
         )}
 
-        {messages.length === 0 && (
+        {displayMessages.length === 0 && (
           <div className="text-center py-8">
             <Bot className="h-8 w-8 text-gray-400 mx-auto mb-2" />
             <p className="text-gray-600 text-sm">
@@ -253,7 +437,7 @@ export function ChatInterface({
           </div>
         )}
 
-        {messages.map((message, index) => (
+        {displayMessages.map((message, index) => (
           <div
             key={message.id}
             className={`flex gap-3 ${
@@ -273,31 +457,117 @@ export function ChatInterface({
                   : 'bg-gray-100 text-gray-900'
               }`}
             >
-              <div className="prose prose-sm max-w-none">
-                <ReactMarkdown
-                  components={{
-                    a: ({ href, children, ...props }) => (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800 hover:underline"
-                        {...props}
-                      >
-                        {children}
-                      </a>
-                    ),
-                  }}
-                >
-                  {message.role === 'assistant' && message.references
-                    ? processInTextCitations(message.content, message.references)
-                    : message.content
+              {message.role === 'assistant' && (
+                (() => {
+                  const hasActivity = Boolean(
+                    message.isStreaming ||
+                    message.error ||
+                    message.activitySummary ||
+                    (message.steps && message.steps.length > 0)
+                  )
+                  const isActivityExpanded = expandedActivityIds.includes(message.id)
+                  const shouldShowSteps = Boolean(
+                    message.steps &&
+                    message.steps.length > 0 &&
+                    (message.isStreaming || isActivityExpanded)
+                  )
+
+                  if (!hasActivity) {
+                    return null
                   }
-                </ReactMarkdown>
-              </div>
+
+                  return (
+                    <div className={`mb-3 rounded-md border px-3 py-2 ${
+                      message.error
+                        ? 'border-red-200 bg-red-50'
+                        : 'border-gray-200 bg-white/70'
+                    }`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-xs font-medium text-gray-700">
+                          {message.error ? (
+                            <AlertCircle className="h-3.5 w-3.5 text-red-600" />
+                          ) : message.isStreaming ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600" />
+                          ) : (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          )}
+                          <span>{getActivityHeader(message)}</span>
+                        </div>
+
+                        {!message.isStreaming && message.steps && message.steps.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedActivityIds((current) => (
+                                current.includes(message.id)
+                                  ? current.filter((id) => id !== message.id)
+                                  : [...current, message.id]
+                              ))
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700"
+                          >
+                            {isActivityExpanded ? 'Hide workings' : 'Show workings'}
+                          </button>
+                        )}
+                      </div>
+
+                      {shouldShowSteps && message.steps && (
+                        <div className="mt-2 border-t border-gray-200 pt-2 space-y-1.5">
+                          {message.steps.map((step) => (
+                            <div key={step.id} className="flex items-start gap-2 text-xs text-gray-600">
+                              <span
+                                className={`mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                                  step.status === 'failed'
+                                    ? 'bg-red-500'
+                                    : step.status === 'running'
+                                      ? 'bg-blue-500'
+                                      : 'bg-gray-400'
+                                }`}
+                              />
+                              <div className="min-w-0">
+                                <span className={step.status === 'running' ? 'font-medium text-gray-800' : ''}>
+                                  {step.label}
+                                </span>
+                                {step.summary && !message.isStreaming && (
+                                  <span className="text-gray-500">: {step.summary}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()
+              )}
+
+              {message.content && (
+                <div className="prose prose-sm max-w-none">
+                  <ReactMarkdown
+                    components={{
+                      a: ({ href, children, ...props }) => (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 hover:underline"
+                          {...props}
+                        >
+                          {children}
+                        </a>
+                      ),
+                    }}
+                  >
+                    {message.role === 'assistant' && message.references
+                      ? processInTextCitations(message.content, message.references)
+                      : message.content
+                    }
+                  </ReactMarkdown>
+                </div>
+              )}
               
               {/* Show references for assistant messages */}
-              {message.role === 'assistant' && message.references && (
+              {message.role === 'assistant' && message.references && message.references.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-gray-200">
                   <div className="space-y-2">
                     {message.references.map((ref, idx) => {
@@ -389,21 +659,6 @@ export function ChatInterface({
             )}
           </div>
         ))}
-
-        {isLoading && (
-          <div className="flex gap-3 justify-start">
-            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-              <Bot className="h-4 w-4 text-blue-600" />
-            </div>
-            <div className="bg-gray-100 rounded-lg p-3">
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3">

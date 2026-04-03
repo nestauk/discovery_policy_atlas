@@ -1,11 +1,23 @@
 import { create } from 'zustand'
 
+export interface ChatStep {
+  id: string
+  type: 'status' | 'tool' | 'message'
+  label: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  summary?: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
   references?: DocumentReference[]
+  steps?: ChatStep[]
+  isStreaming?: boolean
+  activitySummary?: string
+  error?: string
 }
 
 export interface DocumentReference {
@@ -22,6 +34,17 @@ export interface DocumentReference {
 export interface ChatResponse {
   message: string
   references: DocumentReference[]
+  steps?: ChatStep[]
+  activity_summary?: string
+}
+
+export interface ChatStreamEvent {
+  type: 'agent.status' | 'tool.started' | 'tool.completed' | 'tool.failed' | 'message.completed' | 'message.failed'
+  step?: ChatStep
+  message?: string
+  references?: DocumentReference[]
+  activity_summary?: string
+  error?: string
 }
 
 // TODO: Add eviction (e.g. cap at N most-recent projects) to prevent
@@ -86,7 +109,13 @@ function loadMessagesByProject(): MessagesByProject {
           role: candidate.role,
           content: candidate.content,
           timestamp,
-          references: Array.isArray(candidate.references) ? candidate.references : undefined
+          references: Array.isArray(candidate.references) ? candidate.references : undefined,
+          activitySummary: typeof (candidate as { activitySummary?: unknown }).activitySummary === 'string'
+            ? (candidate as { activitySummary: string }).activitySummary
+            : undefined,
+          steps: Array.isArray((candidate as { steps?: unknown }).steps)
+            ? (candidate as { steps: ChatStep[] }).steps
+            : undefined
         }]
       })
 
@@ -132,7 +161,6 @@ interface ChatState {
   // Actions
   addMessage: (projectId: string, message: ChatMessage) => void
   getMessages: (projectId: string) => ChatMessage[]
-  removeLastMessage: (projectId: string) => void
   setActiveProjectId: (projectId: string | null) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
@@ -160,24 +188,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   }),
 
   getMessages: (projectId) => get().messagesByProject[projectId] ?? EMPTY_MESSAGES,
-
-  removeLastMessage: (projectId) => set((state) => {
-    const projectMessages = state.messagesByProject[projectId] ?? []
-    const lastMessage = projectMessages[projectMessages.length - 1]
-
-    if (!lastMessage || lastMessage.role !== 'user') {
-      return state
-    }
-
-    const nextMessagesByProject = {
-      ...state.messagesByProject,
-      [projectId]: projectMessages.slice(0, -1)
-    }
-
-    persistMessagesByProject(nextMessagesByProject)
-
-    return { messagesByProject: nextMessagesByProject }
-  }),
 
   setActiveProjectId: (projectId) => set({ activeProjectId: projectId }),
   
