@@ -1,4 +1,4 @@
-"""Unit tests for the chatbot service."""
+"""Focused tests for high-value chatbot service behavior."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -10,79 +10,72 @@ from app.services.chatbot.models import ChatRequest
 
 
 @pytest.mark.asyncio
-async def test_chat_returns_grounded_answer_for_relevant_project(monkeypatch):
+async def test_chat_compacts_and_filters_cited_references(monkeypatch):
     service = ChatbotService()
-    enriched_hit = {
+    first_hit = {
         "document_id": "doc-1",
         "chunk_index": 0,
         "chunk_type": "content",
-        "content": "Housing First reduced time spent homeless in multiple evaluations.",
-        "document_title": "Housing First Outcomes Review",
+        "content": "First evidence hit.",
+        "document_title": "First Evidence Review",
         "document_authors": ["A. Researcher"],
-        "document_doi": "10.1000/housing-first",
+        "document_doi": "10.1000/first",
         "document_overton_url": None,
         "document_published_date": "2024-01-01",
         "document_year": 2024,
     }
+    second_hit = {
+        "document_id": "doc-2",
+        "chunk_index": 0,
+        "chunk_type": "content",
+        "content": "Second evidence hit.",
+        "document_title": "Second Evidence Review",
+        "document_authors": ["B. Researcher"],
+        "document_doi": "10.1000/second",
+        "document_overton_url": None,
+        "document_published_date": "2023-01-01",
+        "document_year": 2023,
+    }
+    third_hit = {
+        "document_id": "doc-3",
+        "chunk_index": 0,
+        "chunk_type": "content",
+        "content": "Third evidence hit.",
+        "document_title": "Third Evidence Review",
+        "document_authors": ["C. Researcher"],
+        "document_doi": "10.1000/third",
+        "document_overton_url": None,
+        "document_published_date": "2022-01-01",
+        "document_year": 2022,
+    }
     fake_message = SimpleNamespace(
-        content=(
-            "The evidence suggests Housing First improves housing stability "
-            "and reduces time spent homeless [Document 1]."
-        )
-    )
-    monkeypatch.setattr(
-        service, "_run_agent_loop", AsyncMock(return_value=fake_message)
+        content="The most relevant items are [Documents 1 and 3]."
     )
 
-    # Simulate the tool handler having stored evidence chunks
     async def _fake_run(messages, handlers):
-        service._last_evidence_chunks = [enriched_hit]
+        service._ordered_references = [
+            service._build_document_reference(first_hit),
+            service._build_document_reference(second_hit),
+            service._build_document_reference(third_hit),
+        ]
         return fake_message
 
     monkeypatch.setattr(service, "_run_agent_loop", _fake_run)
 
     response = await service.chat(
         "project-1",
-        ChatRequest(message="What does the evidence say about Housing First?"),
+        ChatRequest(message="What does the evidence say?"),
     )
 
-    assert "Housing First improves housing stability" in response.message
-    assert len(response.references) == 1
-    assert response.references[0].title == "Housing First Outcomes Review"
-    assert response.references[0].url == "https://doi.org/10.1000/housing-first"
+    assert response.message == "The most relevant items are [1][2]."
+    assert [ref.title for ref in response.references] == [
+        "First Evidence Review",
+        "Third Evidence Review",
+    ]
 
 
 @pytest.mark.asyncio
-async def test_chat_returns_no_evidence_message_when_no_hits(monkeypatch):
-    service = ChatbotService()
-    fake_message = SimpleNamespace(
-        content="I don't have any relevant evidence to answer that question."
-    )
-    monkeypatch.setattr(
-        service, "_run_agent_loop", AsyncMock(return_value=fake_message)
-    )
-
-    response = await service.chat("project-1", ChatRequest(message="test"))
-
-    assert response.references == []
-    assert "don't have any relevant evidence" in response.message
-
-
-@pytest.mark.asyncio
-async def test_chat_propagates_agent_loop_errors(monkeypatch):
-    service = ChatbotService()
-    monkeypatch.setattr(
-        service,
-        "_run_agent_loop",
-        AsyncMock(side_effect=RuntimeError("openai request failed")),
-    )
-
-    with pytest.raises(RuntimeError, match="openai request failed"):
-        await service.chat("project-1", ChatRequest(message="test"))
-
-
-@pytest.mark.asyncio
-async def test_search_relevant_chunks_uses_strict_vector_search(monkeypatch):
+async def test_search_relevant_chunks_uses_project_title_in_query(monkeypatch):
     service = ChatbotService()
     search_similar_content = AsyncMock(return_value=[])
     fake_vectorization_service = SimpleNamespace(

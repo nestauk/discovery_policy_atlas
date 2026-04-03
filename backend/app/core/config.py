@@ -1,10 +1,11 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional, List, Union
-from functools import lru_cache
-from pydantic import field_validator
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
+from typing import List, Optional, Union
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Get the project root directory (3 levels up from this config file)
 config_dir = Path(__file__).parent.parent.parent
@@ -114,6 +115,8 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4000
+    CHATBOT_MODEL: str = "gpt-4o-mini"
+    CHATBOT_REASONING_EFFORT: str = "minimal"
 
     # Boolean Query Generation Settings
     BOOLEAN_QUERY_GENERATION_MODE: str = "multi"  # "single" or "multi"
@@ -128,12 +131,12 @@ class Settings(BaseSettings):
 
     # Screening/Relevance Settings
     SCREENING_MODEL: str = "gpt-4.1-mini"  # Model for screening and relevance checking
-    EVIDENCE_CATEGORY_MODEL: (
-        str
-    ) = "gpt-5.2"  # Model for evidence categorisation (needs higher accuracy)
-    OPENALEX_ENABLE_RCT_SYSREV_FANOUT: (
-        bool
-    ) = True  # Fan out RCT/systematic review variants
+    EVIDENCE_CATEGORY_MODEL: str = (
+        "gpt-5.2"  # Model for evidence categorisation (needs higher accuracy)
+    )
+    OPENALEX_ENABLE_RCT_SYSREV_FANOUT: bool = (
+        True  # Fan out RCT/systematic review variants
+    )
 
     # Batch Processing Settings
     BATCH_SIZE_SCREENING: int = 5
@@ -148,9 +151,9 @@ class Settings(BaseSettings):
     # PDF/File Limits (used during parsing)
     MAX_PDF_SIZE_MB: float = 50.0  # Maximum PDF file size
     MAX_PDF_PAGES: int = 50  # Maximum PDF pages
-    MAX_TEXT_LENGTH_CHARS: (
-        int
-    ) = 100000  # Max chars during parsing (before extraction truncation)
+    MAX_TEXT_LENGTH_CHARS: int = (
+        100000  # Max chars during parsing (before extraction truncation)
+    )
 
     # Timeout Settings (seconds)
     DOWNLOAD_TIMEOUT: float = 30.0

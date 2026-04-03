@@ -10,19 +10,72 @@ import ReactMarkdown from 'react-markdown'
 import { useUser } from '@clerk/nextjs'
 import Image from 'next/image'
 
+const DOCUMENT_CITATION_BRACKET_RE = /\[([^\]]+)\]/g
+
+function parseCitationGroup(bracketContent: string): number[] {
+  const cleaned = bracketContent
+    .replace(/\bdocuments?\b/gi, '')
+    .replace(/&/g, ',')
+    .replace(/\band\b/gi, ',')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^,+|,+$/g, '')
+
+  if (!cleaned || !/^\d+(?:\s*,\s*\d+)*$/.test(cleaned)) {
+    return []
+  }
+
+  return cleaned.split(',').map((part) => parseInt(part.trim(), 10))
+}
+
+function buildCitationLabelMap(content: string, references: { url?: string }[]): Map<number, number> {
+  const labelMap = new Map<number, number>()
+  let match: RegExpExecArray | null
+
+  DOCUMENT_CITATION_BRACKET_RE.lastIndex = 0
+  while ((match = DOCUMENT_CITATION_BRACKET_RE.exec(content)) !== null) {
+    for (const rawNumber of parseCitationGroup(match[1])) {
+      if (labelMap.has(rawNumber)) {
+        continue
+      }
+
+      const nextLabel = labelMap.size + 1
+      if (nextLabel > references.length) {
+        continue
+      }
+      labelMap.set(rawNumber, nextLabel)
+    }
+  }
+
+  return labelMap
+}
+
 // Helper function to process in-text citations
 function processInTextCitations(content: string, references: { url?: string }[]): string {
-  // Replace [Document X] with clickable [X] links
-  return content.replace(/\[Document (\d+)\]/g, (match, docNum) => {
-    const refIndex = parseInt(docNum) - 1
-    if (refIndex >= 0 && refIndex < references.length) {
-      const ref = references[refIndex]
-      const url = ref.url
-      if (url) {
-        return `[[${docNum}]](${url})`
-      }
+  const labelMap = buildCitationLabelMap(content, references)
+
+  // Replace [5], [Document 5], or grouped forms like [Documents 5 and 7]
+  return content.replace(DOCUMENT_CITATION_BRACKET_RE, (match, bracketContent) => {
+    const numbers = parseCitationGroup(bracketContent)
+    if (numbers.length === 0) {
+      return match
     }
-    return `[${docNum}]`
+
+    return numbers.map((number) => {
+      const label = labelMap.get(number)
+      if (!label) {
+        return `[${number}]`
+      }
+
+      const refIndex = label - 1
+      if (refIndex >= 0 && refIndex < references.length) {
+        const ref = references[refIndex]
+        if (ref.url) {
+          return `[[${label}]](${ref.url})`
+        }
+      }
+      return `[${label}]`
+    }).join('')
   })
 }
 
