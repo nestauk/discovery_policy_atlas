@@ -47,6 +47,13 @@ export interface ChatStreamEvent {
   error?: string
 }
 
+export interface ChatLaunchIntent {
+  intentId: string
+  sectionTitle: string
+  contextHint: string
+  prefillQuestion?: string
+}
+
 // TODO: Add eviction (e.g. cap at N most-recent projects) to prevent
 // unbounded localStorage growth across long-lived sessions.
 type MessagesByProject = Record<string, ChatMessage[]>
@@ -157,7 +164,8 @@ interface ChatState {
   isLoading: boolean
   error: string | null
   isOpen: boolean
-  
+  chatLaunchIntent: ChatLaunchIntent | null
+
   // Actions
   addMessage: (projectId: string, message: ChatMessage) => void
   getMessages: (projectId: string) => ChatMessage[]
@@ -167,6 +175,8 @@ interface ChatState {
   setIsOpen: (isOpen: boolean) => void
   clearMessages: (projectId: string) => void
   clearError: () => void
+  openChatWithIntent: (intent: ChatLaunchIntent) => void
+  consumeChatLaunchIntent: (intentId: string) => void
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -175,6 +185,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isLoading: false,
   error: null,
   isOpen: false,
+  chatLaunchIntent: null,
   
   addMessage: (projectId, message) => set((state) => {
     const nextMessagesByProject = {
@@ -208,5 +219,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return { messagesByProject: nextMessagesByProject }
   }),
   
-  clearError: () => set({ error: null })
+  clearError: () => set({ error: null }),
+
+  openChatWithIntent: (intent) => set({ chatLaunchIntent: intent, isOpen: true }),
+
+  consumeChatLaunchIntent: (intentId) => set((state) => (
+    state.chatLaunchIntent?.intentId === intentId
+      ? { chatLaunchIntent: null }
+      : {}
+  )),
 }))

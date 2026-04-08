@@ -236,12 +236,15 @@ export function ChatInterface({
     addMessage,
     setLoading,
     setError,
-    clearError
+    clearError,
+    chatLaunchIntent,
+    consumeChatLaunchIntent,
   } = useChatStore()
-  
+
   const { activeProject } = useAnalysisProjectStore()
   const { user } = useUser()
   const [inputMessage, setInputMessage] = useState('')
+  const [activeContextHint, setActiveContextHint] = useState<{ sectionTitle: string; contextHint: string } | null>(null)
   const [transientAssistantMessage, setTransientAssistantMessage] = useState<ChatMessage | null>(null)
   const [expandedActivityIds, setExpandedActivityIds] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -273,6 +276,23 @@ export function ChatInterface({
     setExpandedActivityIds([])
   }, [activeProjectId])
 
+  // Consume chat launch intent: prefill input and set context
+  useEffect(() => {
+    if (!chatLaunchIntent) return
+
+    consumeChatLaunchIntent(chatLaunchIntent.intentId)
+    setActiveContextHint({
+      sectionTitle: chatLaunchIntent.sectionTitle,
+      contextHint: chatLaunchIntent.contextHint,
+    })
+
+    // Only prefill if input is empty (don't overwrite user's draft)
+    if (chatLaunchIntent.prefillQuestion && !inputMessage.trim()) {
+      setInputMessage(chatLaunchIntent.prefillQuestion)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatLaunchIntent?.intentId])
+
   const handleNewChat = () => {
     if (!activeProjectId) return
 
@@ -282,6 +302,7 @@ export function ChatInterface({
     setInputMessage('')
     setTransientAssistantMessage(null)
     setExpandedActivityIds([])
+    setActiveContextHint(null)
   }
 
   const handleSendMessage = async () => {
@@ -323,11 +344,15 @@ export function ChatInterface({
       }))
 
       // Call the v2 chat API
+      const contextHintToSend = activeContextHint?.contextHint ?? undefined
+      setActiveContextHint(null) // one-shot: clear after sending
+
       const response = await fetchWithAuth(`/api/analysis-projects/${projectId}/chat/stream`, {
         method: 'POST',
         body: JSON.stringify({
           message: userMessage.content,
-          recent_messages: recentMessages
+          recent_messages: recentMessages,
+          ...(contextHintToSend ? { context_hint: contextHintToSend } : {}),
         })
       }, true)
 
@@ -671,6 +696,21 @@ export function ChatInterface({
 
       {/* Input */}
       <div className="flex-shrink-0 border-t border-gray-200 p-4">
+        {activeContextHint && (
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-full">
+              Context: {activeContextHint.sectionTitle}
+            </span>
+            <button
+              type="button"
+              onClick={() => setActiveContextHint(null)}
+              className="text-xs text-slate-400 hover:text-slate-600"
+              aria-label="Remove context"
+            >
+              &times;
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
           <textarea
             value={inputMessage}

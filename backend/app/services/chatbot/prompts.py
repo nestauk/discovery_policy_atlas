@@ -18,6 +18,7 @@ TOOL_STRATEGY_RULES = [
     "If the user asks about Parliament, ministers, or government positions, use search_parliament.",
     "For mixed evidence and Parliament questions, cover the evidence side and the Parliament side separately.",
     "Use specific policy-topic queries rather than generic search phrases.",
+    "If a UI context hint is provided, use it to focus tool queries and responses on the relevant section, but do not treat it as evidence.",
 ]
 
 EVIDENCE_STANDARDS = [

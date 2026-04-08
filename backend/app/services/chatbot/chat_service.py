@@ -241,6 +241,18 @@ class ChatbotService:
             for msg in request.recent_messages[-5:]:
                 messages.append({"role": msg.role.value, "content": msg.content})
 
+        if request.context_hint:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"[UI context — the user is looking at this section of the synthesis: "
+                        f"{request.context_hint[:800]}. "
+                        f"Use this to focus your response, but treat it as relevance guidance, not evidence.]"
+                    ),
+                }
+            )
+
         messages.append({"role": "user", "content": request.message})
 
         # Run agent loop

@@ -40,6 +40,7 @@ import { SynthesisSummary } from '@/types/search'
 import { ExecutiveBriefing } from '../../results/ExecutiveBriefing'
 import { ChatInterface } from '@/components/chatbot/ChatInterface'
 import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
+import { useChatStore } from '@/lib/chatStore'
 import { ProjectCharts } from '@/components/charts/ProjectCharts'
 import { InterventionsNavigator } from '@/components/interventions/InterventionsNavigator'
 import type { InterventionData } from '@/components/interventions/InterventionsTable'
@@ -178,6 +179,16 @@ export default function ProjectResultsPage() {
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
   const { getToken } = useAuth()
   const { user } = useUser()
+  const { openChatWithIntent } = useChatStore()
+
+  const handleLaunchChat = useCallback((sectionTitle: string, contextHint: string, prefillQuestion?: string) => {
+    openChatWithIntent({
+      intentId: `${Date.now()}`,
+      sectionTitle,
+      contextHint,
+      prefillQuestion,
+    })
+  }, [openChatWithIntent])
   
   const isProjectOwner = useMemo(() => {
     if (!user || !activeProject) return false
@@ -1234,6 +1245,8 @@ export default function ProjectResultsPage() {
                         onCitationClick={() => {
                           updateUrl('evidence', 'documents')
                         }}
+                        chatEnabled={true}
+                        onLaunchChat={handleLaunchChat}
                       />
                       <ProjectCharts projectId={projectId} projectTitle={activeProject?.title} />
                     </div>

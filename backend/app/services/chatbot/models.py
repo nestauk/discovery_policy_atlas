@@ -26,6 +26,7 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=2000)
     recent_messages: Optional[List[ChatMessage]] = Field(default=None, max_length=10)
+    context_hint: Optional[str] = Field(default=None, max_length=800)
 
 
 class DocumentReference(BaseModel):
