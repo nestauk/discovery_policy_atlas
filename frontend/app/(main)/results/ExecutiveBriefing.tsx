@@ -255,47 +255,34 @@ function stripCitationsAndTruncate(text: string, maxLen = 350): string {
   return stripped.length > maxLen ? stripped.slice(0, maxLen) + '…' : stripped;
 }
 
-function SectionChatButton({ sectionTitle, contextHint, onLaunchChat }: {
-  sectionTitle: string;
-  contextHint: string;
-  onLaunchChat: (sectionTitle: string, contextHint: string) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onLaunchChat(sectionTitle, contextHint)}
-      className="ml-2 inline-flex items-center justify-center w-6 h-6 rounded-full text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-      aria-label={`Ask about ${sectionTitle}`}
-      title="Ask about this section"
-    >
-      <MessageCircle className="h-3.5 w-3.5" />
-    </button>
-  );
-}
-
 interface ChipDef {
   question: string;
 }
 
-function SectionChatChips({ chips, sectionTitle, contextHint, onLaunchChat }: {
+function SectionChatFooter({ chips, sectionTitle, contextHint, onLaunchChat }: {
   chips: ChipDef[];
   sectionTitle: string;
   contextHint: string;
   onLaunchChat: (sectionTitle: string, contextHint: string, prefillQuestion?: string) => void;
 }) {
   return (
-    <div className="flex flex-wrap gap-2 mt-3">
-      {chips.map((chip) => (
-        <button
-          key={chip.question}
-          type="button"
-          onClick={() => onLaunchChat(sectionTitle, contextHint, chip.question)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-full transition-colors"
-        >
-          <MessageCircle className="h-3 w-3" />
-          {chip.question}
-        </button>
-      ))}
+    <div className="mt-4 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
+      <div className="flex items-center gap-1.5 mb-2">
+        <MessageCircle className="h-3.5 w-3.5 text-slate-500" />
+        <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Ask the assistant</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {chips.map((chip) => (
+          <button
+            key={chip.question}
+            type="button"
+            onClick={() => onLaunchChat(sectionTitle, contextHint, chip.question)}
+            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-full transition-colors"
+          >
+            {chip.question}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -539,12 +526,7 @@ function CoreAnswerSection({ coreAnswer, renderCitations, onLaunchChat }: {
       <div className="flex items-start gap-3">
         <Lightbulb className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
         <div className="flex-1">
-          <div className="text-sm text-blue-600 font-medium mb-2 flex items-center">
-            Core Finding
-            {onLaunchChat && (
-              <SectionChatButton sectionTitle="Core Finding" contextHint={contextHint} onLaunchChat={onLaunchChat} />
-            )}
-          </div>
+          <div className="text-sm text-blue-600 font-medium mb-2">Core Finding</div>
           <div className="text-slate-800 font-medium leading-relaxed">
             {renderCitations(coreAnswer.answer, 'core-answer')}
           </div>
@@ -557,7 +539,7 @@ function CoreAnswerSection({ coreAnswer, renderCitations, onLaunchChat }: {
             </div>
           )}
           {onLaunchChat && (
-            <SectionChatChips chips={CORE_ANSWER_CHIPS} sectionTitle="Core Finding" contextHint={contextHint} onLaunchChat={onLaunchChat} />
+            <SectionChatFooter chips={CORE_ANSWER_CHIPS} sectionTitle="Core Finding" contextHint={contextHint} onLaunchChat={onLaunchChat} />
           )}
         </div>
       </div>
@@ -565,19 +547,13 @@ function CoreAnswerSection({ coreAnswer, renderCitations, onLaunchChat }: {
   );
 }
 
-function BackgroundSectionComponent({ background, renderCitations, onLaunchChat }: {
+function BackgroundSectionComponent({ background, renderCitations }: {
   background: BackgroundSection;
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
-  onLaunchChat?: (sectionTitle: string, contextHint: string) => void;
 }) {
   return (
     <div className="mb-6">
-      <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center">
-        {background.title}
-        {onLaunchChat && (
-          <SectionChatButton sectionTitle={background.title} contextHint={`Background: ${background.title}`} onLaunchChat={onLaunchChat} />
-        )}
-      </h3>
+      <h3 className="text-lg font-semibold text-slate-800 mb-3">{background.title}</h3>
       <div className="space-y-3">
         {background.paragraphs.map((para, idx) => (
           <p key={idx} className="text-slate-700 leading-relaxed">
@@ -651,13 +627,11 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
 
   return (
     <div className="mb-6">
-      <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center">
-        Key Interventions
-        {onLaunchChat && (
-          <SectionChatButton sectionTitle="Interventions" contextHint={interventionContext} onLaunchChat={onLaunchChat} />
-        )}
-      </h3>
-      <div className="overflow-x-auto rounded-lg border border-slate-200">
+      <h3 className="text-lg font-semibold text-slate-800 mb-3">Key Interventions</h3>
+      {onLaunchChat && (
+        <SectionChatFooter chips={INTERVENTIONS_CHIPS} sectionTitle="Interventions" contextHint={interventionContext} onLaunchChat={onLaunchChat} />
+      )}
+      <div className="overflow-x-auto rounded-lg border border-slate-200 mt-3">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
@@ -768,9 +742,6 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
           </tbody>
         </table>
       </div>
-      {onLaunchChat && (
-        <SectionChatChips chips={INTERVENTIONS_CHIPS} sectionTitle="Interventions" contextHint={interventionContext} onLaunchChat={onLaunchChat} />
-      )}
     </div>
   );
 }
@@ -789,11 +760,11 @@ function RecommendationsList({ recommendations, renderCitations, onLaunchChat }:
       <h3 className="text-lg font-semibold text-slate-800 mb-3 flex items-center gap-2">
         <CheckCircle className="h-5 w-5 text-green-600" />
         Recommendations
-        {onLaunchChat && (
-          <SectionChatButton sectionTitle="Recommendations" contextHint={recContext} onLaunchChat={onLaunchChat} />
-        )}
       </h3>
-      <div className="space-y-3">
+      {onLaunchChat && (
+        <SectionChatFooter chips={RECOMMENDATIONS_CHIPS} sectionTitle="Recommendations" contextHint={recContext} onLaunchChat={onLaunchChat} />
+      )}
+      <div className="space-y-3 mt-3">
         {recommendations.map((rec) => (
           <div key={rec.number} className="flex gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
             <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-semibold flex items-center justify-center">
@@ -817,17 +788,13 @@ function RecommendationsList({ recommendations, renderCitations, onLaunchChat }:
           </div>
         ))}
       </div>
-      {onLaunchChat && (
-        <SectionChatChips chips={RECOMMENDATIONS_CHIPS} sectionTitle="Recommendations" contextHint={recContext} onLaunchChat={onLaunchChat} />
-      )}
     </div>
   );
 }
 
-function SynthesisSections({ sections, renderCitations, onLaunchChat }: {
+function SynthesisSections({ sections, renderCitations }: {
   sections?: SynthesisSectionType[];
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
-  onLaunchChat?: (sectionTitle: string, contextHint: string) => void;
 }) {
   if (!sections || sections.length === 0) return null;
 
@@ -838,15 +805,6 @@ function SynthesisSections({ sections, renderCitations, onLaunchChat }: {
           <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
             <Lightbulb className="h-4 w-4 text-blue-600" />
             <h3 className="text-base font-semibold text-slate-800">{section.title}</h3>
-            {onLaunchChat && (
-              <SectionChatButton
-                sectionTitle={section.title}
-                contextHint={`${section.title}: ${stripCitationsAndTruncate(
-                  (section.content_type === 'bullets' ? section.bullets : section.paragraphs).join(' ')
-                )}`}
-                onLaunchChat={onLaunchChat}
-              />
-            )}
           </div>
           {section.content_type === 'bullets' ? (
             <ul className="px-4 py-3 list-disc list-inside space-y-2 text-slate-700 leading-relaxed">
@@ -1577,7 +1535,6 @@ export function ExecutiveBriefing({
               <BackgroundSectionComponent
                 background={structuredBriefing.background_section}
                 renderCitations={renderCitations}
-                onLaunchChat={chatEnabled ? onLaunchChat : undefined}
               />
             )}
 
@@ -1594,7 +1551,6 @@ export function ExecutiveBriefing({
             <SynthesisSections
               sections={synthesisSections}
               renderCitations={renderCitations}
-              onLaunchChat={chatEnabled ? onLaunchChat : undefined}
             />
 
             <RecommendationsList

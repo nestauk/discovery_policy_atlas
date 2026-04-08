@@ -248,6 +248,7 @@ export function ChatInterface({
   const [transientAssistantMessage, setTransientAssistantMessage] = useState<ChatMessage | null>(null)
   const [expandedActivityIds, setExpandedActivityIds] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const { fetchWithAuth } = useAPI()
   const activeProjectId = activeProject?.id ?? null
   const messages = activeProjectId ? getMessages(activeProjectId) : EMPTY_CHAT_MESSAGES
@@ -266,8 +267,7 @@ export function ChatInterface({
   // Auto-focus input if requested
   useEffect(() => {
     if (autoFocus) {
-      const input = document.querySelector('textarea') as HTMLTextAreaElement
-      if (input) input.focus()
+      inputRef.current?.focus()
     }
   }, [autoFocus])
 
@@ -713,6 +713,7 @@ export function ChatInterface({
         )}
         <div className="flex gap-2">
           <textarea
+            ref={inputRef}
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyPress={handleKeyPress}

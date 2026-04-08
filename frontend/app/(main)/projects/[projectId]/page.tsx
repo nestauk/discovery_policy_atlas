@@ -16,7 +16,6 @@ import {
   AlertCircle,
   BookOpen,
   Target,
-  Bot,
   Download,
   Share2,
   Copy,
@@ -38,7 +37,6 @@ import { useProjectDataCache } from '@/lib/projectDataCache'
 import { useAuth, useUser } from '@clerk/nextjs'
 import { SynthesisSummary } from '@/types/search'
 import { ExecutiveBriefing } from '../../results/ExecutiveBriefing'
-import { ChatInterface } from '@/components/chatbot/ChatInterface'
 import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
 import { useChatStore } from '@/lib/chatStore'
 import { ProjectCharts } from '@/components/charts/ProjectCharts'
@@ -104,7 +102,7 @@ interface AnalysisDocument {
   is_relevant_evidence?: boolean
 }
 
-type TabType = 'summary' | 'evidence' | 'assistant'
+type TabType = 'summary' | 'evidence'
 type EvidenceSubTabType = 'interventions' | 'documents'
 type ProjectStatus = 'created' | 'running' | 'synthesising' | 'uploading' | 'completed' | 'failed' | string
 
@@ -127,7 +125,7 @@ export default function ProjectResultsPage() {
   
   // Get tab state from URL query params, with defaults and validation
   const tabParam = searchParams.get('tab')
-  const validTabs: TabType[] = ['summary', 'evidence', 'assistant']
+  const validTabs: TabType[] = ['summary', 'evidence']
   const urlTab: TabType = validTabs.includes(tabParam as TabType) ? (tabParam as TabType) : 'summary'
   
   const subtabParam = searchParams.get('subtab')
@@ -179,7 +177,7 @@ export default function ProjectResultsPage() {
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
   const { getToken } = useAuth()
   const { user } = useUser()
-  const { openChatWithIntent } = useChatStore()
+  const { openChatWithIntent, isOpen: isChatOpen, setIsOpen: setChatOpen } = useChatStore()
 
   const handleLaunchChat = useCallback((sectionTitle: string, contextHint: string, prefillQuestion?: string) => {
     openChatWithIntent({
@@ -204,6 +202,14 @@ export default function ProjectResultsPage() {
       activeProject.created_by_name === currentUserEmailUsername
     )
   }, [user, activeProject])
+
+  // Backward compat: ?tab=assistant opens sidebar and redirects to summary
+  useEffect(() => {
+    if (tabParam === 'assistant') {
+      setChatOpen(true)
+      router.replace(`/projects/${projectId}`, { scroll: false })
+    }
+  }, [tabParam, projectId, router, setChatOpen])
 
   // Update URL when tab changes (without full navigation)
   const updateUrl = useCallback((tab: TabType, subtab?: EvidenceSubTabType) => {
@@ -956,7 +962,11 @@ export default function ProjectResultsPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-50">
+    <div
+      className={`flex-1 flex flex-col bg-slate-50 transition-[margin] duration-300 ${
+        isChatOpen ? '2xl:mr-[400px]' : ''
+      }`}
+    >
       {/* Header */}
       <div className="border-b border-slate-200 bg-white px-8 py-6">
         <div className="flex items-start justify-between gap-4">
@@ -1170,7 +1180,7 @@ export default function ProjectResultsPage() {
         {projectId && !error && (
           <Tabs value={urlTab} onValueChange={handleTabChange} className="flex flex-col">
             <div className="px-6 pt-4">
-              <TabsList className="!grid w-full grid-cols-3">
+              <TabsList className="!grid w-full grid-cols-2">
                 <TabsTrigger value="summary" className="flex items-center gap-2">
                   <FileText className="h-4 w-4" />
                   Summary
@@ -1178,10 +1188,6 @@ export default function ProjectResultsPage() {
                 <TabsTrigger value="evidence" className="flex items-center gap-2">
                   <BookOpen className="h-4 w-4" />
                   Evidence
-                </TabsTrigger>
-                <TabsTrigger value="assistant" className="flex items-center gap-2">
-                  <Bot className="h-4 w-4" />
-                  Assistant
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -1401,13 +1407,6 @@ export default function ProjectResultsPage() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="assistant" className="m-0 h-[600px]">
-                <ChatInterface 
-                  autoFocus={urlTab === 'assistant'}
-                  placeholder="Ask about the evidence in this project..."
-                  className="h-full"
-                />
-              </TabsContent>
             </div>
           </Tabs>
         )}
