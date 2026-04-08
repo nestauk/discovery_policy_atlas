@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.core.auth import CurrentUser, get_current_user
 from app.core.config import settings
+from app.services.analysis.schemas import ImplementationConstraints
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +29,6 @@ class ConversationMessage(BaseModel):
     content: str
 
 
-class ImplementationConstraintsParam(BaseModel):
-    cost: Optional[str] = None
-    staffing: Optional[str] = None
-    implementation_complexity: Optional[str] = None
-
-
 class ExtractedParams(BaseModel):
     research_question: str = ""
     population: List[str] = Field(default_factory=list)
@@ -43,7 +38,7 @@ class ExtractedParams(BaseModel):
     time_preset: str = "LAST_10_YEARS"
     time_from: Optional[str] = None
     time_to: Optional[str] = None
-    implementation_constraints: Optional[ImplementationConstraintsParam] = None
+    implementation_constraints: Optional[ImplementationConstraints] = None
     screening_factors: List[str] = Field(default_factory=list)
     sources: List[str] = Field(default_factory=lambda: ["openalex", "overton"])
     max_results: int = 25
@@ -265,7 +260,81 @@ Abstract: {abstract}
 
 
 # ---------------------------------------------------------------------------
-# Endpoint
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+async def _call_llm_json(
+    messages: list[dict],
+    *,
+    temperature: float = 0.3,
+    max_tokens: int = 1000,
+    error_context: str = "LLM call",
+) -> dict:
+    """Call OpenAI with JSON mode and return the parsed dict.
+
+    Raises HTTPException on failure so callers stay concise.
+    """
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-5.4",
+            messages=messages,
+            temperature=temperature,
+            max_completion_tokens=max_tokens,
+            reasoning_effort="none",
+            response_format={"type": "json_object"},
+        )
+
+        content = (response.choices[0].message.content or "").strip()
+        if not content:
+            raise ValueError("Empty response from LLM")
+
+        return json.loads(content)
+
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse %s response as JSON: %s", error_context, e)
+        raise HTTPException(status_code=500, detail="Failed to parse AI response")
+    except Exception as e:
+        logger.error("Error in %s: %s", error_context, e, exc_info=True)
+        raise HTTPException(
+            status_code=500, detail=f"Failed to process {error_context}"
+        )
+
+
+def _merge_extracted_params(
+    parsed_params: dict, current: ExtractedParams
+) -> ExtractedParams:
+    """Merge LLM-extracted params over current defaults."""
+    return ExtractedParams(
+        research_question=parsed_params.get(
+            "research_question", current.research_question
+        ),
+        population=parsed_params.get("population", current.population),
+        inner_setting=parsed_params.get("inner_setting", current.inner_setting),
+        outcome=parsed_params.get("outcome", current.outcome),
+        geography=parsed_params.get("geography", current.geography),
+        time_preset=parsed_params.get("time_preset", current.time_preset),
+        time_from=parsed_params.get("time_from", current.time_from),
+        time_to=parsed_params.get("time_to", current.time_to),
+        implementation_constraints=(
+            ImplementationConstraints(**parsed_params["implementation_constraints"])
+            if isinstance(parsed_params.get("implementation_constraints"), dict)
+            else current.implementation_constraints
+        ),
+        screening_factors=parsed_params.get(
+            "screening_factors", current.screening_factors
+        ),
+        sources=parsed_params.get("sources", current.sources),
+        max_results=parsed_params.get("max_results", current.max_results),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -280,10 +349,6 @@ async def converse(
     generates the next question with contextual chips, and progressively
     extracts structured search parameters.
     """
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-
     current_params = request.extracted_params or ExtractedParams()
     system_prompt = _build_system_prompt(
         request.use_case,
@@ -293,73 +358,32 @@ async def converse(
         pending_context_summary=request.pending_context_summary,
     )
 
-    # Build messages for the LLM
-    messages = [{"role": "system", "content": system_prompt}]
-    for msg in request.conversation_history:
-        messages.append({"role": msg.role, "content": msg.content})
-    messages.append({"role": "user", "content": request.message})
+    messages = [
+        {"role": "system", "content": system_prompt},
+        *[
+            {"role": msg.role, "content": msg.content}
+            for msg in request.conversation_history
+        ],
+        {"role": "user", "content": request.message},
+    ]
 
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-5.4",
-            messages=messages,
-            temperature=0.3,
-            max_completion_tokens=1000,
-            reasoning_effort="none",
-            response_format={"type": "json_object"},
-        )
+    parsed = await _call_llm_json(
+        messages, temperature=0.3, max_tokens=1000, error_context="converse"
+    )
 
-        content = (response.choices[0].message.content or "").strip()
-        if not content:
-            raise ValueError("Empty response from LLM")
+    params = _merge_extracted_params(parsed.get("extracted_params", {}), current_params)
 
-        parsed = json.loads(content)
-
-        # Build response with defaults for missing fields
-        extracted = parsed.get("extracted_params", {})
-        params = ExtractedParams(
-            research_question=extracted.get(
-                "research_question", current_params.research_question
-            ),
-            population=extracted.get("population", current_params.population),
-            inner_setting=extracted.get("inner_setting", current_params.inner_setting),
-            outcome=extracted.get("outcome", current_params.outcome),
-            geography=extracted.get("geography", current_params.geography),
-            time_preset=extracted.get("time_preset", current_params.time_preset),
-            time_from=extracted.get("time_from", current_params.time_from),
-            time_to=extracted.get("time_to", current_params.time_to),
-            implementation_constraints=(
-                ImplementationConstraintsParam(
-                    **extracted["implementation_constraints"]
-                )
-                if isinstance(extracted.get("implementation_constraints"), dict)
-                else current_params.implementation_constraints
-            ),
-            screening_factors=extracted.get(
-                "screening_factors", current_params.screening_factors
-            ),
-            sources=extracted.get("sources", current_params.sources),
-            max_results=extracted.get("max_results", current_params.max_results),
-        )
-
-        return ConverseResponse(
-            message=parsed.get(
-                "message", "I'm not sure what to ask next. Could you tell me more?"
-            ),
-            chips=parsed.get("chips", []),
-            ready_for_plan=parsed.get("ready_for_plan", False),
-            show_filters=parsed.get("show_filters", False),
-            requires_confirmation=parsed.get("requires_confirmation", False),
-            confirmed_action=parsed.get("confirmed_action", False),
-            extracted_params=params,
-        )
-
-    except json.JSONDecodeError as e:
-        logger.error("Failed to parse LLM response as JSON: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to parse AI response")
-    except Exception as e:
-        logger.error("Error in converse endpoint: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to process conversation")
+    return ConverseResponse(
+        message=parsed.get(
+            "message", "I'm not sure what to ask next. Could you tell me more?"
+        ),
+        chips=parsed.get("chips", []),
+        ready_for_plan=parsed.get("ready_for_plan", False),
+        show_filters=parsed.get("show_filters", False),
+        requires_confirmation=parsed.get("requires_confirmation", False),
+        confirmed_action=parsed.get("confirmed_action", False),
+        extracted_params=params,
+    )
 
 
 @router.post(
@@ -371,11 +395,6 @@ async def international_comparison(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> InternationalComparisonResponse:
     """Generate a concise LLM judgment for why an international source is interesting."""
-    from openai import AsyncOpenAI
-
-    del current_user  # Auth gate only; not used beyond dependency injection.
-
-    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     prompt = INTERNATIONAL_COMPARISON_PROMPT.format(
         research_question=request.research_question,
         focus_terms=", ".join(request.focus_terms)
@@ -386,36 +405,20 @@ async def international_comparison(
         abstract=request.abstract or "No abstract available.",
     )
 
-    try:
-        response = await client.chat.completions.create(
-            model="gpt-5.4",
-            messages=[{"role": "system", "content": prompt}],
-            temperature=0.2,
-            max_completion_tokens=400,
-            reasoning_effort="none",
-            response_format={"type": "json_object"},
-        )
+    parsed = await _call_llm_json(
+        [{"role": "system", "content": prompt}],
+        temperature=0.2,
+        max_tokens=400,
+        error_context="international comparison",
+    )
 
-        content = (response.choices[0].message.content or "").strip()
-        if not content:
-            raise ValueError("Empty response from LLM")
-
-        parsed = json.loads(content)
-        return InternationalComparisonResponse(
-            why_interesting=parsed.get(
-                "why_interesting",
-                "This source appears relevant as an international comparator for the question.",
-            ),
-            uk_relevance=parsed.get(
-                "uk_relevance",
-                "It may offer a useful comparison point for a UK policy context.",
-            ),
-        )
-    except json.JSONDecodeError as e:
-        logger.error("Failed to parse international comparison JSON: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to parse AI response")
-    except Exception as e:
-        logger.error("Error in international comparison endpoint: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500, detail="Failed to generate international comparison"
-        )
+    return InternationalComparisonResponse(
+        why_interesting=parsed.get(
+            "why_interesting",
+            "This source appears relevant as an international comparator for the question.",
+        ),
+        uk_relevance=parsed.get(
+            "uk_relevance",
+            "It may offer a useful comparison point for a UK policy context.",
+        ),
+    )

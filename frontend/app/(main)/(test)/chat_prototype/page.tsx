@@ -68,8 +68,21 @@ type Phase = 'chat' | 'running' | 'results'
 type PendingAction = 'run_preview_search' | 'confirm_preview_sources' | 'run_full_analysis'
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Constants & Helpers
 // ---------------------------------------------------------------------------
+
+const DEFAULT_PARAMS: ExtractedParams = {
+  research_question: '',
+  population: [],
+  inner_setting: [],
+  outcome: [],
+  geography: [],
+  time_preset: 'LAST_10_YEARS',
+  implementation_constraints: null,
+  screening_factors: [],
+  sources: ['openalex', 'overton'],
+  max_results: 25,
+}
 
 const SESSION_KEY = 'chat-prototype-state'
 
@@ -116,6 +129,9 @@ const TIME_PRESET_TO_DATES: Record<string, { from?: string; to?: string }> = {
   SINCE_2000: { from: '2000-01-01' },
   ANY: {},
 }
+
+const PRIMARY_CHIPS = new Set(['Start initial scan', 'These look right', 'Start full analysis'])
+const SECONDARY_CHIPS = new Set(['Change scope', 'Refine search', 'Change outputs'])
 
 const FILTER_CARD_TITLE = 'Recommended Search Scope'
 const FILTER_CARD_DESCRIPTION =
@@ -203,21 +219,24 @@ function getSourceSummary(sources: string[]) {
   return 'policy and grey literature'
 }
 
+const TIME_PRESET_DISPLAY: Record<string, string> = {
+  LAST_YEAR: 'last year',
+  LAST_2_YEARS: 'last 2 years',
+  LAST_5_YEARS: 'last 5 years',
+  LAST_10_YEARS: 'last 10 years',
+  SINCE_2000: 'since 2000',
+  ANY: 'any time period',
+}
+
 function getTimeSummary(filters: FilterValues) {
-  return (
-    {
-      LAST_YEAR: 'from the last year',
-      LAST_2_YEARS: 'from the last 2 years',
-      LAST_5_YEARS: 'from the last 5 years',
-      LAST_10_YEARS: 'from the last 10 years',
-      SINCE_2000: 'since 2000',
-      ANY: 'from any time period',
-      CUSTOM:
-        filters.customFrom || filters.customTo
-          ? `from ${filters.customFrom || 'an earlier date'} to ${filters.customTo || 'now'}`
-          : 'from a custom date range',
-    }[filters.timePreset] || 'from the selected time period'
-  )
+  if (filters.timePreset === 'CUSTOM') {
+    const range =
+      filters.customFrom || filters.customTo
+        ? `from ${filters.customFrom || 'an earlier date'} to ${filters.customTo || 'now'}`
+        : 'from a custom date range'
+    return range
+  }
+  return `from the ${TIME_PRESET_DISPLAY[filters.timePreset] || 'selected time period'}`
 }
 
 function getGeographySummary(geography: string[]) {
@@ -264,20 +283,39 @@ function buildAnalysisPlanSummary(params: ExtractedParams, outputs: string[]) {
   const geography = params.geography.includes('All') || params.geography.length === 0
     ? 'any geography'
     : formatList(params.geography)
-  const timeWindow =
-    {
-      LAST_YEAR: 'last year',
-      LAST_2_YEARS: 'last 2 years',
-      LAST_5_YEARS: 'last 5 years',
-      LAST_10_YEARS: 'last 10 years',
-      SINCE_2000: 'since 2000',
-      ANY: 'any time period',
-    }[params.time_preset] || params.time_preset
+  const timeWindow = TIME_PRESET_DISPLAY[params.time_preset] || params.time_preset
 
   const selected = outputs.map((id) => OUTPUT_LABELS[id] || id.replaceAll('_', ' '))
   const outputSummary = selected.length > 0 ? formatList(selected) : 'the selected outputs'
 
   return `Here’s the plan I’ll follow if you want me to continue:\n\n- **Topic:** ${params.research_question}\n- **Evidence scope:** ${sources}, ${timeWindow}, ${geography}\n- **Outputs to generate:** ${outputSummary}\n- **Next:** gather the fuller evidence base, extract the intervention details, and draft the outputs you selected`
+}
+
+function buildAnalysisConfig(params: ExtractedParams, options: { abstractsOnly: boolean }) {
+  const dates = TIME_PRESET_TO_DATES[params.time_preset] || {}
+  return {
+    query: params.research_question,
+    search_context: {
+      research_question: params.research_question,
+      population: params.population,
+      outcome: params.outcome,
+      inner_setting: params.inner_setting,
+      geography: params.geography.filter((g) => g !== 'All'),
+      time_preset: params.time_preset,
+      screening_factors: params.screening_factors,
+      implementation_constraints: params.implementation_constraints || {},
+      sources: params.sources,
+      max_results: params.max_results,
+    },
+    sources: params.sources,
+    date_from: params.time_from || dates.from,
+    date_to: params.time_to || dates.to,
+    limit: options.abstractsOnly
+      ? params.max_results
+      : params.max_results * params.sources.length,
+    relevance_enabled: true,
+    use_abstracts_only: options.abstractsOnly,
+  }
 }
 
 function getFilterInitialValues(params: ExtractedParams) {
@@ -457,19 +495,6 @@ export default function ChatPrototypePage() {
   // --- Restore persisted state ---
   const saved = useRef(loadPersistedState()).current
 
-  const defaultParams: ExtractedParams = {
-    research_question: '',
-    population: [],
-    inner_setting: [],
-    outcome: [],
-    geography: [],
-    time_preset: 'LAST_10_YEARS',
-    implementation_constraints: null,
-    screening_factors: [],
-    sources: ['openalex', 'overton'],
-    max_results: 25,
-  }
-
   // Restore msgCounter so IDs don't collide
   if (saved) msgCounter = saved.msgCounter
 
@@ -478,7 +503,7 @@ export default function ChatPrototypePage() {
   const [useCase, setUseCase] = useState<UseCase | null>(saved?.useCase ?? null)
   const [messages, setMessages] = useState<ChatMessage[]>(saved?.messages ?? [])
   const [conversationHistory, setConversationHistory] = useState<ConversationEntry[]>(saved?.conversationHistory ?? [])
-  const [extractedParams, setExtractedParams] = useState<ExtractedParams>(saved?.extractedParams ?? defaultParams)
+  const [extractedParams, setExtractedParams] = useState<ExtractedParams>(saved?.extractedParams ?? DEFAULT_PARAMS)
   const [isLoading, setIsLoading] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('Thinking...')
   const [inputValue, setInputValue] = useState('')
@@ -756,27 +781,11 @@ export default function ChatPrototypePage() {
   // --- Handle chip selection ---
   const handleChipSelect = useCallback(
     (chip: string) => {
-      if (chip === 'Start initial scan') {
+      if (PRIMARY_CHIPS.has(chip)) {
         void handleConfirmationPrimary()
         return
       }
-      if (chip === 'Change scope') {
-        handleConfirmationSecondary()
-        return
-      }
-      if (chip === 'These look right') {
-        void handleConfirmationPrimary()
-        return
-      }
-      if (chip === 'Refine search') {
-        handleConfirmationSecondary()
-        return
-      }
-      if (chip === 'Start full analysis') {
-        void handleConfirmationPrimary()
-        return
-      }
-      if (chip === 'Change outputs') {
+      if (SECONDARY_CHIPS.has(chip)) {
         handleConfirmationSecondary()
         return
       }
@@ -834,31 +843,7 @@ export default function ChatPrototypePage() {
 
         setLoadingMessage('Searching research and policy evidence for the most relevant sources...')
 
-        // Build date range from time preset
-        const dates = TIME_PRESET_TO_DATES[params.time_preset] || {}
-
-        // Trigger preview (abstracts only)
-        await runAnalysisForProject(pid, {
-          query: params.research_question,
-          search_context: {
-            research_question: params.research_question,
-            population: params.population,
-            outcome: params.outcome,
-            inner_setting: params.inner_setting,
-            geography: params.geography.filter((g) => g !== 'All'),
-            time_preset: params.time_preset,
-            screening_factors: params.screening_factors,
-            implementation_constraints: params.implementation_constraints || {},
-            sources: params.sources,
-            max_results: params.max_results,
-          },
-          sources: params.sources,
-          date_from: params.time_from || dates.from,
-          date_to: params.time_to || dates.to,
-          limit: params.max_results,
-          relevance_enabled: true,
-          use_abstracts_only: true,
-        })
+        await runAnalysisForProject(pid, buildAnalysisConfig(params, { abstractsOnly: true }))
 
         setLoadingMessage('Reviewing the most relevant sources and ranking the strongest studies...')
 
@@ -1164,29 +1149,7 @@ export default function ChatPrototypePage() {
       ])
 
       try {
-        const dates = TIME_PRESET_TO_DATES[extractedParams.time_preset] || {}
-
-        await runAnalysisForProject(projectId, {
-          query: extractedParams.research_question,
-          search_context: {
-            research_question: extractedParams.research_question,
-            population: extractedParams.population,
-            outcome: extractedParams.outcome,
-            inner_setting: extractedParams.inner_setting,
-            geography: extractedParams.geography.filter((g) => g !== 'All'),
-            time_preset: extractedParams.time_preset,
-            screening_factors: extractedParams.screening_factors,
-            implementation_constraints: extractedParams.implementation_constraints || {},
-            sources: extractedParams.sources,
-            max_results: extractedParams.max_results,
-          },
-          sources: extractedParams.sources,
-          date_from: extractedParams.time_from || dates.from,
-          date_to: extractedParams.time_to || dates.to,
-          limit: extractedParams.max_results * extractedParams.sources.length,
-          relevance_enabled: true,
-          use_abstracts_only: false,
-        })
+        await runAnalysisForProject(projectId, buildAnalysisConfig(extractedParams, { abstractsOnly: false }))
 
         setTimeout(() => {
           setMessages((prev) => [
@@ -1255,30 +1218,16 @@ export default function ChatPrototypePage() {
   )
 
   const handleConfirmationSecondary = useCallback(() => {
-    if (pendingAction === 'run_preview_search') {
-      clearPendingAction()
-      setMessages((prev) => [
-        ...prev,
-        {
-          type: 'text',
-          id: nextId(),
-          role: 'assistant',
-          content: 'No problem. Which part of the scope would you like to refine?',
-          chips: ['Geography', 'Time window', 'Sources'],
-        },
-      ])
-      return
-    }
+    clearPendingAction()
 
-    if (pendingAction === 'confirm_preview_sources') {
-      clearPendingAction()
+    if (pendingAction === 'run_preview_search' || pendingAction === 'confirm_preview_sources') {
       setMessages((prev) => [
         ...prev,
         {
           type: 'text',
           id: nextId(),
           role: 'assistant',
-          content: 'No problem. Which part of the search would you like to adjust before we go further?',
+          content: 'No problem. Which part of the search would you like to adjust?',
           chips: ['Geography', 'Time window', 'Sources'],
         },
       ])
@@ -1286,7 +1235,6 @@ export default function ChatPrototypePage() {
     }
 
     if (pendingAction === 'run_full_analysis') {
-      clearPendingAction()
       setMessages((prev) => [
         ...prev,
         {
@@ -1388,18 +1336,7 @@ export default function ChatPrototypePage() {
     setUseCase(null)
     setMessages([])
     setConversationHistory([])
-    setExtractedParams({
-      research_question: '',
-      population: [],
-      inner_setting: [],
-      outcome: [],
-      geography: [],
-      time_preset: 'LAST_10_YEARS',
-      implementation_constraints: null,
-      screening_factors: [],
-      sources: ['openalex', 'overton'],
-      max_results: 25,
-    })
+    setExtractedParams({ ...DEFAULT_PARAMS })
     setInputValue('')
     setProjectId(null)
     setSelectedOutputs([])
