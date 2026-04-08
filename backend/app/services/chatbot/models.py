@@ -25,7 +25,7 @@ class ChatRequest(BaseModel):
     """Request to send a message to the chatbot."""
 
     message: str = Field(..., min_length=1, max_length=2000)
-    recent_messages: Optional[List[ChatMessage]] = Field(default=None, max_items=10)
+    recent_messages: Optional[List[ChatMessage]] = Field(default=None, max_length=10)
 
 
 class DocumentReference(BaseModel):
