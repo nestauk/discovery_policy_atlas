@@ -48,7 +48,36 @@ const HelpHint = ({ content }: { content: React.ReactNode }) => (
 );
 
 // ---------------- TYPES & CONSTANTS ----------------
-type Step = "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
+type Step = "USER_TYPE" | "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
+type UserType = "policy_blueprint" | "horizon_scan" | "rapid_brief" | "rapid_evidence_review" | "not_sure";
+
+const USER_TYPE_OPTIONS: { value: UserType; label: string; description: string }[] = [
+  {
+    value: "policy_blueprint",
+    label: "A Policy Blueprint",
+    description: "generate a full report identifying specific interventions, extracting their outcomes, and ranking them by evidence strength and predicted impact.",
+  },
+  {
+    value: "horizon_scan",
+    label: "A Horizon Scan",
+    description: "An exec summary on a new policy area to get up to speed on a policy context and background.",
+  },
+  {
+    value: "rapid_brief",
+    label: "A Rapid Brief",
+    description: "A quick, evidenced answer to a policy-related question.",
+  },
+  {
+    value: "rapid_evidence_review",
+    label: "A Rapid Evidence Review",
+    description: "Search and summarise academic papers and grey literature for a particular policy area.",
+  },
+  {
+    value: "not_sure",
+    label: "I'm not sure",
+    description: "If you’re not sure, our search wizard will help you narrow down your policy question.",
+  },
+];
 type TimePreset = "LAST_YEAR" | "LAST_2_YEARS" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
 const DEFAULT_SOURCES = ["openalex", "overton"] as const;
@@ -155,6 +184,7 @@ export type SearchContext = {
 // ---------------- STATE ----------------
 interface WizardState {
   step: Step;
+  userType: UserType | null;
   researchQuestion: string;
   population: { selected: string[]; noPreference: boolean };
   innerSetting: { selected: string[]; noPreference: boolean };
@@ -191,7 +221,8 @@ interface WizardState {
 }
 
 const INITIAL_WIZARD_STATE = {
-  step: "ASK" as Step,
+  step: "USER_TYPE" as Step,
+  userType: null as UserType | null,
   researchQuestion: "",
   population: { selected: [] as string[], noPreference: true },
   innerSetting: { selected: [] as string[], noPreference: true },
@@ -228,7 +259,7 @@ export const useWizard = create<WizardState>((set, get) => ({
   next: () => {
     const s = get();
     // Skip ADDITIONAL_QUESTIONS step - go directly from PARAMETERS to SUMMARY
-    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+    const steps: Step[] = ["USER_TYPE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
     const currentIdx = steps.indexOf(s.step);
     if (currentIdx < steps.length - 1) {
       const nextStep = steps[currentIdx + 1];
@@ -243,7 +274,7 @@ export const useWizard = create<WizardState>((set, get) => ({
   back: () => {
     const s = get();
     // Skip ADDITIONAL_QUESTIONS step - go directly from SUMMARY to PARAMETERS
-    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+    const steps: Step[] = ["USER_TYPE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
     const currentIdx = steps.indexOf(s.step);
     if (currentIdx > 0) {
       const prevStep = steps[currentIdx - 1];
@@ -374,6 +405,7 @@ function ProgressBar({
   allStepsVisited: boolean;
 }) {
   const steps: { id: Step; label: string }[] = [
+    { id: "USER_TYPE", label: "Use case" },
     { id: "ASK", label: "Question" },
     { id: "POPULATION", label: "Population" },
     { id: "INNER_SETTING", label: "Setting" },
@@ -512,6 +544,70 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
 }
 
 // ---------------- SCREENS ----------------
+function ScreenUserType() {
+  const s = useWizard();
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-32">
+      <div className="flex items-center justify-center gap-3">
+          <h1 className="text-4xl font-bold tracking-tight">What would you like Policy Atlas to generate?</h1>
+          <Tooltip content={
+            <p className="max-w-xs">
+              Alpha means this is an early prototype with limited functionality. 
+              Features may be incomplete, unstable, or subject to change. 
+              We&apos;re actively developing and improving the tool.
+            </p>
+          }>
+            <Badge variant="default" className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1 -mt-2">ALPHA</Badge>
+          </Tooltip>
+        </div>
+
+      <div className="max-w-2xl mx-auto">
+        <p className="max-w-2xl mx-auto mt-4 text-sm text-gray-500">
+        Policy atlas is designed to support a range of use cases, from quick evidence checks to in-depth policy reports. We&apos;d love to understand which of these you&apos;d find most useful - this will help us prioritise which features to build next.
+      </p>
+
+        {USER_TYPE_OPTIONS.map((option) => {
+          const isSelected = s.userType === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => s.set({ userType: option.value })}
+              className={cx(
+                "w-full text-left px-5 py-4 !my-2 rounded-xl transition ring-1 whitespace-normal break-words",
+                isSelected
+                  ? "bg-blue-600 !text-white ring-blue-600"
+                  : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+              )}
+            >
+              <span className="font-medium">{option.label}</span>
+              {option.description && (
+                <span className={cx("block text-sm mt-1", isSelected ? "text-blue-100" : "text-gray-500")}>
+                  {option.description}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end items-center mt-6 max-w-2xl mx-auto">
+        <Button
+          variant="secondary"
+          className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+          full
+          disabled={!s.userType}
+          onClick={() => s.set({ step: "ASK" })}
+        >
+          Continue
+        </Button>
+      </div>
+
+    </div>
+  );
+}
+
 function ScreenAsk() {
   const s = useWizard();
   const apis = useAPI();
@@ -1643,8 +1739,8 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
     context.parameters.customFrom > context.parameters.customTo;
 
   const isSummaryStep = s.step === "SUMMARY";
-  const showActionBar = s.step !== "ASK";
-  const showResearchQuestionContext = s.step !== "ASK" && !!trimmedResearchQuestion;
+  const showActionBar = s.step !== "ASK" && s.step !== "USER_TYPE";
+  const showResearchQuestionContext = s.step !== "ASK" && s.step !== "USER_TYPE" && !!trimmedResearchQuestion;
 
   const getPrimaryAction = () => {
     if (isSummaryStep) {
@@ -1695,6 +1791,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
         />
       )}
       <div className={isSummaryStep ? "" : "flex-1"}>
+        {s.step === "USER_TYPE" && <ScreenUserType />}
         {s.step === "ASK" && <ScreenAsk />}
         {s.step === "POPULATION" && <ScreenPopulation />}
         {s.step === "INNER_SETTING" && <ScreenInnerSetting />}
