@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
-import { Bot, X, MessageCircle } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Bot, X, MessageCircle, History, SquarePen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChatInterface } from './ChatInterface'
-import { useChatStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '@/lib/chatStore'
+import { ChatHistoryList } from './ChatHistoryList'
+import { useChatStore, chatStorageKey, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '@/lib/chatStore'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 
 const KEYBOARD_RESIZE_STEP = 20
@@ -17,11 +18,14 @@ interface ChatbotWidgetProps {
 export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
   const {
     activeProjectId,
+    activeMode,
     clearError,
     isOpen,
+    isLoading,
     setActiveProjectId,
     setIsOpen,
     setLoading,
+    startNewConversation,
   } = useChatStore()
   const sidebarWidth = useChatStore((s) => s.sidebarWidth)
   const setSidebarWidth = useChatStore((s) => s.setSidebarWidth)
@@ -29,6 +33,9 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
   const currentProjectId = activeProject?.id ?? null
   const isProjectInSync = currentProjectId === activeProjectId
 
+  const chatKey = currentProjectId ? chatStorageKey(currentProjectId, activeMode) : null
+
+  const [showHistory, setShowHistory] = useState(false)
   const cleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
@@ -37,6 +44,11 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
     setLoading(false)
     setIsOpen(false)
   }, [clearError, currentProjectId, setActiveProjectId, setIsOpen, setLoading])
+
+  // Close history panel when sidebar closes or project changes
+  useEffect(() => {
+    setShowHistory(false)
+  }, [isOpen, currentProjectId])
 
   // Cleanup drag listeners on unmount
   useEffect(() => {
@@ -169,17 +181,60 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
                   </div>
                   <h3 className="text-base font-medium">Policy Assistant</h3>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsOpen(false)}
-                  aria-label="Close chat"
-                  className="text-white hover:bg-white/20 h-8 w-8 p-0"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (chatKey) startNewConversation(chatKey)
+                    }}
+                    disabled={isLoading || !chatKey}
+                    aria-label="New chat"
+                    className="text-white hover:bg-white/20 h-auto px-2 py-1 text-xs font-medium gap-1 disabled:opacity-40"
+                  >
+                    <SquarePen className="h-3.5 w-3.5" />
+                    New chat
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowHistory((prev) => !prev)}
+                    disabled={isLoading}
+                    aria-label="Chat history"
+                    className={`text-white h-8 w-8 p-0 disabled:opacity-40 ${showHistory ? 'bg-white/20' : 'hover:bg-white/20'}`}
+                  >
+                    <History className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsOpen(false)}
+                    aria-label="Close chat"
+                    className="text-white hover:bg-white/20 h-8 w-8 p-0"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             </div>
+
+            {/* History panel — inline collapsible between header and chat */}
+            <AnimatePresence>
+              {showHistory && chatKey && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: 'easeInOut' }}
+                  className="flex-shrink-0 overflow-hidden border-b border-gray-200 bg-gray-50"
+                >
+                  <ChatHistoryList
+                    chatKey={chatKey}
+                    onClose={() => setShowHistory(false)}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Chat */}
             <div className="flex-1 min-h-0">

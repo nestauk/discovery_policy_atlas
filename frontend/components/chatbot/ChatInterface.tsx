@@ -248,7 +248,6 @@ export function ChatInterface({
   showHeader = false
 }: ChatInterfaceProps) {
   const {
-    clearMessages,
     getMessages,
     isLoading,
     error,
@@ -320,17 +319,6 @@ export function ChatInterface({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatLaunchIntent?.intentId])
 
-  const handleNewChat = () => {
-    if (!chatKey) return
-
-    clearMessages(chatKey)
-    clearError()
-    setLoading(false)
-    setInputMessage('')
-    setTransientAssistantMessage(null)
-    setExpandedActivityIds([])
-    setActiveContextHint(null)
-  }
 
   const handleChipClick = useCallback((chipText: string) => {
     setInputMessage(chipText)
@@ -543,21 +531,6 @@ export function ChatInterface({
             </div>
           </div>
         )}
-        {displayMessages.length > 0 && (
-          <div className="sticky top-0 z-10 flex justify-end bg-white/95 py-3 backdrop-blur-sm">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleNewChat}
-              disabled={isLoading}
-              className="text-xs"
-            >
-              New chat
-            </Button>
-          </div>
-        )}
-
         {displayMessages.length === 0 && (
           <div className="text-center py-8">
             <Bot className="h-8 w-8 text-gray-400 mx-auto mb-2" />
