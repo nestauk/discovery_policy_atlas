@@ -257,6 +257,7 @@ export function ChatInterface({
     clearError,
     chatLaunchIntent,
     consumeChatLaunchIntent,
+    startNewConversation,
     activeMode,
   } = useChatStore()
 
@@ -307,6 +308,12 @@ export function ChatInterface({
     if (!chatLaunchIntent) return
 
     consumeChatLaunchIntent(chatLaunchIntent.intentId)
+
+    // Forecast mode: always start a fresh conversation
+    if (chatLaunchIntent.mode === 'forecast' && chatKey) {
+      startNewConversation(chatKey)
+    }
+
     setActiveContextHint({
       sectionTitle: chatLaunchIntent.sectionTitle,
       contextHint: chatLaunchIntent.contextHint,

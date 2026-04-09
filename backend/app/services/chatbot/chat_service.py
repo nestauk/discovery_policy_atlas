@@ -28,8 +28,12 @@ from .models import (
     ChatStep,
     DocumentReference,
 )
+from app.utils.llm.llm_utils import get_llm
+from .extraction_models import CriticResult, InterventionCMExtraction
 from .parliament import search_parliament
 from .prompts import (
+    CM_CRITIC_PROMPT,
+    CM_EXTRACTION_PROMPT,
     EVIDENCE_RETRIEVAL_NOTE,
     PARLIAMENT_RETRIEVAL_NOTE,
     SYNTHESIS_SOURCE_NOTE,
@@ -62,7 +66,7 @@ REFERENCE_SECTION_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 INTERNAL_TOOL_CITATION_RE = re.compile(
-    r"\[(?:get_project_synthesis|search_project_evidence|search_parliament)[^\]]*\]",
+    r"\[(?:get_project_synthesis|search_project_evidence|search_parliament|extract_intervention_context_and_mechanism)[^\]]*\]",
     re.IGNORECASE,
 )
 INTERNAL_SYNTHESIS_LABEL_RE = re.compile(
@@ -78,6 +82,7 @@ TOOL_LABELS = {
     "get_project_synthesis": "Checking project synthesis",
     "search_project_evidence": "Searching project evidence",
     "search_parliament": "Looking up Parliament records",
+    "extract_intervention_context_and_mechanism": "Extracting context and mechanism",
 }
 
 TOOL_DEFINITIONS = [
@@ -131,6 +136,31 @@ TOOL_DEFINITIONS = [
                     },
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_intervention_context_and_mechanism",
+            "description": (
+                "Extract structured context, mechanism, mediators, and support factors "
+                "for a specific intervention from the project evidence. Use this during "
+                "deep dive (Phase 3) when the user selects an intervention to analyse."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "intervention_name": {
+                        "type": "string",
+                        "description": "The name of the intervention to analyse.",
+                    },
+                    "user_context_summary": {
+                        "type": "string",
+                        "description": "Brief summary of the user's implementation context for targeted extraction.",
+                    },
+                },
+                "required": ["intervention_name"],
             },
         },
     },
@@ -347,6 +377,15 @@ class ChatbotService:
                 return f'Searching project evidence for "{truncated_query}"'
             if tool_name == "search_parliament":
                 return f'Looking up Parliament records for "{truncated_query}"'
+
+        intervention = arguments.get("intervention_name")
+        if (
+            tool_name == "extract_intervention_context_and_mechanism"
+            and isinstance(intervention, str)
+            and intervention.strip()
+        ):
+            truncated = self._truncate_for_label(intervention, max_chars=50)
+            return f'Extracting context and mechanism for "{truncated}"'
 
         return TOOL_LABELS.get(tool_name, "Working")
 
@@ -620,7 +659,7 @@ class ChatbotService:
                 block = (
                     f"{i}. {intv.intervention_name}\n"
                     f"   Context: {countries} — {intv.frequency} studies — types: {study_types_str}\n"
-                    f"   Mechanism: [not pre-extracted — use search_project_evidence during deep dive]\n"
+                    f"   Mechanism: [not pre-extracted — use extract_intervention_context_and_mechanism during deep dive]\n"
                     f"   Outcome: {consensus} effect — outcomes: {outcomes_str}"
                 )
                 impact = (intv.impact_summary or "").strip()
@@ -1388,11 +1427,349 @@ class ChatbotService:
                 ),
             )
 
+        async def _handle_extract_cm(
+            intervention_name: str,
+            user_context_summary: str = "",
+        ) -> ToolExecutionResult:
+            # 1. Resolve intervention from synthesis to get supporting_doc_ids
+            matched_intervention = await self._resolve_intervention(
+                project_id, intervention_name
+            )
+            supporting_doc_ids = (
+                matched_intervention.supporting_doc_ids if matched_intervention else []
+            )
+
+            # 2. Retrieve evidence — prefer targeted doc fetch, fall back to vector search
+            chunks: List[Dict[str, Any]] = []
+            if supporting_doc_ids:
+                chunks = await self._fetch_chunks_by_doc_ids(
+                    project_id, supporting_doc_ids, intervention_name
+                )
+            if not chunks:
+                chunks = await self._search_relevant_chunks(
+                    project_id, intervention_name, max_chunks=15
+                )
+            if not chunks:
+                return ToolExecutionResult(
+                    content=(
+                        f"No evidence found for intervention '{intervention_name}' "
+                        "in this project."
+                    ),
+                    summary="No evidence found",
+                )
+
+            # 3. Enrich and register references
+            enriched = await self._get_chunks_with_neighbors(project_id, chunks)
+            enriched = await self._enrich_with_document_details(enriched)
+            self._last_evidence_chunks.extend(enriched)
+            document_numbers = self._register_evidence_references(enriched)
+
+            # 4. Build bounded evidence packet
+            evidence_text = self._build_context(
+                enriched, document_numbers=document_numbers
+            )
+            # Trim to ~12k chars to stay within extraction prompt budget
+            if len(evidence_text) > 12000:
+                evidence_text = evidence_text[:12000] + "\n\n[Evidence truncated]"
+
+            # 5. Run structured extraction
+            extraction = await self._run_cm_extraction(intervention_name, evidence_text)
+
+            # 6. Run critic pass to challenge the extraction
+            user_ctx = user_context_summary or "No specific context provided"
+            critic = await self._run_cm_critic(
+                intervention_name, user_ctx, extraction, evidence_text
+            )
+
+            # 7. Apply critic downgrades
+            if critic:
+                extraction = self._apply_critic_result(extraction, critic)
+
+            # 8. Format and return
+            document_count = len(
+                {c.get("document_id") for c in enriched if c.get("document_id")}
+            )
+            content = self._format_cm_extraction(
+                extraction, intervention_name, enriched, document_numbers, critic
+            )
+            return ToolExecutionResult(
+                content=content,
+                summary=(
+                    f"Extracted C/M from "
+                    f"{self._format_count_summary(document_count, 'document', 'documents')}"
+                ),
+            )
+
         return {
             "get_project_synthesis": _handle_get_project_synthesis,
             "search_project_evidence": _handle_search_evidence,
             "search_parliament": _handle_search_parliament,
+            "extract_intervention_context_and_mechanism": _handle_extract_cm,
         }
+
+    async def _resolve_intervention(
+        self, project_id: str, intervention_name: str
+    ) -> Optional[PolicyIntervention]:
+        """Match an intervention name against synthesis data (case-insensitive)."""
+        try:
+            summary = await read_cached_summary(project_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to read synthesis for intervention resolution %s: %s",
+                project_id,
+                exc,
+            )
+            return None
+
+        if not summary or not summary.interventions:
+            return None
+
+        name_lower = intervention_name.lower().strip()
+        for intv in summary.interventions:
+            if intv.intervention_name.lower().strip() == name_lower:
+                return intv
+
+        # Substring fallback: match if the query is contained in the name or vice versa
+        for intv in summary.interventions:
+            intv_lower = intv.intervention_name.lower().strip()
+            if name_lower in intv_lower or intv_lower in name_lower:
+                return intv
+
+        return None
+
+    async def _fetch_chunks_by_doc_ids(
+        self,
+        project_id: str,
+        doc_ids: List[str],
+        intervention_name: str,
+        max_chunks: int = 15,
+    ) -> List[Dict[str, Any]]:
+        """Fetch mechanism-relevant chunks from specific documents via scoped vector search.
+
+        Uses a mechanism-focused query to surface the most relevant passages
+        rather than naive chunk_index ordering which biases toward introductions.
+        """
+        mechanism_query = (
+            f"mechanism causal process support factors for {intervention_name}"
+        )
+        # Cast a wider net and filter to target docs
+        all_chunks = await self._search_relevant_chunks(
+            project_id, mechanism_query, max_chunks=max_chunks * 3
+        )
+        doc_id_set = set(doc_ids[:10])
+        scoped = [c for c in all_chunks if c.get("document_id") in doc_id_set]
+
+        if scoped:
+            return scoped[:max_chunks]
+
+        # Fallback: if vector search missed the target docs entirely,
+        # return whatever was found (better than nothing)
+        return all_chunks[:max_chunks]
+
+    async def _run_cm_extraction(
+        self, intervention_name: str, evidence_text: str
+    ) -> InterventionCMExtraction:
+        """Run structured C/M extraction over an evidence packet."""
+        prompt = CM_EXTRACTION_PROMPT.format(
+            intervention_name=intervention_name,
+            evidence_text=evidence_text,
+        )
+        llm = get_llm("gpt-4.1-mini", temperature=0.0).with_structured_output(
+            InterventionCMExtraction, method="function_calling"
+        )
+        return await llm.ainvoke(prompt)
+
+    async def _run_cm_critic(
+        self,
+        intervention_name: str,
+        user_context: str,
+        extraction: InterventionCMExtraction,
+        evidence_text: str = "",
+    ) -> Optional[CriticResult]:
+        """Run a critic pass to challenge the extraction for unsupported optimism."""
+        extraction_text = self._format_cm_extraction(extraction, intervention_name)
+        prompt = CM_CRITIC_PROMPT.format(
+            intervention_name=intervention_name,
+            user_context=user_context,
+            extraction_text=extraction_text,
+            evidence_text=evidence_text[:6000] if evidence_text else "[not available]",
+        )
+        try:
+            llm = get_llm("gpt-4.1-mini", temperature=0.0).with_structured_output(
+                CriticResult, method="function_calling"
+            )
+            return await llm.ainvoke(prompt)
+        except Exception as exc:
+            logger.warning("Critic pass failed for %s: %s", intervention_name, exc)
+            return None
+
+    @staticmethod
+    def _apply_critic_result(
+        extraction: InterventionCMExtraction,
+        critic: CriticResult,
+    ) -> InterventionCMExtraction:
+        """Apply critic downgrades to the extraction (confidence can only go down)."""
+        confidence_order = ["explicit", "mediator_supported", "weak", "insufficient"]
+        current_idx = confidence_order.index(extraction.mechanism.confidence)
+        revised_idx = confidence_order.index(critic.revised_mechanism_confidence)
+
+        if revised_idx > current_idx:
+            extraction.mechanism.confidence = critic.revised_mechanism_confidence
+
+        # Remove support factors flagged by critic as bad/generic
+        flagged_factors = set()
+        for flag in critic.flags:
+            if flag.severity == "downgrade" and "support_factors" in flag.field:
+                # Extract factor name from field like "support_factors: trained researchers"
+                parts = flag.field.split(":", 1)
+                if len(parts) > 1:
+                    flagged_factors.add(parts[1].strip().lower())
+
+        if flagged_factors:
+            extraction.support_factors = [
+                sf
+                for sf in extraction.support_factors
+                if sf.factor.lower() not in flagged_factors
+            ]
+
+        # Add missing dealbreakers from critic
+        from .extraction_models import EvidenceBasis, ModeratorOrDealbreaker
+
+        for dealbreaker in critic.missing_dealbreakers:
+            extraction.moderators_or_dealbreakers.append(
+                ModeratorOrDealbreaker(
+                    item=dealbreaker,
+                    effect="blocks",
+                    quote="[identified by critic review against user context]",
+                    basis=EvidenceBasis.AUTHOR_HYPOTHESIS,
+                )
+            )
+
+        return extraction
+
+    @staticmethod
+    def _format_cm_extraction(
+        extraction: InterventionCMExtraction,
+        intervention_name: str,
+        enriched_chunks: Optional[List[Dict[str, Any]]] = None,
+        document_numbers: Optional[Dict[str, int]] = None,
+        critic: Optional[CriticResult] = None,
+    ) -> str:
+        """Render a C/M extraction as readable markdown for the agent."""
+        parts: List[str] = [
+            f"C/M EXTRACTION: {intervention_name}",
+            "",
+            f"DRAFT PROGRAMME THEORY: {extraction.draft_programme_theory}",
+            "",
+            "OBSERVED CONTEXTS:",
+        ]
+        for i, ctx in enumerate(extraction.observed_contexts, 1):
+            prefix = f"  Context {i}" if len(extraction.observed_contexts) > 1 else " "
+            parts.append(f"{prefix}- Setting: {ctx.setting}")
+            parts.append(f"{prefix}- Population: {ctx.population}")
+            if ctx.delivery_features:
+                features = ", ".join(ctx.delivery_features)
+                parts.append(f"{prefix}- Delivery features: {features}")
+
+        parts.extend(
+            [
+                "",
+                "MECHANISM:",
+                f"- Summary: {extraction.mechanism.summary}",
+                f"- Confidence: {extraction.mechanism.confidence}",
+            ]
+        )
+
+        if extraction.mediators:
+            parts.extend(["", "MEDIATORS:"])
+            for m in extraction.mediators:
+                parts.append(
+                    f'- {m.name} ({m.direction}, {m.basis.value}): "{m.quote}"'
+                )
+
+        if extraction.support_factors:
+            parts.extend(["", "SUPPORT FACTORS:"])
+            for sf in extraction.support_factors:
+                parts.append(f'- {sf.factor} ({sf.basis.value}): "{sf.quote}"')
+
+        if extraction.moderators_or_dealbreakers:
+            parts.extend(["", "MODERATORS / DEALBREAKERS:"])
+            for mod in extraction.moderators_or_dealbreakers:
+                parts.append(
+                    f'- {mod.item} ({mod.effect}, {mod.basis.value}): "{mod.quote}"'
+                )
+
+        if critic and (critic.flags or critic.missing_dealbreakers):
+            parts.extend(["", "CRITIC REVIEW:"])
+            for flag in critic.flags:
+                severity_label = "⚠️" if flag.severity == "downgrade" else "ℹ️"
+                parts.append(
+                    f"- {severity_label} [{flag.field}] {flag.issue} → {flag.suggestion}"
+                )
+            if critic.missing_dealbreakers:
+                parts.append("")
+                parts.append("MISSING DEALBREAKERS (from user context):")
+                for db in critic.missing_dealbreakers:
+                    parts.append(f"- ❌ {db}")
+
+        # Append source reference list so the agent can cite [N] in its answer
+        if enriched_chunks and document_numbers:
+            seen_docs: Dict[str, str] = {}
+            for chunk in enriched_chunks:
+                doc_id = chunk.get("document_id")
+                if not doc_id or doc_id in seen_docs:
+                    continue
+                num = document_numbers.get(doc_id)
+                if num is None:
+                    continue
+                title = chunk.get("document_title", "Untitled")
+                authors = chunk.get("document_authors")
+                author_str = authors[0] if isinstance(authors, list) and authors else ""
+                year = chunk.get("document_year", "")
+                label = f"[{num}] {author_str}"
+                if year:
+                    label += f" ({year})"
+                label += f" — {title}"
+                seen_docs[doc_id] = label
+            if seen_docs:
+                parts.extend(["", "SOURCES USED IN EXTRACTION:"])
+                for label in seen_docs.values():
+                    parts.append(f"- {label}")
+                parts.append(
+                    "Use these [N] citations when presenting evidence from this extraction."
+                )
+
+        # Enforce transfer view ceiling based on mechanism confidence
+        confidence = extraction.mechanism.confidence
+        ceiling_map = {
+            "insufficient": (
+                "Insufficient",
+                "Mechanism not identified — cannot assess transfer.",
+            ),
+            "weak": (
+                "Conditional",
+                "Mechanism evidence is weak — transfer view cannot exceed Conditional.",
+            ),
+            "mediator_supported": (
+                "Conditional",
+                "Mechanism is mediator-supported but not directly demonstrated — transfer view cannot exceed Conditional unless all key factors are confirmed.",
+            ),
+            "explicit": ("Strong", ""),
+        }
+        max_view, reason = ceiling_map.get(confidence, ("Conditional", ""))
+        parts.extend(
+            [
+                "",
+                f"TRANSFER VIEW CEILING: {max_view}",
+            ]
+        )
+        if reason:
+            parts.append(f"REASON: {reason}")
+        parts.append(
+            "You MUST NOT assign a transfer view above this ceiling in your assessment."
+        )
+
+        return "\n".join(parts)
 
     def _build_document_url(
         self,

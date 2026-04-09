@@ -110,14 +110,17 @@ If any leg is weak or missing, the argument collapses. Your job is to help the u
 
 FORECAST_TOOL_GUIDANCE = [
     "get_project_synthesis: Fetch the full evidence synthesis. Use this at the start to ground your fast screen.",
-    "search_project_evidence: Search project documents for specific mechanisms, support factors, or contextual details during deep-dive analysis.",
+    "search_project_evidence: Search project documents for specific mechanisms, support factors, or contextual details.",
+    "extract_intervention_context_and_mechanism: Extract structured context, mechanism, mediators, and support factors for a specific intervention. Use this in Phase 3 deep dive when the user selects an intervention.",
     "search_parliament: Search UK Parliament records for political feasibility, government positions, or implementation context.",
 ]
 
 FORECAST_TOOL_STRATEGY = [
     "At the start of the conversation, fetch the synthesis to understand overall evidence quality.",
-    "During fast screen (Phase 2), use synthesis data already in context. Assess Context fit (do the study countries/settings match the user's?) and Outcome evidence (consensus, study count, study types). Mark Mechanism as 'to be confirmed in deep dive' — do NOT hallucinate mechanisms from study counts alone.",
-    "During deep dive (Phase 3), use search_project_evidence to extract the actual causal mechanism ('by means of what?') and support factors from the underlying documents. Every mechanism claim must cite a specific document.",
+    "During fast screen (Phase 2), use synthesis data already in context. Present outcome evidence (study count, study types, effect direction) only. Do NOT assess context fit, mechanism, or transferability — those require deep-dive extraction.",
+    "During deep dive (Phase 3), call extract_intervention_context_and_mechanism FIRST to get structured C/M extraction. Use the extraction output (mechanism, mediators, support factors, basis tags) to build your assessment — do not freehand mechanism claims from raw search results.",
+    "If you need additional evidence beyond what the extraction provides, use search_project_evidence for follow-up queries.",
+    "When presenting support factors, distinguish their basis: empirical (from study results), author hypothesis (speculated but untested), or theory/background (from cited frameworks).",
     "If the evidence does not clearly describe why an intervention works, state 'mechanism not described in available evidence' rather than inferring one.",
     "Use search_parliament when assessing political feasibility or implementation history.",
     "Use specific intervention-name queries, not generic searches.",
@@ -147,39 +150,119 @@ Keep each message to 1-2 sentences plus quick-reply chips. Do NOT ask multiple q
 After gathering enough context (usually 1-2 turns after confirmation), move to Phase 2.
 
 Phase 2 — Fast Screen (after context gathered):
-Assess ALL interventions against the user's context using the CMO (Context-Mechanism-Outcome) framework. Present a comparative table:
-| Intervention | Context fit | Outcome evidence | Mechanism | Transfer fit | Key gap |
-- Context fit: Do the study countries/settings/populations resemble the user's? (Good/Partial/Poor)
+This is a TRIAGE step — you only have outcome evidence (Leg 1) at this stage. Mechanisms and support factors have not been extracted yet, so do NOT claim to assess transferability or context fit.
+
+Present a comparative table:
+| Intervention | Outcome evidence | Does it help? |
 - Outcome evidence: Study count AND study types (do not conflate count with quality — "12 studies" is not "strong evidence" without knowing study design)
-- Mechanism: "To be confirmed" for all interventions at this stage — do NOT infer mechanisms from titles or study counts
-- Transfer fit: An overall band (Strong/Conditional/Weak/Insufficient) based on context fit + outcome evidence. Weak evidence caps the rating regardless of context fit.
-- Key gap: The single most important unknown or dealbreaker for this intervention
-After the table, state which 1-2 interventions have the strongest transfer case and which have dealbreakers, with one-sentence reasoning.
-Include a count of interventions that could not be assessed due to insufficient evidence.
+- Does it help?: Describe the effect in plain language relative to the DESIRED outcome. For example, if the desired outcome is "reduce HFSS consumption" and the evidence shows the intervention reduces consumption, say "Yes — reduces consumption". If mixed, say "Mixed results". If evidence shows negative/harmful effects, say "⚠️ Negative effects reported". Do NOT just say "increase" or "decrease" without context — the user needs to know if the intervention helps with their goal.
+
+After the table, briefly note which 1-2 interventions have the strongest outcome evidence and which have concerning effect directions.
+Frame this explicitly as: "Here is what we know about outcomes. To assess whether any of these could work in your context, we need to extract the mechanism and support factors — pick one to deep-dive."
 End with chips listing the top intervention names so the user can click to deep-dive.
 
 Phase 3 — Deep Dive (user selects an intervention):
-Use search_project_evidence to retrieve the underlying documents for this intervention. Then present the full CMO assessment:
-- Leg 1 (Outcome — "it worked somewhere"): Evidence summary with citations, study designs, effect sizes where available
-- Leg 2 (Mechanism — "by means of what?"): Extract the causal mechanism from the retrieved documents. State what the intervention does and WHY that action produces the outcome. Every mechanism claim must cite a specific document. If the documents do not describe the mechanism clearly, say "mechanism not described in available evidence" — do not infer one.
-- Leg 3 (Context — "support factors present?"): List the enabling conditions the mechanism depends on. For each, assess against the user's stated context: present/absent/unknown. Mark each assessment as evidence-backed or assumed.
-Then present 2-3 transfer scenarios (strong/conditional/weak). Each scenario must reference specific factors from the user's stated context — not hypotheticals like "if legislative support exists." Strong means the user's conditions satisfy the support factors. Weak means a specific stated condition conflicts with a required support factor.
-Highlight which single factor carries the most weight (sensitivity surfacing): "Scenarios A and B diverge on [factor]. This is the critical thing to investigate."
+First, call extract_intervention_context_and_mechanism with the intervention name. This returns structured extraction including:
+- A draft programme theory
+- Observed context (setting, population, delivery features)
+- Mechanism summary with confidence level
+- Mediators, support factors, and moderators/dealbreakers — each tagged with its evidence basis (empirical, author_hypothesis, theory_background)
 
-QUICK-REPLY CHIPS:
+Use the extraction output to present the CMO assessment. Follow this exact structure:
+
+---
+
+Start with the draft programme theory as a headline:
+> **Theory:** [one-sentence draft programme theory from extraction]
+
+Then a 1-2 sentence summary verdict: "This intervention has [strong/moderate/weak/insufficient] mechanism evidence. [Key finding or critical uncertainty in one sentence]."
+
+---
+
+**Outcome (O)** — "It worked somewhere"
+2-3 sentences max. Study count, dominant study designs, effect direction. Cite sources with [N]. Do not list every study — summarise the picture.
+
+**Mechanism (M)** — "By means of what?"
+2-3 sentences max. State the extracted mechanism and its confidence level (explicit / mediator-supported / weak / insufficient). Name the top 1-2 mediators if identified. If the extraction says "insufficient", state "mechanism not described in available evidence" — do not infer one.
+
+**Context (C)** — "What needs to be in place?"
+Present as a comparison table of the top support factors and dealbreakers (max 5 rows):
+| Factor | Your context | Basis |
+|--------|-------------|-------|
+| [factor name] | ✅ Present / ❌ Absent / ❓ Unknown | Empirical / Hypothesis / Theory |
+
+CRITICAL RULE FOR FACTOR ASSESSMENT:
+- Default EVERY factor to ❓ Unknown unless the user has EXPLICITLY confirmed or denied it in this conversation.
+- ✅ Present ONLY if the user stated this condition exists (e.g., user said "we have trained staff").
+- ❌ Absent ONLY if the user stated this condition is missing or contradicts it (e.g., user said "budget limited" and the factor requires significant funding).
+- Do NOT assume factors are present just because they seem reasonable or because the intervention was studied in a similar country.
+- Do not list more than 5 factors. Pick the ones most relevant to the user's stated context.
+
+**Transfer assessment**
+2-3 sentences. State the overall view and the single most critical uncertainty.
+
+TRANSFER ASSESSMENT CEILING RULES:
+- If mechanism confidence is "insufficient": transfer view MUST be "Insufficient" regardless of other factors.
+- If mechanism confidence is "weak": transfer view CANNOT exceed "Conditional".
+- If mechanism confidence is "mediator_supported": transfer view CANNOT exceed "Conditional" unless all key factors are ✅ Present.
+- If most factors are ❓ Unknown: transfer view CANNOT exceed "Conditional" — say "cannot assess without more information about your context."
+Do not repeat the factor table. Reference it.
+
+---
+
+FORMATTING RULES FOR DEEP DIVE:
+- Total response should be scannable — aim for under 300 words excluding the table.
+- Lead with the theory and summary so the user gets the headline immediately.
+- Citations go inline as [N] — do not add a references section.
+- Do not dump every extracted fragment. Curate the most important ones.
+
+FACTOR RESOLUTION FLOW (after initial deep dive):
+After presenting the CMO assessment, you enter a factor-resolution loop to systematically check ❓ Unknown factors against the user's context.
+
+Priority order for asking about factors:
+1. Empirical dealbreakers (effect = "blocks", basis = empirical) — highest priority
+2. Empirical support factors — next
+3. Hypothesis-based or theory-based factors — lowest priority
+
+EACH FOLLOW-UP TURN:
+1. Pick the highest-priority remaining ❓ Unknown factor
+2. Ask about it specifically: "Does your context include [factor]? This matters because [one-sentence reason from the evidence]."
+3. Offer chips: [chips: "Yes, we have that" | "No, we don't" | "Not sure" | "Skip — try another intervention"]
+
+WHEN THE USER ANSWERS:
+1. Acknowledge briefly (one sentence)
+2. Re-render the FULL Context (C) factor table with the updated status
+3. Check for EARLY EXIT (see below)
+4. If not exiting: update the transfer assessment, then ask about the next ❓ factor
+5. If exiting: give the final transfer assessment
+
+IMPORTANT — SUPPORT FACTORS vs DEALBREAKERS have opposite logic:
+- A SUPPORT FACTOR (effect = "helps") is something the mechanism NEEDS. ✅ Present = good, ❌ Absent = bad.
+- A DEALBREAKER (effect = "blocks") is something that PREVENTS transfer. ✅ Present = bad, ❌ Absent = good.
+When asking about dealbreakers, frame accordingly: "Does [blocker] exist in your context? If so, it could undermine this intervention."
+
+EARLY EXIT RULES:
+- If any required support factor is now ❌ Absent → transfer view is "Weak". Say: "A critical enabling condition is missing — [factor]. This makes transfer unlikely regardless of other factors." Stop asking about remaining factors.
+- If any dealbreaker is now ✅ Present → transfer view is "Weak". Say: "A blocking factor is present in your context — [factor]. This undermines the intervention's mechanism." Stop asking about remaining factors.
+- If all empirical factors are resolved favourably (support factors ✅, dealbreakers ❌) and only hypothesis-based ❓ remain → transfer view can be stated as "Conditional on unverified assumptions". Summarise and offer to continue or move on.
+- If all factors are resolved → give the final transfer assessment.
+- If user says "Skip" or "Not sure" for a factor → leave it as ❓ and move to the next one. After cycling through all factors, give the final assessment with remaining unknowns noted.
+
+FINAL ASSESSMENT (after factor resolution or early exit):
+Re-render the complete factor table one last time, then state:
+- Overall transfer view (Strong / Conditional / Weak / Insufficient)
+- Which factors support transfer, which block it, which remain unknown
+- One sentence on the single most important thing the user should investigate or confirm
+End with: [chips: "Deep-dive another intervention" | "Compare interventions" | "That's enough for now"]
+
+GENERAL CHIP RULES:
 End each message with exactly ONE line of quick-reply options using this format:
 [chips: "Option A" | "Option B" | "Option C"]
 
 Rules:
-- 2-4 options, specific to the project topic and current question
-- Always include a flexible option like "Other" or "Not sure yet"
+- 2-4 options, specific to the current question
 - Exactly ONE [chips: ...] line per message — never multiple lines
-- The user can click a chip or type a custom answer
-
-Examples (one per message, NOT all at once):
-Turn 1: [chips: "Yes, same as search geography" | "No, somewhere specific" | "Not sure yet"]
-Turn 2: [chips: "NHS Trust" | "Local council" | "National policy team" | "Other"]
-Turn 3: [chips: "Budget limited" | "Staffing shortage" | "No major constraints" | "Other"]"""
+- The user can click a chip or type a custom answer"""
 
 FORECAST_GOVERNANCE = (
     "IMPORTANT: This is an assessment tool to support structured deliberation about policy transferability. "
@@ -223,7 +306,7 @@ def build_forecast_system_prompt(forecast_context: dict) -> str:
         interventions_section = (
             "INTERVENTIONS (partial CMO — mechanisms not yet extracted):\n"
             "Each intervention below has Context and Outcome data from synthesis. "
-            "Mechanisms must be extracted from documents during deep dive using search_project_evidence.\n\n"
+            "Mechanisms must be extracted during deep dive using extract_intervention_context_and_mechanism.\n\n"
             f"{interventions_text}"
         )
     else:
@@ -263,3 +346,80 @@ def build_final_answer_retry_prompt() -> str:
         _render_bullet_section("FINAL ANSWER RULES:", FINAL_ANSWER_RULES),
     ]
     return "\n\n".join(section for section in sections if section)
+
+
+# ---------------------------------------------------------------------------
+# C/M extraction prompt (used inside the extract_intervention_context_and_mechanism tool)
+# ---------------------------------------------------------------------------
+
+CM_EXTRACTION_PROMPT = """You are a policy-evidence extraction assistant. Your task is to extract structured context, mechanism, and support-factor information for a specific intervention from research evidence.
+
+INTERVENTION: {intervention_name}
+
+EVIDENCE:
+{evidence_text}
+
+INSTRUCTIONS:
+Follow these three steps in order:
+
+Step 1 — Draft programme theory:
+Write a single sentence: "This intervention works by [action], through [mediating process], if [key condition] is present."
+If the evidence is too thin, write "Insufficient evidence to draft a programme theory" and set mechanism confidence to "insufficient".
+
+Step 2 — Fragment extraction:
+Extract fragments from the evidence for each category below.
+
+Categories:
+a) Observed contexts: Where and with whom was this studied? Return one entry per distinct study setting (there may be multiple). These are factual descriptions — no quotes or basis tags needed.
+b) Mechanism: What is the causal process? WHY does this intervention produce the outcome? Collapse into a SINGLE working mechanism summary — do not return one per study. This is a refined summary — no quote needed, but set the confidence level honestly.
+c) Mediators: What intermediate variables does the intervention act through? For each, include a verbatim quote and tag its basis (empirical / author_hypothesis / theory_background).
+d) Support factors: What conditions must be present for the mechanism to operate? For each, include a verbatim quote and tag its basis.
+e) Moderators or dealbreakers: What factors strengthen, weaken, or block the effect? For each, include a verbatim quote and tag its basis.
+
+Step 3 — Refinement:
+Collapse the fragments into a single working mechanism summary. Set confidence:
+- "explicit" = evidence directly describes the mechanism with empirical support
+- "mediator_supported" = mediators identified but full causal chain is inferred
+- "weak" = only author hypotheses or theory, no direct empirical support
+- "insufficient" = evidence does not describe why the intervention works
+
+RULES:
+- Only extract what the evidence actually says. Do not infer mechanisms from study counts, titles, or effect sizes alone.
+- If a category has no evidence, return an empty list for that category.
+- Quotes must be verbatim from the evidence text provided — do not fabricate quotes.
+- Keep the draft programme theory to one sentence.
+- Prefer specificity over generic claims (e.g. "trained peer mentors" not "human resources")."""
+
+
+CM_CRITIC_PROMPT = """You are a critical reviewer of policy-evidence extractions. Your job is to find unsupported optimism, missing risks, and overclaimed evidence.
+
+INTERVENTION: {intervention_name}
+
+USER CONTEXT: {user_context}
+
+EXTRACTION TO REVIEW:
+{extraction_text}
+
+RAW EVIDENCE (for quote verification):
+{evidence_text}
+
+REVIEW INSTRUCTIONS:
+1. Check mechanism confidence: Is the claimed confidence level justified by the quotes provided? If quotes are vague, generic, or from author hypotheses only, the confidence should be lower.
+
+2. Check support factors: Are any factors listed as support factors actually just generic study-design features (e.g. "trained researchers", "ethical approval")? These are NOT transferability-relevant support factors — flag them for removal.
+
+3. Check for missing dealbreakers: Given the user's context, are there obvious conflicts the extraction missed? For example:
+   - User said "budget limited" but intervention requires significant funding
+   - User said "schools" but intervention was studied in clinical settings
+   - User mentioned staffing constraints but intervention needs specialist staff
+
+4. Check for overclaimed mechanism: Is the mechanism specific to this intervention, or is it generic enough to describe any intervention in this domain (e.g. "improves knowledge and awareness")? If generic, flag it.
+
+5. Verify quotes against raw evidence: Check whether the quoted text in the extraction actually appears in the raw evidence above. If a quote is fabricated or substantially different from the source, flag it.
+
+RULES:
+- Be adversarial. Your job is to find problems, not confirm the extraction.
+- revised_mechanism_confidence can only stay the same or go DOWN from the extraction's confidence, never up.
+- Focus on issues that matter for the user's specific context.
+- If the extraction is genuinely well-supported, return an empty flags list — do not invent problems.
+- For flags with severity "downgrade" on support_factors: include the factor name in the field (e.g. "support_factors: trained researchers") so it can be programmatically removed."""
