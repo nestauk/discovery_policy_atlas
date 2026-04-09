@@ -22,6 +22,7 @@ import {
   Check,
   Globe,
   Lock,
+  Compass,
 } from 'lucide-react'
 import {
   Dialog,
@@ -187,7 +188,17 @@ export default function ProjectResultsPage() {
       prefillQuestion,
     })
   }, [openChatWithIntent])
-  
+
+  const handleLaunchForecast = useCallback(() => {
+    openChatWithIntent({
+      intentId: `forecast-${Date.now()}`,
+      sectionTitle: 'Transferability Forecast',
+      contextHint: `Transferability assessment for: ${activeProject?.title}`,
+      prefillQuestion: 'Assess the transferability of these interventions to my context.',
+      mode: 'forecast',
+    })
+  }, [openChatWithIntent, activeProject])
+
   const isProjectOwner = useMemo(() => {
     if (!user || !activeProject) return false
     const currentUserId = user.id
@@ -991,6 +1002,13 @@ export default function ProjectResultsPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
+            {/* Transferability Forecast - only when synthesis data is available */}
+            {activeProject?.status === 'completed' && summaryData && (
+              <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={handleLaunchForecast}>
+                <Compass className="h-4 w-4" />
+                Transferability Forecast
+              </Button>
+            )}
             {/* Share Button - only visible to project owner */}
             {projectId && activeProject && isProjectOwner && (
               <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>

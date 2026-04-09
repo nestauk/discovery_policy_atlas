@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
-import { Send, Bot, User, ExternalLink, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Send, Bot, User, ExternalLink, Loader2, AlertCircle, CheckCircle2, Compass } from 'lucide-react'
 import {
   useChatStore,
+  chatStorageKey,
   ChatMessage,
   ChatStep,
   ChatStreamEvent,
@@ -12,12 +13,30 @@ import {
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useUser } from '@clerk/nextjs'
 import Image from 'next/image'
 
 const DOCUMENT_CITATION_BRACKET_RE = /\[([^\]]+)\]/g
+const CHIP_LINE_RE = /\[chips:\s*((?:"[^"]*"(?:\s*\|\s*"[^"]*")*))\s*\]/g
+const CHIP_VALUE_RE = /"([^"]*)"/g
 const EMPTY_CHAT_MESSAGES: ChatMessage[] = []
 const EMPTY_CHAT_STEPS: ChatStep[] = []
+
+function parseChips(content: string): { cleanContent: string; chipGroups: string[][] } {
+  const chipGroups: string[][] = []
+  const cleanContent = content.replace(CHIP_LINE_RE, (match, inner: string) => {
+    const values: string[] = []
+    let m: RegExpExecArray | null
+    CHIP_VALUE_RE.lastIndex = 0
+    while ((m = CHIP_VALUE_RE.exec(inner)) !== null) {
+      if (m[1]) values.push(m[1])
+    }
+    if (values.length > 0) chipGroups.push(values)
+    return ''
+  }).trimEnd()
+  return { cleanContent, chipGroups }
+}
 
 function parseCitationGroup(bracketContent: string): number[] {
   const cleaned = bracketContent
@@ -239,6 +258,7 @@ export function ChatInterface({
     clearError,
     chatLaunchIntent,
     consumeChatLaunchIntent,
+    activeMode,
   } = useChatStore()
 
   const { activeProject } = useAnalysisProjectStore()
@@ -251,7 +271,8 @@ export function ChatInterface({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const { fetchWithAuth } = useAPI()
   const activeProjectId = activeProject?.id ?? null
-  const messages = activeProjectId ? getMessages(activeProjectId) : EMPTY_CHAT_MESSAGES
+  const chatKey = activeProjectId ? chatStorageKey(activeProjectId, activeMode) : null
+  const messages = chatKey ? getMessages(chatKey) : EMPTY_CHAT_MESSAGES
   const displayMessages = (
     transientAssistantMessage &&
     !messages.some((message) => message.id === transientAssistantMessage.id)
@@ -274,7 +295,7 @@ export function ChatInterface({
   useEffect(() => {
     setTransientAssistantMessage(null)
     setExpandedActivityIds([])
-  }, [activeProjectId])
+  }, [chatKey])
 
   // Consume chat launch intent: prefill input and set context
   useEffect(() => {
@@ -294,9 +315,9 @@ export function ChatInterface({
   }, [chatLaunchIntent?.intentId])
 
   const handleNewChat = () => {
-    if (!activeProjectId) return
+    if (!chatKey) return
 
-    clearMessages(activeProjectId)
+    clearMessages(chatKey)
     clearError()
     setLoading(false)
     setInputMessage('')
@@ -305,16 +326,34 @@ export function ChatInterface({
     setActiveContextHint(null)
   }
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading || !activeProject) return
+  const handleChipClick = useCallback((chipText: string) => {
+    setInputMessage(chipText)
+    inputRef.current?.focus()
+  }, [])
+
+  // Forecast context card: build context summary from search_query
+  const forecastContext = useMemo(() => {
+    const sq = activeProject?.search_query
+    if (!sq) return null
+    return {
+      geography: sq.geography?.join(', ') || null,
+      population: sq.population?.join(', ') || null,
+      setting: sq.inner_setting?.join(', ') || null,
+      outcomes: sq.outcome?.join(', ') || null,
+    }
+  }, [activeProject?.search_query])
+
+  const handleSendMessage = async (overrideMessage?: string) => {
+    const messageText = overrideMessage ?? inputMessage
+    if (!messageText.trim() || isLoading || !activeProject || !chatKey) return
     const projectId = activeProject.id
-    const projectMessages = getMessages(projectId)
+    const projectMessages = getMessages(chatKey)
     const now = Date.now()
 
     const userMessage: ChatMessage = {
       id: `${now}`,
       role: 'user',
-      content: inputMessage.trim(),
+      content: messageText.trim(),
       timestamp: new Date()
     }
 
@@ -329,7 +368,7 @@ export function ChatInterface({
       activitySummary: 'Working'
     }
 
-    addMessage(projectId, userMessage)
+    addMessage(chatKey, userMessage)
     setTransientAssistantMessage(assistantPlaceholder)
     setInputMessage('')
     setLoading(true)
@@ -353,6 +392,7 @@ export function ChatInterface({
           message: userMessage.content,
           recent_messages: recentMessages,
           ...(contextHintToSend ? { context_hint: contextHintToSend } : {}),
+          ...(activeMode && activeMode !== 'default' ? { mode: activeMode } : {}),
         })
       }, true)
 
@@ -390,7 +430,7 @@ export function ChatInterface({
         throw new Error(streamFailureMessage)
       }
 
-      addMessage(projectId, toPersistedAssistantMessage(streamingSnapshot))
+      addMessage(chatKey, toPersistedAssistantMessage(streamingSnapshot))
       setTransientAssistantMessage(null)
 
     } catch (error) {
@@ -403,6 +443,30 @@ export function ChatInterface({
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleConfirmContext = () => {
+    const parts = [
+      forecastContext?.geography ? `Geography: ${forecastContext.geography}` : null,
+      forecastContext?.population ? `Population: ${forecastContext.population}` : null,
+      forecastContext?.setting ? `Setting: ${forecastContext.setting}` : null,
+      forecastContext?.outcomes ? `Outcomes: ${forecastContext.outcomes}` : null,
+    ].filter(Boolean).join('. ')
+    const msg = parts
+      ? `My context is confirmed: ${parts}. Please proceed with the transferability assessment.`
+      : 'Please proceed with the transferability assessment.'
+    handleSendMessage(msg)
+  }
+
+  const handleEditContext = () => {
+    const lines = [
+      `Geography: ${forecastContext?.geography || '(e.g. UK, OECD countries)'}`,
+      `Population: ${forecastContext?.population || '(e.g. children, older adults, knowledge workers)'}`,
+      `Setting: ${forecastContext?.setting || '(e.g. NHS trust, local council, schools)'}`,
+      `Outcomes: ${forecastContext?.outcomes || '(e.g. reduced waiting times, improved attendance)'}`,
+    ].join('\n')
+    setInputMessage(lines)
+    inputRef.current?.focus()
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -438,6 +502,41 @@ export function ChatInterface({
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
+        {/* Forecast mode banner */}
+        {activeMode === 'forecast' && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <Compass className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div>
+              <span className="font-medium">Transferability Forecast</span>
+              <span className="text-amber-600"> — This is an assessment tool to support deliberation, not a recommendation.</span>
+            </div>
+          </div>
+        )}
+        {/* Forecast context card — shown before any messages */}
+        {activeMode === 'forecast' && displayMessages.length === 0 && !isLoading && forecastContext && (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+            <div className="text-sm font-medium text-gray-900">Your Project Context</div>
+            <p className="text-xs text-gray-500">This is what I know from your search. Confirm or edit before we start.</p>
+            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
+              <span className="text-gray-500">Geography</span>
+              <span className="text-gray-800">{forecastContext.geography || <span className="italic text-gray-400">Where are you implementing? e.g. UK, OECD</span>}</span>
+              <span className="text-gray-500">Population</span>
+              <span className="text-gray-800">{forecastContext.population || <span className="italic text-gray-400">Who is this for? e.g. children, older adults</span>}</span>
+              <span className="text-gray-500">Setting</span>
+              <span className="text-gray-800">{forecastContext.setting || <span className="italic text-gray-400">Where exactly? e.g. NHS trust, local council</span>}</span>
+              <span className="text-gray-500">Outcomes</span>
+              <span className="text-gray-800">{forecastContext.outcomes || <span className="italic text-gray-400">What result are you looking for?</span>}</span>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button size="sm" onClick={handleConfirmContext}>
+                Looks right
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleEditContext}>
+                Edit details
+              </Button>
+            </div>
+          </div>
+        )}
         {displayMessages.length > 0 && (
           <div className="sticky top-0 z-10 flex justify-end bg-white/95 py-3 backdrop-blur-sm">
             <Button
@@ -566,31 +665,71 @@ export function ChatInterface({
                 })()
               )}
 
-              {message.content && (
-                <div className="prose prose-sm max-w-none">
-                  <ReactMarkdown
-                    components={{
-                      a: ({ href, children, ...props }) => (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 hover:underline"
-                          {...props}
-                        >
-                          {children}
-                        </a>
-                      ),
-                    }}
-                  >
-                    {message.role === 'assistant' && message.references
-                      ? processInTextCitations(message.content, message.references)
-                      : message.content
-                    }
-                  </ReactMarkdown>
-                </div>
-              )}
-              
+              {message.content && (() => {
+                const processed = message.role === 'assistant' && message.references
+                  ? processInTextCitations(message.content, message.references)
+                  : message.content
+                const { cleanContent, chipGroups } = message.role === 'assistant'
+                  ? parseChips(processed)
+                  : { cleanContent: processed, chipGroups: [] as string[][] }
+                const isLastAssistant = message.role === 'assistant' &&
+                  index === displayMessages.length - 1
+
+                return (
+                  <>
+                    <div className="prose prose-sm max-w-none">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          a: ({ href, children, ...props }) => (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                              {...props}
+                            >
+                              {children}
+                            </a>
+                          ),
+                          table: ({ children, ...props }) => (
+                            <div className="overflow-x-auto my-2">
+                              <table className="min-w-full text-xs border-collapse border border-gray-200" {...props}>{children}</table>
+                            </div>
+                          ),
+                          th: ({ children, ...props }) => (
+                            <th className="border border-gray-200 bg-gray-50 px-2 py-1.5 text-left font-medium text-gray-700" {...props}>{children}</th>
+                          ),
+                          td: ({ children, ...props }) => (
+                            <td className="border border-gray-200 px-2 py-1.5 text-gray-600" {...props}>{children}</td>
+                          ),
+                        }}
+                      >
+                        {cleanContent}
+                      </ReactMarkdown>
+                    </div>
+                    {isLastAssistant && chipGroups.length > 0 && !message.isStreaming && !isLoading && (
+                      <div className="mt-3 space-y-2">
+                        {chipGroups.map((group, groupIdx) => (
+                          <div key={groupIdx} className="flex flex-wrap gap-1.5">
+                            {group.map((chip) => (
+                              <button
+                                key={chip}
+                                type="button"
+                                onClick={() => handleChipClick(chip)}
+                                className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-700 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors cursor-pointer"
+                              >
+                                {chip}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+
               {/* Show references for assistant messages */}
               {message.role === 'assistant' && message.references && message.references.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-gray-200">
@@ -721,10 +860,10 @@ export function ChatInterface({
             disabled={isLoading}
             className="flex-1 resize-none border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
             rows={1}
-            style={{ minHeight: '46px', maxHeight: '120px' }}
+            style={{ minHeight: '46px', maxHeight: '200px' }}
           />
           <Button
-            onClick={handleSendMessage}
+            onClick={() => handleSendMessage()}
             disabled={!inputMessage.trim() || isLoading}
             className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-400"
           >

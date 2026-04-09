@@ -47,11 +47,18 @@ export interface ChatStreamEvent {
   error?: string
 }
 
+export type ChatModeType = 'default' | 'forecast'
+
+export function chatStorageKey(projectId: string, mode?: ChatModeType | null): string {
+  return mode && mode !== 'default' ? `${projectId}:${mode}` : projectId
+}
+
 export interface ChatLaunchIntent {
   intentId: string
   sectionTitle: string
   contextHint: string
   prefillQuestion?: string
+  mode?: ChatModeType
 }
 
 // TODO: Add eviction (e.g. cap at N most-recent projects) to prevent
@@ -161,6 +168,7 @@ function persistMessagesByProject(messagesByProject: MessagesByProject) {
 interface ChatState {
   messagesByProject: MessagesByProject
   activeProjectId: string | null
+  activeMode: ChatModeType | null
   isLoading: boolean
   error: string | null
   isOpen: boolean
@@ -182,6 +190,7 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set, get) => ({
   messagesByProject: loadMessagesByProject(),
   activeProjectId: null,
+  activeMode: null,
   isLoading: false,
   error: null,
   isOpen: false,
@@ -221,7 +230,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   
   clearError: () => set({ error: null }),
 
-  openChatWithIntent: (intent) => set({ chatLaunchIntent: intent, isOpen: true }),
+  openChatWithIntent: (intent) => set({
+    chatLaunchIntent: intent,
+    isOpen: true,
+    activeMode: intent.mode ?? 'default',
+  }),
 
   consumeChatLaunchIntent: (intentId) => set((state) => (
     state.chatLaunchIntent?.intentId === intentId

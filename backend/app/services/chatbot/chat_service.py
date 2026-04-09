@@ -22,6 +22,7 @@ from app.services.synthesis.schemas import (
 from app.services.vectorization import vectorization_service
 from .models import (
     ChatEvent,
+    ChatMode,
     ChatRequest,
     ChatResponse,
     ChatStep,
@@ -34,6 +35,8 @@ from .prompts import (
     SYNTHESIS_SOURCE_NOTE,
     build_chatbot_system_prompt,
     build_final_answer_retry_prompt,
+    build_forecast_final_answer_prompt,
+    build_forecast_system_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +54,7 @@ NO_SYNTHESIS_SUMMARY_MESSAGE = (
     "Use search_project_evidence for study-level questions."
 )
 FINAL_ANSWER_RETRY_PROMPT = build_final_answer_retry_prompt()
+FORECAST_FINAL_ANSWER_RETRY_PROMPT = build_forecast_final_answer_prompt()
 SYNTHESIS_CITATION_GROUP_RE = re.compile(r"\[((?:\d+\s*,\s*)*\d+)\]")
 DOCUMENT_CITATION_BRACKET_RE = re.compile(r"\[([^\]]+)\]")
 REFERENCE_SECTION_RE = re.compile(
@@ -223,16 +227,23 @@ class ChatbotService:
         self._last_evidence_chunks = []
         self._last_parliament_items = []
         self._reset_reference_state()
+        self._active_mode = request.mode
         tool_handlers = self._build_tool_handlers(project_id)
         steps: List[ChatStep] = []
 
-        project_title = await self._get_project_title(project_id)
+        # Build system prompt based on mode
+        if request.mode == ChatMode.FORECAST:
+            forecast_ctx = await self._get_forecast_context(project_id)
+            system_prompt = build_forecast_system_prompt(forecast_ctx)
+        else:
+            project_title = await self._get_project_title(project_id)
+            system_prompt = self._build_system_prompt(project_title)
 
         # Build messages
         messages: List[Dict[str, Any]] = [
             {
                 "role": "system",
-                "content": self._build_system_prompt(project_title),
+                "content": system_prompt,
             },
         ]
 
@@ -533,6 +544,98 @@ class ChatbotService:
 
         title = title.strip()
         return title or None
+
+    async def _get_forecast_context(self, project_id: str) -> Dict[str, Any]:
+        """Fetch project context + synthesis data for forecast mode.
+
+        Returns a dict with title, search_query (normalised), intervention
+        summary text, and a flag indicating whether synthesis is available.
+        """
+        # Fetch project metadata
+        try:
+            proj_result = (
+                vectorization_service.supabase.table("analysis_projects")
+                .select("title, description, search_query")
+                .eq("id", project_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch project context for forecast %s: %s",
+                project_id,
+                exc,
+            )
+            proj_result = SimpleNamespace(data=[])
+
+        proj = proj_result.data[0] if proj_result.data else {}
+        title = (proj.get("title") or "").strip()
+        description = (proj.get("description") or "").strip()
+        search_query = proj.get("search_query") or {}
+
+        # Normalise search_query for prompt rendering
+        sq_normalised = {
+            "geography": ", ".join(search_query.get("geography") or [])
+            or "Not specified",
+            "population": ", ".join(search_query.get("population") or [])
+            or "Not specified",
+            "inner_setting": ", ".join(search_query.get("inner_setting") or [])
+            or "Not specified",
+            "outcomes": ", ".join(search_query.get("outcome") or []) or "Not specified",
+            "constraints": search_query.get("implementation_constraints") or {},
+        }
+
+        # Fetch synthesis data via the existing cached summary path
+        try:
+            summary = await read_cached_summary(project_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to read synthesis for forecast %s: %s", project_id, exc
+            )
+            summary = None
+
+        # Build CMO-structured intervention list for the system prompt
+        interventions_text = ""
+        if summary and summary.interventions:
+            blocks = []
+            for i, intv in enumerate(summary.interventions, 1):
+                countries = (
+                    ", ".join(intv.countries[:4]) if intv.countries else "various"
+                )
+                consensus = intv.effect_consensus or "unknown"
+                study_types_str = (
+                    ", ".join(
+                        f"{stype} ({count})"
+                        for stype, count in list(intv.study_types.items())[:3]
+                    )
+                    if intv.study_types
+                    else "not recorded"
+                )
+                outcomes_str = (
+                    ", ".join(intv.related_outcomes[:3])
+                    if intv.related_outcomes
+                    else "not specified"
+                )
+
+                block = (
+                    f"{i}. {intv.intervention_name}\n"
+                    f"   Context: {countries} — {intv.frequency} studies — types: {study_types_str}\n"
+                    f"   Mechanism: [not pre-extracted — use search_project_evidence during deep dive]\n"
+                    f"   Outcome: {consensus} effect — outcomes: {outcomes_str}"
+                )
+                impact = (intv.impact_summary or "").strip()
+                if impact:
+                    block += f"\n   Impact: {impact}"
+                blocks.append(block)
+            interventions_text = "\n".join(blocks)
+
+        return {
+            "title": title or "Untitled project",
+            "description": description,
+            "search_query": sq_normalised,
+            "interventions_text": interventions_text,
+            "has_synthesis": summary is not None and bool(summary.interventions),
+        }
 
     async def _get_project_synthesis(self, project_id: str) -> str:
         """Fetch and format cached synthesis output for chat use."""
@@ -1182,9 +1285,12 @@ class ChatbotService:
                 emit_event,
             )
 
-        retry_messages = messages + [
-            {"role": "user", "content": FINAL_ANSWER_RETRY_PROMPT}
-        ]
+        retry_prompt = (
+            FORECAST_FINAL_ANSWER_RETRY_PROMPT
+            if getattr(self, "_active_mode", None) == ChatMode.FORECAST
+            else FINAL_ANSWER_RETRY_PROMPT
+        )
+        retry_messages = messages + [{"role": "user", "content": retry_prompt}]
         response = await self._create_chat_completion(
             retry_messages,
             tool_choice="none",
