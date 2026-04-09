@@ -55,7 +55,7 @@ const USER_TYPE_OPTIONS: { value: UserType; label: string; description: string }
   {
     value: "policy_blueprint",
     label: "A Policy Blueprint",
-    description: "generate a full report identifying specific interventions, extracting their outcomes, and ranking them by evidence strength and predicted impact.",
+    description: "A full report identifying specific interventions, extracting their outcomes, and ranking them by evidence strength and predicted impact.",
   },
   {
     value: "horizon_scan",
