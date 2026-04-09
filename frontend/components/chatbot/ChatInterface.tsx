@@ -268,6 +268,7 @@ export function ChatInterface({
   const [transientAssistantMessage, setTransientAssistantMessage] = useState<ChatMessage | null>(null)
   const [expandedActivityIds, setExpandedActivityIds] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const hasScrolledInitially = useRef(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const { fetchWithAuth } = useAPI()
   const activeProjectId = activeProject?.id ?? null
@@ -280,9 +281,14 @@ export function ChatInterface({
     ? [...messages, transientAssistantMessage]
     : messages
 
-  // Auto-scroll to bottom when new messages arrive
+  // Scroll to bottom: instantly on first mount, smoothly on subsequent updates
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (!hasScrolledInitially.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
+      hasScrolledInitially.current = true
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages, transientAssistantMessage])
 
   // Auto-focus input if requested

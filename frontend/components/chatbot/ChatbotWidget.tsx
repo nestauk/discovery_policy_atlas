@@ -1,15 +1,14 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { Bot, X, MessageCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChatInterface } from './ChatInterface'
-import { useChatStore } from '@/lib/chatStore'
+import { useChatStore, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '@/lib/chatStore'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 
-/** Sidebar width in pixels — import this where you need a matching margin. */
-export const CHAT_SIDEBAR_WIDTH = 400
+const KEYBOARD_RESIZE_STEP = 20
 
 interface ChatbotWidgetProps {
   className?: string
@@ -22,11 +21,15 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
     isOpen,
     setActiveProjectId,
     setIsOpen,
-    setLoading
+    setLoading,
   } = useChatStore()
+  const sidebarWidth = useChatStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useChatStore((s) => s.setSidebarWidth)
   const { activeProject } = useAnalysisProjectStore()
   const currentProjectId = activeProject?.id ?? null
   const isProjectInSync = currentProjectId === activeProjectId
+
+  const cleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     setActiveProjectId(currentProjectId)
@@ -34,6 +37,58 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
     setLoading(false)
     setIsOpen(false)
   }, [clearError, currentProjectId, setActiveProjectId, setIsOpen, setLoading])
+
+  // Cleanup drag listeners on unmount
+  useEffect(() => {
+    return () => cleanupRef.current?.()
+  }, [])
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const target = e.currentTarget
+    target.setPointerCapture(e.pointerId)
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const handlePointerMove = (ev: PointerEvent) => {
+      setSidebarWidth(window.innerWidth - ev.clientX)
+    }
+
+    const cleanup = () => {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      target.releasePointerCapture(e.pointerId)
+      target.removeEventListener('pointermove', handlePointerMove)
+      target.removeEventListener('pointerup', cleanup)
+      target.removeEventListener('pointercancel', cleanup)
+      window.removeEventListener('blur', cleanup)
+      cleanupRef.current = null
+    }
+
+    cleanupRef.current = cleanup
+
+    target.addEventListener('pointermove', handlePointerMove)
+    target.addEventListener('pointerup', cleanup)
+    target.addEventListener('pointercancel', cleanup)
+    window.addEventListener('blur', cleanup)
+  }, [setSidebarWidth])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setSidebarWidth(sidebarWidth + KEYBOARD_RESIZE_STEP)
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setSidebarWidth(sidebarWidth - KEYBOARD_RESIZE_STEP)
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setSidebarWidth(SIDEBAR_MAX_WIDTH)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setSidebarWidth(SIDEBAR_MIN_WIDTH)
+    }
+  }, [setSidebarWidth, sidebarWidth])
 
   if (!activeProject) {
     return null
@@ -52,6 +107,7 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
           >
             <Button
               onClick={() => setIsOpen(true)}
+              aria-label="Open chat"
               className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
             >
               <MessageCircle className="h-6 w-6" />
@@ -83,9 +139,27 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'tween', duration: 0.25 }}
-            className="fixed inset-y-0 right-0 z-50 flex flex-col bg-white border-l border-slate-200 shadow-xl w-full sm:w-[400px]"
-            style={{ maxWidth: CHAT_SIDEBAR_WIDTH }}
+            className="fixed inset-y-0 right-0 z-50 flex flex-col bg-white border-l border-slate-200 shadow-xl"
+            style={{ width: sidebarWidth, maxWidth: '100vw' }}
+            role="complementary"
+            aria-label="Chat sidebar"
           >
+            {/* Resize handle — visible strip is narrow, hit area is wider */}
+            <div
+              onPointerDown={handlePointerDown}
+              onKeyDown={handleKeyDown}
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuenow={sidebarWidth}
+              aria-valuemin={SIDEBAR_MIN_WIDTH}
+              aria-valuemax={SIDEBAR_MAX_WIDTH}
+              aria-label="Resize chat sidebar"
+              tabIndex={0}
+              className="absolute inset-y-0 -left-1.5 w-3 cursor-col-resize z-10 group"
+            >
+              <div className="absolute inset-y-0 left-1.5 w-0.5 group-hover:bg-blue-400/60 group-active:bg-blue-500/80 transition-colors" />
+            </div>
+
             {/* Header */}
             <div className="flex-shrink-0 p-3 bg-blue-600 text-white">
               <div className="flex items-center justify-between">
@@ -99,6 +173,7 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsOpen(false)}
+                  aria-label="Close chat"
                   className="text-white hover:bg-white/20 h-8 w-8 p-0"
                 >
                   <X className="h-4 w-4" />

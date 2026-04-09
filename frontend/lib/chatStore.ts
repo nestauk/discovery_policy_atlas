@@ -1,5 +1,9 @@
 import { create } from 'zustand'
 
+export const SIDEBAR_MIN_WIDTH = 320
+export const SIDEBAR_MAX_WIDTH = 800
+export const SIDEBAR_DEFAULT_WIDTH = 400
+
 export interface ChatStep {
   id: string
   type: 'status' | 'tool' | 'message'
@@ -173,6 +177,7 @@ interface ChatState {
   error: string | null
   isOpen: boolean
   chatLaunchIntent: ChatLaunchIntent | null
+  sidebarWidth: number
 
   // Actions
   addMessage: (projectId: string, message: ChatMessage) => void
@@ -181,6 +186,7 @@ interface ChatState {
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   setIsOpen: (isOpen: boolean) => void
+  setSidebarWidth: (width: number) => void
   clearMessages: (projectId: string) => void
   clearError: () => void
   openChatWithIntent: (intent: ChatLaunchIntent) => void
@@ -195,6 +201,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   isOpen: false,
   chatLaunchIntent: null,
+  sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
   
   addMessage: (projectId, message) => set((state) => {
     const nextMessagesByProject = {
@@ -216,6 +223,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setError: (error) => set({ error }),
   
   setIsOpen: (isOpen) => set({ isOpen }),
+
+  setSidebarWidth: (width) => {
+    if (!Number.isFinite(width)) return
+    const clamped = Math.min(Math.max(width, SIDEBAR_MIN_WIDTH), SIDEBAR_MAX_WIDTH)
+    if (clamped === get().sidebarWidth) return
+    set({ sidebarWidth: clamped })
+  },
   
   clearMessages: (projectId) => set((state) => {
     const nextMessagesByProject = {
