@@ -28,9 +28,6 @@ export default function SearchPage() {
         parent_project_id: parentProjectId ?? undefined,
       })
 
-      // Reset wizard state so a fresh visit to /search starts clean
-      useWizard.getState().reset()
-
       // Set as active project
       setActiveProject(project)
 
@@ -125,6 +122,9 @@ export default function SearchPage() {
         .catch((error) => {
           console.error('Search analysis HTTP connection lost (backend may still be running):', error)
         })
+
+      // Reset wizard state so a fresh visit to /search starts clean
+      useWizard.getState().reset()
 
       // Navigate to results immediately
       router.push(`/projects/${project.id}`)
