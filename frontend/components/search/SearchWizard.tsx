@@ -55,22 +55,22 @@ const USER_TYPE_OPTIONS: { value: UserType; label: string; description: string }
   {
     value: "policy_blueprint",
     label: "A Policy Blueprint",
-    description: "A full report identifying specific interventions, extracting their outcomes, and ranking them by evidence strength and predicted impact.",
+    description: "A full report identifying interventions, extracting outcomes, and ranking them by evidence strength and predicted impact. Ideal for designing new strategies or major spend decisions.",
   },
   {
     value: "horizon_scan",
     label: "A Horizon Scan",
-    description: "An exec summary on a new policy area to get up to speed on a policy context and background.",
+    description: "An executive summary mapping emerging themes and blind spots, best for getting up to speed on unknown policy areas.",
   },
   {
     value: "rapid_brief",
     label: "A Rapid Brief",
-    description: "A quick, evidenced answer to a policy-related question.",
+    description: "A 1-page summary answering a specific question with key citations, perfect for urgent meeting prep or sense checking.",
   },
   {
     value: "rapid_evidence_review",
     label: "A Rapid Evidence Review",
-    description: "Search and summarise academic papers and grey literature for a particular policy area.",
+    description: "An exhaustive data extraction of 100+ sources, designed for deep-dive literature synthesis and rigorous evidence mapping.",
   },
   {
     value: "not_sure",
@@ -548,26 +548,27 @@ function ScreenUserType() {
   const s = useWizard();
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 p-8 pt-32">
-      <div className="flex items-center justify-center gap-3">
+    <div className="max-w-4xl mx-auto space-y-6 p-8 pt-32">
+      <div className="text-center space-y-3">
+        <div className="flex items-center justify-center gap-3">
           <h1 className="text-4xl font-bold tracking-tight">What would you like Policy Atlas to generate?</h1>
           <Tooltip content={
             <p className="max-w-xs">
-              Alpha means this is an early prototype with limited functionality. 
-              Features may be incomplete, unstable, or subject to change. 
+              Alpha means this is an early prototype with limited functionality.
+              Features may be incomplete, unstable, or subject to change.
               We&apos;re actively developing and improving the tool.
             </p>
           }>
             <Badge variant="default" className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1 -mt-2">ALPHA</Badge>
           </Tooltip>
         </div>
+        <p className="max-w-2xl mx-auto text-sm text-gray-500">
+          Policy Atlas is designed to support a range of use cases, from quick evidence checks to in-depth policy reports. We&apos;re testing which outputs users find most valuable to help prioritise what to build next. This won&apos;t change your search flow or output in alpha.
+        </p>
+      </div>
 
-      <div className="max-w-2xl mx-auto">
-        <p className="max-w-2xl mx-auto mt-4 text-sm text-gray-500">
-        Policy atlas is designed to support a range of use cases, from quick evidence checks to in-depth policy reports. We&apos;d love to understand which of these you&apos;d find most useful - this will help us prioritise which features to build next.
-      </p>
-
-        {USER_TYPE_OPTIONS.map((option) => {
+      <div className="max-w-2xl mx-auto flex flex-col gap-3">
+        {USER_TYPE_OPTIONS.filter((o) => o.value !== "not_sure").map((option) => {
           const isSelected = s.userType === option.value;
           return (
             <button
@@ -575,9 +576,9 @@ function ScreenUserType() {
               type="button"
               onClick={() => s.set({ userType: option.value })}
               className={cx(
-                "w-full text-left px-5 py-4 !my-2 rounded-xl transition ring-1 whitespace-normal break-words",
+                "w-full text-left px-5 py-4 rounded-xl transition-all ring-1 whitespace-normal break-words hover:-translate-y-0.5 hover:shadow-md",
                 isSelected
-                  ? "bg-blue-600 !text-white ring-blue-600"
+                  ? "bg-blue-600 !text-white ring-blue-600 shadow-md"
                   : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
               )}
             >
@@ -590,6 +591,29 @@ function ScreenUserType() {
             </button>
           );
         })}
+
+        {/* "I'm not sure" as a distinct lighter option */}
+        {(() => {
+          const notSure = USER_TYPE_OPTIONS.find((o) => o.value === "not_sure")!;
+          const isSelected = s.userType === "not_sure";
+          return (
+            <button
+              type="button"
+              onClick={() => s.set({ userType: "not_sure" })}
+              className={cx(
+                "w-full text-center px-5 py-3 mt-4 rounded-xl transition-all ring-1 whitespace-normal break-words",
+                isSelected
+                  ? "bg-gray-700 !text-white ring-gray-700"
+                  : "bg-transparent text-gray-500 ring-gray-200 hover:bg-gray-50 hover:text-gray-700"
+              )}
+            >
+              <span className="font-medium">{notSure.label}</span>
+              <span className={cx("block text-sm mt-1", isSelected ? "text-gray-300" : "text-gray-400")}>
+                {notSure.description}
+              </span>
+            </button>
+          );
+        })()}
       </div>
 
       <div className="flex justify-end items-center mt-6 max-w-2xl mx-auto">
@@ -603,7 +627,6 @@ function ScreenUserType() {
           Continue
         </Button>
       </div>
-
     </div>
   );
 }
