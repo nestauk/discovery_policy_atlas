@@ -94,6 +94,7 @@ export default function SearchPage() {
         time_to: dateTo,
         max_results: context.maxResults,
         additional_questions: context.additionalQuestions,
+        user_type: context.userType ?? undefined,
         ...(hasImplementationConstraints
           ? { implementation_constraints: implementationConstraints }
           : {}),

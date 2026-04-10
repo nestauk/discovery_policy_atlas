@@ -78,6 +78,7 @@ class SearchContext(BaseModel):
     max_results: Optional[int] = None
     additional_questions: List[str] = Field(default_factory=list)
     implementation_constraints: Optional[ImplementationConstraints] = None
+    user_type: Optional[str] = None
 
 
 # Search wizard API request/response schemas

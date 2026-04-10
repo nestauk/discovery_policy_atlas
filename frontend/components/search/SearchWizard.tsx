@@ -179,6 +179,7 @@ export type SearchContext = {
   screeningFactors: string[]; // Free text factors for screening
   additionalQuestions: string[]; // Additional research questions
   maxResults: number;
+  userType: UserType | null;
 };
 
 // ---------------- STATE ----------------
@@ -299,6 +300,7 @@ export const useWizard = create<WizardState>((set, get) => ({
       screeningFactors: s.screeningFactors,
       additionalQuestions: s.additionalQuestions,
       maxResults: s.maxResults,
+      userType: s.userType,
     };
   },
   initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => {
