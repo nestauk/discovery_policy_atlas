@@ -49,6 +49,9 @@ const HelpHint = ({ content }: { content: React.ReactNode }) => (
 
 // ---------------- TYPES & CONSTANTS ----------------
 type Step = "USER_TYPE" | "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
+const STEPS: Step[] = ["USER_TYPE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+/** Steps that appear before the research question is entered */
+const PRE_QUESTION_STEPS: ReadonlySet<Step> = new Set(["USER_TYPE", "ASK"]);
 type UserType = "policy_blueprint" | "horizon_scan" | "rapid_brief" | "rapid_evidence_review" | "not_sure";
 
 const USER_TYPE_OPTIONS: { value: UserType; label: string; description: string }[] = [
@@ -259,32 +262,20 @@ export const useWizard = create<WizardState>((set, get) => ({
   reset: () => set({ ...INITIAL_WIZARD_STATE }),
   next: () => {
     const s = get();
-    // Skip ADDITIONAL_QUESTIONS step - go directly from PARAMETERS to SUMMARY
-    const steps: Step[] = ["USER_TYPE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
-    const currentIdx = steps.indexOf(s.step);
-    if (currentIdx < steps.length - 1) {
-      const nextStep = steps[currentIdx + 1];
+    const currentIdx = STEPS.indexOf(s.step);
+    if (currentIdx < STEPS.length - 1) {
+      const nextStep = STEPS[currentIdx + 1];
       // Skip ADDITIONAL_QUESTIONS - go directly to SUMMARY
-      if (nextStep === "ADDITIONAL_QUESTIONS") {
-        set({ step: "SUMMARY" });
-      } else {
-        set({ step: nextStep });
-      }
+      set({ step: nextStep === "ADDITIONAL_QUESTIONS" ? "SUMMARY" : nextStep });
     }
   },
   back: () => {
     const s = get();
-    // Skip ADDITIONAL_QUESTIONS step - go directly from SUMMARY to PARAMETERS
-    const steps: Step[] = ["USER_TYPE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
-    const currentIdx = steps.indexOf(s.step);
+    const currentIdx = STEPS.indexOf(s.step);
     if (currentIdx > 0) {
-      const prevStep = steps[currentIdx - 1];
+      const prevStep = STEPS[currentIdx - 1];
       // Skip ADDITIONAL_QUESTIONS - go directly to PARAMETERS
-      if (prevStep === "ADDITIONAL_QUESTIONS") {
-        set({ step: "PARAMETERS" });
-      } else {
-        set({ step: prevStep });
-      }
+      set({ step: prevStep === "ADDITIONAL_QUESTIONS" ? "PARAMETERS" : prevStep });
     }
   },
   buildContext: () => {
@@ -330,6 +321,7 @@ export const useWizard = create<WizardState>((set, get) => ({
 
     set({
       step: "SUMMARY",
+      userType: (sq.user_type as UserType) || null,
       researchQuestion: sq.research_question || sq.original_query || "",
       population: toSelection(population),
       innerSetting: toSelection(innerSetting),
@@ -570,52 +562,37 @@ function ScreenUserType() {
       </div>
 
       <div className="max-w-2xl mx-auto flex flex-col gap-3">
-        {USER_TYPE_OPTIONS.filter((o) => o.value !== "not_sure").map((option) => {
+        {USER_TYPE_OPTIONS.map((option) => {
           const isSelected = s.userType === option.value;
+          const isNotSure = option.value === "not_sure";
           return (
             <button
               key={option.value}
               type="button"
               onClick={() => s.set({ userType: option.value })}
               className={cx(
-                "w-full text-left px-5 py-4 rounded-xl transition-all ring-1 whitespace-normal break-words hover:-translate-y-0.5 hover:shadow-md",
-                isSelected
-                  ? "bg-blue-600 !text-white ring-blue-600 shadow-md"
-                  : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50"
+                "w-full px-5 rounded-xl transition-all ring-1 whitespace-normal break-words",
+                isNotSure
+                  ? cx("text-center py-3 mt-4", isSelected
+                      ? "bg-gray-700 !text-white ring-gray-700"
+                      : "bg-transparent text-gray-500 ring-gray-200 hover:bg-gray-50 hover:text-gray-700")
+                  : cx("text-left py-4 hover:-translate-y-0.5 hover:shadow-md", isSelected
+                      ? "bg-blue-600 !text-white ring-blue-600 shadow-md"
+                      : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50")
               )}
             >
               <span className="font-medium">{option.label}</span>
-              {option.description && (
-                <span className={cx("block text-sm mt-1", isSelected ? "text-blue-100" : "text-gray-500")}>
-                  {option.description}
-                </span>
-              )}
-            </button>
-          );
-        })}
-
-        {/* "I'm not sure" as a distinct lighter option */}
-        {(() => {
-          const notSure = USER_TYPE_OPTIONS.find((o) => o.value === "not_sure")!;
-          const isSelected = s.userType === "not_sure";
-          return (
-            <button
-              type="button"
-              onClick={() => s.set({ userType: "not_sure" })}
-              className={cx(
-                "w-full text-center px-5 py-3 mt-4 rounded-xl transition-all ring-1 whitespace-normal break-words",
-                isSelected
-                  ? "bg-gray-700 !text-white ring-gray-700"
-                  : "bg-transparent text-gray-500 ring-gray-200 hover:bg-gray-50 hover:text-gray-700"
-              )}
-            >
-              <span className="font-medium">{notSure.label}</span>
-              <span className={cx("block text-sm mt-1", isSelected ? "text-gray-300" : "text-gray-400")}>
-                {notSure.description}
+              <span className={cx(
+                "block text-sm mt-1",
+                isNotSure
+                  ? (isSelected ? "text-gray-300" : "text-gray-400")
+                  : (isSelected ? "text-blue-100" : "text-gray-500")
+              )}>
+                {option.description}
               </span>
             </button>
           );
-        })()}
+        })}
       </div>
 
       <div className="flex justify-end items-center mt-6 max-w-2xl mx-auto">
@@ -624,7 +601,7 @@ function ScreenUserType() {
           className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
           full
           disabled={!s.userType}
-          onClick={() => s.set({ step: "ASK" })}
+          onClick={() => s.next()}
         >
           Continue
         </Button>
@@ -1764,8 +1741,9 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
     context.parameters.customFrom > context.parameters.customTo;
 
   const isSummaryStep = s.step === "SUMMARY";
-  const showActionBar = s.step !== "ASK" && s.step !== "USER_TYPE";
-  const showResearchQuestionContext = s.step !== "ASK" && s.step !== "USER_TYPE" && !!trimmedResearchQuestion;
+  const isPastQuestionStep = !PRE_QUESTION_STEPS.has(s.step);
+  const showActionBar = isPastQuestionStep;
+  const showResearchQuestionContext = isPastQuestionStep && !!trimmedResearchQuestion;
 
   const getPrimaryAction = () => {
     if (isSummaryStep) {
