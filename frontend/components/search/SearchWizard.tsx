@@ -567,7 +567,7 @@ function ScreenUserType() {
           </Tooltip>
         </div>
         <p className="max-w-2xl mx-auto text-sm text-gray-500">
-          Policy Atlas is designed to support a range of use cases, from quick evidence checks to in-depth policy reports. We&apos;re testing which outputs users find most valuable to help prioritise what to build next. This won&apos;t change your search flow or output in alpha.
+          Policy Atlas supports a range of use cases, from quick evidence checks to in-depth policy reports. We&apos;re testing which outputs users find most valuable to help prioritise what to build next. This selection won&apos;t change your search flow or output in alpha.
         </p>
       </div>
 
