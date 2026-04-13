@@ -59,7 +59,7 @@ const USER_TYPE_OPTIONS: { value: UserType; label: string; tagline?: string; des
     value: "horizon_scan",
     label: "A Horizon Scan",
     tagline: "Explore an unfamiliar area",
-    description: "An executive summary mapping emerging themes and blind spots, best for getting up to speed on an unknown policy area.",
+    description: "An executive summary mapping emerging themes and blind spots, best for getting up to speed on an unfamiliar policy area.",
   },
   {
     value: "rapid_brief",
@@ -82,7 +82,7 @@ const USER_TYPE_OPTIONS: { value: UserType; label: string; tagline?: string; des
   {
     value: "rapid_evidence_review",
     label: "A Rapid Evidence Review",
-    tagline: "Deep evidence synthesis",
+    tagline: "Review the evidence in depth",
     description: "A deep evidence review synthesising findings across 100+ sources. Best for rigorous literature reviews and evidence mapping.",
   },
   {
