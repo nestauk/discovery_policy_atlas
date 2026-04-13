@@ -52,32 +52,42 @@ type Step = "USER_TYPE" | "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "
 const STEPS: Step[] = ["USER_TYPE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
 /** Steps that appear before the research question is entered */
 const PRE_QUESTION_STEPS: ReadonlySet<Step> = new Set(["USER_TYPE", "ASK"]);
-type UserType = "policy_blueprint" | "horizon_scan" | "rapid_brief" | "rapid_evidence_review" | "not_sure";
+type UserType = "policy_blueprint" | "horizon_scan" | "rapid_brief" | "rapid_evidence_review" | "policy_note" | "not_sure";
 
-const USER_TYPE_OPTIONS: { value: UserType; label: string; description: string }[] = [
-  {
-    value: "policy_blueprint",
-    label: "A Policy Blueprint",
-    description: "A full report identifying interventions, extracting outcomes, and ranking them by evidence strength and predicted impact. Ideal for designing new strategies or major spend decisions.",
-  },
+const USER_TYPE_OPTIONS: { value: UserType; label: string; tagline?: string; description: string }[] = [
   {
     value: "horizon_scan",
     label: "A Horizon Scan",
-    description: "An executive summary mapping emerging themes and blind spots, best for getting up to speed on unknown policy areas.",
+    tagline: "Explore an unfamiliar area",
+    description: "An executive summary mapping emerging themes and blind spots, best for getting up to speed on an unknown policy area.",
   },
   {
     value: "rapid_brief",
     label: "A Rapid Brief",
-    description: "A 1-page summary answering a specific question with key citations, perfect for urgent meeting prep or sense checking.",
+    tagline: "Answer one question fast",
+    description: "A concise 1-page evidence brief answering a specific policy question, with key findings and citations. Best for urgent meeting prep, quick sense-checks, or getting up to speed fast.",
+  },
+  {
+    value: "policy_note",
+    label: "A Policy Note",
+    tagline: "Recommend a course of action",
+    description: "A three-page decision note structured around the problem, policy options, and a recommended course of action. Designed for senior review, with concise evidence, trade-offs, and clear rationale.",
+  },
+  {
+    value: "policy_blueprint",
+    label: "A Policy Blueprint",
+    tagline: "Design a strategy",
+    description: "A full report comparing interventions and ranking them by evidence strength and likely impact. Ideal for designing strategies or informing major spend decisions.",
   },
   {
     value: "rapid_evidence_review",
     label: "A Rapid Evidence Review",
-    description: "An exhaustive data extraction of 100+ sources, designed for deep-dive literature synthesis and rigorous evidence mapping.",
+    tagline: "Deep evidence synthesis",
+    description: "A deep evidence review synthesising findings across 100+ sources. Best for rigorous literature reviews and evidence mapping.",
   },
   {
     value: "not_sure",
-    label: "I'm not sure",
+    label: "I’m not sure",
     description: "If you’re not sure, our search wizard will help you narrow down your policy question.",
   },
 ];
@@ -399,7 +409,7 @@ function ProgressBar({
   allStepsVisited: boolean;
 }) {
   const steps: { id: Step; label: string }[] = [
-    { id: "USER_TYPE", label: "Use case" },
+    { id: "USER_TYPE", label: "Output" },
     { id: "ASK", label: "Question" },
     { id: "POPULATION", label: "Population" },
     { id: "INNER_SETTING", label: "Setting" },
@@ -582,6 +592,14 @@ function ScreenUserType() {
               )}
             >
               <span className="font-medium">{option.label}</span>
+              {option.tagline && (
+                <span className={cx(
+                  "ml-2 text-sm font-normal",
+                  isSelected ? "text-blue-200" : "text-gray-400"
+                )}>
+                  — {option.tagline}
+                </span>
+              )}
               <span className={cx(
                 "block text-sm mt-1",
                 isNotSure

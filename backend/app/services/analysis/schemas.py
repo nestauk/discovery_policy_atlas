@@ -85,6 +85,7 @@ class SearchContext(BaseModel):
             "horizon_scan",
             "rapid_brief",
             "rapid_evidence_review",
+            "policy_note",
             "not_sure",
         ]
     ] = None
