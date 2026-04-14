@@ -52,7 +52,9 @@ type Step = "USE_CASE" | "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "P
 const STEPS: Step[] = ["USE_CASE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
 /** Steps that appear before the research question is entered */
 const PRE_QUESTION_STEPS: ReadonlySet<Step> = new Set(["USE_CASE", "ASK"]);
+// Keep in sync with backend/app/services/analysis/schemas.py SearchContext.use_case
 type UseCase = "policy_blueprint" | "horizon_scan" | "rapid_brief" | "rapid_evidence_review" | "policy_note" | "not_sure";
+const VALID_USE_CASES: ReadonlySet<string> = new Set<UseCase>(["policy_blueprint", "horizon_scan", "rapid_brief", "rapid_evidence_review", "policy_note", "not_sure"]);
 
 const USE_CASE_OPTIONS: { value: UseCase; label: string; tagline?: string; description: string }[] = [
   {
@@ -331,7 +333,7 @@ export const useWizard = create<WizardState>((set, get) => ({
 
     set({
       step: "SUMMARY",
-      useCase: (sq.use_case as UseCase) || null,
+      useCase: VALID_USE_CASES.has(sq.use_case ?? "") ? (sq.use_case as UseCase) : null,
       researchQuestion: sq.research_question || sq.original_query || "",
       population: toSelection(population),
       innerSetting: toSelection(innerSetting),
