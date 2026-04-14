@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
@@ -11,6 +11,14 @@ export default function SearchPage() {
   const { createAnalysisProject, runAnalysisForProject } = useAPI()
   const { setActiveProject } = useAnalysisProjectStore()
   const [isRunning, setIsRunning] = useState(false)
+
+  // Reset wizard on mount — but not if this is a refine visit
+  // (refine sets parentProjectId via initFromSearchQuery before navigating here)
+  useEffect(() => {
+    if (!useWizard.getState().parentProjectId) {
+      useWizard.getState().reset()
+    }
+  }, [])
 
   const handleRunAnalysis = async (context: SearchContext) => {
     // Prevent user initiating multiple analysis runs with the same search parameters
@@ -91,7 +99,7 @@ export default function SearchPage() {
         time_to: dateTo,
         max_results: context.maxResults,
         additional_questions: context.additionalQuestions,
-        user_type: context.userType ?? undefined,
+        use_case: context.useCase ?? undefined,
         ...(hasImplementationConstraints
           ? { implementation_constraints: implementationConstraints }
           : {}),
@@ -122,9 +130,6 @@ export default function SearchPage() {
         .catch((error) => {
           console.error('Search analysis HTTP connection lost (backend may still be running):', error)
         })
-
-      // Reset wizard state so a fresh visit to /search starts clean
-      useWizard.getState().reset()
 
       // Navigate to results immediately
       router.push(`/projects/${project.id}`)

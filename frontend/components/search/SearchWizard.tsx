@@ -48,47 +48,47 @@ const HelpHint = ({ content }: { content: React.ReactNode }) => (
 );
 
 // ---------------- TYPES & CONSTANTS ----------------
-type Step = "USER_TYPE" | "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
-const STEPS: Step[] = ["USER_TYPE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+type Step = "USE_CASE" | "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
+const STEPS: Step[] = ["USE_CASE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
 /** Steps that appear before the research question is entered */
-const PRE_QUESTION_STEPS: ReadonlySet<Step> = new Set(["USER_TYPE", "ASK"]);
-type UserType = "policy_blueprint" | "horizon_scan" | "rapid_brief" | "rapid_evidence_review" | "policy_note" | "not_sure";
+const PRE_QUESTION_STEPS: ReadonlySet<Step> = new Set(["USE_CASE", "ASK"]);
+type UseCase = "policy_blueprint" | "horizon_scan" | "rapid_brief" | "rapid_evidence_review" | "policy_note" | "not_sure";
 
-const USER_TYPE_OPTIONS: { value: UserType; label: string; tagline?: string; description: string }[] = [
+const USE_CASE_OPTIONS: { value: UseCase; label: string; tagline?: string; description: string }[] = [
   {
     value: "horizon_scan",
-    label: "A Horizon Scan",
+    label: "Horizon Scan",
     tagline: "Explore an unfamiliar area",
-    description: "An executive summary mapping emerging themes and blind spots, best for getting up to speed on an unfamiliar policy area.",
+    description: "An overview of emerging themes, best for getting up to speed on an unfamiliar policy area.",
   },
   {
     value: "rapid_brief",
-    label: "A Rapid Brief",
+    label: "Rapid Brief",
     tagline: "Answer one question fast",
-    description: "A concise 1-page evidence brief answering a specific policy question, with key findings and citations. Best for urgent meeting prep, quick sense-checks, or getting up to speed fast.",
+    description: "A one-page evidence brief answering a specific policy question, with key findings and citations from the most relevant sources. Best for urgent prep or a quick sense-check.",
   },
   {
     value: "policy_note",
-    label: "A Policy Note",
+    label: "Policy Note",
     tagline: "Recommend a course of action",
-    description: "A three-page decision note structured around the problem, policy options, and a recommended course of action. Designed for senior review, with concise evidence, trade-offs, and clear rationale.",
+    description: "A three-page decision note setting out the problem, options and recommendations. Designed for senior review, with the most relevant evidence and trade-offs.",
   },
   {
     value: "policy_blueprint",
-    label: "A Policy Blueprint",
+    label: "Policy Blueprint",
     tagline: "Design a strategy",
-    description: "A full report comparing interventions and ranking them by evidence strength and likely impact. Ideal for designing strategies or informing major spend decisions.",
+    description: "A report ranking policy interventions by evidence strength and impact, based on comprehensive evidence. Ideal for designing strategies or informing major spend decisions.",
   },
   {
     value: "rapid_evidence_review",
-    label: "A Rapid Evidence Review",
-    tagline: "Review the evidence in depth",
-    description: "A deep evidence review synthesising findings across 100+ sources. Best for rigorous literature reviews and evidence mapping.",
+    label: "Rapid Evidence Review",
+    tagline: "Deep-dive into the literature",
+    description: "A rigorous synthesis of 100+ academic and grey literature sources on a policy question.",
   },
   {
     value: "not_sure",
     label: "I’m not sure",
-    description: "If you’re not sure, our search wizard will help you narrow down your policy question.",
+    description: "Our search wizard will help you narrow down your policy question.",
   },
 ];
 type TimePreset = "LAST_YEAR" | "LAST_2_YEARS" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
@@ -192,13 +192,13 @@ export type SearchContext = {
   screeningFactors: string[]; // Free text factors for screening
   additionalQuestions: string[]; // Additional research questions
   maxResults: number;
-  userType: UserType | null;
+  useCase: UseCase | null;
 };
 
 // ---------------- STATE ----------------
 interface WizardState {
   step: Step;
-  userType: UserType | null;
+  useCase: UseCase | null;
   researchQuestion: string;
   population: { selected: string[]; noPreference: boolean };
   innerSetting: { selected: string[]; noPreference: boolean };
@@ -235,8 +235,8 @@ interface WizardState {
 }
 
 const INITIAL_WIZARD_STATE = {
-  step: "USER_TYPE" as Step,
-  userType: null as UserType | null,
+  step: "USE_CASE" as Step,
+  useCase: null as UseCase | null,
   researchQuestion: "",
   population: { selected: [] as string[], noPreference: true },
   innerSetting: { selected: [] as string[], noPreference: true },
@@ -301,7 +301,7 @@ export const useWizard = create<WizardState>((set, get) => ({
       screeningFactors: s.screeningFactors,
       additionalQuestions: s.additionalQuestions,
       maxResults: s.maxResults,
-      userType: s.userType,
+      useCase: s.useCase,
     };
   },
   initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => {
@@ -331,7 +331,7 @@ export const useWizard = create<WizardState>((set, get) => ({
 
     set({
       step: "SUMMARY",
-      userType: (sq.user_type as UserType) || null,
+      useCase: (sq.use_case as UseCase) || null,
       researchQuestion: sq.research_question || sq.original_query || "",
       population: toSelection(population),
       innerSetting: toSelection(innerSetting),
@@ -409,7 +409,7 @@ function ProgressBar({
   allStepsVisited: boolean;
 }) {
   const steps: { id: Step; label: string }[] = [
-    { id: "USER_TYPE", label: "Output" },
+    { id: "USE_CASE", label: "Output" },
     { id: "ASK", label: "Question" },
     { id: "POPULATION", label: "Population" },
     { id: "INNER_SETTING", label: "Setting" },
@@ -548,14 +548,14 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
 }
 
 // ---------------- SCREENS ----------------
-function ScreenUserType() {
+function ScreenUseCase() {
   const s = useWizard();
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 p-8 pt-32">
+    <div className="max-w-4xl mx-auto space-y-6 p-8 pt-20">
       <div className="text-center space-y-3">
         <div className="flex items-center justify-center gap-3">
-          <h1 className="text-4xl font-bold tracking-tight">What would you like Policy Atlas to generate?</h1>
+          <h1 className="text-4xl font-bold tracking-tight">How can Policy Atlas help?</h1>
           <Tooltip content={
             <p className="max-w-xs">
               Alpha means this is an early prototype with limited functionality.
@@ -566,27 +566,24 @@ function ScreenUserType() {
             <Badge variant="default" className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1 -mt-2">ALPHA</Badge>
           </Tooltip>
         </div>
-        <p className="max-w-2xl mx-auto text-sm text-gray-500">
-          Policy Atlas supports a range of use cases, from quick evidence checks to in-depth policy reports. We&apos;re testing which outputs users find most valuable to help prioritise what to build next. This selection won&apos;t change your search flow or output in alpha.
-        </p>
       </div>
 
-      <div className="max-w-2xl mx-auto flex flex-col gap-3">
-        {USER_TYPE_OPTIONS.map((option) => {
-          const isSelected = s.userType === option.value;
+      <div className="max-w-3xl mx-auto flex flex-col gap-3">
+        {USE_CASE_OPTIONS.map((option) => {
+          const isSelected = s.useCase === option.value;
           const isNotSure = option.value === "not_sure";
           return (
             <button
               key={option.value}
               type="button"
-              onClick={() => s.set({ userType: option.value })}
+              onClick={() => s.set({ useCase: option.value })}
               className={cx(
-                "w-full px-5 rounded-xl transition-all ring-1 whitespace-normal break-words",
+                "w-full px-6 rounded-xl transition-all ring-1 whitespace-normal break-words",
                 isNotSure
                   ? cx("text-center py-3 mt-4", isSelected
                       ? "bg-gray-700 !text-white ring-gray-700"
                       : "bg-transparent text-gray-500 ring-gray-200 hover:bg-gray-50 hover:text-gray-700")
-                  : cx("text-left py-4 hover:-translate-y-0.5 hover:shadow-md", isSelected
+                  : cx("text-left py-5 hover:-translate-y-0.5 hover:shadow-md", isSelected
                       ? "bg-blue-600 !text-white ring-blue-600 shadow-md"
                       : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50")
               )}
@@ -601,7 +598,7 @@ function ScreenUserType() {
                 </span>
               )}
               <span className={cx(
-                "block text-sm mt-1",
+                "block text-sm mt-0.5",
                 isNotSure
                   ? (isSelected ? "text-gray-300" : "text-gray-400")
                   : (isSelected ? "text-blue-100" : "text-gray-500")
@@ -613,16 +610,17 @@ function ScreenUserType() {
         })}
       </div>
 
-      <div className="flex justify-end items-center mt-6 max-w-2xl mx-auto">
+      <div className="flex flex-col items-center gap-3 mt-6 max-w-3xl mx-auto">
         <Button
           variant="secondary"
           className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
           full
-          disabled={!s.userType}
+          disabled={!s.useCase}
           onClick={() => s.next()}
         >
           Continue
         </Button>
+        <p className="text-xs text-gray-400">We&apos;ll use your selection to prioritise new features. It won&apos;t affect today&apos;s results.</p>
       </div>
     </div>
   );
@@ -644,7 +642,7 @@ function ScreenAsk() {
     <div className="max-w-4xl mx-auto space-y-8 p-8 pt-32">
       <div className="text-center space-y-4">
         <div className="flex items-center justify-center gap-3">
-          <h1 className="text-4xl font-bold tracking-tight">Find evidence on policy interventions</h1>
+          <h1 className="text-4xl font-bold tracking-tight">What policy interventions are you exploring?</h1>
           <Tooltip content={
             <p className="max-w-xs">
               Alpha means this is an early prototype with limited functionality. 
@@ -1812,7 +1810,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
         />
       )}
       <div className={isSummaryStep ? "" : "flex-1"}>
-        {s.step === "USER_TYPE" && <ScreenUserType />}
+        {s.step === "USE_CASE" && <ScreenUseCase />}
         {s.step === "ASK" && <ScreenAsk />}
         {s.step === "POPULATION" && <ScreenPopulation />}
         {s.step === "INNER_SETTING" && <ScreenInnerSetting />}

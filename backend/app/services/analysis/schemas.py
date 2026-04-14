@@ -79,7 +79,7 @@ class SearchContext(BaseModel):
     additional_questions: List[str] = Field(default_factory=list)
     implementation_constraints: Optional[ImplementationConstraints] = None
     # Collected for analytics; does not affect search behavior in alpha
-    user_type: Optional[
+    use_case: Optional[
         Literal[
             "policy_blueprint",
             "horizon_scan",
