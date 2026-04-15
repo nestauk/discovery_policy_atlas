@@ -95,7 +95,7 @@ export default function AgentLayout({
       pingBackend()
       if (user?.id) {
         posthog.identify(user.id, {
-          langfuse_user_url: `https://langfuse.dap-tools.uk/project/cmdefyjbe00014uoitxxn92n7/users/${user.id}`,
+          langfuse_user_url: `${process.env.NEXT_PUBLIC_LANGFUSE_USER_URL}/${user.id}`,
         })
       }
     }
