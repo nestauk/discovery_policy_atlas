@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 
 class UnifiedReference(BaseModel):
@@ -78,6 +78,18 @@ class SearchContext(BaseModel):
     max_results: Optional[int] = None
     additional_questions: List[str] = Field(default_factory=list)
     implementation_constraints: Optional[ImplementationConstraints] = None
+    # Collected for analytics; does not affect search behavior in alpha
+    # Keep in sync with frontend/components/search/SearchWizard.tsx UseCase type
+    use_case: Optional[
+        Literal[
+            "policy_blueprint",
+            "horizon_scan",
+            "rapid_brief",
+            "rapid_evidence_review",
+            "policy_note",
+            "not_sure",
+        ]
+    ] = None
 
 
 # Search wizard API request/response schemas

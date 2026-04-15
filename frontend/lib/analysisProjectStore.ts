@@ -50,6 +50,7 @@ export interface AnalysisProject {
     custom_excludes?: string[]
     relevance_enabled?: boolean
     use_abstracts_only?: boolean
+    use_case?: string
   }
   progress?: {
     stage_label: string
