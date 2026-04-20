@@ -28,7 +28,7 @@ export default function SearchPage() {
     try {
       // Read refine state from wizard store
       const { parentProjectId } = useWizard.getState()
-      const baseTitle = (context.researchQuestion || 'New Analysis Project').replace(/ \(refined\)$/, '')
+      const baseTitle = (context.researchQuestion || 'New Analysis Project').replace(/ \(refined\)$/, '').slice(0, 240)
 
       // Create analysis project from search context
       const project = await createAnalysisProject({
