@@ -10,6 +10,7 @@ import { Search, FileText, FolderOpen, Folder, Zap, ChevronRight, ChevronDown, C
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useWizard } from '@/components/search/SearchWizard'
 import { pingBackend } from '@/lib/api'
+import posthog from 'posthog-js'
 import { FeedbackButton } from '@/components/ui/feedback-button'
 import { FeedbackModal } from '@/components/ui/feedback-modal'
 import { useFeedbackStore, fetchProjectFeedback, saveProjectFeedback } from '@/lib/feedbackStore'
@@ -92,8 +93,13 @@ export default function AgentLayout({
       router.push('/login')
     } else {
       pingBackend()
+      if (user?.id) {
+        posthog.identify(user.id, {
+          langfuse_user_url: `${process.env.NEXT_PUBLIC_LANGFUSE_USER_URL}/${user.id}`,
+        })
+      }
     }
-  }, [isSignedIn, isLoaded, router])
+  }, [isSignedIn, isLoaded, router, user?.id])
 
   // Prime evidence categories cache from backend API
   useEffect(() => {
