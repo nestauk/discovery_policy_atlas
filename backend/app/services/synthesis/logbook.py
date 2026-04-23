@@ -155,7 +155,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
     for t in issue_themes:
         src_ids = [
             uuid_to_docid.get(str(u), "")
-            for u in (t.get("source_document_ids") or [])
+            for u in (t.get("source_doc_ids") or [])
             if uuid_to_docid.get(str(u))
         ]
         if t.get("theme_name"):
@@ -171,11 +171,19 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
     # Build interventions
     interventions = []
     for t in intervention_themes:
-        supp_ids = [
-            uuid_to_docid.get(str(u), "")
-            for u in (t.get("source_document_ids") or [])
-            if uuid_to_docid.get(str(u))
-        ]
+        raw_ids = t.get("source_doc_ids") or []
+        # IDs may be UUIDs or external doc_ids — normalise to external
+        supp_ids = []
+        for u in raw_ids:
+            u_str = str(u)
+            if u_str in uuid_to_docid:
+                # It's a UUID — map to external
+                ext = uuid_to_docid[u_str]
+                if ext:
+                    supp_ids.append(ext)
+            elif u_str:
+                # Already an external ID — keep as-is
+                supp_ids.append(u_str)
         if t.get("theme_name"):
             interventions.append(
                 PolicyIntervention(
