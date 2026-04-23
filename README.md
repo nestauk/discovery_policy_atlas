@@ -21,3 +21,7 @@ To deploy the app locally and start developing, see the [installation guide](htt
 ## Documentation
 
 Check out the [technical documentation](https://nestauk.github.io/discovery_policy_atlas/) for more info!
+
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 — see the [LICENSE](LICENSE) file for details.
