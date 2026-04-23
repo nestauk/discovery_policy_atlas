@@ -636,20 +636,80 @@ class ChatbotService:
         # Build CMO-structured intervention list for the system prompt
         interventions_text = ""
         if summary and summary.interventions:
+            # Build evidence_category lookup keyed by both UUID and external
+            # doc_id, from ALL project documents (not just
+            # those in the citation map) so every supporting_doc_id matches.
+            doc_evidence_category: Dict[str, str] = {}
+            try:
+                all_docs_res = (
+                    vectorization_service.supabase.table("analysis_documents")
+                    .select("id, doc_id, evidence_category")
+                    .eq("analysis_project_id", project_id)
+                    .execute()
+                )
+                for row in all_docs_res.data or []:
+                    cat = row.get("evidence_category")
+                    if not cat:
+                        cat = "Unknown / Insufficient information"
+                    uuid = str(row["id"])
+                    ext_id = row.get("doc_id")
+                    doc_evidence_category[uuid] = cat
+                    if ext_id:
+                        doc_evidence_category[str(ext_id)] = cat
+            except Exception as exc:
+                logger.warning("Failed to load doc evidence categories: %s", exc)
+
+            # Short names for evidence categories, ordered by strength
+            EVIDENCE_SHORT_NAMES: Dict[str, str] = {
+                "Systematic Review and Meta-Analysis": "SR/MA",
+                "RCTs and Quasi-Experimental Studies": "RCT",
+                "Observational Research Studies": "Obs.",
+                "Modelling & Simulation": "Modelling",
+                "Policy Syntheses & Guidance Documents": "Policy",
+                "Qualitative & Contextual Evidence": "Qual.",
+                "Expert Opinion and Commentary": "Opinion",
+                "Other (Non-evidence documents)": "Other",
+                "Unknown / Insufficient information": "Unknown",
+            }
+            EVIDENCE_RANK = {name: i for i, name in enumerate(EVIDENCE_SHORT_NAMES)}
+
+            # Pre-compute evidence data per intervention for sorting
+            intv_evidence: list = []
+            for intv in summary.interventions:
+                category_counts: Dict[str, int] = {}
+                for doc_id in set(intv.supporting_doc_ids):
+                    cat = doc_evidence_category.get(doc_id)
+                    if cat:
+                        category_counts[cat] = category_counts.get(cat, 0) + 1
+                sorted_cats = sorted(
+                    category_counts.items(),
+                    key=lambda x: EVIDENCE_RANK.get(x[0], 99),
+                )
+                # Highest causal evidence present (lowest rank = strongest)
+                best_rank = min(
+                    (EVIDENCE_RANK.get(cat, 99) for cat in category_counts),
+                    default=99,
+                )
+                evidence_str = (
+                    " ".join(
+                        f"{EVIDENCE_SHORT_NAMES.get(cat, cat)} ({count})"
+                        for cat, count in sorted_cats
+                    )
+                    if sorted_cats
+                    else "not recorded"
+                )
+                intv_evidence.append((intv, evidence_str, best_rank, intv.frequency))
+
+            # Sort by highest causal evidence present, then study count (matches themes tab)
+            intv_evidence.sort(key=lambda x: (x[2], -x[3]))
+
             blocks = []
-            for i, intv in enumerate(summary.interventions, 1):
+            for i, (intv, evidence_str, _, _) in enumerate(intv_evidence, 1):
                 countries = (
                     ", ".join(intv.countries[:4]) if intv.countries else "various"
                 )
                 consensus = intv.effect_consensus or "unknown"
-                study_types_str = (
-                    ", ".join(
-                        f"{stype} ({count})"
-                        for stype, count in list(intv.study_types.items())[:3]
-                    )
-                    if intv.study_types
-                    else "not recorded"
-                )
+
                 outcomes_str = (
                     ", ".join(intv.related_outcomes[:3])
                     if intv.related_outcomes
@@ -658,7 +718,8 @@ class ChatbotService:
 
                 block = (
                     f"{i}. {intv.intervention_name}\n"
-                    f"   Context: {countries} — {intv.frequency} studies — types: {study_types_str}\n"
+                    f"   Context: {countries} — {intv.frequency} studies\n"
+                    f"   Evidence: {evidence_str}\n"
                     f"   Mechanism: [not pre-extracted — use extract_intervention_context_and_mechanism during deep dive]\n"
                     f"   Outcome: {consensus} effect — outcomes: {outcomes_str}"
                 )

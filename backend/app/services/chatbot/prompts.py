@@ -136,7 +136,8 @@ FORECAST_EVIDENCE_STANDARDS = [
 
 FORECAST_TASK_INSTRUCTIONS = """YOUR TASK:
 Phase 1 — Context Confirmation (1-2 turns):
-The user's first message will typically confirm or edit their project context (geography, population, setting, outcomes).
+The user's first message will typically confirm or edit their implementation context (geography, population, setting, outcomes).
+IMPORTANT: The PROJECT CONTEXT section above contains their search parameters, which may be broader than their actual implementation target (e.g. they searched across "OECD" but want to implement in "UK"). Treat these as starting defaults, not confirmed implementation details.
 If they confirm their context:
 - Acknowledge briefly (one sentence)
 - Do NOT re-ask geography, population, setting, or outcomes — these are already known
@@ -153,11 +154,11 @@ Phase 2 — Fast Screen (after context gathered):
 This is a TRIAGE step — you only have outcome evidence (Leg 1) at this stage. Mechanisms and support factors have not been extracted yet, so do NOT claim to assess transferability or context fit.
 
 Present a comparative table:
-| Intervention | Outcome evidence | Does it help? |
-- Outcome evidence: Study count AND study types (do not conflate count with quality — "12 studies" is not "strong evidence" without knowing study design)
+| Intervention theme | Outcome evidence base | Does it help? |
+- Outcome evidence base: Copy the "evidence:" value from the intervention list VERBATIM into this cell. For example if the data says "evidence: SR/MA (1) RCT (2) Policy (5)" then the cell must contain exactly "SR/MA (1) RCT (2) Policy (5)". Do NOT rephrase, reorder, expand, or rewrite the category names — use them verbatim so the UI can render colour-coded badges. Do NOT prepend study counts or add other text.
 - Does it help?: Describe the effect in plain language relative to the DESIRED outcome. For example, if the desired outcome is "reduce HFSS consumption" and the evidence shows the intervention reduces consumption, say "Yes — reduces consumption". If mixed, say "Mixed results". If evidence shows negative/harmful effects, say "⚠️ Negative effects reported". Do NOT just say "increase" or "decrease" without context — the user needs to know if the intervention helps with their goal.
 
-After the table, briefly note which 1-2 interventions have the strongest outcome evidence and which have concerning effect directions.
+After the table, briefly note which 1-2 interventions have the strongest outcome evidence base and which have concerning effect directions.
 Frame this explicitly as: "Here is what we know about outcomes. To assess whether any of these could work in your context, we need to extract the mechanism and support factors — pick one to deep-dive."
 End with chips listing the top intervention names so the user can click to deep-dive.
 
@@ -290,13 +291,12 @@ def build_forecast_system_prompt(forecast_context: dict) -> str:
         constraints_text = f"\n- Known constraints: {', '.join(parts)}" if parts else ""
 
     project_section = (
-        "PROJECT CONTEXT:\n"
+        "PROJECT CONTEXT (from search — may be broader than the user's actual implementation target):\n"
         f"- Topic: {forecast_context.get('title', 'Unknown')}\n"
-        f"- Search geography: {sq.get('geography', 'Not specified')} "
-        "(NOTE: confirm whether this is the implementation target or a broad discovery scope)\n"
-        f"- Target population: {sq.get('population', 'Not specified')}\n"
-        f"- Target setting: {sq.get('inner_setting', 'Not specified')}\n"
-        f"- Desired outcomes: {sq.get('outcomes', 'Not specified')}"
+        f"- Implementation geography: UK (default assumption — this tool targets UK policymakers)\n"
+        f"- Search population: {sq.get('population', 'Not specified')}\n"
+        f"- Search setting: {sq.get('inner_setting', 'Not specified')}\n"
+        f"- Search outcomes: {sq.get('outcomes', 'Not specified')}"
         f"{constraints_text}"
     )
 

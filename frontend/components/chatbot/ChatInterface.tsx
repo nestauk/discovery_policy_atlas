@@ -16,10 +16,61 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useUser } from '@clerk/nextjs'
 import Image from 'next/image'
+import { getEvidenceCategories } from '@/lib/evidenceCategories'
 
 const DOCUMENT_CITATION_BRACKET_RE = /\[([^\]]+)\]/g
 const CHIP_LINE_RE = /\[chips:\s*((?:"[^"]*"(?:\s*\|\s*"[^"]*")*))\s*\]/g
 const CHIP_VALUE_RE = /"([^"]*)"/g
+
+// Evidence category badge colours keyed by short name
+const EVIDENCE_BADGE_COLORS: Record<string, { bg: string; text: string }> = {}
+for (const cat of getEvidenceCategories()) {
+  EVIDENCE_BADGE_COLORS[cat.short_name] = { bg: cat.bg_color, text: cat.text_color }
+}
+// Also register the concise aliases used in the chatbot system prompt
+EVIDENCE_BADGE_COLORS['SR/MA'] = EVIDENCE_BADGE_COLORS['Systematic Review'] ?? { bg: '#0F294A', text: '#FFFFFF' }
+EVIDENCE_BADGE_COLORS['RCT'] = EVIDENCE_BADGE_COLORS['RCT/Quasi-Exp'] ?? { bg: '#9A1BBE', text: '#FFFFFF' }
+EVIDENCE_BADGE_COLORS['Obs.'] = EVIDENCE_BADGE_COLORS['Observational'] ?? { bg: '#0000FF', text: '#FFFFFF' }
+EVIDENCE_BADGE_COLORS['Policy'] = EVIDENCE_BADGE_COLORS['Policy Guidance'] ?? { bg: '#97D9E3', text: '#111827' }
+EVIDENCE_BADGE_COLORS['Qual.'] = EVIDENCE_BADGE_COLORS['Qualitative'] ?? { bg: '#A59BEE', text: '#111827' }
+EVIDENCE_BADGE_COLORS['Opinion'] = EVIDENCE_BADGE_COLORS['Expert Opinion'] ?? { bg: '#F6A4B7', text: '#111827' }
+// Match patterns like "SR/MA (2)" or "Policy Guidance (5)"
+const EVIDENCE_BADGE_RE = new RegExp(
+  `(${Object.keys(EVIDENCE_BADGE_COLORS).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\((\\d+)\\)`,
+  'g'
+)
+
+function renderEvidenceBadges(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  EVIDENCE_BADGE_RE.lastIndex = 0
+  while ((match = EVIDENCE_BADGE_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    const name = match[1]
+    const count = match[2]
+    const colors = EVIDENCE_BADGE_COLORS[name]
+    parts.push(
+      <span
+        key={match.index}
+        className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium leading-tight whitespace-nowrap"
+        style={{ backgroundColor: colors.bg, color: colors.text }}
+      >
+        {name} ({count})
+      </span>
+    )
+    lastIndex = EVIDENCE_BADGE_RE.lastIndex
+  }
+
+  if (parts.length === 0) return null
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+  return <span className="inline-flex flex-wrap gap-1 items-center">{parts}</span>
+}
 const EMPTY_CHAT_MESSAGES: ChatMessage[] = []
 const EMPTY_CHAT_STEPS: ChatStep[] = []
 
@@ -448,20 +499,18 @@ export function ChatInterface({
 
   const handleConfirmContext = () => {
     const parts = [
-      forecastContext?.geography ? `Geography: ${forecastContext.geography}` : null,
+      'Geography: UK',
       forecastContext?.population ? `Population: ${forecastContext.population}` : null,
       forecastContext?.setting ? `Setting: ${forecastContext.setting}` : null,
       forecastContext?.outcomes ? `Outcomes: ${forecastContext.outcomes}` : null,
     ].filter(Boolean).join('. ')
-    const msg = parts
-      ? `My context is confirmed: ${parts}. Please proceed with the transferability assessment.`
-      : 'Please proceed with the transferability assessment.'
+    const msg = `My context is confirmed: ${parts}. Please proceed with the transferability assessment.`
     handleSendMessage(msg)
   }
 
   const handleEditContext = () => {
     const lines = [
-      `Geography: ${forecastContext?.geography || '(e.g. UK, OECD countries)'}`,
+      `Geography: UK`,
       `Population: ${forecastContext?.population || '(e.g. children, older adults, knowledge workers)'}`,
       `Setting: ${forecastContext?.setting || '(e.g. NHS trust, local council, schools)'}`,
       `Outcomes: ${forecastContext?.outcomes || '(e.g. reduced waiting times, improved attendance)'}`,
@@ -516,11 +565,11 @@ export function ChatInterface({
         {/* Forecast context card — shown before any messages */}
         {activeMode === 'forecast' && displayMessages.length === 0 && !isLoading && forecastContext && (
           <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
-            <div className="text-sm font-medium text-gray-900">Your Project Context</div>
-            <p className="text-xs text-gray-500">This is what I know from your search. Confirm or edit before we start.</p>
+            <div className="text-sm font-medium text-gray-900">Your Implementation Context</div>
+            <p className="text-xs text-gray-500">Pre-filled from your search with a UK implementation target assumed. Edit anything that differs from your context.</p>
             <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
               <span className="text-gray-500">Geography</span>
-              <span className="text-gray-800">{forecastContext.geography || <span className="italic text-gray-400">Where are you implementing? e.g. UK, OECD</span>}</span>
+              <span className="text-gray-800">UK <span className="text-gray-400">(assumed — edit if different)</span></span>
               <span className="text-gray-500">Population</span>
               <span className="text-gray-800">{forecastContext.population || <span className="italic text-gray-400">Who is this for? e.g. children, older adults</span>}</span>
               <span className="text-gray-500">Setting</span>
@@ -686,9 +735,25 @@ export function ChatInterface({
                           th: ({ children, ...props }) => (
                             <th className="border border-gray-200 bg-gray-50 px-2 py-1.5 text-left font-medium text-gray-700" {...props}>{children}</th>
                           ),
-                          td: ({ children, ...props }) => (
-                            <td className="border border-gray-200 px-2 py-1.5 text-gray-600" {...props}>{children}</td>
-                          ),
+                          td: ({ children, ...props }) => {
+                            // Extract plain text from children (may be nested React elements)
+                            const extractText = (node: React.ReactNode): string => {
+                              if (typeof node === 'string') return node
+                              if (typeof node === 'number') return String(node)
+                              if (Array.isArray(node)) return node.map(extractText).join('')
+                              if (node && typeof node === 'object' && 'props' in node) {
+                                return extractText((node as React.ReactElement).props.children)
+                              }
+                              return ''
+                            }
+                            const text = extractText(children)
+                            const badges = text ? renderEvidenceBadges(text) : null
+                            return (
+                              <td className="border border-gray-200 px-2 py-1.5 text-gray-600" {...props}>
+                                {badges || children}
+                              </td>
+                            )
+                          },
                         }}
                       >
                         {cleanContent}
