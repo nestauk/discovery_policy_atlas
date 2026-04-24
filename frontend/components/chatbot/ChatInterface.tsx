@@ -35,32 +35,8 @@ function parseCitationGroup(bracketContent: string): number[] {
   return cleaned.split(',').map((part) => parseInt(part.trim(), 10))
 }
 
-function buildCitationLabelMap(content: string, references: { url?: string }[]): Map<number, number> {
-  const labelMap = new Map<number, number>()
-  let match: RegExpExecArray | null
-
-  DOCUMENT_CITATION_BRACKET_RE.lastIndex = 0
-  while ((match = DOCUMENT_CITATION_BRACKET_RE.exec(content)) !== null) {
-    for (const rawNumber of parseCitationGroup(match[1])) {
-      if (labelMap.has(rawNumber)) {
-        continue
-      }
-
-      const nextLabel = labelMap.size + 1
-      if (nextLabel > references.length) {
-        continue
-      }
-      labelMap.set(rawNumber, nextLabel)
-    }
-  }
-
-  return labelMap
-}
-
 // Helper function to process in-text citations
 function processInTextCitations(content: string, references: { url?: string }[]): string {
-  const labelMap = buildCitationLabelMap(content, references)
-
   // Replace [5], [Document 5], or grouped forms like [Documents 5 and 7]
   return content.replace(DOCUMENT_CITATION_BRACKET_RE, (match, bracketContent) => {
     const numbers = parseCitationGroup(bracketContent)
@@ -69,19 +45,14 @@ function processInTextCitations(content: string, references: { url?: string }[])
     }
 
     return numbers.map((number) => {
-      const label = labelMap.get(number)
-      if (!label) {
+      const ref = references[number - 1]
+      if (!ref) {
         return `[${number}]`
       }
-
-      const refIndex = label - 1
-      if (refIndex >= 0 && refIndex < references.length) {
-        const ref = references[refIndex]
-        if (ref.url) {
-          return `[[${label}]](${ref.url})`
-        }
+      if (ref.url) {
+        return `[[${number}]](${ref.url})`
       }
-      return `[${label}]`
+      return `[${number}]`
     }).join('')
   })
 }
