@@ -193,6 +193,46 @@ async def test_written_question_timeout_logs_explicitly(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
+async def test_rerank_truncates_long_embedding_inputs(monkeypatch):
+    from app.services.chatbot import parliament
+
+    captured_texts = []
+
+    async def _fake_batch_embed(texts):
+        captured_texts.extend(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(parliament, "_batch_embed", _fake_batch_embed)
+
+    items = [
+        {
+            "id": "h-1",
+            "title": "Extremely long parliamentary record",
+            "source_type": "debate",
+            "date": "2025-01-01",
+            "content": "x" * 20000,
+            "rerank_text": "x" * 20000,
+        },
+        {
+            "id": "h-2",
+            "title": "Short parliamentary record",
+            "source_type": "written_question",
+            "date": "2025-01-02",
+            "content": "Brief content",
+            "rerank_text": "Brief rerank text",
+        },
+    ]
+
+    ranked = await parliament._rerank_items("query", items, top_k=2)
+
+    assert len(ranked) == 2
+    assert captured_texts
+    assert all(
+        len(text) <= parliament.RERANK_EMBED_TEXT_MAX_CHARS for text in captured_texts
+    )
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_executes_tool_and_loops():
     from app.services.chatbot.chat_service import ChatbotService
 

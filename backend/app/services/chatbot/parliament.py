@@ -20,6 +20,7 @@ HANSARD_TIMEOUT = 10.0
 HANSARD_MAX_RESULTS = 3
 PARLIAMENT_FINAL_RESULTS = 3
 PQS_MAX_RESULTS = 6
+RERANK_EMBED_TEXT_MAX_CHARS = 4000
 
 _STOPWORDS = frozenset(
     {
@@ -353,10 +354,13 @@ async def _rerank_items(
     try:
         from sklearn.metrics.pairwise import cosine_similarity
 
-        texts = [original_query] + [
-            (
-                f"{it['title']} | {it['source_type']} | {it['date']} | "
-                f"{it.get('rerank_text', it['content'])}"
+        texts = [_truncate_text(original_query, RERANK_EMBED_TEXT_MAX_CHARS)] + [
+            _truncate_text(
+                (
+                    f"{it['title']} | {it['source_type']} | {it['date']} | "
+                    f"{it.get('rerank_text', it['content'])}"
+                ),
+                RERANK_EMBED_TEXT_MAX_CHARS,
             )
             for it in items
         ]
