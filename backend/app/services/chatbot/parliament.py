@@ -16,7 +16,7 @@ HANSARD_SEARCH_URL = "https://hansard-api.parliament.uk/search.json"
 PQS_SEARCH_URL = (
     "https://questions-statements-api.parliament.uk/api/writtenquestions/questions"
 )
-HANSARD_TIMEOUT = 10.0
+HANSARD_TIMEOUT = 15.0
 HANSARD_MAX_RESULTS = 3
 PARLIAMENT_FINAL_RESULTS = 3
 PQS_MAX_RESULTS = 6
