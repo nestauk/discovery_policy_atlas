@@ -17,7 +17,6 @@ PQS_SEARCH_URL = (
     "https://questions-statements-api.parliament.uk/api/writtenquestions/questions"
 )
 HANSARD_TIMEOUT = 10.0
-PQS_TIMEOUT = 8.0
 HANSARD_MAX_RESULTS = 3
 PARLIAMENT_FINAL_RESULTS = 3
 PQS_MAX_RESULTS = 6
@@ -734,19 +733,37 @@ async def _search_parliamentary_questions_safe(
     date_from: Optional[str],
     date_to: Optional[str],
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """Run the written questions branch with an isolated timeout and soft failure."""
+    """Run written-question search with explicit timeout/error diagnostics."""
     try:
-        async with asyncio.timeout(PQS_TIMEOUT):
-            items = await _search_parliamentary_questions(
-                query,
-                date_from=date_from,
-                date_to=date_to,
-                client=client,
-            )
+        items = await _search_parliamentary_questions(
+            query,
+            date_from=date_from,
+            date_to=date_to,
+            client=client,
+        )
         return items, None
+    except TimeoutError:
+        timeout_error = (
+            f"written question search timed out after {HANSARD_TIMEOUT:.0f}s"
+        )
+        logger.warning("Written question search timed out for query %r", query)
+        return [], timeout_error
+    except httpx.TimeoutException as exc:
+        timeout_error = (
+            f"written question search timed out after {HANSARD_TIMEOUT:.0f}s: {exc}"
+        )
+        logger.warning(
+            "Written question search HTTP timeout for query %r: %s", query, exc
+        )
+        return [], timeout_error
     except Exception as exc:
-        logger.warning("Written question search failed for query %r: %s", query, exc)
-        return [], str(exc)
+        logger.warning(
+            "Written question search failed for query %r (%s): %s",
+            query,
+            type(exc).__name__,
+            exc,
+        )
+        return [], f"{type(exc).__name__}: {exc}"
 
 
 def _format_parliament_items(

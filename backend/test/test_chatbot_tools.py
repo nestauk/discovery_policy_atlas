@@ -166,6 +166,33 @@ async def test_search_parliament_passes_date_filters():
 
 
 @pytest.mark.asyncio
+async def test_written_question_timeout_logs_explicitly(monkeypatch, caplog):
+    from app.services.chatbot import parliament
+
+    monkeypatch.setattr(
+        parliament,
+        "_search_parliamentary_questions",
+        AsyncMock(side_effect=TimeoutError()),
+    )
+
+    with caplog.at_level("WARNING"):
+        items, error = await parliament._search_parliamentary_questions_safe(
+            client=AsyncMock(),
+            query="childhood obesity",
+            date_from=None,
+            date_to=None,
+        )
+
+    assert items == []
+    assert error == (
+        f"written question search timed out after {parliament.HANSARD_TIMEOUT:.0f}s"
+    )
+    assert (
+        "Written question search timed out for query 'childhood obesity'" in caplog.text
+    )
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_executes_tool_and_loops():
     from app.services.chatbot.chat_service import ChatbotService
 
