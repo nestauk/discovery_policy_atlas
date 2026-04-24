@@ -2,7 +2,7 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -300,7 +300,7 @@ async def test_agent_loop_can_call_get_project_synthesis(monkeypatch):
     )
 
     assert result.content == "Here is the project synthesis."
-    mock_get_synthesis.assert_awaited_once_with("proj-1")
+    mock_get_synthesis.assert_awaited_once_with("proj-1", ANY)
 
 
 @pytest.mark.asyncio
