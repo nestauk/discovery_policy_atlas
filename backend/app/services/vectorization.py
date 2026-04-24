@@ -50,6 +50,7 @@ class VectorizationService:
         project_id: str,
         match_threshold: float = 0.8,
         match_count: int = 5,
+        raise_on_error: bool = False,
     ) -> List[Dict[str, Any]]:
         """Search for similar content using pgvector"""
         try:
@@ -69,6 +70,8 @@ class VectorizationService:
 
         except Exception as e:
             logger.error(f"Error searching similar content: {e}")
+            if raise_on_error:
+                raise
             return []
 
 

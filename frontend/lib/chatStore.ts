@@ -1,11 +1,23 @@
 import { create } from 'zustand'
 
+export interface ChatStep {
+  id: string
+  type: 'status' | 'tool' | 'message'
+  label: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  summary?: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: Date
   references?: DocumentReference[]
+  steps?: ChatStep[]
+  isStreaming?: boolean
+  activitySummary?: string
+  error?: string
 }
 
 export interface DocumentReference {
@@ -22,35 +34,162 @@ export interface DocumentReference {
 export interface ChatResponse {
   message: string
   references: DocumentReference[]
+  steps?: ChatStep[]
+  activity_summary?: string
+}
+
+export interface ChatStreamEvent {
+  type: 'agent.status' | 'tool.started' | 'tool.completed' | 'tool.failed' | 'message.completed' | 'message.failed'
+  step?: ChatStep
+  message?: string
+  references?: DocumentReference[]
+  activity_summary?: string
+  error?: string
+}
+
+// TODO: Add eviction (e.g. cap at N most-recent projects) to prevent
+// unbounded localStorage growth across long-lived sessions.
+type MessagesByProject = Record<string, ChatMessage[]>
+
+const CHAT_MESSAGES_STORAGE_KEY = 'policy-atlas:chat-messages'
+const EMPTY_MESSAGES: ChatMessage[] = []
+
+function isLegacyChatStore(value: unknown): boolean {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      ('messages' in value || 'isLoading' in value || 'error' in value || 'isOpen' in value)
+  )
+}
+
+function loadMessagesByProject(): MessagesByProject {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(CHAT_MESSAGES_STORAGE_KEY)
+    if (!storedValue) {
+      return {}
+    }
+
+    const parsedValue: unknown = JSON.parse(storedValue)
+    if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue) || isLegacyChatStore(parsedValue)) {
+      return {}
+    }
+
+    const parsedEntries = Object.entries(parsedValue).reduce<MessagesByProject>((acc, [projectId, messages]) => {
+      if (!Array.isArray(messages)) {
+        return acc
+      }
+
+      const parsedMessages = messages.flatMap((message) => {
+        if (!message || typeof message !== 'object') {
+          return []
+        }
+
+        const candidate = message as Partial<ChatMessage> & { timestamp?: string }
+        if (
+          typeof candidate.id !== 'string' ||
+          (candidate.role !== 'user' && candidate.role !== 'assistant') ||
+          typeof candidate.content !== 'string' ||
+          typeof candidate.timestamp !== 'string'
+        ) {
+          return []
+        }
+
+        const timestamp = new Date(candidate.timestamp)
+        if (Number.isNaN(timestamp.getTime())) {
+          return []
+        }
+
+        return [{
+          id: candidate.id,
+          role: candidate.role,
+          content: candidate.content,
+          timestamp,
+          references: Array.isArray(candidate.references) ? candidate.references : undefined,
+          activitySummary: typeof (candidate as { activitySummary?: unknown }).activitySummary === 'string'
+            ? (candidate as { activitySummary: string }).activitySummary
+            : undefined,
+          steps: Array.isArray((candidate as { steps?: unknown }).steps)
+            ? (candidate as { steps: ChatStep[] }).steps
+            : undefined
+        }]
+      })
+
+      acc[projectId] = parsedMessages
+      return acc
+    }, {})
+
+    return parsedEntries
+  } catch {
+    return {}
+  }
+}
+
+function persistMessagesByProject(messagesByProject: MessagesByProject) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    const serializedValue = Object.fromEntries(
+      Object.entries(messagesByProject).map(([projectId, messages]) => [
+        projectId,
+        messages.map((message) => ({
+          ...message,
+          timestamp: message.timestamp.toISOString()
+        }))
+      ])
+    )
+
+    window.localStorage.setItem(CHAT_MESSAGES_STORAGE_KEY, JSON.stringify(serializedValue))
+  } catch {
+    // Ignore localStorage failures and keep the in-memory chat working.
+  }
 }
 
 interface ChatState {
-  messages: ChatMessage[]
+  messagesByProject: MessagesByProject
+  activeProjectId: string | null
   isLoading: boolean
   error: string | null
   isOpen: boolean
   
   // Actions
-  addMessage: (message: ChatMessage) => void
-  setMessages: (messages: ChatMessage[]) => void
+  addMessage: (projectId: string, message: ChatMessage) => void
+  getMessages: (projectId: string) => ChatMessage[]
+  setActiveProjectId: (projectId: string | null) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
   setIsOpen: (isOpen: boolean) => void
-  clearMessages: () => void
+  clearMessages: (projectId: string) => void
   clearError: () => void
 }
 
-export const useChatStore = create<ChatState>((set) => ({
-  messages: [],
+export const useChatStore = create<ChatState>((set, get) => ({
+  messagesByProject: loadMessagesByProject(),
+  activeProjectId: null,
   isLoading: false,
   error: null,
   isOpen: false,
   
-  addMessage: (message) => set((state) => ({
-    messages: [...state.messages, message]
-  })),
-  
-  setMessages: (messages) => set({ messages }),
+  addMessage: (projectId, message) => set((state) => {
+    const nextMessagesByProject = {
+      ...state.messagesByProject,
+      [projectId]: [...(state.messagesByProject[projectId] ?? []), message]
+    }
+
+    persistMessagesByProject(nextMessagesByProject)
+
+    return { messagesByProject: nextMessagesByProject }
+  }),
+
+  getMessages: (projectId) => get().messagesByProject[projectId] ?? EMPTY_MESSAGES,
+
+  setActiveProjectId: (projectId) => set({ activeProjectId: projectId }),
   
   setLoading: (loading) => set({ isLoading: loading }),
   
@@ -58,7 +197,16 @@ export const useChatStore = create<ChatState>((set) => ({
   
   setIsOpen: (isOpen) => set({ isOpen }),
   
-  clearMessages: () => set({ messages: [] }),
+  clearMessages: (projectId) => set((state) => {
+    const nextMessagesByProject = {
+      ...state.messagesByProject,
+      [projectId]: []
+    }
+
+    persistMessagesByProject(nextMessagesByProject)
+
+    return { messagesByProject: nextMessagesByProject }
+  }),
   
   clearError: () => set({ error: null })
 }))

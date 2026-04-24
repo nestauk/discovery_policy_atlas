@@ -2,6 +2,29 @@ import { useCallback } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { AnalysisProject } from "./analysisProjectStore";
 
+async function getResponseErrorMessage(response: Response): Promise<string> {
+  const fallbackError = `API call failed: ${response.status} ${response.statusText}`;
+  const errorText = await response.text();
+
+  if (!errorText) {
+    return fallbackError;
+  }
+
+  try {
+    const parsedError = JSON.parse(errorText) as { detail?: unknown; message?: unknown };
+    if (typeof parsedError.detail === "string" && parsedError.detail.trim()) {
+      return parsedError.detail;
+    }
+    if (typeof parsedError.message === "string" && parsedError.message.trim()) {
+      return parsedError.message;
+    }
+  } catch {
+    // Fall back to the raw response body for non-JSON error payloads.
+  }
+
+  return errorText;
+}
+
 export const pingBackend = async (): Promise<boolean> => {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const cleanBaseUrl = baseUrl.replace(/\/$/, '');
@@ -67,13 +90,13 @@ export const fetchWithAuthExternal = async (
   }
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`Response error body (external):`, errorText);
+    const errorMessage = await getResponseErrorMessage(response);
+    console.error(`Response error body (external):`, errorMessage);
     if (response.status === 401) {
       console.error("Authentication failed - token may be expired");
       throw new Error("Authentication failed - please refresh the page and sign in again");
     }
-    throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
+    throw new Error(errorMessage);
   }
 
   return isStreaming ? response : response.json();
@@ -117,13 +140,13 @@ export function useAPI() {
     }
     
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Response error body:`, errorText);
+      const errorMessage = await getResponseErrorMessage(response);
+      console.error(`Response error body:`, errorMessage);
       if (response.status === 401) {
         console.error("Authentication failed - token may be expired");
         throw new Error("Authentication failed - please refresh the page and sign in again");
       }
-      throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
+      throw new Error(errorMessage);
     }
     
     return isStreaming ? response : response.json();

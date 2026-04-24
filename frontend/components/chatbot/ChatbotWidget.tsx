@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { Bot, X, MessageCircle } from 'lucide-react'
 import { Card, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,8 +15,26 @@ interface ChatbotWidgetProps {
 }
 
 export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
-  const { isOpen, setIsOpen } = useChatStore()
+  const {
+    activeProjectId,
+    clearError,
+    isOpen,
+    setActiveProjectId,
+    setIsOpen,
+    setLoading
+  } = useChatStore()
   const { activeProject } = useAnalysisProjectStore()
+  const currentProjectId = activeProject?.id ?? null
+  // Prevents showing a stale chat from the previous project during the tick
+  // between the project store updating and the useEffect syncing activeProjectId.
+  const isProjectInSync = currentProjectId === activeProjectId
+
+  useEffect(() => {
+    setActiveProjectId(currentProjectId)
+    clearError()
+    setLoading(false)
+    setIsOpen(false)
+  }, [clearError, currentProjectId, setActiveProjectId, setIsOpen, setLoading])
 
   if (!activeProject) {
     return null // Don't show widget if no project is selected
@@ -25,7 +44,7 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
     <>
       {/* Floating Chat Button */}
       <AnimatePresence>
-        {!isOpen && (
+        {(!isOpen || !isProjectInSync) && (
           <motion.div
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -44,7 +63,7 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
 
       {/* Chat Widget */}
       <AnimatePresence>
-        {isOpen && (
+        {isOpen && isProjectInSync && (
           <motion.div
             initial={{ scale: 0, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
