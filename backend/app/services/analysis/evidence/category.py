@@ -140,6 +140,20 @@ EVIDENCE_CATEGORY_RANKS = {
 EVIDENCE_CATEGORY_TO_KEY = {row[0]: row[1] for row in _EVIDENCE_CATEGORY_DATA}
 EVIDENCE_CATEGORY_EXPLANATIONS = {row[0]: row[6] for row in _EVIDENCE_CATEGORY_DATA}
 
+# Concise aliases used by the chatbot fast-screen table.
+# These must stay short enough for badge rendering in the UI.
+EVIDENCE_CATEGORY_CHATBOT_ALIASES: dict[str, str] = {
+    "Systematic Review and Meta-Analysis": "SR/MA",
+    "RCTs and Quasi-Experimental Studies": "RCT",
+    "Observational Research Studies": "Obs.",
+    "Modelling & Simulation": "Modelling",
+    "Policy Syntheses & Guidance Documents": "Policy",
+    "Qualitative & Contextual Evidence": "Qual.",
+    "Expert Opinion and Commentary": "Opinion",
+    "Other (Non-evidence documents)": "Other",
+    "Unknown / Insufficient information": "Unknown",
+}
+
 # Thresholds for evidence strength calculations
 EVIDENCE_CONFIDENCE_THRESHOLD = 0.5
 DENSITY_THRESHOLD = 0.025  # 2.5%
