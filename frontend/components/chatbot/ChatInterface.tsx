@@ -16,29 +16,15 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useUser } from '@clerk/nextjs'
 import Image from 'next/image'
-import { getEvidenceCategories } from '@/lib/evidenceCategories'
+import { getEvidenceBadgeColors, buildEvidenceBadgeRegex } from '@/lib/evidenceCategories'
 
 const DOCUMENT_CITATION_BRACKET_RE = /\[([^\]]+)\]/g
 const CHIP_LINE_RE = /\[chips:\s*((?:"[^"]*"(?:\s*\|\s*"[^"]*")*))\s*\]/g
 const CHIP_VALUE_RE = /"([^"]*)"/g
 
-// Evidence category badge colours keyed by short name
-const EVIDENCE_BADGE_COLORS: Record<string, { bg: string; text: string }> = {}
-for (const cat of getEvidenceCategories()) {
-  EVIDENCE_BADGE_COLORS[cat.short_name] = { bg: cat.bg_color, text: cat.text_color }
-}
-// Also register the concise aliases used in the chatbot system prompt
-EVIDENCE_BADGE_COLORS['SR/MA'] = EVIDENCE_BADGE_COLORS['Systematic Review'] ?? { bg: '#0F294A', text: '#FFFFFF' }
-EVIDENCE_BADGE_COLORS['RCT'] = EVIDENCE_BADGE_COLORS['RCT/Quasi-Exp'] ?? { bg: '#9A1BBE', text: '#FFFFFF' }
-EVIDENCE_BADGE_COLORS['Obs.'] = EVIDENCE_BADGE_COLORS['Observational'] ?? { bg: '#0000FF', text: '#FFFFFF' }
-EVIDENCE_BADGE_COLORS['Policy'] = EVIDENCE_BADGE_COLORS['Policy Guidance'] ?? { bg: '#97D9E3', text: '#111827' }
-EVIDENCE_BADGE_COLORS['Qual.'] = EVIDENCE_BADGE_COLORS['Qualitative'] ?? { bg: '#A59BEE', text: '#111827' }
-EVIDENCE_BADGE_COLORS['Opinion'] = EVIDENCE_BADGE_COLORS['Expert Opinion'] ?? { bg: '#F6A4B7', text: '#111827' }
-// Match patterns like "SR/MA (2)" or "Policy Guidance (5)"
-const EVIDENCE_BADGE_RE = new RegExp(
-  `(${Object.keys(EVIDENCE_BADGE_COLORS).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*\\((\\d+)\\)`,
-  'g'
-)
+// Evidence badge colours from the shared module (canonical + chatbot aliases)
+const EVIDENCE_BADGE_COLORS = getEvidenceBadgeColors()
+const EVIDENCE_BADGE_RE = buildEvidenceBadgeRegex(Object.keys(EVIDENCE_BADGE_COLORS))
 
 function renderEvidenceBadges(text: string): React.ReactNode {
   const parts: React.ReactNode[] = []
@@ -554,11 +540,11 @@ export function ChatInterface({
       <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
         {/* Forecast mode banner */}
         {activeMode === 'forecast' && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            <Compass className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+            <Compass className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
               <span className="font-medium">Transferability Forecast</span>
-              <span className="text-amber-600"> — This is an assessment tool to support deliberation, not a recommendation.</span>
+              <span className="text-amber-600">: an assessment tool to support deliberation, not a recommendation. The more context you share (setting, population, constraints) the sharper the assessment.</span>
             </div>
           </div>
         )}
@@ -742,7 +728,8 @@ export function ChatInterface({
                               if (typeof node === 'number') return String(node)
                               if (Array.isArray(node)) return node.map(extractText).join('')
                               if (node && typeof node === 'object' && 'props' in node) {
-                                return extractText((node as React.ReactElement).props.children)
+                                const el = node as React.ReactElement<{ children?: React.ReactNode }>
+                                return extractText(el.props.children)
                               }
                               return ''
                             }
