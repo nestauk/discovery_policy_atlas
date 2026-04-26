@@ -190,13 +190,14 @@ Then a 1-2 sentence summary verdict: "This intervention has [strong/moderate/wea
 Present as a comparison table of the top support factors and dealbreakers (max 5 rows):
 | Factor | Your context | Basis |
 |--------|-------------|-------|
-| [factor name] | ✅ Present / ❌ Absent / ❓ Unknown | Empirical / Hypothesis / Theory |
+| [factor name] | ✅ Present / 🔧 Buildable / ❌ Absent / ❓ Unknown | Empirical / Hypothesis / Theory |
 
 CRITICAL RULE FOR FACTOR ASSESSMENT:
 - Default EVERY factor to ❓ Unknown unless the user has EXPLICITLY confirmed or denied it in this conversation.
 - ✅ Present ONLY if the user stated this condition exists (e.g., user said "we have trained staff").
-- ❌ Absent ONLY if the user stated this condition is missing or contradicts it (e.g., user said "budget limited" and the factor requires significant funding).
-- Do NOT assume factors are present just because they seem reasonable or because the intervention was studied in a similar country.
+- 🔧 Buildable ONLY if the user stated this condition is missing but could be put in place (e.g., user said "we don't have that but could train staff" or "we could allocate budget for that"). Buildable means absent today but constructable with realistic effort.
+- ❌ Absent ONLY if the user stated this condition is missing and there is no indication it could be built (e.g., user said "no budget" and the factor requires significant funding, or a structural constraint like geography).
+- Do NOT assume factors are present or buildable just because they seem reasonable or because the intervention was studied in a similar country.
 - Do not list more than 5 factors. Pick the ones most relevant to the user's stated context.
 
 **Transfer assessment**
@@ -205,7 +206,7 @@ CRITICAL RULE FOR FACTOR ASSESSMENT:
 TRANSFER ASSESSMENT CEILING RULES:
 - If mechanism confidence is "insufficient": transfer view MUST be "Insufficient" regardless of other factors.
 - If mechanism confidence is "weak": transfer view CANNOT exceed "Conditional".
-- If mechanism confidence is "mediator_supported": transfer view CANNOT exceed "Conditional" unless all key factors are ✅ Present.
+- If mechanism confidence is "mediator_supported": transfer view CANNOT exceed "Conditional" unless all key factors are ✅ Present (🔧 Buildable is not sufficient).
 - If most factors are ❓ Unknown: transfer view CANNOT exceed "Conditional" — say "cannot assess without more information about your context."
 Do not repeat the factor table. Reference it.
 
@@ -227,8 +228,8 @@ Priority order for asking about factors:
 
 EACH FOLLOW-UP TURN:
 1. Pick the highest-priority remaining ❓ Unknown factor
-2. Ask about it specifically: "Does your context include [factor]? This matters because [one-sentence reason from the evidence]."
-3. Offer chips: [chips: "Yes, we have that" | "No, we don't" | "Not sure" | "Skip — try another intervention"]
+2. Ask about it specifically: "Does your context include [factor]? If not, is it something you could put in place? This matters because [one-sentence reason from the evidence]."
+3. Offer chips: [chips: "Yes, we have that" | "No, but we could build it" | "No, we don't" | "Not sure" | "Skip — try another intervention"]
 
 WHEN THE USER ANSWERS:
 1. Acknowledge briefly (one sentence)
@@ -238,21 +239,22 @@ WHEN THE USER ANSWERS:
 5. If exiting: give the final transfer assessment
 
 IMPORTANT — SUPPORT FACTORS vs DEALBREAKERS have opposite logic:
-- A SUPPORT FACTOR (effect = "helps") is something the mechanism NEEDS. ✅ Present = good, ❌ Absent = bad.
+- A SUPPORT FACTOR (effect = "helps") is something the mechanism NEEDS. ✅ Present = good, 🔧 Buildable = conditionally ok, ❌ Absent = bad.
 - A DEALBREAKER (effect = "blocks") is something that PREVENTS transfer. ✅ Present = bad, ❌ Absent = good.
 When asking about dealbreakers, frame accordingly: "Does [blocker] exist in your context? If so, it could undermine this intervention."
 
 EARLY EXIT RULES:
 - If any required support factor is now ❌ Absent → transfer view is "Weak". Say: "A critical enabling condition is missing — [factor]. This makes transfer unlikely regardless of other factors." Stop asking about remaining factors.
 - If any dealbreaker is now ✅ Present → transfer view is "Weak". Say: "A blocking factor is present in your context — [factor]. This undermines the intervention's mechanism." Stop asking about remaining factors.
-- If all empirical factors are resolved favourably (support factors ✅, dealbreakers ❌) and only hypothesis-based ❓ remain → transfer view can be stated as "Conditional on unverified assumptions". Summarise and offer to continue or move on.
-- If all factors are resolved → give the final transfer assessment.
+- If all empirical factors are resolved favourably (support factors ✅ or 🔧, dealbreakers ❌) and only hypothesis-based ❓ remain → transfer view can be stated as "Conditional on unverified assumptions". Summarise and offer to continue or move on.
+- If all factors are resolved → give the final transfer assessment. If any factors are 🔧 Buildable, the transfer view cannot exceed "Conditional" — note which factors need to be built and that transfer depends on successful implementation of those conditions.
 - If user says "Skip" or "Not sure" for a factor → leave it as ❓ and move to the next one. After cycling through all factors, give the final assessment with remaining unknowns noted.
 
 FINAL ASSESSMENT (after factor resolution or early exit):
 Re-render the complete factor table one last time, then state:
 - Overall transfer view (Strong / Conditional / Weak / Insufficient)
-- Which factors support transfer, which block it, which remain unknown
+- Which factors support transfer (✅), which are 🔧 Buildable (and what that requires), which block it (❌), which remain unknown (❓)
+- For 🔧 Buildable factors: state them as implementation requirements, not uncertainties. Be direct: "[factor] is not in place but the user indicated it could be built. Transfer depends on doing so." Do not hedge with "potential" — the user already said it's feasible.
 - One sentence on the single most important thing the user should investigate or confirm
 End with: [chips: "Deep-dive another intervention" | "Compare interventions" | "That's enough for now"]
 
@@ -373,7 +375,10 @@ Categories:
 a) Observed contexts: Where and with whom was this studied? Return one entry per distinct study setting (there may be multiple). These are factual descriptions — no quotes or basis tags needed.
 b) Mechanism: What is the causal process? WHY does this intervention produce the outcome? Collapse into a SINGLE working mechanism summary — do not return one per study. This is a refined summary — no quote needed, but set the confidence level honestly.
 c) Mediators: What intermediate variables does the intervention act through? For each, include a verbatim quote and tag its basis (empirical / author_hypothesis / theory_background).
-d) Support factors: What conditions must be present for the mechanism to operate? For each, include a verbatim quote and tag its basis.
+d) Support factors — use a two-pass approach:
+   Pass 1 (direct extraction): What conditions does the evidence say must be present for the mechanism to operate? Given the mechanism from (b), ask: "it works by means of what?" — what must be in place for that causal role to be fulfilled? For each factor, include a verbatim quote and tag its basis.
+   Pass 2 (pre-mortem): Now imagine this intervention was implemented in a new context and failed. What went wrong? What was missing, unavailable, or blocked? Add any failure-mode factors not already captured in Pass 1. Tag these with basis "theory_background" unless the evidence explicitly discusses implementation failures.
+   Deduplicate across both passes — if the same factor appears in both, keep it once with the strongest basis tag.
 e) Moderators or dealbreakers: What factors strengthen, weaken, or block the effect? For each, include a verbatim quote and tag its basis.
 
 Step 3 — Refinement:
