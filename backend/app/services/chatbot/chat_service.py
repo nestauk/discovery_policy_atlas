@@ -12,6 +12,10 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from openai import AsyncOpenAI
 from app.core.config import settings
+from app.services.analysis.evidence.category import (
+    EVIDENCE_CATEGORY_CHATBOT_ALIASES,
+    EVIDENCE_CATEGORY_RANKS,
+)
 from app.services.synthesis.logbook import read_cached_summary
 from app.services.synthesis.schemas import (
     CitationInfo,
@@ -636,98 +640,9 @@ class ChatbotService:
         # Build CMO-structured intervention list for the system prompt
         interventions_text = ""
         if summary and summary.interventions:
-            # Build evidence_category lookup keyed by both UUID and external
-            # doc_id, from ALL project documents (not just
-            # those in the citation map) so every supporting_doc_id matches.
-            doc_evidence_category: Dict[str, str] = {}
-            try:
-                all_docs_res = (
-                    vectorization_service.supabase.table("analysis_documents")
-                    .select("id, doc_id, evidence_category")
-                    .eq("analysis_project_id", project_id)
-                    .execute()
-                )
-                for row in all_docs_res.data or []:
-                    cat = row.get("evidence_category")
-                    if not cat:
-                        cat = "Unknown / Insufficient information"
-                    uuid = str(row["id"])
-                    ext_id = row.get("doc_id")
-                    doc_evidence_category[uuid] = cat
-                    if ext_id:
-                        doc_evidence_category[str(ext_id)] = cat
-            except Exception as exc:
-                logger.warning("Failed to load doc evidence categories: %s", exc)
-
-            # Short names for evidence categories, ordered by strength
-            EVIDENCE_SHORT_NAMES: Dict[str, str] = {
-                "Systematic Review and Meta-Analysis": "SR/MA",
-                "RCTs and Quasi-Experimental Studies": "RCT",
-                "Observational Research Studies": "Obs.",
-                "Modelling & Simulation": "Modelling",
-                "Policy Syntheses & Guidance Documents": "Policy",
-                "Qualitative & Contextual Evidence": "Qual.",
-                "Expert Opinion and Commentary": "Opinion",
-                "Other (Non-evidence documents)": "Other",
-                "Unknown / Insufficient information": "Unknown",
-            }
-            EVIDENCE_RANK = {name: i for i, name in enumerate(EVIDENCE_SHORT_NAMES)}
-
-            # Pre-compute evidence data per intervention for sorting
-            intv_evidence: list = []
-            for intv in summary.interventions:
-                category_counts: Dict[str, int] = {}
-                for doc_id in set(intv.supporting_doc_ids):
-                    cat = doc_evidence_category.get(doc_id)
-                    if cat:
-                        category_counts[cat] = category_counts.get(cat, 0) + 1
-                sorted_cats = sorted(
-                    category_counts.items(),
-                    key=lambda x: EVIDENCE_RANK.get(x[0], 99),
-                )
-                # Highest causal evidence present (lowest rank = strongest)
-                best_rank = min(
-                    (EVIDENCE_RANK.get(cat, 99) for cat in category_counts),
-                    default=99,
-                )
-                evidence_str = (
-                    " ".join(
-                        f"{EVIDENCE_SHORT_NAMES.get(cat, cat)} ({count})"
-                        for cat, count in sorted_cats
-                    )
-                    if sorted_cats
-                    else "not recorded"
-                )
-                intv_evidence.append((intv, evidence_str, best_rank, intv.frequency))
-
-            # Sort by highest causal evidence present, then study count (matches themes tab)
-            intv_evidence.sort(key=lambda x: (x[2], -x[3]))
-
-            blocks = []
-            for i, (intv, evidence_str, _, _) in enumerate(intv_evidence, 1):
-                countries = (
-                    ", ".join(intv.countries[:4]) if intv.countries else "various"
-                )
-                consensus = intv.effect_consensus or "unknown"
-
-                outcomes_str = (
-                    ", ".join(intv.related_outcomes[:3])
-                    if intv.related_outcomes
-                    else "not specified"
-                )
-
-                block = (
-                    f"{i}. {intv.intervention_name}\n"
-                    f"   Context: {countries} — {intv.frequency} studies\n"
-                    f"   Evidence: {evidence_str}\n"
-                    f"   Mechanism: [not pre-extracted — use extract_intervention_context_and_mechanism during deep dive]\n"
-                    f"   Outcome: {consensus} effect — outcomes: {outcomes_str}"
-                )
-                impact = (intv.impact_summary or "").strip()
-                if impact:
-                    block += f"\n   Impact: {impact}"
-                blocks.append(block)
-            interventions_text = "\n".join(blocks)
+            interventions_text = self._build_forecast_interventions_text(
+                project_id, summary.interventions
+            )
 
         return {
             "title": title or "Untitled project",
@@ -736,6 +651,85 @@ class ChatbotService:
             "interventions_text": interventions_text,
             "has_synthesis": summary is not None and bool(summary.interventions),
         }
+
+    def _build_forecast_interventions_text(
+        self,
+        project_id: str,
+        interventions: List[PolicyIntervention],
+    ) -> str:
+        """Format interventions with evidence badges for the forecast system prompt."""
+        # Build evidence_category lookup keyed by both UUID and external
+        # doc_id so every supporting_doc_id matches.
+        doc_evidence_category: Dict[str, str] = {}
+        try:
+            all_docs_res = (
+                vectorization_service.supabase.table("analysis_documents")
+                .select("id, doc_id, evidence_category")
+                .eq("analysis_project_id", project_id)
+                .execute()
+            )
+            for row in all_docs_res.data or []:
+                cat = (
+                    row.get("evidence_category") or "Unknown / Insufficient information"
+                )
+                doc_evidence_category[str(row["id"])] = cat
+                ext_id = row.get("doc_id")
+                if ext_id:
+                    doc_evidence_category[str(ext_id)] = cat
+        except Exception as exc:
+            logger.warning("Failed to load doc evidence categories: %s", exc)
+
+        # Pre-compute evidence data per intervention for sorting
+        intv_evidence: list = []
+        for intv in interventions:
+            category_counts: Dict[str, int] = {}
+            for doc_id in set(intv.supporting_doc_ids):
+                cat = doc_evidence_category.get(doc_id)
+                if cat:
+                    category_counts[cat] = category_counts.get(cat, 0) + 1
+            sorted_cats = sorted(
+                category_counts.items(),
+                key=lambda x: EVIDENCE_CATEGORY_RANKS.get(x[0], 99),
+            )
+            best_rank = min(
+                (EVIDENCE_CATEGORY_RANKS.get(cat, 99) for cat in category_counts),
+                default=99,
+            )
+            evidence_str = (
+                " ".join(
+                    f"{EVIDENCE_CATEGORY_CHATBOT_ALIASES.get(cat, cat)} ({count})"
+                    for cat, count in sorted_cats
+                )
+                if sorted_cats
+                else "not recorded"
+            )
+            intv_evidence.append((intv, evidence_str, best_rank, intv.frequency))
+
+        # Sort by highest causal evidence (lowest rank = strongest), then study count
+        intv_evidence.sort(key=lambda x: (x[2], -x[3]))
+
+        blocks = []
+        for i, (intv, evidence_str, _, _) in enumerate(intv_evidence, 1):
+            countries = ", ".join(intv.countries[:4]) if intv.countries else "various"
+            consensus = intv.effect_consensus or "unknown"
+            outcomes_str = (
+                ", ".join(intv.related_outcomes[:3])
+                if intv.related_outcomes
+                else "not specified"
+            )
+
+            block = (
+                f"{i}. {intv.intervention_name}\n"
+                f"   Context: {countries} — {intv.frequency} studies\n"
+                f"   Evidence: {evidence_str}\n"
+                f"   Mechanism: [not pre-extracted — use extract_intervention_context_and_mechanism during deep dive]\n"
+                f"   Outcome: {consensus} effect — outcomes: {outcomes_str}"
+            )
+            impact = (intv.impact_summary or "").strip()
+            if impact:
+                block += f"\n   Impact: {impact}"
+            blocks.append(block)
+        return "\n".join(blocks)
 
     async def _get_project_synthesis(self, project_id: str) -> str:
         """Fetch and format cached synthesis output for chat use."""
@@ -1184,7 +1178,6 @@ class ChatbotService:
         )
 
         for iteration in range(MAX_AGENT_ITERATIONS):
-            logger.info("[chatbot] Agent loop iteration %d", iteration + 1)
             response = await self._create_chat_completion(messages)
             assistant_message = response.choices[0].message
 
@@ -1203,11 +1196,6 @@ class ChatbotService:
                     )
 
                 await self._complete_step(active_status_step, emit_event)
-                logger.info(
-                    "[chatbot] Final response (%d chars): %s",
-                    len(assistant_text),
-                    assistant_text[:200],
-                )
                 return SimpleNamespace(content=assistant_text, tool_calls=None)
 
             await self._complete_step(active_status_step, emit_event)
@@ -1266,11 +1254,6 @@ class ChatbotService:
                     )
                     continue
 
-                logger.info(
-                    "[chatbot] Tool call: %s(%s)",
-                    tool_name,
-                    tool_call.function.arguments,
-                )
                 step = await self._start_tool_step(
                     step_list,
                     tool_name,
@@ -1315,11 +1298,6 @@ class ChatbotService:
                             summary=tool_result.summary,
                         )
 
-                logger.info(
-                    "[chatbot] Tool result (%d chars): %s",
-                    len(tool_result.content),
-                    tool_result.content[:300],
-                )
                 messages.append(
                     {
                         "role": "tool",

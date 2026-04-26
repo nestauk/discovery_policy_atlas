@@ -150,14 +150,23 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
         str(d["id"]): str(d.get("doc_id") or "") for d in (docs_res.data or [])
     }
 
+    def _normalise_doc_ids(raw_ids: list, uuid_map: Dict[str, str]) -> List[str]:
+        """Normalise a list of mixed UUID/external doc IDs to external IDs."""
+        result = []
+        for u in raw_ids:
+            u_str = str(u)
+            if u_str in uuid_map:
+                ext = uuid_map[u_str]
+                if ext:
+                    result.append(ext)
+            elif u_str:
+                result.append(u_str)
+        return result
+
     # Build issues
     key_issues = []
     for t in issue_themes:
-        src_ids = [
-            uuid_to_docid.get(str(u), "")
-            for u in (t.get("source_doc_ids") or [])
-            if uuid_to_docid.get(str(u))
-        ]
+        src_ids = _normalise_doc_ids(t.get("source_doc_ids") or [], uuid_to_docid)
         if t.get("theme_name"):
             key_issues.append(
                 KeyIssue(
@@ -171,19 +180,7 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
     # Build interventions
     interventions = []
     for t in intervention_themes:
-        raw_ids = t.get("source_doc_ids") or []
-        # IDs may be UUIDs or external doc_ids — normalise to external
-        supp_ids = []
-        for u in raw_ids:
-            u_str = str(u)
-            if u_str in uuid_to_docid:
-                # It's a UUID — map to external
-                ext = uuid_to_docid[u_str]
-                if ext:
-                    supp_ids.append(ext)
-            elif u_str:
-                # Already an external ID — keep as-is
-                supp_ids.append(u_str)
+        supp_ids = _normalise_doc_ids(t.get("source_doc_ids") or [], uuid_to_docid)
         if t.get("theme_name"):
             interventions.append(
                 PolicyIntervention(
@@ -364,14 +361,6 @@ async def read_cached_summary(project_id: str) -> Optional[SynthesisSummary]:
             structured_briefing = StructuredBriefing.model_validate(sb_data)
         except Exception as e:
             logger.warning(f"Failed to parse structured_briefing: {e}")
-
-    logger.info(f"Read {len(citation_map)} citations from DB for project {project_id}")
-    if citation_map:
-        sample_key = next(iter(citation_map.keys()))
-        sample_cit = citation_map[sample_key]
-        logger.info(
-            f"Sample citation - key: {sample_key}, number: {sample_cit.citation_number}, title: {sample_cit.title}, author: {sample_cit.author_short}"
-        )
 
     return SynthesisSummary(
         executive_briefing=run.get("executive_briefing") or "",
