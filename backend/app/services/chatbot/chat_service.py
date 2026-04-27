@@ -781,6 +781,8 @@ class ChatbotService:
         if summary is None:
             return self._format_project_synthesis(summary)
 
+        self._backfill_synthesis_citation_urls(project_id, summary.citation_map)
+
         effective_turn_state = turn_state or ChatTurnState.create()
         citation_mapping = self._register_synthesis_references(
             effective_turn_state,
@@ -960,6 +962,55 @@ class ChatbotService:
 
         return "\n".join(lines)
 
+    def _backfill_synthesis_citation_urls(
+        self, project_id: str, citation_map: Dict[str, CitationInfo]
+    ) -> None:
+        """Patch missing citation URLs to mirror the synthesis panel's live lookup."""
+        missing_ids = {
+            citation.analysis_document_id
+            for citation in citation_map.values()
+            if not citation.url and citation.analysis_document_id
+        }
+        if not missing_ids:
+            return
+
+        try:
+            res = (
+                vectorization_service.supabase.table("analysis_documents")
+                .select("id, pdf_url, landing_page_url, overton_url")
+                .eq("analysis_project_id", project_id)
+                .in_("id", list(missing_ids))
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to backfill synthesis citation URLs for project %s: %s",
+                project_id,
+                exc,
+            )
+            return
+
+        url_by_doc_id: Dict[str, str] = {}
+        for row in res.data or []:
+            doc_id = str(row.get("id") or "")
+            resolved = (
+                row.get("pdf_url")
+                or row.get("landing_page_url")
+                or row.get("overton_url")
+            )
+            if doc_id and resolved:
+                url_by_doc_id[doc_id] = resolved
+
+        if not url_by_doc_id:
+            return
+
+        for citation in citation_map.values():
+            if citation.url:
+                continue
+            resolved = url_by_doc_id.get(citation.analysis_document_id)
+            if resolved:
+                citation.url = resolved
+
     def _register_synthesis_references(
         self, turn_state: ChatTurnState, citation_map: Dict[str, CitationInfo]
     ) -> Dict[int, int]:
@@ -1117,7 +1168,7 @@ class ChatbotService:
                 result = (
                     vectorization_service.supabase.table("analysis_documents")
                     .select(
-                        "id, doc_id, title, authors, doi, overton_url, source_country, year, published_on"
+                        "id, doc_id, title, authors, doi, overton_url, pdf_url, landing_page_url, source_country, year, published_on"
                     )
                     .in_("id", document_ids)
                     .execute()
@@ -1147,6 +1198,10 @@ class ChatbotService:
                         "document_authors": doc_details.get("authors", []),
                         "document_doi": doc_details.get("doi"),
                         "document_overton_url": doc_details.get("overton_url"),
+                        "document_pdf_url": doc_details.get("pdf_url"),
+                        "document_landing_page_url": doc_details.get(
+                            "landing_page_url"
+                        ),
                         "document_source_country": doc_details.get("source_country"),
                         "document_published_date": published_date,
                         "document_year": doc_details.get("year"),
@@ -2004,8 +2059,11 @@ class ChatbotService:
     def _build_document_reference(self, chunk: Dict[str, Any]) -> DocumentReference:
         """Build a single document reference from an enriched evidence chunk."""
         doi = chunk.get("document_doi")
-        overton_url = chunk.get("document_overton_url")
-        url = self._build_document_url(doi, overton_url)
+        url = (
+            chunk.get("document_pdf_url")
+            or chunk.get("document_landing_page_url")
+            or self._build_document_url(doi, chunk.get("document_overton_url"))
+        )
 
         return DocumentReference(
             document_id=chunk.get("document_id", f"chunk-{id(chunk)}"),
