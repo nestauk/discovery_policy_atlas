@@ -228,6 +228,7 @@ function loadMetaByProject(): MetaByProject {
   try {
     const storedValue = window.localStorage.getItem(META_STORAGE_KEY)
     if (!storedValue) return {}
+
     const parsedValue: unknown = JSON.parse(storedValue)
     if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue) || isLegacyChatStore(parsedValue)) {
       return {}

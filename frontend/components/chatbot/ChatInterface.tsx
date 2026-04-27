@@ -278,7 +278,7 @@ interface ChatInterfaceProps {
   showHeader?: boolean
 }
 
-export function ChatInterface({ 
+export function ChatInterface({
   className = "",
   placeholder = "Ask about the evidence in this project...",
   autoFocus = false,
@@ -573,6 +573,7 @@ export function ChatInterface({
             </div>
           </div>
         )}
+
         {displayMessages.length === 0 && (
           <div className="text-center py-8">
             <Bot className="h-8 w-8 text-gray-400 mx-auto mb-2" />
@@ -594,7 +595,7 @@ export function ChatInterface({
                 <Bot className="h-4 w-4 text-blue-600" />
               </div>
             )}
-            
+
             <div
               className={`max-w-[80%] rounded-lg p-3 ${
                 message.role === 'user'
@@ -776,25 +777,25 @@ export function ChatInterface({
                       // Helper function to process and truncate authors
                       const formatAuthors = (authors: string[] | string) => {
                         if (!authors) return ''
-                        
+
                         let authorText = ''
-                        
+
                         if (Array.isArray(authors)) {
                           authorText = authors.join(', ')
                         } else {
                           authorText = String(authors)
                         }
-                        
+
                         // Simple approach: strip all brackets, quotes, and extra spaces
                         authorText = authorText
                           .replace(/[\[\]'"]/g, '') // Remove all brackets and quotes
                           .replace(/,\s*,/g, ',') // Fix double commas
                           .replace(/^\s*,|,\s*$/g, '') // Remove leading/trailing commas
                           .trim()
-                        
+
                         // Truncate if too long
                         if (authorText.length <= 60) return authorText
-                        
+
                         // Find the last complete author name within ~50 chars
                         const truncated = authorText.substring(0, 50)
                         const lastComma = truncated.lastIndexOf(', ')
@@ -824,7 +825,7 @@ export function ChatInterface({
                             {(ref.published_date || ref.year) && (
                               <span className="font-normal text-gray-600">
                                 {' '}({
-                                  ref.published_date 
+                                  ref.published_date
                                     ? new Date(ref.published_date).getFullYear()
                                     : ref.year
                                 })
@@ -846,8 +847,8 @@ export function ChatInterface({
 
             {message.role === 'user' && (
               user?.imageUrl ? (
-                <Image 
-                  src={user.imageUrl} 
+                <Image
+                  src={user.imageUrl}
                   alt="User avatar"
                   width={32}
                   height={32}

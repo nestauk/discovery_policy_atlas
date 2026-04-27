@@ -31,6 +31,8 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
   const setSidebarWidth = useChatStore((s) => s.setSidebarWidth)
   const { activeProject } = useAnalysisProjectStore()
   const currentProjectId = activeProject?.id ?? null
+  // Prevents showing a stale chat from the previous project during the tick
+  // between the project store updating and the useEffect syncing activeProjectId.
   const isProjectInSync = currentProjectId === activeProjectId
 
   const chatKey = currentProjectId ? chatStorageKey(currentProjectId, activeMode) : null

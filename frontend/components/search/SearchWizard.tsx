@@ -48,7 +48,51 @@ const HelpHint = ({ content }: { content: React.ReactNode }) => (
 );
 
 // ---------------- TYPES & CONSTANTS ----------------
-type Step = "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
+type Step = "USE_CASE" | "ASK" | "POPULATION" | "INNER_SETTING" | "OUTCOME" | "PARAMETERS" | "SCREENING" | "ADDITIONAL_QUESTIONS" | "SUMMARY";
+const STEPS: Step[] = ["USE_CASE", "ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
+/** Steps that appear before the research question is entered */
+const PRE_QUESTION_STEPS: ReadonlySet<Step> = new Set(["USE_CASE", "ASK"]);
+// Keep in sync with backend/app/services/analysis/schemas.py SearchContext.use_case
+type UseCase = "policy_blueprint" | "horizon_scan" | "rapid_brief" | "rapid_evidence_review" | "policy_note" | "not_sure";
+const VALID_USE_CASES: ReadonlySet<string> = new Set<UseCase>(["policy_blueprint", "horizon_scan", "rapid_brief", "rapid_evidence_review", "policy_note", "not_sure"]);
+
+const USE_CASE_OPTIONS: { value: UseCase; label: string; tagline?: string; description: string }[] = [
+  {
+    value: "horizon_scan",
+    label: "Horizon Scan",
+    tagline: "Explore an unfamiliar area",
+    description: "An overview of emerging themes, best for getting up to speed on an unfamiliar policy area.",
+  },
+  {
+    value: "rapid_brief",
+    label: "Rapid Brief",
+    tagline: "Answer one question fast",
+    description: "A one-page evidence brief answering a specific policy question, with key findings and citations from the most relevant sources. Best for urgent prep or a quick sense-check.",
+  },
+  {
+    value: "policy_note",
+    label: "Policy Note",
+    tagline: "Recommend a course of action",
+    description: "A three-page decision note setting out the problem, options and recommendations. Designed for senior review, with the most relevant evidence and trade-offs.",
+  },
+  {
+    value: "policy_blueprint",
+    label: "Policy Blueprint",
+    tagline: "Design a strategy",
+    description: "A report ranking policy interventions by evidence strength and impact, based on comprehensive evidence. Ideal for designing strategies or informing major spend decisions.",
+  },
+  {
+    value: "rapid_evidence_review",
+    label: "Rapid Evidence Review",
+    tagline: "Deep-dive into the literature",
+    description: "A rigorous synthesis of 100+ academic and grey literature sources on a policy question.",
+  },
+  {
+    value: "not_sure",
+    label: "I’m not sure",
+    description: "Our search wizard will help you narrow down your policy question.",
+  },
+];
 type TimePreset = "LAST_YEAR" | "LAST_2_YEARS" | "LAST_5_YEARS" | "LAST_10_YEARS" | "SINCE_2000" | "ANY" | "CUSTOM";
 type Access = { academic: boolean; policy: boolean };
 const DEFAULT_SOURCES = ["openalex", "overton"] as const;
@@ -150,11 +194,13 @@ export type SearchContext = {
   screeningFactors: string[]; // Free text factors for screening
   additionalQuestions: string[]; // Additional research questions
   maxResults: number;
+  useCase: UseCase | null;
 };
 
 // ---------------- STATE ----------------
 interface WizardState {
   step: Step;
+  useCase: UseCase | null;
   researchQuestion: string;
   population: { selected: string[]; noPreference: boolean };
   innerSetting: { selected: string[]; noPreference: boolean };
@@ -191,7 +237,8 @@ interface WizardState {
 }
 
 const INITIAL_WIZARD_STATE = {
-  step: "ASK" as Step,
+  step: "USE_CASE" as Step,
+  useCase: null as UseCase | null,
   researchQuestion: "",
   population: { selected: [] as string[], noPreference: true },
   innerSetting: { selected: [] as string[], noPreference: true },
@@ -227,32 +274,20 @@ export const useWizard = create<WizardState>((set, get) => ({
   reset: () => set({ ...INITIAL_WIZARD_STATE }),
   next: () => {
     const s = get();
-    // Skip ADDITIONAL_QUESTIONS step - go directly from PARAMETERS to SUMMARY
-    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
-    const currentIdx = steps.indexOf(s.step);
-    if (currentIdx < steps.length - 1) {
-      const nextStep = steps[currentIdx + 1];
+    const currentIdx = STEPS.indexOf(s.step);
+    if (currentIdx < STEPS.length - 1) {
+      const nextStep = STEPS[currentIdx + 1];
       // Skip ADDITIONAL_QUESTIONS - go directly to SUMMARY
-      if (nextStep === "ADDITIONAL_QUESTIONS") {
-        set({ step: "SUMMARY" });
-      } else {
-        set({ step: nextStep });
-      }
+      set({ step: nextStep === "ADDITIONAL_QUESTIONS" ? "SUMMARY" : nextStep });
     }
   },
   back: () => {
     const s = get();
-    // Skip ADDITIONAL_QUESTIONS step - go directly from SUMMARY to PARAMETERS
-    const steps: Step[] = ["ASK", "POPULATION", "INNER_SETTING", "OUTCOME", "SCREENING", "PARAMETERS", "ADDITIONAL_QUESTIONS", "SUMMARY"];
-    const currentIdx = steps.indexOf(s.step);
+    const currentIdx = STEPS.indexOf(s.step);
     if (currentIdx > 0) {
-      const prevStep = steps[currentIdx - 1];
+      const prevStep = STEPS[currentIdx - 1];
       // Skip ADDITIONAL_QUESTIONS - go directly to PARAMETERS
-      if (prevStep === "ADDITIONAL_QUESTIONS") {
-        set({ step: "PARAMETERS" });
-      } else {
-        set({ step: prevStep });
-      }
+      set({ step: prevStep === "ADDITIONAL_QUESTIONS" ? "PARAMETERS" : prevStep });
     }
   },
   buildContext: () => {
@@ -268,6 +303,7 @@ export const useWizard = create<WizardState>((set, get) => ({
       screeningFactors: s.screeningFactors,
       additionalQuestions: s.additionalQuestions,
       maxResults: s.maxResults,
+      useCase: s.useCase,
     };
   },
   initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => {
@@ -297,6 +333,7 @@ export const useWizard = create<WizardState>((set, get) => ({
 
     set({
       step: "SUMMARY",
+      useCase: VALID_USE_CASES.has(sq.use_case ?? "") ? (sq.use_case as UseCase) : null,
       researchQuestion: sq.research_question || sq.original_query || "",
       population: toSelection(population),
       innerSetting: toSelection(innerSetting),
@@ -374,6 +411,7 @@ function ProgressBar({
   allStepsVisited: boolean;
 }) {
   const steps: { id: Step; label: string }[] = [
+    { id: "USE_CASE", label: "Output" },
     { id: "ASK", label: "Question" },
     { id: "POPULATION", label: "Population" },
     { id: "INNER_SETTING", label: "Setting" },
@@ -512,6 +550,84 @@ function generateImpliedResearchQuestion(context: SearchContext): string {
 }
 
 // ---------------- SCREENS ----------------
+function ScreenUseCase() {
+  const s = useWizard();
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6 p-8 pt-20">
+      <div className="text-center space-y-3">
+        <div className="flex items-center justify-center gap-3">
+          <h1 className="text-4xl font-bold tracking-tight">How can Policy Atlas help?</h1>
+          <Tooltip content={
+            <p className="max-w-xs">
+              Alpha means this is an early prototype with limited functionality.
+              Features may be incomplete, unstable, or subject to change.
+              We&apos;re actively developing and improving the tool.
+            </p>
+          }>
+            <Badge variant="default" className="text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1 -mt-2">ALPHA</Badge>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto flex flex-col gap-3">
+        {USE_CASE_OPTIONS.map((option) => {
+          const isSelected = s.useCase === option.value;
+          const isNotSure = option.value === "not_sure";
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => s.set({ useCase: option.value })}
+              className={cx(
+                "w-full px-6 rounded-xl transition-all ring-1 whitespace-normal break-words",
+                isNotSure
+                  ? cx("text-center py-3 mt-4", isSelected
+                      ? "bg-gray-700 !text-white ring-gray-700"
+                      : "bg-transparent text-gray-500 ring-gray-200 hover:bg-gray-50 hover:text-gray-700")
+                  : cx("text-left py-5 hover:-translate-y-0.5 hover:shadow-md", isSelected
+                      ? "bg-blue-600 !text-white ring-blue-600 shadow-md"
+                      : "bg-white text-gray-900 ring-gray-300 hover:bg-gray-50")
+              )}
+            >
+              <span className="font-medium">{option.label}</span>
+              {option.tagline && (
+                <span className={cx(
+                  "ml-2 text-sm font-normal",
+                  isSelected ? "text-blue-200" : "text-gray-400"
+                )}>
+                  — {option.tagline}
+                </span>
+              )}
+              <span className={cx(
+                "block text-sm mt-0.5",
+                isNotSure
+                  ? (isSelected ? "text-gray-300" : "text-gray-400")
+                  : (isSelected ? "text-blue-100" : "text-gray-500")
+              )}>
+                {option.description}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col items-center gap-3 mt-6 max-w-3xl mx-auto">
+        <Button
+          variant="secondary"
+          className="!bg-[#A5D6E1] !text-black hover:!bg-[#93c9d6] border-0 ring-0"
+          full
+          disabled={!s.useCase}
+          onClick={() => s.next()}
+        >
+          Continue
+        </Button>
+        <p className="text-xs text-gray-400">We&apos;ll use your selection to prioritise new features. It won&apos;t affect today&apos;s results.</p>
+      </div>
+    </div>
+  );
+}
+
 function ScreenAsk() {
   const s = useWizard();
   const apis = useAPI();
@@ -528,7 +644,7 @@ function ScreenAsk() {
     <div className="max-w-4xl mx-auto space-y-8 p-8 pt-32">
       <div className="text-center space-y-4">
         <div className="flex items-center justify-center gap-3">
-          <h1 className="text-4xl font-bold tracking-tight">Find evidence on policy interventions</h1>
+          <h1 className="text-4xl font-bold tracking-tight">What policy interventions are you exploring?</h1>
           <Tooltip content={
             <p className="max-w-xs">
               Alpha means this is an early prototype with limited functionality. 
@@ -1643,8 +1759,9 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
     context.parameters.customFrom > context.parameters.customTo;
 
   const isSummaryStep = s.step === "SUMMARY";
-  const showActionBar = s.step !== "ASK";
-  const showResearchQuestionContext = s.step !== "ASK" && !!trimmedResearchQuestion;
+  const isPastQuestionStep = !PRE_QUESTION_STEPS.has(s.step);
+  const showActionBar = isPastQuestionStep;
+  const showResearchQuestionContext = isPastQuestionStep && !!trimmedResearchQuestion;
 
   const getPrimaryAction = () => {
     if (isSummaryStep) {
@@ -1695,6 +1812,7 @@ export default function SearchWizard({ onRunAnalysis, isRunning = false }: Searc
         />
       )}
       <div className={isSummaryStep ? "" : "flex-1"}>
+        {s.step === "USE_CASE" && <ScreenUseCase />}
         {s.step === "ASK" && <ScreenAsk />}
         {s.step === "POPULATION" && <ScreenPopulation />}
         {s.step === "INNER_SETTING" && <ScreenInnerSetting />}

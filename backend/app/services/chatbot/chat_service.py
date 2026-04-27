@@ -179,6 +179,28 @@ class ToolExecutionResult:
     summary: Optional[str] = None
 
 
+@dataclass
+class ChatTurnState:
+    """Request-scoped mutable state for one chat turn."""
+
+    last_evidence_chunks: List[Dict[str, Any]]
+    last_parliament_items: List[Dict[str, Any]]
+    ordered_references: List[DocumentReference]
+    evidence_reference_numbers: Dict[str, int]
+    parliament_reference_numbers: Dict[str, int]
+
+    @classmethod
+    def create(cls) -> "ChatTurnState":
+        """Create empty turn state for a fresh chat request."""
+        return cls(
+            last_evidence_chunks=[],
+            last_parliament_items=[],
+            ordered_references=[],
+            evidence_reference_numbers={},
+            parliament_reference_numbers={},
+        )
+
+
 EventEmitter = Callable[[ChatEvent], Awaitable[None]]
 
 
@@ -187,11 +209,6 @@ class ChatbotService:
 
     def __init__(self):
         self._openai_client = None
-        self._last_evidence_chunks: List[Dict[str, Any]] = []
-        self._last_parliament_items: List[Dict[str, Any]] = []
-        self._ordered_references: List[DocumentReference] = []
-        self._evidence_reference_numbers: Dict[str, int] = {}
-        self._parliament_reference_numbers: Dict[str, int] = {}
 
     @property
     def openai_client(self):
@@ -258,11 +275,9 @@ class ChatbotService:
         emit_event: Optional[EventEmitter] = None,
     ) -> ChatResponse:
         """Run one chat turn and optionally emit step events while it executes."""
-        self._last_evidence_chunks = []
-        self._last_parliament_items = []
-        self._reset_reference_state()
+        turn_state = ChatTurnState.create()
         self._active_mode = request.mode
-        tool_handlers = self._build_tool_handlers(project_id)
+        tool_handlers = self._build_tool_handlers(project_id, turn_state)
         steps: List[ChatStep] = []
 
         # Build system prompt based on mode
@@ -316,11 +331,11 @@ class ChatbotService:
 
         references: List[DocumentReference] = []
         if has_final_content:
-            references = self._get_ordered_references()
+            references = self._get_ordered_references(turn_state)
             if not references:
-                references = self._build_references(self._last_evidence_chunks)
+                references = self._build_references(turn_state.last_evidence_chunks)
                 references.extend(
-                    self._build_parliament_references(self._last_parliament_items)
+                    self._build_parliament_references(turn_state.last_parliament_items)
                 )
             final_content, references = self._compact_cited_references(
                 final_content,
@@ -337,15 +352,11 @@ class ChatbotService:
             activity_summary=activity_summary,
         )
 
-    def _reset_reference_state(self) -> None:
-        """Reset reference ordering for a new chat turn."""
-        self._ordered_references = []
-        self._evidence_reference_numbers = {}
-        self._parliament_reference_numbers = {}
-
-    def _get_ordered_references(self) -> List[DocumentReference]:
+    def _get_ordered_references(
+        self, turn_state: ChatTurnState
+    ) -> List[DocumentReference]:
         """Return references in the same order used for [Document N] citations."""
-        return list(self._ordered_references)
+        return list(turn_state.ordered_references)
 
     def _build_activity_summary(
         self,
@@ -731,7 +742,11 @@ class ChatbotService:
             blocks.append(block)
         return "\n".join(blocks)
 
-    async def _get_project_synthesis(self, project_id: str) -> str:
+    async def _get_project_synthesis(
+        self,
+        project_id: str,
+        turn_state: Optional[ChatTurnState] = None,
+    ) -> str:
         """Fetch and format cached synthesis output for chat use."""
         try:
             summary = await read_cached_summary(project_id)
@@ -749,7 +764,11 @@ class ChatbotService:
         if summary is None:
             return self._format_project_synthesis(summary)
 
-        citation_mapping = self._register_synthesis_references(summary.citation_map)
+        effective_turn_state = turn_state or ChatTurnState.create()
+        citation_mapping = self._register_synthesis_references(
+            effective_turn_state,
+            summary.citation_map,
+        )
         formatted = self._format_project_synthesis(summary)
         return self._remap_synthesis_citations(formatted, citation_mapping)
 
@@ -925,7 +944,7 @@ class ChatbotService:
         return "\n".join(lines)
 
     def _register_synthesis_references(
-        self, citation_map: Dict[str, CitationInfo]
+        self, turn_state: ChatTurnState, citation_map: Dict[str, CitationInfo]
     ) -> Dict[int, int]:
         """Assign chatbot [Document N] numbers to synthesis citations."""
         citation_number_mapping: Dict[int, int] = {}
@@ -941,12 +960,12 @@ class ChatbotService:
 
         for citation in ordered_citations:
             reference_key = self._get_synthesis_reference_key(citation)
-            doc_number = self._evidence_reference_numbers.get(reference_key)
+            doc_number = turn_state.evidence_reference_numbers.get(reference_key)
 
             if doc_number is None:
-                doc_number = len(self._ordered_references) + 1
-                self._evidence_reference_numbers[reference_key] = doc_number
-                self._ordered_references.append(
+                doc_number = len(turn_state.ordered_references) + 1
+                turn_state.evidence_reference_numbers[reference_key] = doc_number
+                turn_state.ordered_references.append(
                     self._build_synthesis_reference(citation, reference_key)
                 )
 
@@ -1033,7 +1052,7 @@ class ChatbotService:
                 min_index = min(chunk_indices)
                 max_index = max(chunk_indices)
 
-                # Expand range to include neighbors (±1 chunk on each side)
+                # Expand range to include neighbors (+-1 chunk on each side)
                 expanded_min = max(0, min_index - 1)
                 expanded_max = max_index + 1
 
@@ -1178,6 +1197,7 @@ class ChatbotService:
         )
 
         for iteration in range(MAX_AGENT_ITERATIONS):
+            logger.info("[chatbot] Agent loop iteration %d", iteration + 1)
             response = await self._create_chat_completion(messages)
             assistant_message = response.choices[0].message
 
@@ -1196,6 +1216,11 @@ class ChatbotService:
                     )
 
                 await self._complete_step(active_status_step, emit_event)
+                logger.info(
+                    "[chatbot] Final response (%d chars): %s",
+                    len(assistant_text),
+                    assistant_text[:200],
+                )
                 return SimpleNamespace(content=assistant_text, tool_calls=None)
 
             await self._complete_step(active_status_step, emit_event)
@@ -1254,6 +1279,11 @@ class ChatbotService:
                     )
                     continue
 
+                logger.info(
+                    "[chatbot] Tool call: %s(%s)",
+                    tool_name,
+                    tool_call.function.arguments,
+                )
                 step = await self._start_tool_step(
                     step_list,
                     tool_name,
@@ -1298,6 +1328,11 @@ class ChatbotService:
                             summary=tool_result.summary,
                         )
 
+                logger.info(
+                    "[chatbot] Tool result (%d chars): %s",
+                    len(tool_result.content),
+                    tool_result.content[:300],
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -1406,11 +1441,18 @@ class ChatbotService:
 
         return "\n".join(parts).strip()
 
-    def _build_tool_handlers(self, project_id: str) -> Dict[str, Callable]:
+    def _build_tool_handlers(
+        self,
+        project_id: str,
+        turn_state: Optional[ChatTurnState] = None,
+    ) -> Dict[str, Callable]:
         """Build tool handler dict for the agent loop."""
+        effective_turn_state = turn_state or ChatTurnState.create()
 
         async def _handle_get_project_synthesis(**_: Any) -> ToolExecutionResult:
-            content = await self._get_project_synthesis(project_id)
+            content = await self._get_project_synthesis(
+                project_id, effective_turn_state
+            )
             return ToolExecutionResult(
                 content=content,
                 summary=self._build_synthesis_summary(content),
@@ -1426,8 +1468,11 @@ class ChatbotService:
 
             enriched = await self._get_chunks_with_neighbors(project_id, chunks)
             enriched = await self._enrich_with_document_details(enriched)
-            self._last_evidence_chunks.extend(enriched)
-            document_numbers = self._register_evidence_references(enriched)
+            effective_turn_state.last_evidence_chunks.extend(enriched)
+            document_numbers = self._register_evidence_references(
+                effective_turn_state,
+                enriched,
+            )
             document_count = len(
                 {
                     chunk.get("document_id")
@@ -1455,8 +1500,11 @@ class ChatbotService:
                     summary="No Parliament records found",
                 )
 
-            self._last_parliament_items.extend(items)
-            document_numbers = self._register_parliament_references(items)
+            effective_turn_state.last_parliament_items.extend(items)
+            document_numbers = self._register_parliament_references(
+                effective_turn_state,
+                items,
+            )
             return ToolExecutionResult(
                 content=self._build_parliament_context(items, document_numbers),
                 summary=self._format_count_summary(
@@ -1500,8 +1548,11 @@ class ChatbotService:
             # 3. Enrich and register references
             enriched = await self._get_chunks_with_neighbors(project_id, chunks)
             enriched = await self._enrich_with_document_details(enriched)
-            self._last_evidence_chunks.extend(enriched)
-            document_numbers = self._register_evidence_references(enriched)
+            effective_turn_state.last_evidence_chunks.extend(enriched)
+            document_numbers = self._register_evidence_references(
+                effective_turn_state,
+                enriched,
+            )
 
             # 4. Build bounded evidence packet
             evidence_text = self._build_context(
@@ -1907,7 +1958,9 @@ class ChatbotService:
         return DOCUMENT_CITATION_BRACKET_RE.sub(_replace, message), filtered
 
     def _register_evidence_references(
-        self, chunks: List[Dict[str, Any]]
+        self,
+        turn_state: ChatTurnState,
+        chunks: List[Dict[str, Any]],
     ) -> Dict[str, int]:
         """Assign stable [Document N] numbers to project evidence documents."""
         document_numbers: Dict[str, int] = {}
@@ -1917,18 +1970,22 @@ class ChatbotService:
             if not doc_id:
                 continue
 
-            doc_number = self._evidence_reference_numbers.get(doc_id)
+            doc_number = turn_state.evidence_reference_numbers.get(doc_id)
             if doc_number is None:
-                doc_number = len(self._ordered_references) + 1
-                self._evidence_reference_numbers[doc_id] = doc_number
-                self._ordered_references.append(self._build_document_reference(chunk))
+                doc_number = len(turn_state.ordered_references) + 1
+                turn_state.evidence_reference_numbers[doc_id] = doc_number
+                turn_state.ordered_references.append(
+                    self._build_document_reference(chunk)
+                )
 
             document_numbers[doc_id] = doc_number
 
         return document_numbers
 
     def _register_parliament_references(
-        self, items: List[Dict[str, Any]]
+        self,
+        turn_state: ChatTurnState,
+        items: List[Dict[str, Any]],
     ) -> Dict[str, int]:
         """Assign stable [Document N] numbers to Parliament search results."""
         document_numbers: Dict[str, int] = {}
@@ -1938,11 +1995,13 @@ class ChatbotService:
             if not item_id:
                 continue
 
-            doc_number = self._parliament_reference_numbers.get(item_id)
+            doc_number = turn_state.parliament_reference_numbers.get(item_id)
             if doc_number is None:
-                doc_number = len(self._ordered_references) + 1
-                self._parliament_reference_numbers[item_id] = doc_number
-                self._ordered_references.append(self._build_parliament_reference(item))
+                doc_number = len(turn_state.ordered_references) + 1
+                turn_state.parliament_reference_numbers[item_id] = doc_number
+                turn_state.ordered_references.append(
+                    self._build_parliament_reference(item)
+                )
 
             document_numbers[item_id] = doc_number
 

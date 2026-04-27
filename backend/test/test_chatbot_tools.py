@@ -2,7 +2,7 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -166,6 +166,73 @@ async def test_search_parliament_passes_date_filters():
 
 
 @pytest.mark.asyncio
+async def test_written_question_timeout_logs_explicitly(monkeypatch, caplog):
+    from app.services.chatbot import parliament
+
+    monkeypatch.setattr(
+        parliament,
+        "_search_parliamentary_questions",
+        AsyncMock(side_effect=TimeoutError()),
+    )
+
+    with caplog.at_level("WARNING"):
+        items, error = await parliament._search_parliamentary_questions_safe(
+            client=AsyncMock(),
+            query="childhood obesity",
+            date_from=None,
+            date_to=None,
+        )
+
+    assert items == []
+    assert error == (
+        f"written question search timed out after {parliament.HANSARD_TIMEOUT:.0f}s"
+    )
+    assert (
+        "Written question search timed out for query 'childhood obesity'" in caplog.text
+    )
+
+
+@pytest.mark.asyncio
+async def test_rerank_truncates_long_embedding_inputs(monkeypatch):
+    from app.services.chatbot import parliament
+
+    captured_texts = []
+
+    async def _fake_batch_embed(texts):
+        captured_texts.extend(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(parliament, "_batch_embed", _fake_batch_embed)
+
+    items = [
+        {
+            "id": "h-1",
+            "title": "Extremely long parliamentary record",
+            "source_type": "debate",
+            "date": "2025-01-01",
+            "content": "x" * 20000,
+            "rerank_text": "x" * 20000,
+        },
+        {
+            "id": "h-2",
+            "title": "Short parliamentary record",
+            "source_type": "written_question",
+            "date": "2025-01-02",
+            "content": "Brief content",
+            "rerank_text": "Brief rerank text",
+        },
+    ]
+
+    ranked = await parliament._rerank_items("query", items, top_k=2)
+
+    assert len(ranked) == 2
+    assert captured_texts
+    assert all(
+        len(text) <= parliament.RERANK_EMBED_TEXT_MAX_CHARS for text in captured_texts
+    )
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_executes_tool_and_loops():
     from app.services.chatbot.chat_service import ChatbotService
 
@@ -300,7 +367,7 @@ async def test_agent_loop_can_call_get_project_synthesis(monkeypatch):
     )
 
     assert result.content == "Here is the project synthesis."
-    mock_get_synthesis.assert_awaited_once_with("proj-1")
+    mock_get_synthesis.assert_awaited_once_with("proj-1", ANY)
 
 
 @pytest.mark.asyncio
