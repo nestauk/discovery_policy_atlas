@@ -254,7 +254,7 @@ async def test_agent_loop_executes_tool_and_loops():
         tool_handlers={"search_project_evidence": mock_handler},
     )
 
-    assert result.content == "Based on the evidence..."
+    assert result == "Based on the evidence..."
     assert fake_create.await_count == 2
     mock_handler.assert_awaited_once_with(query="housing")
 
@@ -282,7 +282,7 @@ async def test_agent_loop_retries_with_tool_choice_none_after_empty_final_turn()
         tool_handlers={"search_project_evidence": mock_handler},
     )
 
-    assert result.content == "Grounded answer [1]."
+    assert result == "Grounded answer [1]."
     assert fake_create.await_count == 3
     assert fake_create.await_args_list[-1].kwargs["tool_choice"] == "none"
 
@@ -321,7 +321,7 @@ async def test_agent_loop_emits_progress_steps():
         emit_event=collect,
     )
 
-    assert result.content == "Based on the evidence..."
+    assert result == "Based on the evidence..."
     assert [step.label for step in steps] == [
         "Understanding your question",
         'Searching project evidence for "housing"',
@@ -366,7 +366,7 @@ async def test_agent_loop_can_call_get_project_synthesis(monkeypatch):
         tool_handlers=service._build_tool_handlers("proj-1"),
     )
 
-    assert result.content == "Here is the project synthesis."
+    assert result == "Here is the project synthesis."
     mock_get_synthesis.assert_awaited_once_with("proj-1", ANY)
 
 

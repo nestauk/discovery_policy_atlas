@@ -294,7 +294,7 @@ class ChatbotService:
             system_prompt = build_forecast_system_prompt(forecast_ctx)
         else:
             project_title = await self._get_project_title(project_id)
-            system_prompt = self._build_system_prompt(project_title)
+            system_prompt = build_chatbot_system_prompt(project_title)
 
         # Build messages
         messages: List[Dict[str, Any]] = [
@@ -324,14 +324,13 @@ class ChatbotService:
         messages.append({"role": "user", "content": request.message})
 
         # Run agent loop
-        final_message = await self._run_agent_loop(
+        final_content = await self._run_agent_loop(
             messages,
             tool_handlers,
             steps=steps,
             emit_event=emit_event,
             turn_state=turn_state,
         )
-        final_content = self._extract_assistant_text(final_message)
         has_final_content = bool(final_content)
         if not has_final_content:
             final_content = EMPTY_ASSISTANT_FALLBACK
@@ -340,7 +339,7 @@ class ChatbotService:
 
         references: List[DocumentReference] = []
         if has_final_content:
-            references = self._get_ordered_references(turn_state)
+            references = list(turn_state.ordered_references)
             if not references:
                 references = self._build_unique_references(
                     turn_state.last_evidence_chunks,
@@ -368,12 +367,6 @@ class ChatbotService:
             steps=steps,
             activity_summary=activity_summary,
         )
-
-    def _get_ordered_references(
-        self, turn_state: ChatTurnState
-    ) -> List[DocumentReference]:
-        """Return references in the same order used for [Document N] citations."""
-        return list(turn_state.ordered_references)
 
     def _build_activity_summary(
         self,
@@ -420,15 +413,6 @@ class ChatbotService:
             return f'Extracting context and mechanism for "{truncated}"'
 
         return TOOL_LABELS.get(tool_name, "Working")
-
-    def _build_synthesis_summary(self, content: str) -> str:
-        """Summarize synthesis retrieval without exposing raw synthesis text."""
-        normalized = content.strip()
-        if normalized == NO_SYNTHESIS_SUMMARY_MESSAGE:
-            return "No synthesis summary available"
-        if normalized.startswith("Project synthesis could not be loaded"):
-            return "Synthesis could not be loaded"
-        return "Synthesis found"
 
     def _format_count_summary(self, count: int, singular: str, plural: str) -> str:
         """Render a short, human-readable count summary."""
@@ -561,10 +545,6 @@ class ChatbotService:
         if not isinstance(parsed, dict):
             raise ValueError("Tool arguments must be a JSON object")
         return parsed
-
-    def _build_system_prompt(self, project_title: Optional[str] = None) -> str:
-        """Build system prompt for the tool-calling agent."""
-        return build_chatbot_system_prompt(project_title)
 
     async def _search_relevant_chunks(
         self, project_id: str, query: str, max_chunks: int = 10
@@ -1260,8 +1240,8 @@ class ChatbotService:
         steps: Optional[List[ChatStep]] = None,
         emit_event: Optional[EventEmitter] = None,
         turn_state: Optional[ChatTurnState] = None,
-    ) -> Any:
-        """Run the tool-calling agent loop. Returns the final assistant message."""
+    ) -> str:
+        """Run the tool-calling agent loop. Returns the final assistant text."""
         step_list = steps if steps is not None else []
         active_status_step = await self._start_status_step(
             step_list,
@@ -1295,7 +1275,7 @@ class ChatbotService:
                     len(assistant_text),
                     assistant_text[:200],
                 )
-                return SimpleNamespace(content=assistant_text, tool_calls=None)
+                return assistant_text
 
             await self._complete_step(active_status_step, emit_event)
 
@@ -1464,7 +1444,7 @@ class ChatbotService:
         emit_event: Optional[EventEmitter] = None,
         active_status_step: Optional[ChatStep] = None,
         turn_state: Optional[ChatTurnState] = None,
-    ) -> Any:
+    ) -> str:
         """Force a plain-text answer using already retrieved tool outputs."""
         step_list = steps if steps is not None else []
         if step_list is not None:
@@ -1491,7 +1471,7 @@ class ChatbotService:
             emit_event,
             summary="Answer drafted" if assistant_text else None,
         )
-        return SimpleNamespace(content=assistant_text, tool_calls=None)
+        return assistant_text
 
     def _extract_assistant_text(self, message: Any) -> str:
         """Normalize assistant content into a plain text string."""
@@ -1529,10 +1509,14 @@ class ChatbotService:
             content = await self._get_project_synthesis(
                 project_id, effective_turn_state
             )
-            return ToolExecutionResult(
-                content=content,
-                summary=self._build_synthesis_summary(content),
-            )
+            normalized = content.strip()
+            if normalized == NO_SYNTHESIS_SUMMARY_MESSAGE:
+                summary = "No synthesis summary available"
+            elif normalized.startswith("Project synthesis could not be loaded"):
+                summary = "Synthesis could not be loaded"
+            else:
+                summary = "Synthesis found"
+            return ToolExecutionResult(content=content, summary=summary)
 
         async def _handle_search_evidence(query: str) -> ToolExecutionResult:
             chunks = await self._search_relevant_chunks(project_id, query)
@@ -1920,16 +1904,6 @@ class ChatbotService:
 
         return "\n".join(parts)
 
-    def _build_document_url(
-        self,
-        doi: Optional[str],
-        overton_url: Optional[str],
-    ) -> Optional[str]:
-        """Build a reference URL from DOI metadata or an existing document URL."""
-        if doi:
-            return f"https://doi.org/{doi}" if not doi.startswith("http") else doi
-        return overton_url
-
     def _parse_document_citation_group(self, bracket_content: str) -> List[int]:
         """Parse a citation group like '5', 'Document 5', or 'Documents 5 and 7'."""
         document_match = re.search(
@@ -2059,10 +2033,16 @@ class ChatbotService:
     def _build_document_reference(self, chunk: Dict[str, Any]) -> DocumentReference:
         """Build a single document reference from an enriched evidence chunk."""
         doi = chunk.get("document_doi")
+        doi_url = (
+            (f"https://doi.org/{doi}" if not doi.startswith("http") else doi)
+            if doi
+            else None
+        )
         url = (
             chunk.get("document_pdf_url")
             or chunk.get("document_landing_page_url")
-            or self._build_document_url(doi, chunk.get("document_overton_url"))
+            or doi_url
+            or chunk.get("document_overton_url")
         )
 
         return DocumentReference(
@@ -2084,21 +2064,6 @@ class ChatbotService:
             url=item.get("url"),
             published_date=item.get("date"),
         )
-
-    def _build_parliament_references(
-        self, items: List[Dict[str, Any]]
-    ) -> List[DocumentReference]:
-        """Build ordered parliament references without introducing duplicates."""
-        references: List[DocumentReference] = []
-        seen_ids = set()
-
-        for item in items:
-            item_id = item.get("id")
-            if item_id and item_id not in seen_ids:
-                seen_ids.add(item_id)
-                references.append(self._build_parliament_reference(item))
-
-        return references
 
     def _build_parliament_context(
         self,
