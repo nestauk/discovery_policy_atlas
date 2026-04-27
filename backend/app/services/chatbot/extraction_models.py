@@ -104,7 +104,7 @@ class CriticFlag(BaseModel):
 
     issue: str = Field(description="What is wrong or unsupported")
     field: str = Field(
-        description="Which extraction field this affects (e.g. 'mechanism', 'support_factors[0]')"
+        description="Which extraction field this affects (e.g. 'mechanism', 'support_factors: trained researchers'). For support factor flags, use 'support_factors: <factor name>' so it can be programmatically matched."
     )
     severity: Literal["downgrade", "note"] = Field(
         description="'downgrade' = confidence or a factor should be weakened; 'note' = flag for user but no change needed",
