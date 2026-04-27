@@ -18,7 +18,7 @@ import { useUser } from '@clerk/nextjs'
 import Image from 'next/image'
 import { getEvidenceBadgeColors, buildEvidenceBadgeRegex } from '@/lib/evidenceCategories'
 
-const DOCUMENT_CITATION_BRACKET_RE = /\[([^\]]+)\]/g
+const SIMPLE_CITATION_RE = /\[(\d+)\]/g
 const CHIP_LINE_RE = /\[chips:\s*((?:"[^"]*"(?:\s*\|\s*"[^"]*")*))\s*\]/g
 const CHIP_VALUE_RE = /"([^"]*)"/g
 
@@ -75,70 +75,14 @@ function parseChips(content: string): { cleanContent: string; chipGroups: string
   return { cleanContent, chipGroups }
 }
 
-function parseCitationGroup(bracketContent: string): number[] {
-  const cleaned = bracketContent
-    .replace(/\bdocuments?\b/gi, '')
-    .replace(/&/g, ',')
-    .replace(/\band\b/gi, ',')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^,+|,+$/g, '')
-
-  if (!cleaned || !/^\d+(?:\s*,\s*\d+)*$/.test(cleaned)) {
-    return []
-  }
-
-  return cleaned.split(',').map((part) => parseInt(part.trim(), 10))
-}
-
-function buildCitationLabelMap(content: string, references: { url?: string }[]): Map<number, number> {
-  const labelMap = new Map<number, number>()
-  let match: RegExpExecArray | null
-
-  DOCUMENT_CITATION_BRACKET_RE.lastIndex = 0
-  while ((match = DOCUMENT_CITATION_BRACKET_RE.exec(content)) !== null) {
-    for (const rawNumber of parseCitationGroup(match[1])) {
-      if (labelMap.has(rawNumber)) {
-        continue
-      }
-
-      const nextLabel = labelMap.size + 1
-      if (nextLabel > references.length) {
-        continue
-      }
-      labelMap.set(rawNumber, nextLabel)
-    }
-  }
-
-  return labelMap
-}
-
-// Helper function to process in-text citations
+// Server-side `_compact_cited_references` rewrites all citations to `[N]`
+// form, where N is 1-indexed into the references list. We only need to wrap
+// each [N] in a markdown link if the referenced source has a URL.
 function processInTextCitations(content: string, references: { url?: string }[]): string {
-  const labelMap = buildCitationLabelMap(content, references)
-
-  // Replace [5], [Document 5], or grouped forms like [Documents 5 and 7]
-  return content.replace(DOCUMENT_CITATION_BRACKET_RE, (match, bracketContent) => {
-    const numbers = parseCitationGroup(bracketContent)
-    if (numbers.length === 0) {
-      return match
-    }
-
-    return numbers.map((number) => {
-      const label = labelMap.get(number)
-      if (!label) {
-        return `[${number}]`
-      }
-
-      const refIndex = label - 1
-      if (refIndex >= 0 && refIndex < references.length) {
-        const ref = references[refIndex]
-        if (ref.url) {
-          return `[[${label}]](${ref.url})`
-        }
-      }
-      return `[${label}]`
-    }).join('')
+  return content.replace(SIMPLE_CITATION_RE, (match, numStr: string) => {
+    const number = parseInt(numStr, 10)
+    const ref = references[number - 1]
+    return ref?.url ? `[[${number}]](${ref.url})` : match
   })
 }
 
@@ -166,6 +110,113 @@ function getCurrentStep(steps: ChatStep[] | undefined): ChatStep | undefined {
   }
 
   return undefined
+}
+
+function extractText(node: React.ReactNode): string {
+  if (typeof node === 'string') return node
+  if (typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(extractText).join('')
+  if (node && typeof node === 'object' && 'props' in node) {
+    const el = node as React.ReactElement<{ children?: React.ReactNode }>
+    return extractText(el.props.children)
+  }
+  return ''
+}
+
+function formatAuthors(authors: string[] | string | undefined): string {
+  if (!authors) return ''
+  let authorText = Array.isArray(authors) ? authors.join(', ') : String(authors)
+  authorText = authorText
+    .replace(/[\[\]'"]/g, '')
+    .replace(/,\s*,/g, ',')
+    .replace(/^\s*,|,\s*$/g, '')
+    .trim()
+  if (authorText.length <= 60) return authorText
+  const truncated = authorText.substring(0, 50)
+  const lastComma = truncated.lastIndexOf(', ')
+  if (lastComma > 20) {
+    return truncated.substring(0, lastComma) + ' et al.'
+  }
+  return truncated + '...'
+}
+
+interface ActivityCardProps {
+  message: ChatMessage
+  isExpanded: boolean
+  onToggleExpand: () => void
+}
+
+function ActivityCard({ message, isExpanded, onToggleExpand }: ActivityCardProps) {
+  const hasActivity = Boolean(
+    message.isStreaming ||
+    message.error ||
+    message.activitySummary ||
+    (message.steps && message.steps.length > 0)
+  )
+  if (!hasActivity) return null
+
+  const shouldShowSteps = Boolean(
+    message.steps &&
+    message.steps.length > 0 &&
+    (message.isStreaming || isExpanded)
+  )
+
+  return (
+    <div className={`mb-3 rounded-md border px-3 py-2 ${
+      message.error
+        ? 'border-red-200 bg-red-50'
+        : 'border-gray-200 bg-white/70'
+    }`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs font-medium text-gray-700">
+          {message.error ? (
+            <AlertCircle className="h-3.5 w-3.5 text-red-600" />
+          ) : message.isStreaming ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600" />
+          ) : (
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+          )}
+          <span>{getActivityHeader(message)}</span>
+        </div>
+
+        {!message.isStreaming && message.steps && message.steps.length > 0 && (
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            className="text-xs text-gray-500 hover:text-gray-700"
+          >
+            {isExpanded ? 'Hide workings' : 'Show workings'}
+          </button>
+        )}
+      </div>
+
+      {shouldShowSteps && message.steps && (
+        <div className="mt-2 border-t border-gray-200 pt-2 space-y-1.5">
+          {message.steps.map((step) => (
+            <div key={step.id} className="flex items-start gap-2 text-xs text-gray-600">
+              <span
+                className={`mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                  step.status === 'failed'
+                    ? 'bg-red-500'
+                    : step.status === 'running'
+                      ? 'bg-blue-500'
+                      : 'bg-gray-400'
+                }`}
+              />
+              <div className="min-w-0">
+                <span className={step.status === 'running' ? 'font-medium text-gray-800' : ''}>
+                  {step.label}
+                </span>
+                {step.summary && !message.isStreaming && (
+                  <span className="text-gray-500">: {step.summary}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function getActivityHeader(message: ChatMessage): string {
@@ -604,87 +655,15 @@ export function ChatInterface({
               }`}
             >
               {message.role === 'assistant' && (
-                (() => {
-                  const hasActivity = Boolean(
-                    message.isStreaming ||
-                    message.error ||
-                    message.activitySummary ||
-                    (message.steps && message.steps.length > 0)
-                  )
-                  const isActivityExpanded = expandedActivityIds.includes(message.id)
-                  const shouldShowSteps = Boolean(
-                    message.steps &&
-                    message.steps.length > 0 &&
-                    (message.isStreaming || isActivityExpanded)
-                  )
-
-                  if (!hasActivity) {
-                    return null
-                  }
-
-                  return (
-                    <div className={`mb-3 rounded-md border px-3 py-2 ${
-                      message.error
-                        ? 'border-red-200 bg-red-50'
-                        : 'border-gray-200 bg-white/70'
-                    }`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2 text-xs font-medium text-gray-700">
-                          {message.error ? (
-                            <AlertCircle className="h-3.5 w-3.5 text-red-600" />
-                          ) : message.isStreaming ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600" />
-                          ) : (
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                          )}
-                          <span>{getActivityHeader(message)}</span>
-                        </div>
-
-                        {!message.isStreaming && message.steps && message.steps.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setExpandedActivityIds((current) => (
-                                current.includes(message.id)
-                                  ? current.filter((id) => id !== message.id)
-                                  : [...current, message.id]
-                              ))
-                            }}
-                            className="text-xs text-gray-500 hover:text-gray-700"
-                          >
-                            {isActivityExpanded ? 'Hide workings' : 'Show workings'}
-                          </button>
-                        )}
-                      </div>
-
-                      {shouldShowSteps && message.steps && (
-                        <div className="mt-2 border-t border-gray-200 pt-2 space-y-1.5">
-                          {message.steps.map((step) => (
-                            <div key={step.id} className="flex items-start gap-2 text-xs text-gray-600">
-                              <span
-                                className={`mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${
-                                  step.status === 'failed'
-                                    ? 'bg-red-500'
-                                    : step.status === 'running'
-                                      ? 'bg-blue-500'
-                                      : 'bg-gray-400'
-                                }`}
-                              />
-                              <div className="min-w-0">
-                                <span className={step.status === 'running' ? 'font-medium text-gray-800' : ''}>
-                                  {step.label}
-                                </span>
-                                {step.summary && !message.isStreaming && (
-                                  <span className="text-gray-500">: {step.summary}</span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })()
+                <ActivityCard
+                  message={message}
+                  isExpanded={expandedActivityIds.includes(message.id)}
+                  onToggleExpand={() => setExpandedActivityIds((current) => (
+                    current.includes(message.id)
+                      ? current.filter((id) => id !== message.id)
+                      : [...current, message.id]
+                  ))}
+                />
               )}
 
               {message.content && (() => {
@@ -723,17 +702,6 @@ export function ChatInterface({
                             <th className="border border-gray-200 bg-gray-50 px-2 py-1.5 text-left font-medium text-gray-700" {...props}>{children}</th>
                           ),
                           td: ({ children, ...props }) => {
-                            // Extract plain text from children (may be nested React elements)
-                            const extractText = (node: React.ReactNode): string => {
-                              if (typeof node === 'string') return node
-                              if (typeof node === 'number') return String(node)
-                              if (Array.isArray(node)) return node.map(extractText).join('')
-                              if (node && typeof node === 'object' && 'props' in node) {
-                                const el = node as React.ReactElement<{ children?: React.ReactNode }>
-                                return extractText(el.props.children)
-                              }
-                              return ''
-                            }
                             const text = extractText(children)
                             const badges = text ? renderEvidenceBadges(text) : null
                             return (
@@ -774,37 +742,6 @@ export function ChatInterface({
                 <div className="mt-3 pt-3 border-t border-gray-200">
                   <div className="space-y-2">
                     {message.references.map((ref, idx) => {
-                      // Helper function to process and truncate authors
-                      const formatAuthors = (authors: string[] | string) => {
-                        if (!authors) return ''
-
-                        let authorText = ''
-
-                        if (Array.isArray(authors)) {
-                          authorText = authors.join(', ')
-                        } else {
-                          authorText = String(authors)
-                        }
-
-                        // Simple approach: strip all brackets, quotes, and extra spaces
-                        authorText = authorText
-                          .replace(/[\[\]'"]/g, '') // Remove all brackets and quotes
-                          .replace(/,\s*,/g, ',') // Fix double commas
-                          .replace(/^\s*,|,\s*$/g, '') // Remove leading/trailing commas
-                          .trim()
-
-                        // Truncate if too long
-                        if (authorText.length <= 60) return authorText
-
-                        // Find the last complete author name within ~50 chars
-                        const truncated = authorText.substring(0, 50)
-                        const lastComma = truncated.lastIndexOf(', ')
-                        if (lastComma > 20) {
-                          return truncated.substring(0, lastComma) + ' et al.'
-                        }
-                        return truncated + '...'
-                      }
-
                       return (
                         <div key={ref.document_id} className="text-xs">
                           <div className="font-medium text-gray-800">

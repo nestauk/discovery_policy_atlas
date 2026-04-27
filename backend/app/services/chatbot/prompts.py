@@ -2,7 +2,74 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from typing import Dict, Iterable, Optional
+
+
+@dataclass(frozen=True)
+class TransferCeiling:
+    """Single source of truth for mechanism-confidence → transfer-view ceilings."""
+
+    max_view: str
+    reason: str
+    prompt_rule: str
+
+
+# Keyed by InterventionCMExtraction.mechanism.confidence values.
+TRANSFER_CEILINGS: Dict[str, TransferCeiling] = {
+    "insufficient": TransferCeiling(
+        max_view="Insufficient",
+        reason="Mechanism not identified — cannot assess transfer.",
+        prompt_rule=(
+            'If mechanism confidence is "insufficient": '
+            'transfer view MUST be "Insufficient" regardless of other factors.'
+        ),
+    ),
+    "weak": TransferCeiling(
+        max_view="Conditional",
+        reason="Mechanism evidence is weak — transfer view cannot exceed Conditional.",
+        prompt_rule=(
+            'If mechanism confidence is "weak": '
+            'transfer view CANNOT exceed "Conditional".'
+        ),
+    ),
+    "mediator_supported": TransferCeiling(
+        max_view="Conditional",
+        reason=(
+            "Mechanism is mediator-supported but not directly demonstrated — "
+            "transfer view cannot exceed Conditional unless all key factors are confirmed."
+        ),
+        prompt_rule=(
+            'If mechanism confidence is "mediator_supported": '
+            'transfer view CANNOT exceed "Conditional" unless all key factors are '
+            "✅ Present (🔧 Buildable is not sufficient)."
+        ),
+    ),
+    "explicit": TransferCeiling(
+        max_view="Strong",
+        reason="",
+        prompt_rule="",
+    ),
+}
+
+# Default applied when mechanism confidence is missing or unrecognised.
+DEFAULT_TRANSFER_CEILING = TransferCeiling(
+    max_view="Conditional",
+    reason="",
+    prompt_rule="",
+)
+
+
+def _render_transfer_ceiling_rules() -> str:
+    rules = [c.prompt_rule for c in TRANSFER_CEILINGS.values() if c.prompt_rule]
+    rules.append(
+        'If most factors are ❓ Unknown: transfer view CANNOT exceed "Conditional"'
+        ' — say "cannot assess without more information about your context."'
+    )
+    return "TRANSFER ASSESSMENT CEILING RULES:\n" + "\n".join(f"- {r}" for r in rules)
+
+
+_TRANSFER_CEILING_RULES_BLOCK = _render_transfer_ceiling_rules()
 
 
 TOOL_GUIDANCE = [
@@ -134,7 +201,8 @@ FORECAST_EVIDENCE_STANDARDS = [
     "Distinguish between surface similarity (same geography/population) and mechanism fit (same causal role and support factors).",
 ]
 
-FORECAST_TASK_INSTRUCTIONS = """YOUR TASK:
+FORECAST_TASK_INSTRUCTIONS = (
+    """YOUR TASK:
 Phase 1 — Context Confirmation (1-2 turns):
 The user's first message will typically confirm or edit their implementation context (geography, population, setting, outcomes).
 IMPORTANT: The PROJECT CONTEXT section above contains their search parameters, which may be broader than their actual implementation target (e.g. they searched across "OECD" but want to implement in "UK"). Treat these as starting defaults, not confirmed implementation details.
@@ -203,11 +271,9 @@ CRITICAL RULE FOR FACTOR ASSESSMENT:
 **Transfer assessment**
 2-3 sentences. State the overall view and the single most critical uncertainty.
 
-TRANSFER ASSESSMENT CEILING RULES:
-- If mechanism confidence is "insufficient": transfer view MUST be "Insufficient" regardless of other factors.
-- If mechanism confidence is "weak": transfer view CANNOT exceed "Conditional".
-- If mechanism confidence is "mediator_supported": transfer view CANNOT exceed "Conditional" unless all key factors are ✅ Present (🔧 Buildable is not sufficient).
-- If most factors are ❓ Unknown: transfer view CANNOT exceed "Conditional" — say "cannot assess without more information about your context."
+"""
+    + _TRANSFER_CEILING_RULES_BLOCK
+    + """
 Do not repeat the factor table. Reference it.
 
 ---
@@ -266,6 +332,7 @@ Rules:
 - 2-4 options, specific to the current question
 - Exactly ONE [chips: ...] line per message — never multiple lines
 - The user can click a chip or type a custom answer"""
+)
 
 FORECAST_GOVERNANCE = (
     "IMPORTANT: This is an assessment tool to support structured deliberation about policy transferability. "
@@ -332,22 +399,25 @@ def build_forecast_system_prompt(forecast_context: dict) -> str:
     return "\n\n".join(section for section in sections if section)
 
 
+def _build_final_answer_prompt(intro: str, rules: Iterable[str]) -> str:
+    sections = [intro, _render_bullet_section("FINAL ANSWER RULES:", rules)]
+    return "\n\n".join(section for section in sections if section)
+
+
 def build_forecast_final_answer_prompt() -> str:
     """Build the fallback prompt for forecast mode when the tool loop exhausts iterations."""
-    sections = [
+    return _build_final_answer_prompt(
         "Complete the transferability assessment now using only the retrieved material already in this conversation.",
-        _render_bullet_section("FINAL ANSWER RULES:", FORECAST_FINAL_ANSWER_RULES),
-    ]
-    return "\n\n".join(section for section in sections if section)
+        FORECAST_FINAL_ANSWER_RULES,
+    )
 
 
 def build_final_answer_retry_prompt() -> str:
     """Build the plain-text fallback prompt used after the tool loop."""
-    sections = [
+    return _build_final_answer_prompt(
         "Answer the user's original question now using only the retrieved material already in this conversation.",
-        _render_bullet_section("FINAL ANSWER RULES:", FINAL_ANSWER_RULES),
-    ]
-    return "\n\n".join(section for section in sections if section)
+        FINAL_ANSWER_RULES,
+    )
 
 
 # ---------------------------------------------------------------------------

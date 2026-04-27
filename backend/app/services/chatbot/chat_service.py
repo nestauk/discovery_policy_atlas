@@ -33,14 +33,21 @@ from .models import (
     DocumentReference,
 )
 from app.utils.llm.llm_utils import get_llm
-from .extraction_models import CriticResult, InterventionCMExtraction
+from .extraction_models import (
+    CriticResult,
+    EvidenceBasis,
+    InterventionCMExtraction,
+    ModeratorOrDealbreaker,
+)
 from .parliament import search_parliament
 from .prompts import (
     CM_CRITIC_PROMPT,
     CM_EXTRACTION_PROMPT,
+    DEFAULT_TRANSFER_CEILING,
     EVIDENCE_RETRIEVAL_NOTE,
     PARLIAMENT_RETRIEVAL_NOTE,
     SYNTHESIS_SOURCE_NOTE,
+    TRANSFER_CEILINGS,
     build_chatbot_system_prompt,
     build_final_answer_retry_prompt,
     build_forecast_final_answer_prompt,
@@ -335,9 +342,17 @@ class ChatbotService:
         if has_final_content:
             references = self._get_ordered_references(turn_state)
             if not references:
-                references = self._build_references(turn_state.last_evidence_chunks)
+                references = self._build_unique_references(
+                    turn_state.last_evidence_chunks,
+                    id_key="document_id",
+                    builder=self._build_document_reference,
+                )
                 references.extend(
-                    self._build_parliament_references(turn_state.last_parliament_items)
+                    self._build_unique_references(
+                        turn_state.last_parliament_items,
+                        id_key="id",
+                        builder=self._build_parliament_reference,
+                    )
                 )
             final_content, references = self._compact_cited_references(
                 final_content,
@@ -1705,11 +1720,17 @@ class ChatbotService:
         critic: CriticResult,
     ) -> InterventionCMExtraction:
         """Apply critic downgrades to the extraction (confidence can only go down)."""
-        confidence_order = ["explicit", "mediator_supported", "weak", "insufficient"]
-        current_idx = confidence_order.index(extraction.mechanism.confidence)
-        revised_idx = confidence_order.index(critic.revised_mechanism_confidence)
-
-        if revised_idx > current_idx:
+        # Higher rank = lower confidence; .get() returns None for malformed LLM
+        # output so we skip the downgrade rather than raising.
+        confidence_ranks = {
+            "explicit": 0,
+            "mediator_supported": 1,
+            "weak": 2,
+            "insufficient": 3,
+        }
+        current = confidence_ranks.get(extraction.mechanism.confidence)
+        revised = confidence_ranks.get(critic.revised_mechanism_confidence)
+        if current is not None and revised is not None and revised > current:
             extraction.mechanism.confidence = critic.revised_mechanism_confidence
 
         # Remove support factors flagged by critic as bad/generic
@@ -1727,9 +1748,6 @@ class ChatbotService:
                 for sf in extraction.support_factors
                 if sf.factor.lower() not in flagged_factors
             ]
-
-        # Add missing dealbreakers from critic
-        from .extraction_models import EvidenceBasis, ModeratorOrDealbreaker
 
         for dealbreaker in critic.missing_dealbreakers:
             extraction.moderators_or_dealbreakers.append(
@@ -1835,32 +1853,12 @@ class ChatbotService:
                     "Use these [N] citations when presenting evidence from this extraction."
                 )
 
-        # Enforce transfer view ceiling based on mechanism confidence
-        confidence = extraction.mechanism.confidence
-        ceiling_map = {
-            "insufficient": (
-                "Insufficient",
-                "Mechanism not identified — cannot assess transfer.",
-            ),
-            "weak": (
-                "Conditional",
-                "Mechanism evidence is weak — transfer view cannot exceed Conditional.",
-            ),
-            "mediator_supported": (
-                "Conditional",
-                "Mechanism is mediator-supported but not directly demonstrated — transfer view cannot exceed Conditional unless all key factors are confirmed.",
-            ),
-            "explicit": ("Strong", ""),
-        }
-        max_view, reason = ceiling_map.get(confidence, ("Conditional", ""))
-        parts.extend(
-            [
-                "",
-                f"TRANSFER VIEW CEILING: {max_view}",
-            ]
+        ceiling = TRANSFER_CEILINGS.get(
+            extraction.mechanism.confidence, DEFAULT_TRANSFER_CEILING
         )
-        if reason:
-            parts.append(f"REASON: {reason}")
+        parts.extend(["", f"TRANSFER VIEW CEILING: {ceiling.max_view}"])
+        if ceiling.reason:
+            parts.append(f"REASON: {ceiling.reason}")
         parts.append(
             "You MUST NOT assign a transfer view above this ceiling in your assessment."
         )
@@ -1876,21 +1874,6 @@ class ChatbotService:
         if doi:
             return f"https://doi.org/{doi}" if not doi.startswith("http") else doi
         return overton_url
-
-    def _build_references(
-        self, chunks: List[Dict[str, Any]]
-    ) -> List[DocumentReference]:
-        """Build document references from chunks."""
-        references: List[DocumentReference] = []
-        seen_docs = set()
-
-        for chunk in chunks:
-            doc_id = chunk.get("document_id")
-            if doc_id and doc_id not in seen_docs:
-                seen_docs.add(doc_id)
-                references.append(self._build_document_reference(chunk))
-
-        return references
 
     def _parse_document_citation_group(self, bracket_content: str) -> List[int]:
         """Parse a citation group like '5', 'Document 5', or 'Documents 5 and 7'."""
@@ -1913,55 +1896,65 @@ class ChatbotService:
 
         return [int(part.strip()) for part in cleaned.split(",")]
 
-    def _extract_cited_document_numbers(self, text: str) -> List[int]:
-        """Return cited document numbers in first-appearance order."""
-        if not text:
-            return []
-
-        seen_numbers = set()
-        ordered_numbers: List[int] = []
-        for match in DOCUMENT_CITATION_BRACKET_RE.finditer(text):
-            for number in self._parse_document_citation_group(match.group(1)):
-                if number in seen_numbers:
-                    continue
-                seen_numbers.add(number)
-                ordered_numbers.append(number)
-        return ordered_numbers
-
     def _compact_cited_references(
         self,
         message: str,
         references: List[DocumentReference],
     ) -> tuple[str, List[DocumentReference]]:
         """Renumber cited references compactly and return only those references."""
-        cited_numbers = self._extract_cited_document_numbers(message)
-        if not cited_numbers:
-            return message, []
-
         number_mapping: Dict[int, int] = {}
         filtered: List[DocumentReference] = []
-        for number in cited_numbers:
-            index = number - 1
-            if 0 <= index < len(references):
-                number_mapping[number] = len(filtered) + 1
-                filtered.append(references[index])
-
-        if not filtered:
-            return message, references
+        saw_parsable_group = False
 
         def _replace(match: re.Match[str]) -> str:
+            nonlocal saw_parsable_group
             original_numbers = self._parse_document_citation_group(match.group(1))
             if not original_numbers:
                 return match.group(0)
 
-            remapped_parts = [
-                f"[{number_mapping[number]}]"
-                for number in original_numbers
-                if number in number_mapping
-            ]
+            saw_parsable_group = True
+            remapped_parts: List[str] = []
+            for number in original_numbers:
+                if number not in number_mapping:
+                    index = number - 1
+                    if not (0 <= index < len(references)):
+                        continue
+                    number_mapping[number] = len(filtered) + 1
+                    filtered.append(references[index])
+                remapped_parts.append(f"[{number_mapping[number]}]")
             return "".join(remapped_parts) or match.group(0)
 
-        return DOCUMENT_CITATION_BRACKET_RE.sub(_replace, message), filtered
+        rewritten = DOCUMENT_CITATION_BRACKET_RE.sub(_replace, message)
+        if not saw_parsable_group:
+            return message, []
+        if not filtered:
+            return message, references
+        return rewritten, filtered
+
+    def _register_references(
+        self,
+        turn_state: ChatTurnState,
+        items: List[Dict[str, Any]],
+        *,
+        id_key: str,
+        number_lookup: Dict[str, int],
+        builder: Callable[[Dict[str, Any]], DocumentReference],
+    ) -> Dict[str, int]:
+        """Assign stable [Document N] numbers and append references to the turn state."""
+        document_numbers: Dict[str, int] = {}
+        for item in items:
+            item_id = item.get(id_key)
+            if not item_id:
+                continue
+
+            doc_number = number_lookup.get(item_id)
+            if doc_number is None:
+                doc_number = len(turn_state.ordered_references) + 1
+                number_lookup[item_id] = doc_number
+                turn_state.ordered_references.append(builder(item))
+
+            document_numbers[item_id] = doc_number
+        return document_numbers
 
     def _register_evidence_references(
         self,
@@ -1969,24 +1962,13 @@ class ChatbotService:
         chunks: List[Dict[str, Any]],
     ) -> Dict[str, int]:
         """Assign stable [Document N] numbers to project evidence documents."""
-        document_numbers: Dict[str, int] = {}
-
-        for chunk in chunks:
-            doc_id = chunk.get("document_id")
-            if not doc_id:
-                continue
-
-            doc_number = turn_state.evidence_reference_numbers.get(doc_id)
-            if doc_number is None:
-                doc_number = len(turn_state.ordered_references) + 1
-                turn_state.evidence_reference_numbers[doc_id] = doc_number
-                turn_state.ordered_references.append(
-                    self._build_document_reference(chunk)
-                )
-
-            document_numbers[doc_id] = doc_number
-
-        return document_numbers
+        return self._register_references(
+            turn_state,
+            chunks,
+            id_key="document_id",
+            number_lookup=turn_state.evidence_reference_numbers,
+            builder=self._build_document_reference,
+        )
 
     def _register_parliament_references(
         self,
@@ -1994,24 +1976,30 @@ class ChatbotService:
         items: List[Dict[str, Any]],
     ) -> Dict[str, int]:
         """Assign stable [Document N] numbers to Parliament search results."""
-        document_numbers: Dict[str, int] = {}
+        return self._register_references(
+            turn_state,
+            items,
+            id_key="id",
+            number_lookup=turn_state.parliament_reference_numbers,
+            builder=self._build_parliament_reference,
+        )
 
+    def _build_unique_references(
+        self,
+        items: List[Dict[str, Any]],
+        *,
+        id_key: str,
+        builder: Callable[[Dict[str, Any]], DocumentReference],
+    ) -> List[DocumentReference]:
+        """Build deduplicated references in source order."""
+        references: List[DocumentReference] = []
+        seen: set = set()
         for item in items:
-            item_id = item.get("id")
-            if not item_id:
-                continue
-
-            doc_number = turn_state.parliament_reference_numbers.get(item_id)
-            if doc_number is None:
-                doc_number = len(turn_state.ordered_references) + 1
-                turn_state.parliament_reference_numbers[item_id] = doc_number
-                turn_state.ordered_references.append(
-                    self._build_parliament_reference(item)
-                )
-
-            document_numbers[item_id] = doc_number
-
-        return document_numbers
+            item_id = item.get(id_key)
+            if item_id and item_id not in seen:
+                seen.add(item_id)
+                references.append(builder(item))
+        return references
 
     def _build_document_reference(self, chunk: Dict[str, Any]) -> DocumentReference:
         """Build a single document reference from an enriched evidence chunk."""

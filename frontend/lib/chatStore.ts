@@ -96,9 +96,24 @@ const EMPTY_CONVERSATIONS: ConversationMeta[] = []
 // ---------------------------------------------------------------------------
 // localStorage helpers — per-conversation message storage
 // ---------------------------------------------------------------------------
+//
+// Messages are persisted to localStorage but cached in-memory so reads (which
+// happen on every render via getMessages) don't repeatedly parse JSON. The
+// cache is the source of truth at runtime; localStorage is the persistence
+// layer.
+
+const messagesCache = new Map<string, ChatMessage[]>()
 
 function convStorageKey(conversationId: string): string {
   return `${CONV_KEY_PREFIX}${conversationId}`
+}
+
+function getCachedMessages(conversationId: string): ChatMessage[] {
+  const cached = messagesCache.get(conversationId)
+  if (cached) return cached
+  const loaded = loadConversationMessages(conversationId)
+  messagesCache.set(conversationId, loaded)
+  return loaded
 }
 
 function parseMessageArray(raw: unknown[]): ChatMessage[] {
@@ -145,21 +160,23 @@ function loadConversationMessages(conversationId: string): ChatMessage[] {
 }
 
 function persistConversationMessages(conversationId: string, messages: ChatMessage[]) {
-  if (typeof window === 'undefined') return
   const capped = messages.length > MAX_MESSAGES_PER_CONVERSATION
     ? messages.slice(-MAX_MESSAGES_PER_CONVERSATION)
     : messages
+  messagesCache.set(conversationId, capped)
+  if (typeof window === 'undefined') return
   const serialized = JSON.stringify(
     capped.map((m) => ({ ...m, timestamp: m.timestamp.toISOString() }))
   )
   try {
     window.localStorage.setItem(convStorageKey(conversationId), serialized)
   } catch {
-    // QuotaExceededError — silently fail; messages remain in memory
+    // QuotaExceededError — silently fail; cache still holds the latest messages
   }
 }
 
 function removeConversationMessages(conversationId: string) {
+  messagesCache.delete(conversationId)
   if (typeof window === 'undefined') return
   try {
     window.localStorage.removeItem(convStorageKey(conversationId))
@@ -357,7 +374,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const project = getProjectData(state.metaByProject, key)
     const activeId = state.draftConversationId ?? project.activeConversationId
     if (!activeId) return EMPTY_MESSAGES
-    return loadConversationMessages(activeId)
+    return getCachedMessages(activeId)
   },
 
   addMessage: (key, message) => set((state) => {
@@ -372,8 +389,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       nextDraft = conversationId
     }
 
-    // Load existing messages, append new one
-    const existingMessages = loadConversationMessages(conversationId)
+    // Append to existing messages (cache-first; persist write-through)
+    const existingMessages = getCachedMessages(conversationId)
     const updatedMessages = [...existingMessages, message]
     persistConversationMessages(conversationId, updatedMessages)
 
