@@ -188,9 +188,10 @@ class ChatTurnState:
     ordered_references: List[DocumentReference]
     evidence_reference_numbers: Dict[str, int]
     parliament_reference_numbers: Dict[str, int]
+    active_mode: Optional[str] = None
 
     @classmethod
-    def create(cls) -> "ChatTurnState":
+    def create(cls, active_mode: Optional[str] = None) -> "ChatTurnState":
         """Create empty turn state for a fresh chat request."""
         return cls(
             last_evidence_chunks=[],
@@ -198,6 +199,7 @@ class ChatTurnState:
             ordered_references=[],
             evidence_reference_numbers={},
             parliament_reference_numbers={},
+            active_mode=active_mode,
         )
 
 
@@ -275,8 +277,7 @@ class ChatbotService:
         emit_event: Optional[EventEmitter] = None,
     ) -> ChatResponse:
         """Run one chat turn and optionally emit step events while it executes."""
-        turn_state = ChatTurnState.create()
-        self._active_mode = request.mode
+        turn_state = ChatTurnState.create(active_mode=request.mode)
         tool_handlers = self._build_tool_handlers(project_id, turn_state)
         steps: List[ChatStep] = []
 
@@ -321,6 +322,7 @@ class ChatbotService:
             tool_handlers,
             steps=steps,
             emit_event=emit_event,
+            turn_state=turn_state,
         )
         final_content = self._extract_assistant_text(final_message)
         has_final_content = bool(final_content)
@@ -1187,6 +1189,7 @@ class ChatbotService:
         *,
         steps: Optional[List[ChatStep]] = None,
         emit_event: Optional[EventEmitter] = None,
+        turn_state: Optional[ChatTurnState] = None,
     ) -> Any:
         """Run the tool-calling agent loop. Returns the final assistant message."""
         step_list = steps if steps is not None else []
@@ -1213,6 +1216,7 @@ class ChatbotService:
                         steps=step_list,
                         emit_event=emit_event,
                         active_status_step=active_status_step,
+                        turn_state=turn_state,
                     )
 
                 await self._complete_step(active_status_step, emit_event)
@@ -1354,6 +1358,7 @@ class ChatbotService:
             steps=step_list,
             emit_event=emit_event,
             active_status_step=active_status_step,
+            turn_state=turn_state,
         )
 
     async def _create_chat_completion(
@@ -1388,6 +1393,7 @@ class ChatbotService:
         steps: Optional[List[ChatStep]] = None,
         emit_event: Optional[EventEmitter] = None,
         active_status_step: Optional[ChatStep] = None,
+        turn_state: Optional[ChatTurnState] = None,
     ) -> Any:
         """Force a plain-text answer using already retrieved tool outputs."""
         step_list = steps if steps is not None else []
@@ -1400,7 +1406,7 @@ class ChatbotService:
 
         retry_prompt = (
             FORECAST_FINAL_ANSWER_RETRY_PROMPT
-            if getattr(self, "_active_mode", None) == ChatMode.FORECAST
+            if turn_state is not None and turn_state.active_mode == ChatMode.FORECAST
             else FINAL_ANSWER_RETRY_PROMPT
         )
         retry_messages = messages + [{"role": "user", "content": retry_prompt}]
