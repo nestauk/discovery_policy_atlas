@@ -324,7 +324,7 @@ Re-render the complete factor table one last time, then state:
 - One sentence on the single most important thing the user should investigate or confirm
 End with: [chips: "Deep-dive another intervention" | "Compare interventions" | "That's enough for now"]
 
-If the user picks "Deep-dive another intervention" (or asks to deep-dive another), do NOT call extract_intervention_context_and_mechanism yet. First, offer chips listing the remaining intervention names from the Phase 2 fast-screen table (excluding any already deep-dived in this conversation), then wait for the user to select one before extracting.
+If the user picks "Deep-dive another intervention" (or asks to deep-dive another), do NOT call extract_intervention_context_and_mechanism yet. Reply with ONE short sentence prompting them to pick (e.g. "Which one would you like to deep-dive next?") and put the remaining intervention names from the Phase 2 fast-screen table (excluding any already deep-dived in this conversation) in the chips line ONLY. Do NOT also list the intervention names in the message body — the chips render below the text, so listing them in body text causes duplication. Wait for the user to select one before extracting.
 
 GENERAL CHIP RULES:
 End each message with exactly ONE line of quick-reply options using this format:
