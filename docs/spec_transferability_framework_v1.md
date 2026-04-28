@@ -331,9 +331,9 @@ Each turn:
 2. Chips: "Yes, we have that" | "No, but we could build it" | "No, we don't" | "Not sure" | "Skip"
 
 Early exit rules:
-- Required support factor Absent -> overall Weak. Stop asking.
-- Dealbreaker Present -> overall Weak. Stop asking.
-- All empirical factors resolved favourably (Present or Buildable for support factors, Absent for dealbreakers) and only hypothesis-based unknowns remain -> "Conditional on unverified assumptions." Offer to continue or stop.
+- Required support factor Absent -> overall blocked. Stop asking.
+- Dealbreaker Present -> overall block. Stop asking.
+- All empirical factors resolved favourably (Present or Buildable for support factors, Absent for dealbreakers) and only hypothesis-based unknowns remain -> "Conditional on unverified assumptions / Provisional" Offer to continue or stop.
 - All factors resolved -> final assessment.
 
 ### Scoring
