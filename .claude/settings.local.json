@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(ls -la C:/Users/lukeh/discovery_policy_atlas/backend/Docker*)",
-      "Bash(grep -n \"local_domain\\\\|local_dns\\\\|private_hosted_zone\" /c/Users/lukeh/discovery_policy_atlas/infra/infra/*.py)"
-    ]
-  }
-}
