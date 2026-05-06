@@ -26,6 +26,7 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=2000)
     recent_messages: Optional[List[ChatMessage]] = Field(default=None, max_length=10)
+    previous_response_id: Optional[str] = None
 
 
 class DocumentReference(BaseModel):
@@ -40,6 +41,15 @@ class DocumentReference(BaseModel):
     relevance_score: Optional[float] = None
     published_date: Optional[str] = None
     year: Optional[int] = None
+
+
+class AnswerMetadata(BaseModel):
+    """Structured metadata about the sources behind an answer."""
+
+    source_count: int = 0
+    evidence_source_count: int = 0
+    parliament_source_count: int = 0
+    date_range: Optional[str] = None
 
 
 class ChatStep(BaseModel):
@@ -62,11 +72,14 @@ class ChatEvent(BaseModel):
         "tool.failed",
         "message.completed",
         "message.failed",
+        "message.delta",
     ]
     step: Optional[ChatStep] = None
     message: Optional[str] = None
     references: List[DocumentReference] = Field(default_factory=list)
     activity_summary: Optional[str] = None
+    answer_metadata: Optional[AnswerMetadata] = None
+    response_id: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -77,4 +90,6 @@ class ChatResponse(BaseModel):
     references: List[DocumentReference] = Field(default_factory=list)
     steps: List[ChatStep] = Field(default_factory=list)
     activity_summary: Optional[str] = None
+    answer_metadata: Optional[AnswerMetadata] = None
+    response_id: Optional[str] = None
     context_used: Optional[str] = None  # For debugging
