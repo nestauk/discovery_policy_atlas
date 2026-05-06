@@ -79,56 +79,53 @@ TOOL_LABELS = {
 TOOL_DEFINITIONS = [
     {
         "type": "function",
-        "function": {
-            "name": "get_project_synthesis",
-            "description": "Fetch the project's synthesised evidence summary for high-level questions about what works, main findings, top interventions, or recommendations.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-            },
+        "name": "get_project_synthesis",
+        "description": "Fetch the project's synthesised evidence summary for high-level questions about what works, main findings, top interventions, or recommendations.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
         },
+        "strict": False,
     },
     {
         "type": "function",
-        "function": {
-            "name": "search_project_evidence",
-            "description": "Search the project's collected research documents and policy evidence for information relevant to the query.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query to find relevant evidence.",
-                    },
+        "name": "search_project_evidence",
+        "description": "Search the project's collected research documents and policy evidence for information relevant to the query.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query to find relevant evidence.",
                 },
-                "required": ["query"],
             },
+            "required": ["query"],
         },
+        "strict": False,
     },
     {
         "type": "function",
-        "function": {
-            "name": "search_parliament",
-            "description": "Search UK Parliament records including Hansard debates, contributions, written statements, written answers, and answered written parliamentary questions. Use short specific keyword queries rather than full sentences.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query for parliamentary records.",
-                    },
-                    "date_from": {
-                        "type": "string",
-                        "description": "Start date filter in YYYY-MM-DD format.",
-                    },
-                    "date_to": {
-                        "type": "string",
-                        "description": "End date filter in YYYY-MM-DD format.",
-                    },
+        "name": "search_parliament",
+        "description": "Search UK Parliament records including Hansard debates, contributions, written statements, written answers, and answered written parliamentary questions. Use short specific keyword queries rather than full sentences.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query for parliamentary records.",
                 },
-                "required": ["query"],
+                "date_from": {
+                    "type": "string",
+                    "description": "Start date filter in YYYY-MM-DD format.",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "End date filter in YYYY-MM-DD format.",
+                },
             },
+            "required": ["query"],
         },
+        "strict": False,
     },
 ]
 
@@ -242,26 +239,18 @@ class ChatbotService:
         steps: List[ChatStep] = []
 
         project_title = await self._get_project_title(project_id)
+        instructions = self._build_system_prompt(project_title)
 
-        # Build messages
-        messages: List[Dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": self._build_system_prompt(project_title),
-            },
-        ]
-
-        # Add conversation history
+        input_items: List[Any] = []
         if request.recent_messages:
             for msg in request.recent_messages[-5:]:
-                messages.append({"role": msg.role.value, "content": msg.content})
+                input_items.append({"role": msg.role.value, "content": msg.content})
+        input_items.append({"role": "user", "content": request.message})
 
-        messages.append({"role": "user", "content": request.message})
-
-        # Run agent loop
         final_message = await self._run_agent_loop(
-            messages,
+            input_items,
             tool_handlers,
+            instructions=instructions,
             steps=steps,
             emit_event=emit_event,
         )
@@ -973,13 +962,14 @@ class ChatbotService:
 
     async def _run_agent_loop(
         self,
-        messages: List[Dict[str, Any]],
+        input_items: List[Any],
         tool_handlers: Dict[str, Callable],
         *,
+        instructions: Optional[str] = None,
         steps: Optional[List[ChatStep]] = None,
         emit_event: Optional[EventEmitter] = None,
     ) -> Any:
-        """Run the tool-calling agent loop. Returns the final assistant message."""
+        """Run the tool-calling agent loop via the Responses API."""
         step_list = steps if steps is not None else []
         active_status_step = await self._start_status_step(
             step_list,
@@ -989,18 +979,23 @@ class ChatbotService:
 
         for iteration in range(MAX_AGENT_ITERATIONS):
             logger.info("[chatbot] Agent loop iteration %d", iteration + 1)
-            response = await self._create_chat_completion(messages)
-            assistant_message = response.choices[0].message
+            response = await self._create_response(
+                input_items, instructions=instructions
+            )
+            function_calls = [
+                item for item in response.output if item.type == "function_call"
+            ]
 
-            if not assistant_message.tool_calls:
-                assistant_text = self._extract_assistant_text(assistant_message)
+            if not function_calls:
+                assistant_text = response.output_text
                 if not assistant_text:
                     logger.warning(
                         "[chatbot] Empty final response after iteration %d; retrying without tools",
                         iteration + 1,
                     )
                     return await self._request_final_answer(
-                        messages,
+                        input_items,
+                        instructions=instructions,
                         steps=step_list,
                         emit_event=emit_event,
                         active_status_step=active_status_step,
@@ -1016,32 +1011,14 @@ class ChatbotService:
 
             await self._complete_step(active_status_step, emit_event)
 
-            # Append assistant message (with tool_calls) to conversation
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": assistant_message.content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
-                        }
-                        for tc in assistant_message.tool_calls
-                    ],
-                }
-            )
+            input_items.extend(response.output)
 
-            # Execute each tool call
-            for tool_call in assistant_message.tool_calls:
-                tool_name = tool_call.function.name
+            for fc in function_calls:
+                tool_name = fc.name
                 handler = tool_handlers.get(tool_name)
 
                 try:
-                    kwargs = self._parse_tool_arguments(tool_call.function.arguments)
+                    kwargs = self._parse_tool_arguments(fc.arguments)
                 except Exception as exc:
                     logger.warning(
                         "[chatbot] Failed to parse tool arguments for %s: %s",
@@ -1061,11 +1038,11 @@ class ChatbotService:
                         emit_event,
                         summary="Tool failed",
                     )
-                    messages.append(
+                    input_items.append(
                         {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": failure_reason,
+                            "type": "function_call_output",
+                            "call_id": fc.call_id,
+                            "output": failure_reason,
                         }
                     )
                     continue
@@ -1073,7 +1050,7 @@ class ChatbotService:
                 logger.info(
                     "[chatbot] Tool call: %s(%s)",
                     tool_name,
-                    tool_call.function.arguments,
+                    fc.arguments,
                 )
                 step = await self._start_tool_step(
                     step_list,
@@ -1124,11 +1101,11 @@ class ChatbotService:
                     len(tool_result.content),
                     tool_result.content[:300],
                 )
-                messages.append(
+                input_items.append(
                     {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": tool_result.content,
+                        "type": "function_call_output",
+                        "call_id": fc.call_id,
+                        "output": tool_result.content,
                     }
                 )
 
@@ -1138,44 +1115,51 @@ class ChatbotService:
                 emit_event,
             )
 
-        # Hit iteration cap — force one last plain-text answer.
         logger.warning("[chatbot] Hit agent iteration cap; forcing final answer")
         return await self._request_final_answer(
-            messages,
+            input_items,
+            instructions=instructions,
             steps=step_list,
             emit_event=emit_event,
             active_status_step=active_status_step,
         )
 
-    async def _create_chat_completion(
+    async def _create_response(
         self,
-        messages: List[Dict[str, Any]],
+        input_items: List[Any],
         *,
+        instructions: Optional[str] = None,
         tool_choice: Optional[str] = None,
     ) -> Any:
-        """Create a chat completion using the configured chatbot model."""
+        """Create a response using the Responses API with the configured chatbot model."""
         request_kwargs: Dict[str, Any] = {
             "model": settings.CHATBOT_MODEL,
-            "messages": messages,
+            "input": input_items,
             "tools": TOOL_DEFINITIONS,
-            "max_completion_tokens": CHATBOT_MAX_COMPLETION_TOKENS,
+            "max_output_tokens": CHATBOT_MAX_COMPLETION_TOKENS,
         }
-        model_name = settings.CHATBOT_MODEL
+
+        if instructions is not None:
+            request_kwargs["instructions"] = instructions
 
         if tool_choice is not None:
             request_kwargs["tool_choice"] = tool_choice
 
+        model_name = settings.CHATBOT_MODEL
         if model_name.startswith("gpt-5"):
-            request_kwargs["reasoning_effort"] = settings.CHATBOT_REASONING_EFFORT
+            request_kwargs["reasoning"] = {
+                "effort": settings.CHATBOT_REASONING_EFFORT,
+            }
         else:
             request_kwargs["temperature"] = settings.LLM_TEMPERATURE
 
-        return await self.openai_client.chat.completions.create(**request_kwargs)
+        return await self.openai_client.responses.create(**request_kwargs)
 
     async def _request_final_answer(
         self,
-        messages: List[Dict[str, Any]],
+        input_items: List[Any],
         *,
+        instructions: Optional[str] = None,
         steps: Optional[List[ChatStep]] = None,
         emit_event: Optional[EventEmitter] = None,
         active_status_step: Optional[ChatStep] = None,
@@ -1189,15 +1173,15 @@ class ChatbotService:
                 emit_event,
             )
 
-        retry_messages = messages + [
+        retry_input = input_items + [
             {"role": "user", "content": FINAL_ANSWER_RETRY_PROMPT}
         ]
-        response = await self._create_chat_completion(
-            retry_messages,
+        response = await self._create_response(
+            retry_input,
+            instructions=instructions,
             tool_choice="none",
         )
-        assistant_message = response.choices[0].message
-        assistant_text = self._extract_assistant_text(assistant_message)
+        assistant_text = response.output_text
         await self._complete_step(
             active_status_step,
             emit_event,

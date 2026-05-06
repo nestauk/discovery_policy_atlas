@@ -115,8 +115,8 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 4000
-    CHATBOT_MODEL: str = "gpt-4o-mini"
-    CHATBOT_REASONING_EFFORT: str = "minimal"
+    CHATBOT_MODEL: str = "gpt-5.4"
+    CHATBOT_REASONING_EFFORT: str = "medium"
 
     # Boolean Query Generation Settings
     BOOLEAN_QUERY_GENERATION_MODE: str = "multi"  # "single" or "multi"
