@@ -523,6 +523,7 @@ export default function PublicProjectPage() {
                     <div className="space-y-8">
                       <ExecutiveBriefing 
                         projectId={projectId}
+                        isPublic={true}
                         briefing={summaryData.executive_briefing}
                         structuredBriefing={summaryData.structured_briefing}
                         citationMap={summaryData.citation_map}
