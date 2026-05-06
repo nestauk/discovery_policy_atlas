@@ -8,6 +8,13 @@ export interface ChatStep {
   summary?: string
 }
 
+export interface AnswerMetadata {
+  source_count: number
+  evidence_source_count: number
+  parliament_source_count: number
+  date_range?: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -17,6 +24,8 @@ export interface ChatMessage {
   steps?: ChatStep[]
   isStreaming?: boolean
   activitySummary?: string
+  answerMetadata?: AnswerMetadata
+  responseId?: string
   error?: string
 }
 
@@ -39,11 +48,13 @@ export interface ChatResponse {
 }
 
 export interface ChatStreamEvent {
-  type: 'agent.status' | 'tool.started' | 'tool.completed' | 'tool.failed' | 'message.completed' | 'message.failed'
+  type: 'agent.status' | 'tool.started' | 'tool.completed' | 'tool.failed' | 'message.completed' | 'message.failed' | 'message.delta'
   step?: ChatStep
   message?: string
   references?: DocumentReference[]
   activity_summary?: string
+  answer_metadata?: AnswerMetadata
+  response_id?: string
   error?: string
 }
 
@@ -115,7 +126,10 @@ function loadMessagesByProject(): MessagesByProject {
             : undefined,
           steps: Array.isArray((candidate as { steps?: unknown }).steps)
             ? (candidate as { steps: ChatStep[] }).steps
-            : undefined
+            : undefined,
+          responseId: typeof (candidate as { responseId?: unknown }).responseId === 'string'
+            ? (candidate as { responseId: string }).responseId
+            : undefined,
         }]
       })
 

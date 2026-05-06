@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Send, Bot, User, ExternalLink, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react'
 import {
   useChatStore,
+  AnswerMetadata,
   ChatMessage,
   ChatStep,
   ChatStreamEvent,
@@ -83,6 +84,41 @@ function getCurrentStep(steps: ChatStep[] | undefined): ChatStep | undefined {
   return undefined
 }
 
+function formatAnswerMetadata(metadata: AnswerMetadata): string {
+  const parts: string[] = []
+  if (metadata.evidence_source_count > 0) {
+    parts.push(`${metadata.evidence_source_count} evidence source${metadata.evidence_source_count !== 1 ? 's' : ''}`)
+  }
+  if (metadata.parliament_source_count > 0) {
+    parts.push(`${metadata.parliament_source_count} parliamentary record${metadata.parliament_source_count !== 1 ? 's' : ''}`)
+  }
+  if (parts.length === 0 && metadata.source_count > 0) {
+    parts.push(`${metadata.source_count} source${metadata.source_count !== 1 ? 's' : ''}`)
+  }
+  let result = parts.join(', ')
+  if (metadata.date_range) {
+    result += ` | Evidence from ${metadata.date_range}`
+  }
+  return result
+}
+
+const FOLLOW_UP_HEADING_RE = /\*\*Follow-up questions:?\*\*\s*/i
+const FOLLOW_UP_ITEM_RE = /^[-*]\s+(.+)/gm
+
+function extractFollowUpQuestions(content: string): string[] {
+  const headingMatch = content.match(FOLLOW_UP_HEADING_RE)
+  if (!headingMatch || headingMatch.index === undefined) return []
+
+  const afterHeading = content.slice(headingMatch.index + headingMatch[0].length)
+  const questions: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = FOLLOW_UP_ITEM_RE.exec(afterHeading)) !== null) {
+    const q = match[1].trim()
+    if (q) questions.push(q)
+  }
+  return questions
+}
+
 function getActivityHeader(message: ChatMessage): string {
   if (message.error) {
     return message.error
@@ -113,6 +149,8 @@ function toPersistedAssistantMessage(message: ChatMessage): ChatMessage {
     references: message.references,
     steps: message.steps,
     activitySummary: message.activitySummary,
+    answerMetadata: message.answerMetadata,
+    responseId: message.responseId,
   }
 }
 
@@ -124,7 +162,16 @@ function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEvent): Cha
       references: event.references ?? message.references,
       isStreaming: false,
       activitySummary: event.activity_summary ?? message.activitySummary,
+      answerMetadata: event.answer_metadata ?? message.answerMetadata,
+      responseId: event.response_id ?? message.responseId,
       error: undefined,
+    }
+  }
+
+  if (event.type === 'message.delta') {
+    return {
+      ...message,
+      content: message.content + (event.message ?? ''),
     }
   }
 
@@ -286,19 +333,21 @@ export function ChatInterface({
     clearError()
 
     try {
-      // Prepare recent messages for context (last 5 messages, excluding current)
       const recentMessages = projectMessages.slice(-5).map(msg => ({
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp
       }))
 
-      // Call the v2 chat API
+      const lastAssistantMessage = [...projectMessages].reverse().find(m => m.role === 'assistant')
+      const previousResponseId = lastAssistantMessage?.responseId ?? undefined
+
       const response = await fetchWithAuth(`/api/analysis-projects/${projectId}/chat/stream`, {
         method: 'POST',
         body: JSON.stringify({
           message: userMessage.content,
-          recent_messages: recentMessages
+          recent_messages: recentMessages,
+          previous_response_id: previousResponseId,
         })
       }, true)
 
@@ -463,6 +512,11 @@ export function ChatInterface({
                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                           )}
                           <span>{getActivityHeader(message)}</span>
+                          {!message.isStreaming && !message.error && message.answerMetadata && (
+                            <span className="text-gray-500 font-normal">
+                              — {formatAnswerMetadata(message.answerMetadata)}
+                            </span>
+                          )}
                         </div>
 
                         {!message.isStreaming && message.steps && message.steps.length > 0 && (
@@ -512,30 +566,61 @@ export function ChatInterface({
                 })()
               )}
 
-              {message.content && (
-                <div className="prose prose-sm max-w-none">
-                  <ReactMarkdown
-                    components={{
-                      a: ({ href, children, ...props }) => (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 hover:underline"
-                          {...props}
-                        >
-                          {children}
-                        </a>
-                      ),
-                    }}
-                  >
-                    {message.role === 'assistant' && message.references
-                      ? processInTextCitations(message.content, message.references)
-                      : message.content
-                    }
-                  </ReactMarkdown>
-                </div>
-              )}
+              {message.content && (() => {
+                const followUpQuestions = message.role === 'assistant' && !message.isStreaming
+                  ? extractFollowUpQuestions(message.content)
+                  : []
+                const displayContent = followUpQuestions.length > 0
+                  ? message.content.replace(new RegExp(FOLLOW_UP_HEADING_RE.source + '[\\s\\S]*$', 'i'), '').trimEnd()
+                  : message.content
+                const processedContent = message.role === 'assistant' && message.references
+                  ? processInTextCitations(displayContent, message.references)
+                  : displayContent
+
+                return (
+                  <>
+                    <div className="prose prose-sm max-w-none">
+                      <ReactMarkdown
+                        components={{
+                          a: ({ href, children, ...props }) => (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                              {...props}
+                            >
+                              {children}
+                            </a>
+                          ),
+                        }}
+                      >
+                        {processedContent}
+                      </ReactMarkdown>
+                    </div>
+                    {followUpQuestions.length > 0 && (
+                      <div className="mt-3 pt-2 border-t border-gray-200">
+                        <p className="text-xs font-medium text-gray-500 mb-1.5">Follow-up questions</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {followUpQuestions.map((q) => (
+                            <button
+                              key={q}
+                              type="button"
+                              onClick={() => {
+                                setInputMessage(q)
+                              }}
+                              disabled={isLoading}
+                              className="text-xs text-left px-2.5 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
               
               {/* Show references for assistant messages */}
               {message.role === 'assistant' && message.references && message.references.length > 0 && (

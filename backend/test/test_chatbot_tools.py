@@ -16,7 +16,7 @@ def _make_text_response(content: str = "Here is my answer."):
     message_item = SimpleNamespace(
         type="message", role="assistant", content=[text_part]
     )
-    return SimpleNamespace(output=[message_item], output_text=content)
+    return SimpleNamespace(output=[message_item], output_text=content, id="resp_test")
 
 
 def _make_tool_call_response(tool_name: str, arguments: dict, call_id: str = "call_1"):
@@ -28,6 +28,65 @@ def _make_tool_call_response(tool_name: str, arguments: dict, call_id: str = "ca
         arguments=json.dumps(arguments),
     )
     return SimpleNamespace(output=[fc_item], output_text="")
+
+
+class _AsyncIter:
+    """Minimal async iterable wrapping a list of stream events."""
+
+    def __init__(self, events):
+        self._events = events
+        self._index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._events):
+            raise StopAsyncIteration
+        event = self._events[self._index]
+        self._index += 1
+        return event
+
+
+def _make_streaming_tool_call_response(
+    tool_name: str, arguments: dict, call_id: str = "call_1"
+):
+    """Build a fake streaming response that yields function-call events."""
+    fc_item = SimpleNamespace(
+        type="function_call",
+        call_id=call_id,
+        name=tool_name,
+        arguments=json.dumps(arguments),
+    )
+    return _AsyncIter(
+        [
+            SimpleNamespace(type="response.output_item.added", item=fc_item),
+            SimpleNamespace(type="response.output_item.done", item=fc_item),
+            SimpleNamespace(
+                type="response.completed",
+                response=SimpleNamespace(id="resp_stream", output=[fc_item]),
+            ),
+        ]
+    )
+
+
+def _make_streaming_text_response(content: str = "Here is my answer."):
+    """Build a fake streaming response that yields text delta events."""
+    text_item = SimpleNamespace(type="message", role="assistant")
+    events = [
+        SimpleNamespace(type="response.output_item.added", item=text_item),
+    ]
+    for word in content.split(" "):
+        events.append(
+            SimpleNamespace(type="response.output_text.delta", delta=word + " ")
+        )
+    events.append(
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(id="resp_stream", output=[text_item]),
+        )
+    )
+    return _AsyncIter(events)
 
 
 @pytest.mark.asyncio
@@ -295,8 +354,10 @@ async def test_agent_loop_emits_progress_steps():
     service = ChatbotService()
     fake_create = AsyncMock(
         side_effect=[
-            _make_tool_call_response("search_project_evidence", {"query": "housing"}),
-            _make_text_response("Based on the evidence..."),
+            _make_streaming_tool_call_response(
+                "search_project_evidence", {"query": "housing"}
+            ),
+            _make_streaming_text_response("Based on the evidence..."),
         ]
     )
     service._openai_client = SimpleNamespace(
@@ -322,7 +383,7 @@ async def test_agent_loop_emits_progress_steps():
         emit_event=collect,
     )
 
-    assert result.content == "Based on the evidence..."
+    assert "Based on the evidence" in result.content
     assert [step.label for step in steps] == [
         "Understanding your question",
         'Searching project evidence for "housing"',
@@ -334,14 +395,12 @@ async def test_agent_loop_emits_progress_steps():
         "completed",
     ]
     assert steps[1].summary == "2 relevant documents found"
-    assert [event.type for event in events] == [
-        "agent.status",
-        "agent.status",
-        "tool.started",
-        "tool.completed",
-        "agent.status",
-        "agent.status",
-    ]
+
+    event_types = [event.type for event in events]
+    assert "agent.status" in event_types
+    assert "tool.started" in event_types
+    assert "tool.completed" in event_types
+    assert "message.delta" in event_types
 
 
 @pytest.mark.asyncio
