@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ExternalLink, X } from "lucide-react";
 import * as fuzz from "fuzzball";
 import { fetchWithAuthExternal } from "@/lib/api";
+import { getPublicChunkContext } from "@/lib/publicApi";
 import { Tooltip } from "@/components/ui/tooltip";
 import { getEvidenceCategoryColors, getEvidenceCategoryShortName } from "@/lib/evidenceCategories";
 import {
@@ -47,6 +48,7 @@ interface ChunkContextResponse {
 interface CitationContextPanelProps {
   isOpen: boolean;
   projectId: string;
+  isPublic?: boolean;
   citationInfo: CitationInfo | null;
   chunkId?: string;
   supportingQuote?: string;
@@ -253,6 +255,7 @@ function formatOutOfFive(value: number | null | undefined): string {
 export function CitationContextPanel({
   isOpen,
   projectId,
+  isPublic = false,
   citationInfo,
   chunkId,
   supportingQuote,
@@ -283,9 +286,11 @@ export function CitationContextPanel({
       setError(null);
 
       try {
-        const res = (await fetchWithAuthExternal(
-          `api/analysis-projects/${projectId}/chunks/${chunkId}/context`
-        )) as ChunkContextResponse | null;
+        const res = isPublic
+          ? ((await getPublicChunkContext(projectId, chunkId)) as ChunkContextResponse | null)
+          : ((await fetchWithAuthExternal(
+              `api/analysis-projects/${projectId}/chunks/${chunkId}/context`
+            )) as ChunkContextResponse | null);
 
         if (!cancelled) {
           if (res) {
@@ -310,7 +315,7 @@ export function CitationContextPanel({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, projectId, chunkId, citationInfo]);
+  }, [isOpen, projectId, chunkId, citationInfo, isPublic]);
 
   const freshData = dataIsStale ? null : contextData;
 

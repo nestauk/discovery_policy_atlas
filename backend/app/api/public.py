@@ -6,7 +6,8 @@ These endpoints serve read-only project data for projects marked as public.
 from fastapi import APIRouter, HTTPException
 
 from app.services.vectorization import vectorization_service
-from app.services.synthesis.schemas import SynthesisSummary
+from app.services.synthesis.schemas import SynthesisSummary, ChunkContextResponse
+from app.services.synthesis.citation_context import get_chunk_context_response
 from app.services.synthesis.logbook import get_synthesis_status
 from app.utils.project_data import (
     get_project_documents_data,
@@ -127,3 +128,13 @@ async def get_public_outcome_contributions(project_id: str, outcome_theme_id: st
     """Get contributing outcome extractions for a synthesis outcome theme."""
     get_public_project(project_id, "id, is_public")
     return get_outcome_contributions_data(project_id, outcome_theme_id)
+
+
+@router.get(
+    "/projects/{project_id}/chunks/{chunk_id}/context",
+    response_model=ChunkContextResponse,
+)
+async def get_public_chunk_context(project_id: str, chunk_id: str):
+    """Get citation chunk context for a public project."""
+    get_public_project(project_id, "id, is_public")
+    return get_chunk_context_response(project_id, chunk_id)

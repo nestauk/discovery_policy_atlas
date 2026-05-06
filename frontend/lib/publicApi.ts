@@ -73,3 +73,7 @@ export async function getPublicOutcomeContributions(
     `api/public/projects/${projectId}/synthesis/outcome-themes/${outcomeThemeId}/contributions`
   );
 }
+
+export async function getPublicChunkContext(projectId: string, chunkId: string) {
+  return fetchPublic(`api/public/projects/${projectId}/chunks/${chunkId}/context`);
+}
