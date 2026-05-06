@@ -188,9 +188,10 @@ export function ChatbotWidget({ className = "" }: ChatbotWidgetProps) {
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      if (chatKey) startNewConversation(chatKey)
+                      if (!currentProjectId) return
+                      startNewConversation(chatStorageKey(currentProjectId, 'default'))
                     }}
-                    disabled={isLoading || !chatKey}
+                    disabled={isLoading || !currentProjectId}
                     aria-label="New chat"
                     className="text-white hover:bg-white/20 h-auto px-2 py-1 text-xs font-medium gap-1 disabled:opacity-40"
                   >

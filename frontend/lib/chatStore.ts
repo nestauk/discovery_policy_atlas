@@ -449,7 +449,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     project.activeConversationId = newId
     const nextMeta = { ...state.metaByProject, [key]: project }
     persistMetaByProject(nextMeta)
-    set({ metaByProject: nextMeta, draftConversationId: newId })
+    set({
+      metaByProject: nextMeta,
+      draftConversationId: newId,
+      activeMode: inferModeFromKey(key),
+    })
     return newId
   },
 
@@ -490,7 +494,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveProjectId: (projectId) => set({ activeProjectId: projectId }),
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
-  setIsOpen: (isOpen) => set({ isOpen }),
+  setIsOpen: (isOpen) => set(isOpen
+    ? { isOpen }
+    : { isOpen, activeMode: 'default', chatLaunchIntent: null }
+  ),
 
   setSidebarWidth: (width) => {
     if (!Number.isFinite(width)) return

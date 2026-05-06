@@ -1724,9 +1724,9 @@ class ChatbotService:
             intervention_name=intervention_name,
             evidence_text=evidence_text,
         )
-        llm = get_llm("gpt-4.1-mini", temperature=0.0).with_structured_output(
-            InterventionCMExtraction, method="function_calling"
-        )
+        llm = get_llm(
+            settings.CHATBOT_EXTRACTION_MODEL, temperature=0.0
+        ).with_structured_output(InterventionCMExtraction, method="function_calling")
         return await llm.ainvoke(prompt)
 
     async def _run_cm_critic(
@@ -1745,9 +1745,9 @@ class ChatbotService:
             evidence_text=evidence_text[:6000] if evidence_text else "[not available]",
         )
         try:
-            llm = get_llm("gpt-4.1-mini", temperature=0.0).with_structured_output(
-                CriticResult, method="function_calling"
-            )
+            llm = get_llm(
+                settings.CHATBOT_EXTRACTION_MODEL, temperature=0.0
+            ).with_structured_output(CriticResult, method="function_calling")
             return await llm.ainvoke(prompt)
         except Exception as exc:
             logger.warning("Critic pass failed for %s: %s", intervention_name, exc)

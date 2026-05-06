@@ -183,7 +183,7 @@ function ActivityCard({ message, isExpanded, onToggleExpand }: ActivityCardProps
           <button
             type="button"
             onClick={onToggleExpand}
-            className="text-xs text-gray-500 hover:text-gray-700"
+            className="text-xs font-medium text-gray-700 hover:text-gray-900"
           >
             {isExpanded ? 'Hide workings' : 'Show workings'}
           </button>
