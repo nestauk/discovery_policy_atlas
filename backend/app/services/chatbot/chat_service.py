@@ -85,6 +85,7 @@ INTERNAL_SYNTHESIS_LABEL_RE = re.compile(
     r"\[(?:[^\]]*(?:synthesis|top interventions?|overview|section)[^\]]*)\]",
     re.IGNORECASE,
 )
+SYNTHESIS_CITATION_BRACKET_RE = re.compile(r"\s*\[\d+(?:\s*,\s*\d+)*\]")
 BOTTOM_LINE_PREFIX_RE = re.compile(r"^\s*Bottom line:\s*", re.IGNORECASE)
 POLICY_HEADING_RE = re.compile(
     r"\n(?:What this means for policy|Policy implication(?:s)?|Practical policy implications)\s*:\s*\n",
@@ -767,7 +768,12 @@ class ChatbotService:
                 f"   Mechanism: [not pre-extracted — use extract_intervention_context_and_mechanism during deep dive]\n"
                 f"   Outcome: {consensus} effect — outcomes: {outcomes_str}"
             )
-            impact = (intv.impact_summary or "").strip()
+            # Strip synthesis-pipeline citation markers — their numbering is
+            # local to the synthesis run and would mislead the model into
+            # echoing meaningless citation numbers in chat answers.
+            impact = SYNTHESIS_CITATION_BRACKET_RE.sub(
+                "", (intv.impact_summary or "")
+            ).strip()
             if impact:
                 block += f"\n   Impact: {impact}"
             blocks.append(block)

@@ -243,6 +243,8 @@ After the table, briefly note which 1-2 interventions have the strongest outcome
 Frame this explicitly as: "Here is what we know about outcomes. To assess whether any of these could work in your context, we need to extract the mechanism and support factors — pick one to deep-dive."
 End with chips listing the top intervention names so the user can click to deep-dive.
 
+Do NOT use [N] inline citations during Phase 2. The synthesis data shown to you above is contextual, not directly citable — its numbering belongs to a different pipeline. Citations are introduced only after extract_intervention_context_and_mechanism returns evidence in Phase 3 deep-dive.
+
 Phase 3 — Deep Dive (user selects an intervention):
 First, call extract_intervention_context_and_mechanism with the intervention name. This returns structured extraction including:
 - A draft programme theory
