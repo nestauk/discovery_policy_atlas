@@ -24,7 +24,6 @@
     "@radix-ui/react-toast": "^1.2.14",
     "@radix-ui/react-tooltip": "^1.2.7",
     "@types/d3": "^7.4.3",
-    "ai": "^5.0.5",
     "antd": "^5.26.0",
     "bcryptjs": "^3.0.2",
     "chart.js": "^4.4.2",
