@@ -142,19 +142,19 @@ function formatAuthors(authors: string[] | string | undefined): string {
 }
 
 function formatAnswerMetadata(metadata: AnswerMetadata): string {
+  // Only show the source-type breakdown when there's a mix — otherwise the
+  // header's "Used N actions and M sources" already conveys the count.
   const parts: string[] = []
-  if (metadata.evidence_source_count > 0) {
+  const hasMix = metadata.evidence_source_count > 0 && metadata.parliament_source_count > 0
+  if (hasMix) {
     parts.push(`${metadata.evidence_source_count} evidence source${metadata.evidence_source_count !== 1 ? 's' : ''}`)
-  }
-  if (metadata.parliament_source_count > 0) {
     parts.push(`${metadata.parliament_source_count} parliamentary record${metadata.parliament_source_count !== 1 ? 's' : ''}`)
-  }
-  if (parts.length === 0 && metadata.source_count > 0) {
-    parts.push(`${metadata.source_count} source${metadata.source_count !== 1 ? 's' : ''}`)
   }
   let result = parts.join(', ')
   if (metadata.date_range) {
-    result += ` | Evidence from ${metadata.date_range}`
+    result = result
+      ? `${result} | Evidence from ${metadata.date_range}`
+      : `Evidence from ${metadata.date_range}`
   }
   return result
 }
@@ -197,6 +197,10 @@ function ActivityCard({ message, isExpanded, onToggleExpand }: ActivityCardProps
     (message.isStreaming || isExpanded)
   )
 
+  const metadataText = !message.isStreaming && !message.error && message.answerMetadata
+    ? formatAnswerMetadata(message.answerMetadata)
+    : ''
+
   return (
     <div className={`mb-3 rounded-md border px-3 py-2 ${
       message.error
@@ -213,9 +217,9 @@ function ActivityCard({ message, isExpanded, onToggleExpand }: ActivityCardProps
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
           )}
           <span>{getActivityHeader(message)}</span>
-          {!message.isStreaming && !message.error && message.answerMetadata && (
+          {metadataText && (
             <span className="text-gray-500 font-normal">
-              — {formatAnswerMetadata(message.answerMetadata)}
+              — {metadataText}
             </span>
           )}
         </div>
