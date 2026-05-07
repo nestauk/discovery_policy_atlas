@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 4000
     CHATBOT_MODEL: str = "gpt-5.4"
     CHATBOT_REASONING_EFFORT: str = "medium"
+    # Model for structured C/M extraction and the critic pass during deep dive
+    CHATBOT_EXTRACTION_MODEL: str = "gpt-4.1-mini"
 
     # Boolean Query Generation Settings
     BOOLEAN_QUERY_GENERATION_MODE: str = "multi"  # "single" or "multi"

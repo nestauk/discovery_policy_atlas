@@ -49,13 +49,14 @@ async def test_chat_compacts_and_filters_cited_references(monkeypatch):
         "document_published_date": "2022-01-01",
         "document_year": 2022,
     }
-    fake_message = SimpleNamespace(
-        content="The most relevant items are [Documents 1 and 3]."
-    )
 
     async def _fake_run(_messages, handlers, **_kwargs):
         await handlers["search_project_evidence"](query="interventions")
-        return fake_message
+        return SimpleNamespace(
+            content="The most relevant items are [Documents 1 and 3].",
+            tool_calls=None,
+            response_id=None,
+        )
 
     monkeypatch.setattr(
         service,
@@ -139,7 +140,11 @@ async def test_chat_uses_request_scoped_state_for_concurrent_turns(monkeypatch):
     async def _fake_run(messages, handlers, **_kwargs):
         await handlers["search_project_evidence"](query=messages[-1]["content"])
         await asyncio.sleep(0)
-        return SimpleNamespace(content="Scoped answer [1].")
+        return SimpleNamespace(
+            content="Scoped answer [1].",
+            tool_calls=None,
+            response_id=None,
+        )
 
     monkeypatch.setattr(
         service, "_search_relevant_chunks", _fake_search_relevant_chunks

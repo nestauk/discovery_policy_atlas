@@ -237,4 +237,60 @@ export function getDisplayableCategories(): EvidenceCategory[] {
   return getEvidenceCategories().filter(c => c.key !== 'other')
 }
 
-// Legacy exports removed (unused)
+/**
+ * Concise chatbot aliases used in the fast-screen evidence badges.
+ * Must stay in sync with EVIDENCE_CATEGORY_CHATBOT_ALIASES in the backend
+ * (backend/app/services/analysis/evidence/category.py).
+ */
+const CHATBOT_ALIAS_TO_SHORT_NAME: Record<string, string> = {
+  'SR/MA': 'Systematic Review',
+  'RCT': 'RCT/Quasi-Exp',
+  'Obs.': 'Observational',
+  'Modelling': 'Modelling',
+  'Policy': 'Policy Guidance',
+  'Qual.': 'Qualitative',
+  'Opinion': 'Expert Opinion',
+  'Other': 'Other',
+  'Unknown': 'Unknown',
+}
+
+/**
+ * Get a colour map for all evidence badge names (both canonical short names
+ * and concise chatbot aliases).  Used by the ChatInterface to render
+ * colour-coded evidence badges in markdown tables.
+ */
+export function getEvidenceBadgeColors(): Record<string, { bg: string; text: string }> {
+  const colors: Record<string, { bg: string; text: string }> = {}
+  const categories = getEvidenceCategories()
+
+  // Register canonical short names
+  for (const cat of categories) {
+    colors[cat.short_name] = { bg: cat.bg_color, text: cat.text_color }
+  }
+
+  // Register concise chatbot aliases, falling back to hardcoded defaults
+  // in case the canonical name lookup fails (e.g. data not yet fetched)
+  const ALIAS_FALLBACKS: Record<string, { bg: string; text: string }> = {
+    'SR/MA': { bg: '#0F294A', text: '#FFFFFF' },
+    'RCT': { bg: '#9A1BBE', text: '#FFFFFF' },
+    'Obs.': { bg: '#0000FF', text: '#FFFFFF' },
+    'Policy': { bg: '#97D9E3', text: '#111827' },
+    'Qual.': { bg: '#A59BEE', text: '#111827' },
+    'Opinion': { bg: '#F6A4B7', text: '#111827' },
+  }
+
+  for (const [alias, shortName] of Object.entries(CHATBOT_ALIAS_TO_SHORT_NAME)) {
+    colors[alias] = colors[shortName] ?? ALIAS_FALLBACKS[alias] ?? { bg: '#F3F4F6', text: '#374151' }
+  }
+
+  return colors
+}
+
+/**
+ * Build a regex that matches evidence badge tokens like "SR/MA (2)" or "Policy (5)".
+ * Uses the keys from getEvidenceBadgeColors() so it matches both canonical and alias names.
+ */
+export function buildEvidenceBadgeRegex(badgeNames: string[]): RegExp {
+  const escaped = badgeNames.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  return new RegExp(`(${escaped.join('|')})\\s*\\((\\d+)\\)`, 'g')
+}

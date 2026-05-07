@@ -12,6 +12,10 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 from openai import AsyncOpenAI
 from app.core.config import settings
+from app.services.analysis.evidence.category import (
+    EVIDENCE_CATEGORY_CHATBOT_ALIASES,
+    EVIDENCE_CATEGORY_RANKS,
+)
 from app.services.synthesis.logbook import read_cached_summary
 from app.services.synthesis.schemas import (
     CitationInfo,
@@ -23,18 +27,32 @@ from app.services.vectorization import vectorization_service
 from .models import (
     AnswerMetadata,
     ChatEvent,
+    ChatMode,
     ChatRequest,
     ChatResponse,
     ChatStep,
     DocumentReference,
 )
+from app.utils.llm.llm_utils import get_llm
+from .extraction_models import (
+    CriticResult,
+    EvidenceBasis,
+    InterventionCMExtraction,
+    ModeratorOrDealbreaker,
+)
 from .parliament import search_parliament
 from .prompts import (
+    CM_CRITIC_PROMPT,
+    CM_EXTRACTION_PROMPT,
+    DEFAULT_TRANSFER_CEILING,
     EVIDENCE_RETRIEVAL_NOTE,
     PARLIAMENT_RETRIEVAL_NOTE,
     SYNTHESIS_SOURCE_NOTE,
+    TRANSFER_CEILINGS,
     build_chatbot_system_prompt,
     build_final_answer_retry_prompt,
+    build_forecast_final_answer_prompt,
+    build_forecast_system_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +70,7 @@ NO_SYNTHESIS_SUMMARY_MESSAGE = (
     "Use search_project_evidence for study-level questions."
 )
 FINAL_ANSWER_RETRY_PROMPT = build_final_answer_retry_prompt()
+FORECAST_FINAL_ANSWER_RETRY_PROMPT = build_forecast_final_answer_prompt()
 SYNTHESIS_CITATION_GROUP_RE = re.compile(r"\[((?:\d+\s*,\s*)*\d+)\]")
 DOCUMENT_CITATION_BRACKET_RE = re.compile(r"\[([^\]]+)\]")
 REFERENCE_SECTION_RE = re.compile(
@@ -59,13 +78,14 @@ REFERENCE_SECTION_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 INTERNAL_TOOL_CITATION_RE = re.compile(
-    r"\[(?:get_project_synthesis|search_project_evidence|search_parliament)[^\]]*\]",
+    r"\[(?:get_project_synthesis|search_project_evidence|search_parliament|extract_intervention_context_and_mechanism)[^\]]*\]",
     re.IGNORECASE,
 )
 INTERNAL_SYNTHESIS_LABEL_RE = re.compile(
     r"\[(?:[^\]]*(?:synthesis|top interventions?|overview|section)[^\]]*)\]",
     re.IGNORECASE,
 )
+SYNTHESIS_CITATION_BRACKET_RE = re.compile(r"\s*\[\d+(?:\s*,\s*\d+)*\]")
 BOTTOM_LINE_PREFIX_RE = re.compile(r"^\s*Bottom line:\s*", re.IGNORECASE)
 POLICY_HEADING_RE = re.compile(
     r"\n(?:What this means for policy|Policy implication(?:s)?|Practical policy implications)\s*:\s*\n",
@@ -75,6 +95,7 @@ TOOL_LABELS = {
     "get_project_synthesis": "Checking project synthesis",
     "search_project_evidence": "Searching project evidence",
     "search_parliament": "Looking up Parliament records",
+    "extract_intervention_context_and_mechanism": "Extracting context and mechanism",
 }
 
 TOOL_DEFINITIONS = [
@@ -128,6 +149,30 @@ TOOL_DEFINITIONS = [
         },
         "strict": False,
     },
+    {
+        "type": "function",
+        "name": "extract_intervention_context_and_mechanism",
+        "description": (
+            "Extract structured context, mechanism, mediators, and support factors "
+            "for a specific intervention from the project evidence. Use this during "
+            "deep dive (Phase 3) when the user selects an intervention to analyse."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "intervention_name": {
+                    "type": "string",
+                    "description": "The name of the intervention to analyse.",
+                },
+                "user_context_summary": {
+                    "type": "string",
+                    "description": "Brief summary of the user's implementation context for targeted extraction.",
+                },
+            },
+            "required": ["intervention_name"],
+        },
+        "strict": False,
+    },
 ]
 
 
@@ -148,9 +193,10 @@ class ChatTurnState:
     ordered_references: List[DocumentReference]
     evidence_reference_numbers: Dict[str, int]
     parliament_reference_numbers: Dict[str, int]
+    active_mode: Optional[str] = None
 
     @classmethod
-    def create(cls) -> "ChatTurnState":
+    def create(cls, active_mode: Optional[str] = None) -> "ChatTurnState":
         """Create empty turn state for a fresh chat request."""
         return cls(
             last_evidence_chunks=[],
@@ -158,6 +204,7 @@ class ChatTurnState:
             ordered_references=[],
             evidence_reference_numbers={},
             parliament_reference_numbers={},
+            active_mode=active_mode,
         )
 
 
@@ -237,17 +284,33 @@ class ChatbotService:
         emit_event: Optional[EventEmitter] = None,
     ) -> ChatResponse:
         """Run one chat turn and optionally emit step events while it executes."""
-        turn_state = ChatTurnState.create()
+        turn_state = ChatTurnState.create(active_mode=request.mode)
         tool_handlers = self._build_tool_handlers(project_id, turn_state)
         steps: List[ChatStep] = []
 
-        project_title = await self._get_project_title(project_id)
-        instructions = self._build_system_prompt(project_title)
+        # Build system prompt based on mode
+        if request.mode == ChatMode.FORECAST:
+            forecast_ctx = await self._get_forecast_context(project_id)
+            instructions = build_forecast_system_prompt(forecast_ctx)
+        else:
+            project_title = await self._get_project_title(project_id)
+            instructions = build_chatbot_system_prompt(project_title)
 
         input_items: List[Any] = []
         if request.recent_messages:
             for msg in request.recent_messages[-5:]:
                 input_items.append({"role": msg.role.value, "content": msg.content})
+        if request.context_hint:
+            input_items.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"[UI context — the user is looking at this section of the synthesis: "
+                        f"{request.context_hint[:800]}. "
+                        f"Use this to focus your response, but treat it as relevance guidance, not evidence.]"
+                    ),
+                }
+            )
         input_items.append({"role": "user", "content": request.message})
 
         final_message = await self._run_agent_loop(
@@ -257,6 +320,7 @@ class ChatbotService:
             previous_response_id=request.previous_response_id,
             steps=steps,
             emit_event=emit_event,
+            turn_state=turn_state,
         )
         final_content = self._extract_assistant_text(final_message)
         response_id = getattr(final_message, "response_id", None)
@@ -268,11 +332,19 @@ class ChatbotService:
 
         references: List[DocumentReference] = []
         if has_final_content:
-            references = self._get_ordered_references(turn_state)
+            references = list(turn_state.ordered_references)
             if not references:
-                references = self._build_references(turn_state.last_evidence_chunks)
+                references = self._build_unique_references(
+                    turn_state.last_evidence_chunks,
+                    id_key="document_id",
+                    builder=self._build_document_reference,
+                )
                 references.extend(
-                    self._build_parliament_references(turn_state.last_parliament_items)
+                    self._build_unique_references(
+                        turn_state.last_parliament_items,
+                        id_key="id",
+                        builder=self._build_parliament_reference,
+                    )
                 )
             final_content, references = self._compact_cited_references(
                 final_content,
@@ -291,12 +363,6 @@ class ChatbotService:
             answer_metadata=answer_metadata,
             response_id=response_id,
         )
-
-    def _get_ordered_references(
-        self, turn_state: ChatTurnState
-    ) -> List[DocumentReference]:
-        """Return references in the same order used for [Document N] citations."""
-        return list(turn_state.ordered_references)
 
     def _build_activity_summary(
         self,
@@ -372,16 +438,16 @@ class ChatbotService:
             if tool_name == "search_parliament":
                 return f'Looking up Parliament records for "{truncated_query}"'
 
-        return TOOL_LABELS.get(tool_name, "Working")
+        intervention = arguments.get("intervention_name")
+        if (
+            tool_name == "extract_intervention_context_and_mechanism"
+            and isinstance(intervention, str)
+            and intervention.strip()
+        ):
+            truncated = self._truncate_for_label(intervention, max_chars=50)
+            return f'Extracting context and mechanism for "{truncated}"'
 
-    def _build_synthesis_summary(self, content: str) -> str:
-        """Summarize synthesis retrieval without exposing raw synthesis text."""
-        normalized = content.strip()
-        if normalized == NO_SYNTHESIS_SUMMARY_MESSAGE:
-            return "No synthesis summary available"
-        if normalized.startswith("Project synthesis could not be loaded"):
-            return "Synthesis could not be loaded"
-        return "Synthesis found"
+        return TOOL_LABELS.get(tool_name, "Working")
 
     def _format_count_summary(self, count: int, singular: str, plural: str) -> str:
         """Render a short, human-readable count summary."""
@@ -515,10 +581,6 @@ class ChatbotService:
             raise ValueError("Tool arguments must be a JSON object")
         return parsed
 
-    def _build_system_prompt(self, project_title: Optional[str] = None) -> str:
-        """Build system prompt for the tool-calling agent."""
-        return build_chatbot_system_prompt(project_title)
-
     async def _search_relevant_chunks(
         self, project_id: str, query: str, max_chunks: int = 10
     ) -> List[Dict[str, Any]]:
@@ -569,6 +631,154 @@ class ChatbotService:
         title = title.strip()
         return title or None
 
+    async def _get_forecast_context(self, project_id: str) -> Dict[str, Any]:
+        """Fetch project context + synthesis data for forecast mode.
+
+        Returns a dict with title, search_query (normalised), intervention
+        summary text, and a flag indicating whether synthesis is available.
+        """
+        # Fetch project metadata
+        try:
+            proj_result = (
+                vectorization_service.supabase.table("analysis_projects")
+                .select("title, description, search_query")
+                .eq("id", project_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to fetch project context for forecast %s: %s",
+                project_id,
+                exc,
+            )
+            proj_result = SimpleNamespace(data=[])
+
+        proj = proj_result.data[0] if proj_result.data else {}
+        title = (proj.get("title") or "").strip()
+        description = (proj.get("description") or "").strip()
+        search_query = proj.get("search_query") or {}
+
+        # Normalise search_query for prompt rendering
+        sq_normalised = {
+            "geography": ", ".join(search_query.get("geography") or [])
+            or "Not specified",
+            "population": ", ".join(search_query.get("population") or [])
+            or "Not specified",
+            "inner_setting": ", ".join(search_query.get("inner_setting") or [])
+            or "Not specified",
+            "outcomes": ", ".join(search_query.get("outcome") or []) or "Not specified",
+            "constraints": search_query.get("implementation_constraints") or {},
+        }
+
+        # Fetch synthesis data via the existing cached summary path
+        try:
+            summary = await read_cached_summary(project_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to read synthesis for forecast %s: %s", project_id, exc
+            )
+            summary = None
+
+        # Build CMO-structured intervention list for the system prompt
+        interventions_text = ""
+        if summary and summary.interventions:
+            interventions_text = self._build_forecast_interventions_text(
+                project_id, summary.interventions
+            )
+
+        return {
+            "title": title or "Untitled project",
+            "description": description,
+            "search_query": sq_normalised,
+            "interventions_text": interventions_text,
+            "has_synthesis": summary is not None and bool(summary.interventions),
+        }
+
+    def _build_forecast_interventions_text(
+        self,
+        project_id: str,
+        interventions: List[PolicyIntervention],
+    ) -> str:
+        """Format interventions with evidence badges for the forecast system prompt."""
+        # Build evidence_category lookup keyed by both UUID and external
+        # doc_id so every supporting_doc_id matches.
+        doc_evidence_category: Dict[str, str] = {}
+        try:
+            all_docs_res = (
+                vectorization_service.supabase.table("analysis_documents")
+                .select("id, doc_id, evidence_category")
+                .eq("analysis_project_id", project_id)
+                .execute()
+            )
+            for row in all_docs_res.data or []:
+                cat = (
+                    row.get("evidence_category") or "Unknown / Insufficient information"
+                )
+                doc_evidence_category[str(row["id"])] = cat
+                ext_id = row.get("doc_id")
+                if ext_id:
+                    doc_evidence_category[str(ext_id)] = cat
+        except Exception as exc:
+            logger.warning("Failed to load doc evidence categories: %s", exc)
+
+        # Pre-compute evidence data per intervention for sorting
+        intv_evidence: list = []
+        for intv in interventions:
+            category_counts: Dict[str, int] = {}
+            for doc_id in set(intv.supporting_doc_ids):
+                cat = doc_evidence_category.get(doc_id)
+                if cat:
+                    category_counts[cat] = category_counts.get(cat, 0) + 1
+            sorted_cats = sorted(
+                category_counts.items(),
+                key=lambda x: EVIDENCE_CATEGORY_RANKS.get(x[0], 99),
+            )
+            best_rank = min(
+                (EVIDENCE_CATEGORY_RANKS.get(cat, 99) for cat in category_counts),
+                default=99,
+            )
+            evidence_str = (
+                " ".join(
+                    f"{EVIDENCE_CATEGORY_CHATBOT_ALIASES.get(cat, cat)} ({count})"
+                    for cat, count in sorted_cats
+                )
+                if sorted_cats
+                else "not recorded"
+            )
+            intv_evidence.append((intv, evidence_str, best_rank, intv.frequency))
+
+        # Sort by highest causal evidence (lowest rank = strongest), then study count
+        intv_evidence.sort(key=lambda x: (x[2], -x[3]))
+
+        blocks = []
+        for i, (intv, evidence_str, _, _) in enumerate(intv_evidence, 1):
+            countries = ", ".join(intv.countries[:4]) if intv.countries else "various"
+            consensus = intv.effect_consensus or "unknown"
+            outcomes_str = (
+                ", ".join(intv.related_outcomes[:3])
+                if intv.related_outcomes
+                else "not specified"
+            )
+
+            block = (
+                f"{i}. {intv.intervention_name}\n"
+                f"   Context: {countries} — {intv.frequency} studies\n"
+                f"   Evidence: {evidence_str}\n"
+                f"   Mechanism: [not pre-extracted — use extract_intervention_context_and_mechanism during deep dive]\n"
+                f"   Outcome: {consensus} effect — outcomes: {outcomes_str}"
+            )
+            # Strip synthesis-pipeline citation markers — their numbering is
+            # local to the synthesis run and would mislead the model into
+            # echoing meaningless citation numbers in chat answers.
+            impact = SYNTHESIS_CITATION_BRACKET_RE.sub(
+                "", (intv.impact_summary or "")
+            ).strip()
+            if impact:
+                block += f"\n   Impact: {impact}"
+            blocks.append(block)
+        return "\n".join(blocks)
+
     async def _get_project_synthesis(
         self,
         project_id: str,
@@ -590,6 +800,8 @@ class ChatbotService:
 
         if summary is None:
             return self._format_project_synthesis(summary)
+
+        self._backfill_synthesis_citation_urls(project_id, summary.citation_map)
 
         effective_turn_state = turn_state or ChatTurnState.create()
         citation_mapping = self._register_synthesis_references(
@@ -770,6 +982,55 @@ class ChatbotService:
 
         return "\n".join(lines)
 
+    def _backfill_synthesis_citation_urls(
+        self, project_id: str, citation_map: Dict[str, CitationInfo]
+    ) -> None:
+        """Patch missing citation URLs to mirror the synthesis panel's live lookup."""
+        missing_ids = {
+            citation.analysis_document_id
+            for citation in citation_map.values()
+            if not citation.url and citation.analysis_document_id
+        }
+        if not missing_ids:
+            return
+
+        try:
+            res = (
+                vectorization_service.supabase.table("analysis_documents")
+                .select("id, pdf_url, landing_page_url, overton_url")
+                .eq("analysis_project_id", project_id)
+                .in_("id", list(missing_ids))
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to backfill synthesis citation URLs for project %s: %s",
+                project_id,
+                exc,
+            )
+            return
+
+        url_by_doc_id: Dict[str, str] = {}
+        for row in res.data or []:
+            doc_id = str(row.get("id") or "")
+            resolved = (
+                row.get("pdf_url")
+                or row.get("landing_page_url")
+                or row.get("overton_url")
+            )
+            if doc_id and resolved:
+                url_by_doc_id[doc_id] = resolved
+
+        if not url_by_doc_id:
+            return
+
+        for citation in citation_map.values():
+            if citation.url:
+                continue
+            resolved = url_by_doc_id.get(citation.analysis_document_id)
+            if resolved:
+                citation.url = resolved
+
     def _register_synthesis_references(
         self, turn_state: ChatTurnState, citation_map: Dict[str, CitationInfo]
     ) -> Dict[int, int]:
@@ -879,7 +1140,7 @@ class ChatbotService:
                 min_index = min(chunk_indices)
                 max_index = max(chunk_indices)
 
-                # Expand range to include neighbors (±1 chunk on each side)
+                # Expand range to include neighbors (+-1 chunk on each side)
                 expanded_min = max(0, min_index - 1)
                 expanded_max = max_index + 1
 
@@ -1020,6 +1281,7 @@ class ChatbotService:
         previous_response_id: Optional[str] = None,
         steps: Optional[List[ChatStep]] = None,
         emit_event: Optional[EventEmitter] = None,
+        turn_state: Optional[ChatTurnState] = None,
     ) -> Any:
         """Run the tool-calling agent loop via the Responses API."""
         step_list = steps if steps is not None else []
@@ -1066,6 +1328,7 @@ class ChatbotService:
                         steps=step_list,
                         emit_event=emit_event,
                         active_status_step=active_status_step,
+                        turn_state=turn_state,
                     )
 
                 await self._complete_step(active_status_step, emit_event)
@@ -1193,6 +1456,7 @@ class ChatbotService:
             steps=step_list,
             emit_event=emit_event,
             active_status_step=active_status_step,
+            turn_state=turn_state,
         )
 
     async def _create_streaming_response(
@@ -1376,7 +1640,8 @@ class ChatbotService:
         steps: Optional[List[ChatStep]] = None,
         emit_event: Optional[EventEmitter] = None,
         active_status_step: Optional[ChatStep] = None,
-    ) -> Any:
+        turn_state: Optional[ChatTurnState] = None,
+    ) -> str:
         """Force a plain-text answer using already retrieved tool outputs."""
         step_list = steps if steps is not None else []
         if step_list is not None:
@@ -1386,9 +1651,12 @@ class ChatbotService:
                 emit_event,
             )
 
-        retry_input = input_items + [
-            {"role": "user", "content": FINAL_ANSWER_RETRY_PROMPT}
-        ]
+        retry_prompt = (
+            FORECAST_FINAL_ANSWER_RETRY_PROMPT
+            if turn_state is not None and turn_state.active_mode == ChatMode.FORECAST
+            else FINAL_ANSWER_RETRY_PROMPT
+        )
+        retry_input = input_items + [{"role": "user", "content": retry_prompt}]
 
         if emit_event:
             response = await self._create_streaming_response(
@@ -1452,10 +1720,14 @@ class ChatbotService:
             content = await self._get_project_synthesis(
                 project_id, effective_turn_state
             )
-            return ToolExecutionResult(
-                content=content,
-                summary=self._build_synthesis_summary(content),
-            )
+            normalized = content.strip()
+            if normalized == NO_SYNTHESIS_SUMMARY_MESSAGE:
+                summary = "No synthesis summary available"
+            elif normalized.startswith("Project synthesis could not be loaded"):
+                summary = "Synthesis could not be loaded"
+            else:
+                summary = "Synthesis found"
+            return ToolExecutionResult(content=content, summary=summary)
 
         async def _handle_search_evidence(query: str) -> ToolExecutionResult:
             chunks = await self._search_relevant_chunks(project_id, query)
@@ -1513,38 +1785,335 @@ class ChatbotService:
                 ),
             )
 
+        async def _handle_extract_cm(
+            intervention_name: str,
+            user_context_summary: str = "",
+        ) -> ToolExecutionResult:
+            # 1. Resolve intervention from synthesis to get supporting_doc_ids
+            matched_intervention = await self._resolve_intervention(
+                project_id, intervention_name
+            )
+            supporting_doc_ids = (
+                matched_intervention.supporting_doc_ids if matched_intervention else []
+            )
+
+            # 2. Retrieve evidence — prefer targeted doc fetch, fall back to vector search
+            chunks: List[Dict[str, Any]] = []
+            if supporting_doc_ids:
+                chunks = await self._fetch_chunks_by_doc_ids(
+                    project_id, supporting_doc_ids, intervention_name
+                )
+            if not chunks:
+                chunks = await self._search_relevant_chunks(
+                    project_id, intervention_name, max_chunks=15
+                )
+            if not chunks:
+                return ToolExecutionResult(
+                    content=(
+                        f"No evidence found for intervention '{intervention_name}' "
+                        "in this project."
+                    ),
+                    summary="No evidence found",
+                )
+
+            # 3. Enrich and register references
+            enriched = await self._get_chunks_with_neighbors(project_id, chunks)
+            enriched = await self._enrich_with_document_details(enriched)
+            effective_turn_state.last_evidence_chunks.extend(enriched)
+            document_numbers = self._register_evidence_references(
+                effective_turn_state,
+                enriched,
+            )
+
+            # 4. Build bounded evidence packet
+            evidence_text = self._build_context(
+                enriched, document_numbers=document_numbers
+            )
+            # Trim to ~12k chars to stay within extraction prompt budget
+            if len(evidence_text) > 12000:
+                evidence_text = evidence_text[:12000] + "\n\n[Evidence truncated]"
+
+            # 5. Run structured extraction
+            extraction = await self._run_cm_extraction(intervention_name, evidence_text)
+
+            # 6. Run critic pass to challenge the extraction
+            user_ctx = user_context_summary or "No specific context provided"
+            critic = await self._run_cm_critic(
+                intervention_name, user_ctx, extraction, evidence_text
+            )
+
+            # 7. Apply critic downgrades
+            if critic:
+                extraction = self._apply_critic_result(extraction, critic)
+
+            # 8. Format and return
+            document_count = len(
+                {c.get("document_id") for c in enriched if c.get("document_id")}
+            )
+            content = self._format_cm_extraction(
+                extraction, intervention_name, enriched, document_numbers, critic
+            )
+            return ToolExecutionResult(
+                content=content,
+                summary=(
+                    f"Extracted C/M from "
+                    f"{self._format_count_summary(document_count, 'document', 'documents')}"
+                ),
+            )
+
         return {
             "get_project_synthesis": _handle_get_project_synthesis,
             "search_project_evidence": _handle_search_evidence,
             "search_parliament": _handle_search_parliament,
+            "extract_intervention_context_and_mechanism": _handle_extract_cm,
         }
 
-    def _build_document_url(
+    async def _resolve_intervention(
+        self, project_id: str, intervention_name: str
+    ) -> Optional[PolicyIntervention]:
+        """Match an intervention name against synthesis data (case-insensitive)."""
+        try:
+            summary = await read_cached_summary(project_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to read synthesis for intervention resolution %s: %s",
+                project_id,
+                exc,
+            )
+            return None
+
+        if not summary or not summary.interventions:
+            return None
+
+        name_lower = intervention_name.lower().strip()
+        for intv in summary.interventions:
+            if intv.intervention_name.lower().strip() == name_lower:
+                return intv
+
+        # Substring fallback: match if the query is contained in the name or vice versa
+        for intv in summary.interventions:
+            intv_lower = intv.intervention_name.lower().strip()
+            if name_lower in intv_lower or intv_lower in name_lower:
+                return intv
+
+        return None
+
+    async def _fetch_chunks_by_doc_ids(
         self,
-        doi: Optional[str],
-        overton_url: Optional[str],
-        landing_page_url: Optional[str] = None,
-        pdf_url: Optional[str] = None,
-    ) -> Optional[str]:
-        """Build a reference URL from DOI metadata or an existing document URL."""
-        if doi:
-            return f"https://doi.org/{doi}" if not doi.startswith("http") else doi
-        return overton_url or landing_page_url or pdf_url
+        project_id: str,
+        doc_ids: List[str],
+        intervention_name: str,
+        max_chunks: int = 15,
+    ) -> List[Dict[str, Any]]:
+        """Fetch mechanism-relevant chunks from specific documents via scoped vector search.
 
-    def _build_references(
-        self, chunks: List[Dict[str, Any]]
-    ) -> List[DocumentReference]:
-        """Build document references from chunks."""
-        references: List[DocumentReference] = []
-        seen_docs = set()
+        Uses a mechanism-focused query to surface the most relevant passages
+        rather than naive chunk_index ordering which biases toward introductions.
+        """
+        mechanism_query = (
+            f"mechanism causal process support factors for {intervention_name}"
+        )
+        # Cast a wider net and filter to target docs
+        all_chunks = await self._search_relevant_chunks(
+            project_id, mechanism_query, max_chunks=max_chunks * 3
+        )
+        doc_id_set = set(doc_ids[:10])
+        scoped = [c for c in all_chunks if c.get("document_id") in doc_id_set]
 
-        for chunk in chunks:
-            doc_id = chunk.get("document_id")
-            if doc_id and doc_id not in seen_docs:
-                seen_docs.add(doc_id)
-                references.append(self._build_document_reference(chunk))
+        if scoped:
+            return scoped[:max_chunks]
 
-        return references
+        # Fallback: if vector search missed the target docs entirely,
+        # return whatever was found (better than nothing)
+        return all_chunks[:max_chunks]
+
+    async def _run_cm_extraction(
+        self, intervention_name: str, evidence_text: str
+    ) -> InterventionCMExtraction:
+        """Run structured C/M extraction over an evidence packet."""
+        prompt = CM_EXTRACTION_PROMPT.format(
+            intervention_name=intervention_name,
+            evidence_text=evidence_text,
+        )
+        llm = get_llm(
+            settings.CHATBOT_EXTRACTION_MODEL, temperature=0.0
+        ).with_structured_output(InterventionCMExtraction, method="function_calling")
+        return await llm.ainvoke(prompt)
+
+    async def _run_cm_critic(
+        self,
+        intervention_name: str,
+        user_context: str,
+        extraction: InterventionCMExtraction,
+        evidence_text: str = "",
+    ) -> Optional[CriticResult]:
+        """Run a critic pass to challenge the extraction for unsupported optimism."""
+        extraction_text = self._format_cm_extraction(extraction, intervention_name)
+        prompt = CM_CRITIC_PROMPT.format(
+            intervention_name=intervention_name,
+            user_context=user_context,
+            extraction_text=extraction_text,
+            evidence_text=evidence_text[:6000] if evidence_text else "[not available]",
+        )
+        try:
+            llm = get_llm(
+                settings.CHATBOT_EXTRACTION_MODEL, temperature=0.0
+            ).with_structured_output(CriticResult, method="function_calling")
+            return await llm.ainvoke(prompt)
+        except Exception as exc:
+            logger.warning("Critic pass failed for %s: %s", intervention_name, exc)
+            return None
+
+    @staticmethod
+    def _apply_critic_result(
+        extraction: InterventionCMExtraction,
+        critic: CriticResult,
+    ) -> InterventionCMExtraction:
+        """Apply critic downgrades to the extraction (confidence can only go down)."""
+        # Higher rank = lower confidence; .get() returns None for malformed LLM
+        # output so we skip the downgrade rather than raising.
+        confidence_ranks = {
+            "explicit": 0,
+            "mediator_supported": 1,
+            "weak": 2,
+            "insufficient": 3,
+        }
+        current = confidence_ranks.get(extraction.mechanism.confidence)
+        revised = confidence_ranks.get(critic.revised_mechanism_confidence)
+        if current is not None and revised is not None and revised > current:
+            extraction.mechanism.confidence = critic.revised_mechanism_confidence
+
+        # Remove support factors flagged by critic as bad/generic
+        flagged_factors = set()
+        for flag in critic.flags:
+            if flag.severity == "downgrade" and "support_factors" in flag.field:
+                # Extract factor name from field like "support_factors: trained researchers"
+                parts = flag.field.split(":", 1)
+                if len(parts) > 1:
+                    flagged_factors.add(parts[1].strip().lower())
+
+        if flagged_factors:
+            extraction.support_factors = [
+                sf
+                for sf in extraction.support_factors
+                if sf.factor.lower() not in flagged_factors
+            ]
+
+        for dealbreaker in critic.missing_dealbreakers:
+            extraction.moderators_or_dealbreakers.append(
+                ModeratorOrDealbreaker(
+                    item=dealbreaker,
+                    effect="blocks",
+                    quote="[identified by critic review against user context]",
+                    basis=EvidenceBasis.AUTHOR_HYPOTHESIS,
+                )
+            )
+
+        return extraction
+
+    @staticmethod
+    def _format_cm_extraction(
+        extraction: InterventionCMExtraction,
+        intervention_name: str,
+        enriched_chunks: Optional[List[Dict[str, Any]]] = None,
+        document_numbers: Optional[Dict[str, int]] = None,
+        critic: Optional[CriticResult] = None,
+    ) -> str:
+        """Render a C/M extraction as readable markdown for the agent."""
+        parts: List[str] = [
+            f"C/M EXTRACTION: {intervention_name}",
+            "",
+            f"DRAFT PROGRAMME THEORY: {extraction.draft_programme_theory}",
+            "",
+            "OBSERVED CONTEXTS:",
+        ]
+        for i, ctx in enumerate(extraction.observed_contexts, 1):
+            prefix = f"  Context {i}" if len(extraction.observed_contexts) > 1 else " "
+            parts.append(f"{prefix}- Setting: {ctx.setting}")
+            parts.append(f"{prefix}- Population: {ctx.population}")
+            if ctx.delivery_features:
+                features = ", ".join(ctx.delivery_features)
+                parts.append(f"{prefix}- Delivery features: {features}")
+
+        parts.extend(
+            [
+                "",
+                "MECHANISM:",
+                f"- Summary: {extraction.mechanism.summary}",
+                f"- Confidence: {extraction.mechanism.confidence}",
+            ]
+        )
+
+        if extraction.mediators:
+            parts.extend(["", "MEDIATORS:"])
+            for m in extraction.mediators:
+                parts.append(
+                    f'- {m.name} ({m.direction}, {m.basis.value}): "{m.quote}"'
+                )
+
+        if extraction.support_factors:
+            parts.extend(["", "SUPPORT FACTORS:"])
+            for sf in extraction.support_factors:
+                parts.append(f'- {sf.factor} ({sf.basis.value}): "{sf.quote}"')
+
+        if extraction.moderators_or_dealbreakers:
+            parts.extend(["", "MODERATORS / DEALBREAKERS:"])
+            for mod in extraction.moderators_or_dealbreakers:
+                parts.append(
+                    f'- {mod.item} ({mod.effect}, {mod.basis.value}): "{mod.quote}"'
+                )
+
+        if critic and (critic.flags or critic.missing_dealbreakers):
+            parts.extend(["", "CRITIC REVIEW:"])
+            for flag in critic.flags:
+                severity_label = "⚠️" if flag.severity == "downgrade" else "ℹ️"
+                parts.append(
+                    f"- {severity_label} [{flag.field}] {flag.issue} → {flag.suggestion}"
+                )
+            if critic.missing_dealbreakers:
+                parts.append("")
+                parts.append("MISSING DEALBREAKERS (from user context):")
+                for db in critic.missing_dealbreakers:
+                    parts.append(f"- ❌ {db}")
+
+        # Append source reference list so the agent can cite [N] in its answer
+        if enriched_chunks and document_numbers:
+            seen_docs: Dict[str, str] = {}
+            for chunk in enriched_chunks:
+                doc_id = chunk.get("document_id")
+                if not doc_id or doc_id in seen_docs:
+                    continue
+                num = document_numbers.get(doc_id)
+                if num is None:
+                    continue
+                title = chunk.get("document_title", "Untitled")
+                authors = chunk.get("document_authors")
+                author_str = authors[0] if isinstance(authors, list) and authors else ""
+                year = chunk.get("document_year", "")
+                label = f"[{num}] {author_str}"
+                if year:
+                    label += f" ({year})"
+                label += f" — {title}"
+                seen_docs[doc_id] = label
+            if seen_docs:
+                parts.extend(["", "SOURCES USED IN EXTRACTION:"])
+                for label in seen_docs.values():
+                    parts.append(f"- {label}")
+                parts.append(
+                    "Use these [N] citations when presenting evidence from this extraction."
+                )
+
+        ceiling = TRANSFER_CEILINGS.get(
+            extraction.mechanism.confidence, DEFAULT_TRANSFER_CEILING
+        )
+        parts.extend(["", f"TRANSFER VIEW CEILING: {ceiling.max_view}"])
+        if ceiling.reason:
+            parts.append(f"REASON: {ceiling.reason}")
+        parts.append(
+            "You MUST NOT assign a transfer view above this ceiling in your assessment."
+        )
+
+        return "\n".join(parts)
 
     def _parse_document_citation_group(self, bracket_content: str) -> List[int]:
         """Parse a citation group like '5', 'Document 5', or 'Documents 5 and 7'."""
@@ -1567,55 +2136,65 @@ class ChatbotService:
 
         return [int(part.strip()) for part in cleaned.split(",")]
 
-    def _extract_cited_document_numbers(self, text: str) -> List[int]:
-        """Return cited document numbers in first-appearance order."""
-        if not text:
-            return []
-
-        seen_numbers = set()
-        ordered_numbers: List[int] = []
-        for match in DOCUMENT_CITATION_BRACKET_RE.finditer(text):
-            for number in self._parse_document_citation_group(match.group(1)):
-                if number in seen_numbers:
-                    continue
-                seen_numbers.add(number)
-                ordered_numbers.append(number)
-        return ordered_numbers
-
     def _compact_cited_references(
         self,
         message: str,
         references: List[DocumentReference],
     ) -> tuple[str, List[DocumentReference]]:
         """Renumber cited references compactly and return only those references."""
-        cited_numbers = self._extract_cited_document_numbers(message)
-        if not cited_numbers:
-            return message, []
-
         number_mapping: Dict[int, int] = {}
         filtered: List[DocumentReference] = []
-        for number in cited_numbers:
-            index = number - 1
-            if 0 <= index < len(references):
-                number_mapping[number] = len(filtered) + 1
-                filtered.append(references[index])
-
-        if not filtered:
-            return message, references
+        saw_parsable_group = False
 
         def _replace(match: re.Match[str]) -> str:
+            nonlocal saw_parsable_group
             original_numbers = self._parse_document_citation_group(match.group(1))
             if not original_numbers:
                 return match.group(0)
 
-            remapped_parts = [
-                f"[{number_mapping[number]}]"
-                for number in original_numbers
-                if number in number_mapping
-            ]
+            saw_parsable_group = True
+            remapped_parts: List[str] = []
+            for number in original_numbers:
+                if number not in number_mapping:
+                    index = number - 1
+                    if not (0 <= index < len(references)):
+                        continue
+                    number_mapping[number] = len(filtered) + 1
+                    filtered.append(references[index])
+                remapped_parts.append(f"[{number_mapping[number]}]")
             return "".join(remapped_parts) or match.group(0)
 
-        return DOCUMENT_CITATION_BRACKET_RE.sub(_replace, message), filtered
+        rewritten = DOCUMENT_CITATION_BRACKET_RE.sub(_replace, message)
+        if not saw_parsable_group:
+            return message, []
+        if not filtered:
+            return message, references
+        return rewritten, filtered
+
+    def _register_references(
+        self,
+        turn_state: ChatTurnState,
+        items: List[Dict[str, Any]],
+        *,
+        id_key: str,
+        number_lookup: Dict[str, int],
+        builder: Callable[[Dict[str, Any]], DocumentReference],
+    ) -> Dict[str, int]:
+        """Assign stable [Document N] numbers and append references to the turn state."""
+        document_numbers: Dict[str, int] = {}
+        for item in items:
+            item_id = item.get(id_key)
+            if not item_id:
+                continue
+
+            doc_number = number_lookup.get(item_id)
+            if doc_number is None:
+                doc_number = len(turn_state.ordered_references) + 1
+                number_lookup[item_id] = doc_number
+                turn_state.ordered_references.append(builder(item))
+
+            document_numbers[item_id] = doc_number
+        return document_numbers
 
     def _register_evidence_references(
         self,
@@ -1623,24 +2202,13 @@ class ChatbotService:
         chunks: List[Dict[str, Any]],
     ) -> Dict[str, int]:
         """Assign stable [Document N] numbers to project evidence documents."""
-        document_numbers: Dict[str, int] = {}
-
-        for chunk in chunks:
-            doc_id = chunk.get("document_id")
-            if not doc_id:
-                continue
-
-            doc_number = turn_state.evidence_reference_numbers.get(doc_id)
-            if doc_number is None:
-                doc_number = len(turn_state.ordered_references) + 1
-                turn_state.evidence_reference_numbers[doc_id] = doc_number
-                turn_state.ordered_references.append(
-                    self._build_document_reference(chunk)
-                )
-
-            document_numbers[doc_id] = doc_number
-
-        return document_numbers
+        return self._register_references(
+            turn_state,
+            chunks,
+            id_key="document_id",
+            number_lookup=turn_state.evidence_reference_numbers,
+            builder=self._build_document_reference,
+        )
 
     def _register_parliament_references(
         self,
@@ -1648,24 +2216,42 @@ class ChatbotService:
         items: List[Dict[str, Any]],
     ) -> Dict[str, int]:
         """Assign stable [Document N] numbers to Parliament search results."""
-        document_numbers: Dict[str, int] = {}
+        return self._register_references(
+            turn_state,
+            items,
+            id_key="id",
+            number_lookup=turn_state.parliament_reference_numbers,
+            builder=self._build_parliament_reference,
+        )
 
+    def _build_unique_references(
+        self,
+        items: List[Dict[str, Any]],
+        *,
+        id_key: str,
+        builder: Callable[[Dict[str, Any]], DocumentReference],
+    ) -> List[DocumentReference]:
+        """Build deduplicated references in source order."""
+        references: List[DocumentReference] = []
+        seen: set = set()
         for item in items:
-            item_id = item.get("id")
-            if not item_id:
-                continue
+            item_id = item.get(id_key)
+            if item_id and item_id not in seen:
+                seen.add(item_id)
+                references.append(builder(item))
+        return references
 
-            doc_number = turn_state.parliament_reference_numbers.get(item_id)
-            if doc_number is None:
-                doc_number = len(turn_state.ordered_references) + 1
-                turn_state.parliament_reference_numbers[item_id] = doc_number
-                turn_state.ordered_references.append(
-                    self._build_parliament_reference(item)
-                )
-
-            document_numbers[item_id] = doc_number
-
-        return document_numbers
+    def _build_document_url(
+        self,
+        doi: Optional[str],
+        overton_url: Optional[str],
+        landing_page_url: Optional[str] = None,
+        pdf_url: Optional[str] = None,
+    ) -> Optional[str]:
+        """Build a reference URL from DOI metadata or an existing document URL."""
+        if doi:
+            return f"https://doi.org/{doi}" if not doi.startswith("http") else doi
+        return overton_url or landing_page_url or pdf_url
 
     def _build_document_reference(self, chunk: Dict[str, Any]) -> DocumentReference:
         """Build a single document reference from an enriched evidence chunk."""
@@ -1697,21 +2283,6 @@ class ChatbotService:
             url=item.get("url"),
             published_date=item.get("date"),
         )
-
-    def _build_parliament_references(
-        self, items: List[Dict[str, Any]]
-    ) -> List[DocumentReference]:
-        """Build ordered parliament references without introducing duplicates."""
-        references: List[DocumentReference] = []
-        seen_ids = set()
-
-        for item in items:
-            item_id = item.get("id")
-            if item_id and item_id not in seen_ids:
-                seen_ids.add(item_id)
-                references.append(self._build_parliament_reference(item))
-
-        return references
 
     def _build_parliament_context(
         self,

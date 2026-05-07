@@ -146,22 +146,13 @@ def _simplify_query(query: str) -> List[str]:
     return variants
 
 
-def _default_parliament_date_from(today: Optional[date] = None) -> str:
-    """Return the default lower bound for Hansard searches: last 10 years."""
+def _default_date_from(years_back: int, today: Optional[date] = None) -> str:
+    """Return ISO date `years_back` years before `today` (Feb-29 safe)."""
     today = today or date.today()
     try:
-        return today.replace(year=today.year - 10).isoformat()
+        return today.replace(year=today.year - years_back).isoformat()
     except ValueError:
-        return today.replace(year=today.year - 10, day=28).isoformat()
-
-
-def _default_parliamentary_questions_date_from(today: Optional[date] = None) -> str:
-    """Return the default lower bound for written question searches: last 3 years."""
-    today = today or date.today()
-    try:
-        return today.replace(year=today.year - 3).isoformat()
-    except ValueError:
-        return today.replace(year=today.year - 3, day=28).isoformat()
+        return today.replace(year=today.year - years_back, day=28).isoformat()
 
 
 def _normalise_whitespace(text: str) -> str:
@@ -597,7 +588,7 @@ async def _search_hansard(
     """Search Hansard with query broadening while preserving the existing behavior."""
     original_query = query
     seen_ids: set = set()
-    effective_date_from = date_from or _default_parliament_date_from()
+    effective_date_from = date_from or _default_date_from(10)
 
     params: Dict[str, Any] = {"take": HANSARD_MAX_RESULTS}
     if effective_date_from:
@@ -646,7 +637,7 @@ async def _search_parliamentary_questions(
     client: Optional[httpx.AsyncClient] = None,
 ) -> List[Dict[str, Any]]:
     """Search answered written questions and normalize them into chat items."""
-    effective_date_from = date_from or _default_parliamentary_questions_date_from()
+    effective_date_from = date_from or _default_date_from(3)
     params: Dict[str, Any] = {
         "expandMember": True,
         "take": PQS_MAX_RESULTS,

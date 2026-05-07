@@ -13,6 +13,11 @@ class ChatRole(str, Enum):
     ASSISTANT = "assistant"
 
 
+class ChatMode(str, Enum):
+    DEFAULT = "default"
+    FORECAST = "forecast"
+
+
 class ChatMessage(BaseModel):
     """A single chat message."""
 
@@ -26,6 +31,8 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=2000)
     recent_messages: Optional[List[ChatMessage]] = Field(default=None, max_length=10)
+    context_hint: Optional[str] = Field(default=None, max_length=800)
+    mode: ChatMode = Field(default=ChatMode.DEFAULT)
     previous_response_id: Optional[str] = None
 
 

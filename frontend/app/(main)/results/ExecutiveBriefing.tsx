@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
-import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { ExternalLink, BookOpen, FileText, Quote, CheckCircle, Lightbulb, ChevronLeft, ChevronRight, Download, MessageCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type {
   CitationInfo,
@@ -51,6 +51,8 @@ interface ExecutiveBriefingProps {
   onRerunSynthesis?: () => void | Promise<void>;
   isRerunningSynthesis?: boolean;
   rerunError?: string | null;
+  chatEnabled?: boolean;
+  onLaunchChat?: (sectionTitle: string, contextHint: string, prefillQuestion?: string) => void;
 }
 
 interface CitationInspectPayload {
@@ -244,6 +246,62 @@ function useRenderCitations(
     return parts;
   }, [lookupCitation, onCitationClick, onCitationInspect, activeCitationInstanceId]);
 }
+
+// ============================================================================
+// Section Chat Controls
+// ============================================================================
+
+function stripCitationsAndTruncate(text: string, maxLen = 350): string {
+  const stripped = text.replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim();
+  return stripped.length > maxLen ? stripped.slice(0, maxLen) + '…' : stripped;
+}
+
+interface ChipDef {
+  question: string;
+}
+
+function SectionChatFooter({ chips, sectionTitle, contextHint, onLaunchChat }: {
+  chips: ChipDef[];
+  sectionTitle: string;
+  contextHint: string;
+  onLaunchChat: (sectionTitle: string, contextHint: string, prefillQuestion?: string) => void;
+}) {
+  return (
+    <div className="mt-4 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
+      <div className="flex items-center gap-1.5 mb-2">
+        <MessageCircle className="h-3.5 w-3.5 text-slate-500" />
+        <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Ask the assistant</span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {chips.map((chip) => (
+          <button
+            key={chip.question}
+            type="button"
+            onClick={() => onLaunchChat(sectionTitle, contextHint, chip.question)}
+            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-full transition-colors"
+          >
+            {chip.question}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const CORE_ANSWER_CHIPS: ChipDef[] = [
+  { question: "What's the strength of this evidence?" },
+  { question: "Are there dissenting views?" },
+];
+
+const INTERVENTIONS_CHIPS: ChipDef[] = [
+  { question: "Compare these interventions" },
+  { question: "What are the limitations?" },
+];
+
+const RECOMMENDATIONS_CHIPS: ChipDef[] = [
+  { question: "How feasible are these?" },
+  { question: "What evidence supports these?" },
+];
 
 // ============================================================================
 // Citation Link
@@ -458,10 +516,12 @@ function EvidenceCoverageBadge({ coverage }: { coverage: EvidenceCoverageSnapsho
 // Structured Briefing Components
 // ============================================================================
 
-function CoreAnswerSection({ coreAnswer, renderCitations }: { 
+function CoreAnswerSection({ coreAnswer, renderCitations, onLaunchChat }: {
   coreAnswer: StructuredBriefing['core_answer'];
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
+  onLaunchChat?: (sectionTitle: string, contextHint: string, prefillQuestion?: string) => void;
 }) {
+  const contextHint = `Core Finding: ${stripCitationsAndTruncate(coreAnswer.answer)}`;
   return (
     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-5 mb-6">
       <div className="flex items-start gap-3">
@@ -479,14 +539,17 @@ function CoreAnswerSection({ coreAnswer, renderCitations }: {
               </div>
             </div>
           )}
+          {onLaunchChat && (
+            <SectionChatFooter chips={CORE_ANSWER_CHIPS} sectionTitle="Core Finding" contextHint={contextHint} onLaunchChat={onLaunchChat} />
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function BackgroundSectionComponent({ background, renderCitations }: { 
-  background: BackgroundSection; 
+function BackgroundSectionComponent({ background, renderCitations }: {
+  background: BackgroundSection;
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
 }) {
   return (
@@ -503,13 +566,14 @@ function BackgroundSectionComponent({ background, renderCitations }: {
   );
 }
 
-function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations, onCitationInspect, activeCitationInstanceId }: { 
+function InterventionsTable({ interventions, lookupCitation, onCitationClick, renderCitations, onCitationInspect, activeCitationInstanceId, onLaunchChat }: {
   interventions: InterventionTableRow[];
   lookupCitation: CitationLookupFn;
   onCitationClick?: (docId: string) => void;
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
   onCitationInspect?: (payload: CitationInspectPayload) => void;
   activeCitationInstanceId?: string;
+  onLaunchChat?: (sectionTitle: string, contextHint: string, prefillQuestion?: string) => void;
 }) {
   if (!interventions.length) return null;
 
@@ -560,10 +624,15 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
     });
   };
 
+  const interventionContext = `Interventions: ${interventions.map(r => r.intervention_name).join(', ')}`;
+
   return (
     <div className="mb-6">
       <h3 className="text-lg font-semibold text-slate-800 mb-3">Key Interventions</h3>
-      <div className="overflow-x-auto rounded-lg border border-slate-200">
+      {onLaunchChat && (
+        <SectionChatFooter chips={INTERVENTIONS_CHIPS} sectionTitle="Interventions" contextHint={interventionContext} onLaunchChat={onLaunchChat} />
+      )}
+      <div className="overflow-x-auto rounded-lg border border-slate-200 mt-3">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50">
             <tr>
@@ -678,11 +747,14 @@ function InterventionsTable({ interventions, lookupCitation, onCitationClick, re
   );
 }
 
-function RecommendationsList({ recommendations, renderCitations }: { 
+function RecommendationsList({ recommendations, renderCitations, onLaunchChat }: {
   recommendations: RecommendationItem[];
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
+  onLaunchChat?: (sectionTitle: string, contextHint: string, prefillQuestion?: string) => void;
 }) {
   if (!recommendations.length) return null;
+
+  const recContext = `Recommendations: ${recommendations.map(r => r.title).join(', ')}`;
 
   return (
     <div className="mb-6">
@@ -690,7 +762,10 @@ function RecommendationsList({ recommendations, renderCitations }: {
         <CheckCircle className="h-5 w-5 text-green-600" />
         Recommendations
       </h3>
-      <div className="space-y-3">
+      {onLaunchChat && (
+        <SectionChatFooter chips={RECOMMENDATIONS_CHIPS} sectionTitle="Recommendations" contextHint={recContext} onLaunchChat={onLaunchChat} />
+      )}
+      <div className="space-y-3 mt-3">
         {recommendations.map((rec) => (
           <div key={rec.number} className="flex gap-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
             <div className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-semibold flex items-center justify-center">
@@ -718,7 +793,7 @@ function RecommendationsList({ recommendations, renderCitations }: {
   );
 }
 
-function SynthesisSections({ sections, renderCitations }: { 
+function SynthesisSections({ sections, renderCitations }: {
   sections?: SynthesisSectionType[];
   renderCitations: (text: string, prefix: string) => React.ReactNode[];
 }) {
@@ -946,6 +1021,8 @@ export function ExecutiveBriefing({
   onRerunSynthesis,
   isRerunningSynthesis,
   rerunError,
+  chatEnabled,
+  onLaunchChat,
 }: ExecutiveBriefingProps) {
   const [inspectedCitation, setInspectedCitation] = useState<CitationInspectPayload | null>(null);
   const activeCitationInstanceId = inspectedCitation?.citationInstanceId;
@@ -1450,35 +1527,38 @@ export function ExecutiveBriefing({
         
         {structuredBriefing ? (
           <div className="space-y-2">
-            <CoreAnswerSection 
+            <CoreAnswerSection
               coreAnswer={structuredBriefing.core_answer}
               renderCitations={renderCitations}
+              onLaunchChat={chatEnabled ? onLaunchChat : undefined}
             />
-            
+
             {structuredBriefing.background_section && (
-              <BackgroundSectionComponent 
+              <BackgroundSectionComponent
                 background={structuredBriefing.background_section}
                 renderCitations={renderCitations}
               />
             )}
-            
-            <InterventionsTable 
+
+            <InterventionsTable
               interventions={structuredBriefing.interventions_table}
               lookupCitation={lookupCitation}
               onCitationClick={onCitationClick}
               renderCitations={renderCitations}
               onCitationInspect={setInspectedCitation}
               activeCitationInstanceId={activeCitationInstanceId}
+              onLaunchChat={chatEnabled ? onLaunchChat : undefined}
             />
 
-            <SynthesisSections 
+            <SynthesisSections
               sections={synthesisSections}
               renderCitations={renderCitations}
             />
-            
-            <RecommendationsList 
+
+            <RecommendationsList
               recommendations={structuredBriefing.recommendations}
               renderCitations={renderCitations}
+              onLaunchChat={chatEnabled ? onLaunchChat : undefined}
             />
             
             <ReferencesList
