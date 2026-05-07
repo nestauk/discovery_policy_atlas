@@ -722,8 +722,21 @@ export function ChatInterface({
 
               {message.content && (() => {
                 const isAssistant = message.role === 'assistant'
-                const withCitations = isAssistant && message.references
-                  ? processInTextCitations(message.content, message.references)
+                // Responses API turns can re-cite earlier sources without
+                // firing tools, so fall back to the last assistant message
+                // that did populate refs. Numbering is stable across turns.
+                let linkRefs = message.references?.length ? message.references : undefined
+                if (isAssistant && !linkRefs) {
+                  for (let i = index - 1; i >= 0; i -= 1) {
+                    const prev = displayMessages[i]
+                    if (prev.role === 'assistant' && prev.references?.length) {
+                      linkRefs = prev.references
+                      break
+                    }
+                  }
+                }
+                const withCitations = isAssistant && linkRefs
+                  ? processInTextCitations(message.content, linkRefs)
                   : message.content
                 const followUpQuestions = isAssistant && !message.isStreaming
                   ? extractFollowUpQuestions(withCitations)
