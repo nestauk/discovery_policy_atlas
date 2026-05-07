@@ -1196,7 +1196,7 @@ export default function ProjectResultsPage() {
 
         {/* Show results tabs */}
         {projectId && !error && (
-          <Tabs value={urlTab} onValueChange={handleTabChange} className="flex flex-col">
+          <Tabs value={urlTab} onValueChange={handleTabChange} className="flex flex-1 min-h-0 flex-col">
             <div className="px-6 pt-4">
               <TabsList className="!grid w-full grid-cols-2">
                 <TabsTrigger value="summary" className="flex items-center gap-2">
@@ -1210,7 +1210,7 @@ export default function ProjectResultsPage() {
               </TabsList>
             </div>
 
-            <div>
+            <div className="flex flex-1 min-h-0 flex-col">
               <TabsContent value="summary" className="p-6 m-0">
                 <div className="max-w-6xl mx-auto">
                   {/* Stat Cards Row */}

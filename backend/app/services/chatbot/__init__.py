@@ -3,9 +3,10 @@ Chatbot service module for RAG-based chat functionality.
 """
 
 from .chat_service import ChatbotService
-from .models import ChatMode, ChatRequest, ChatResponse
+from .models import AnswerMetadata, ChatMode, ChatRequest, ChatResponse
 
 __all__ = [
+    "AnswerMetadata",
     "ChatbotService",
     "ChatMode",
     "ChatRequest",

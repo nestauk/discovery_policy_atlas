@@ -32,6 +32,7 @@ import { CitationContextPanel } from "@/components/synthesis/CitationContextPane
 
 interface ExecutiveBriefingProps {
   projectId: string;
+  isPublic?: boolean;
   briefing: string;
   structuredBriefing?: StructuredBriefing;
   citationMap?: Record<string, CitationInfo>;
@@ -1011,6 +1012,7 @@ function ReferencesList({
 
 export function ExecutiveBriefing({ 
   projectId,
+  isPublic = false,
   briefing, 
   structuredBriefing,
   citationMap, 
@@ -1597,6 +1599,7 @@ export function ExecutiveBriefing({
       <CitationContextPanel
         isOpen={Boolean(inspectedCitation)}
         projectId={projectId}
+        isPublic={isPublic}
         citationInfo={inspectedCitation?.citationInfo ?? null}
         chunkId={inspectedCitation?.chunkId}
         supportingQuote={inspectedCitation?.quote}
