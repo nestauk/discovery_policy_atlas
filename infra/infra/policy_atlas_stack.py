@@ -197,7 +197,7 @@ class PolicyAtlasStack(Stack):
                     fe_secret, field="NEXT_PUBLIC_CLERK_SIGN_IN_URL"),
                 "NEXT_PUBLIC_CLERK_SIGN_UP_URL": ecs.Secret.from_secrets_manager(
                     fe_secret, field="NEXT_PUBLIC_CLERK_SIGN_UP_URL"),
-                "NEXT_PUBLIC_CKERL_AFTER_SIGN_IN_URL": ecs.Secret.from_secrets_manager(
+                "NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL": ecs.Secret.from_secrets_manager(
                     fe_secret, field="NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL"),
             },
             port_mappings=[ecs.PortMapping(
@@ -310,7 +310,8 @@ class PolicyAtlasStack(Stack):
             )],
         )
 
-        fe_secret.grant_read(be_task_def.task_role)
+        # LH 08/05/2026: As per PR 172, removed this - backend probably doesn't need to read front-end secret values.
+        # fe_secret.grant_read(be_task_def.task_role)
         db_secret.grant_read(be_task_def.task_role)
         jwt_secret.grant_read(be_task_def.task_role)
 

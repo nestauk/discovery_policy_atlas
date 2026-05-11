@@ -5,7 +5,7 @@ on:
     types: [published]
 
 concurrency:
-  group: deploy-staging
+  group: deploy-production
   cancel-in-progress: false
 
 permissions:
@@ -35,6 +35,15 @@ jobs:
       - name: Install AWS CDK CLI
         run: npm install -g aws-cdk
 
+      - name: Install migration Lambda function dependencies
+        run: | # Added in as per suggestion on PR 172
+          pip install pg8000 sqlparse \
+            --target infra/infra/deploy_functions/run_migrations \
+            --platform manylinux2014_x86_64 \
+            --implementation cp \
+            --python-version 3.12 \
+            --only-binary=:all:
+
       - name: Install CDK Python dependencies
         working-directory: infra
         run: pip install -r requirements.txt
@@ -47,4 +56,4 @@ jobs:
 
       - name: Deploy PolicyAtlasStack
         working-directory: infra
-        run: cdk deploy PolicyAtlasStack -c env_name=staging --require-approval never --verbose
+        run: cdk deploy PolicyAtlasStack -c env_name=production --require-approval never --verbose

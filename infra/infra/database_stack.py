@@ -36,9 +36,8 @@ class DatabaseStack(Stack):
                  db_config: dict, env_name: str, **kwargs) -> None:
         super().__init__(scope, id, **kwargs)
 
-        # Get the VPC by ID.
-        vpc_id = ssm.StringParameter.value_for_string_parameter(self, parameter_name="/policy_atlas/vpc_id")
-
+        # LH 08/05/2026: As per PR 172, removed the vpc_id lookup and instead look up the VPC directly.
+        # There were dependency problems with the lookup ID step via SSM.
         vpc = ec2.Vpc.from_lookup(self, "VPC", region=db_config['aws_region'])
 
         # --- Import shared ALB from NetworkStack ---
