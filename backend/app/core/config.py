@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None
     SUPABASE_KEY: Optional[str] = None
 
+    # Authentication
+    AUTH_PROVIDER: str = "clerk"
+    CLERK_JWT_ISSUER: Optional[str] = None
+    CLERK_SECRET_KEY: Optional[str] = None
+    DEMO_ORG_ID: Optional[str] = None
+
     # Development/Testing
     MOCK_OPENAI: bool = False
     DEBUG_ANALYSIS_FILES: bool = False  # Keep local analysis files for debugging
