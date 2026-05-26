@@ -1,0 +1,31 @@
+:root {
+  --pa-fg: var(--color-text-primary, #1a1a1a);
+  --pa-muted: var(--color-text-secondary, #5e6772);
+  --pa-border: var(--color-border-primary, #d8dde3);
+  --pa-bg: var(--color-background-primary, #ffffff);
+  --pa-card: var(--color-background-secondary, #f5f7fa);
+  --pa-accent: var(--color-text-accent, #2a5fb5);
+  --pa-accent-fg: var(--color-text-on-accent, #ffffff);
+  --pa-radius: var(--border-radius-md, 8px);
+  --pa-font: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.45 var(--pa-font);
+  color: var(--pa-fg);
+  background: var(--pa-bg);
+}
+
+.container {
+  padding: 16px;
+}
+
+.empty {
+  color: var(--pa-muted);
+  font-style: italic;
+  padding: 12px;
+  text-align: center;
+}

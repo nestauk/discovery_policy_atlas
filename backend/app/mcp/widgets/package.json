@@ -1,0 +1,23 @@
+{
+  "name": "policy-atlas-mcp-widgets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP Apps widgets for the Policy Atlas FastMCP server.",
+  "scripts": {
+    "build": "rm -rf dist && INPUT=pico-picker.html vite build && INPUT=search-evidence.html vite build",
+    "build:picker": "INPUT=pico-picker.html vite build",
+    "build:results": "INPUT=search-evidence.html vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
+  }
+}
