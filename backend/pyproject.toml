@@ -33,7 +33,7 @@ dependencies = [
     "rapidfuzz>=3.9.7",
     "langgraph>=0.5.4",
     "hdbscan>=0.8.40",
-    "langfuse>=2.60.7",
+    "langfuse<4",
     "tiktoken>=0.9.0",
     "python-multipart>=0.0.5",
     "scikit-learn>=1.6.1",

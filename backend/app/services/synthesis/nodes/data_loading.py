@@ -159,6 +159,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             "id": str(row.get("id")),
             "doc_uuid": doc_uuid,
             "doc_id": doc_id,
+            "raw_data": raw,
         }
         if et == "intervention":
             raw_st = clean_null_string(raw.get("study_type") or raw.get("type"))

@@ -1460,15 +1460,17 @@ async def get_navigator_stats(
 
         unique_labels: set[str] = set()
         if extraction_ids:
-            extractions_res = (
-                sb.table("analysis_extractions")
-                .select("label")
-                .in_("id", extraction_ids)
-                .execute()
-            )
-            for e in extractions_res.data or []:
-                if e.get("label"):
-                    unique_labels.add(e["label"])
+            for i in range(0, len(extraction_ids), 100):
+                chunk = extraction_ids[i : i + 100]
+                extractions_res = (
+                    sb.table("analysis_extractions")
+                    .select("label")
+                    .in_("id", chunk)
+                    .execute()
+                )
+                for e in extractions_res.data or []:
+                    if e.get("label"):
+                        unique_labels.add(e["label"])
 
         return {
             "intervention_group_count": intervention_theme_count,
