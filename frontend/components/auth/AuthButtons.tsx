@@ -6,7 +6,7 @@ import {
   SignedIn,
   SignedOut,
   UserButton,
-} from "@clerk/nextjs";
+} from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
 export function AuthButtons() {
@@ -23,7 +23,7 @@ export function AuthButtons() {
   return (
     <>
       <SignedOut>
-        <SignInButton mode="modal">
+        <SignInButton>
           <Button variant="ghost">Sign In</Button>
         </SignInButton>
       </SignedOut>

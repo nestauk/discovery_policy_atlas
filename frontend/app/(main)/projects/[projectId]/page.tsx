@@ -35,7 +35,7 @@ import {
 import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
 import { useProjectDataCache } from '@/lib/projectDataCache'
-import { useAuth, useUser } from '@clerk/nextjs'
+import { useAuth } from '@/lib/auth'
 import { SynthesisSummary } from '@/types/search'
 import { ExecutiveBriefing } from '../../results/ExecutiveBriefing'
 import { ChatbotWidget } from '@/components/chatbot/ChatbotWidget'
@@ -176,8 +176,7 @@ export default function ProjectResultsPage() {
 
   const { activeProject, setActiveProject, projects, setProjects } = useAnalysisProjectStore()
   const { fetchWithAuth, getAnalysisProject, getProjectInterventions, rerunSynthesisForProject } = useAPI()
-  const { getToken } = useAuth()
-  const { user } = useUser()
+  const { getToken, user } = useAuth()
   const { openChatWithIntent, isOpen: isChatOpen, setIsOpen: setChatOpen } = useChatStore()
 
   const handleLaunchChat = useCallback((sectionTitle: string, contextHint: string, prefillQuestion?: string) => {
@@ -202,8 +201,8 @@ export default function ProjectResultsPage() {
   const isProjectOwner = useMemo(() => {
     if (!user || !activeProject) return false
     const currentUserId = user.id
-    const currentUserFullName = user.fullName || ''
-    const currentUserEmail = user.emailAddresses?.[0]?.emailAddress || ''
+    const currentUserFullName = user.name || ''
+    const currentUserEmail = user.email || ''
     const currentUserEmailUsername = currentUserEmail.split('@')[0] || ''
     
     return (

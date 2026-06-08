@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { SignInButton } from '@clerk/nextjs'
+import { SignInButton } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -108,7 +108,7 @@ export default function LandingPageContent({ isLoggedIn }: LandingPageContentPro
                   </>
                 ) : (
                   <>
-                    <SignInButton mode="modal">
+                    <SignInButton>
                       <Button
                         size="lg"
                         className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all hover:shadow-xl hover:shadow-blue-600/30"
@@ -222,7 +222,7 @@ export default function LandingPageContent({ isLoggedIn }: LandingPageContentPro
               </>
             ) : (
               <>
-                <SignInButton mode="modal">
+                <SignInButton>
                   <Button
                     size="lg"
                     className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all hover:shadow-xl hover:shadow-blue-600/30"

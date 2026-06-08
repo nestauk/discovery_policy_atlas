@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     AUTH_PROVIDER: str = "clerk"
     CLERK_JWT_ISSUER: Optional[str] = None
     CLERK_SECRET_KEY: Optional[str] = None
+    COGNITO_REGION: Optional[str] = None
+    COGNITO_USER_POOL_ID: Optional[str] = None
+    COGNITO_APP_CLIENT_ID: Optional[str] = None
     DEMO_ORG_ID: Optional[str] = None
 
     # Development/Testing

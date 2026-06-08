@@ -1,8 +1,7 @@
 'use client'
 
-import { ReactNode } from 'react'
-import { AUTH_PROVIDER } from '../config'
-import { ClerkSignInButton } from '../adapters/clerk/ClerkAdapter'
+import { Children, cloneElement, isValidElement, MouseEvent, ReactElement, ReactNode } from 'react'
+import { useAuth } from '../context'
 
 interface SignInButtonProps {
   children: ReactNode
@@ -11,13 +10,27 @@ interface SignInButtonProps {
 /**
  * Trigger the provider's sign-in flow.
  *
- * For Clerk this opens the modal sign-in. For Cognito (Phase 4) this will
- * redirect to the Hosted UI. Callers wrap the child element they want to
- * use as the trigger (typically a `<Button>`).
+ * Wraps a single child element and routes its click through the auth
+ * adapter (Clerk opens the modal sign-in via `openSignIn()`; Cognito
+ * redirects to the Hosted UI). Any existing `onClick` on the child is
+ * preserved and runs before sign-in; if the child calls
+ * `event.preventDefault()`, sign-in is skipped.
  */
 export function SignInButton({ children }: SignInButtonProps) {
-  if (AUTH_PROVIDER === 'clerk') {
-    return <ClerkSignInButton mode="modal">{children}</ClerkSignInButton>
+  const { signIn } = useAuth()
+  const child = Children.only(children)
+  if (!isValidElement(child)) return null
+
+  type Clickable = { onClick?: (e: MouseEvent) => void }
+  const childElement = child as ReactElement<Clickable>
+  const existingOnClick = childElement.props.onClick
+
+  const onClick = (event: MouseEvent) => {
+    existingOnClick?.(event)
+    if (!event.defaultPrevented) {
+      signIn()
+    }
   }
-  throw new Error(`SignInButton not implemented for provider: ${AUTH_PROVIDER}`)
+
+  return cloneElement(childElement, { onClick })
 }

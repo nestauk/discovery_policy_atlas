@@ -9,8 +9,6 @@ import {
   useOrganizationList,
   useSession,
   useClerk,
-  SignInButton as ClerkSignInButton,
-  UserButton as ClerkUserButton,
 } from '@clerk/nextjs'
 
 import { AuthContext } from '../../context'
@@ -138,5 +136,3 @@ function ClerkContextBridge({ children }: { children: ReactNode }) {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
-
-export { ClerkSignInButton, ClerkUserButton }

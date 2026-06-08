@@ -6,6 +6,7 @@ from functools import lru_cache
 
 from app.core.auth.base import AuthProvider
 from app.core.auth.providers.clerk import ClerkAuthProvider
+from app.core.auth.providers.cognito import CognitoAuthProvider
 from app.core.config import settings
 
 
@@ -33,6 +34,23 @@ def get_auth_provider() -> AuthProvider:
         return ClerkAuthProvider(
             jwt_issuer=settings.CLERK_JWT_ISSUER,
             secret_key=settings.CLERK_SECRET_KEY,
+        )
+
+    if provider == "cognito":
+        if not settings.COGNITO_REGION:
+            raise ValueError("COGNITO_REGION is required when AUTH_PROVIDER=cognito")
+        if not settings.COGNITO_USER_POOL_ID:
+            raise ValueError(
+                "COGNITO_USER_POOL_ID is required when AUTH_PROVIDER=cognito"
+            )
+        if not settings.COGNITO_APP_CLIENT_ID:
+            raise ValueError(
+                "COGNITO_APP_CLIENT_ID is required when AUTH_PROVIDER=cognito"
+            )
+        return CognitoAuthProvider(
+            region=settings.COGNITO_REGION,
+            user_pool_id=settings.COGNITO_USER_POOL_ID,
+            app_client_id=settings.COGNITO_APP_CLIENT_ID,
         )
 
     raise ValueError(f"Unknown AUTH_PROVIDER: {settings.AUTH_PROVIDER!r}")

@@ -1,6 +1,6 @@
 'use client'
 
-import { useUser, UserButton } from '@clerk/nextjs'
+import { useAuth, UserButton } from '@/lib/auth'
 import { useRouter, usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -43,7 +43,7 @@ export default function AgentLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { isSignedIn, isLoaded, user } = useUser()
+  const { isSignedIn, isLoaded, user } = useAuth()
   const router = useRouter()
   const pathname = usePathname()
   const { activeProject } = useAnalysisProjectStore()
@@ -274,7 +274,7 @@ export default function AgentLayout({
             </div>
             <div className="flex-1 min-w-0 flex flex-col gap-0.5">
               <p className="text-sm font-medium text-slate-900 truncate leading-none">
-                {user?.firstName || user?.emailAddresses?.[0]?.emailAddress || 'User'}
+                {user?.firstName || user?.email || 'User'}
               </p>
               <OrganizationManager />
             </div>
