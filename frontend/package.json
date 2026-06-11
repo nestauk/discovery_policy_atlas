@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
+    "@aws-amplify/adapter-nextjs": "^1.7.3",
     "@clerk/nextjs": "^6.21.0",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-collapsible": "^1.1.11",

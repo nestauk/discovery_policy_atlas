@@ -19,7 +19,11 @@ from typing import Optional
 from langgraph.graph import StateGraph, END
 
 from app.services.vectorization import vectorization_service
-from app.utils.llm.llm_utils import get_langfuse_handler, resolve_langfuse_session_id
+from app.utils.llm.llm_utils import (
+    get_langfuse_handler,
+    langfuse_span,
+    resolve_langfuse_session_id,
+)
 from app.services.synthesis.state import SynthesisState
 from app.services.synthesis.nodes import (
     load_raw_extractions,
@@ -56,13 +60,10 @@ def _timed_node(node_fn, node_name: str):
     """
 
     async def wrapper(state):
-        from langfuse import Langfuse
-
-        langfuse = Langfuse()
         start = time.time()
 
-        with langfuse.start_as_current_span(
-            name=node_name,
+        with langfuse_span(
+            node_name,
             metadata={"project_id": state.get("project_id")},
         ):
             result = await node_fn(state)

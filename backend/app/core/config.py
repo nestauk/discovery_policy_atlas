@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     # LLM Configuration
     OPENAI_API_KEY: Optional[str] = None
 
+    # Langfuse observability
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: Optional[str] = None
+
     # Supabase Configuration
     SUPABASE_URL: Optional[str] = None
     SUPABASE_KEY: Optional[str] = None

@@ -1,81 +1,101 @@
 /**
- * Single-shot Amplify configuration for the Cognito adapter.
+ * Cognito configuration for the server-side (httpOnly cookie) auth flow.
  *
- * Reads `NEXT_PUBLIC_COGNITO_*` env vars and calls `Amplify.configure` exactly
- * once. Idempotent so hot-reloads and re-renders don't reconfigure.
+ * Phase 5 moved token handling server-side: Amplify's Next.js adapter performs
+ * the OAuth code exchange in Route Handlers and stores tokens in httpOnly
+ * cookies. The client no longer calls `Amplify.configure` or any client-side
+ * Amplify API — it talks to our own `/api/auth/*` routes instead.
  *
- * Tokens are stored in `localStorage` by default — this is the Phase 4 demo
- * setup. Phase 5 swaps this for an httpOnly cookie via Next.js Route
- * Handlers to limit XSS exposure.
+ * This module builds the `ResourcesConfig` consumed by `createServerRunner`
+ * from the `NEXT_PUBLIC_COGNITO_*` env vars (readable on both server and
+ * client). OAuth redirect URLs are derived from `AMPLIFY_APP_ORIGIN` and point
+ * at the callback routes Amplify generates (`/api/auth/sign-in-callback`,
+ * `/api/auth/sign-out-callback`).
  */
 
-import { Amplify } from 'aws-amplify'
+import type { ResourcesConfig } from 'aws-amplify'
 
-let configured = false
+const PLACEHOLDER_USER_POOL_ID = 'us-east-1_xxxxxxxxx'
+const PLACEHOLDER_CLIENT_ID = 'xxxxxxxxxxxxxxxxxxxxxxxxxx'
+const PLACEHOLDER_DOMAIN = 'example.auth.us-east-1.amazoncognito.com'
 
-function parseRedirectList(
-  value: string | undefined,
-  fallback: string[]
-): string[] {
-  if (!value?.trim()) return fallback
-  return value
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
-
-export interface CognitoConfigStatus {
-  configured: boolean
-  missing: string[]
-}
-
-export function configureAmplify(): CognitoConfigStatus {
-  if (configured) {
-    return { configured: true, missing: [] }
-  }
-
-  const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID
-  const userPoolClientId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID
-  const domain = process.env.NEXT_PUBLIC_COGNITO_DOMAIN
-
+/**
+ * Returns the names of any required Cognito env vars that are unset.
+ *
+ * Used by the client adapter to render a configuration hint instead of
+ * silently failing, and to skip session fetches when Cognito isn't set up.
+ *
+ * Each var must be read with a static `process.env.NEXT_PUBLIC_*` property —
+ * Next.js only inlines `NEXT_PUBLIC_` values at compile time for static
+ * access; dynamic `process.env[name]` is always undefined in the browser.
+ *
+ * Returns:
+ *     list[str]: Missing env var names; empty when fully configured.
+ */
+export function getMissingCognitoEnv(): string[] {
   const missing: string[] = []
-  if (!userPoolId) missing.push('NEXT_PUBLIC_COGNITO_USER_POOL_ID')
-  if (!userPoolClientId) missing.push('NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID')
-  if (!domain) missing.push('NEXT_PUBLIC_COGNITO_DOMAIN')
-  if (missing.length > 0) {
-    return { configured: false, missing }
+  if (!process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID?.trim()) {
+    missing.push('NEXT_PUBLIC_COGNITO_USER_POOL_ID')
   }
+  if (!process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID?.trim()) {
+    missing.push('NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID')
+  }
+  if (!process.env.NEXT_PUBLIC_COGNITO_DOMAIN?.trim()) {
+    missing.push('NEXT_PUBLIC_COGNITO_DOMAIN')
+  }
+  return missing
+}
 
-  const defaultRedirect =
-    typeof window !== 'undefined' ? [`${window.location.origin}/`] : ['http://localhost:3000/']
+/**
+ * Returns the app origin used to build OAuth redirect URLs.
+ *
+ * Falls back to the request origin on the client and localhost on the server
+ * when `AMPLIFY_APP_ORIGIN` is unset (dev convenience).
+ */
+function getAppOrigin(): string {
+  if (process.env.AMPLIFY_APP_ORIGIN?.trim()) {
+    return process.env.AMPLIFY_APP_ORIGIN.trim().replace(/\/$/, '')
+  }
+  if (typeof window !== 'undefined') {
+    return window.location.origin
+  }
+  return 'http://localhost:3000'
+}
 
-  const redirectSignIn = parseRedirectList(
-    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_IN,
-    defaultRedirect
-  )
-  const redirectSignOut = parseRedirectList(
-    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_OUT,
-    redirectSignIn
-  )
+/**
+ * Builds the Amplify `ResourcesConfig` for the Cognito server runner.
+ *
+ * When env vars are missing (e.g. running in Clerk mode), syntactically valid
+ * placeholders are substituted so `createServerRunner` doesn't throw at module
+ * load — the Cognito code paths are never exercised unless Cognito is active.
+ *
+ * Returns:
+ *     ResourcesConfig: Config object accepted by `createServerRunner`.
+ */
+export function buildCognitoResourceConfig(): ResourcesConfig {
+  const userPoolId =
+    process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID?.trim() || PLACEHOLDER_USER_POOL_ID
+  const userPoolClientId =
+    process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID?.trim() || PLACEHOLDER_CLIENT_ID
+  const domain = process.env.NEXT_PUBLIC_COGNITO_DOMAIN?.trim() || PLACEHOLDER_DOMAIN
 
-  Amplify.configure({
+  const origin = getAppOrigin()
+
+  return {
     Auth: {
       Cognito: {
-        userPoolId: userPoolId!,
-        userPoolClientId: userPoolClientId!,
+        userPoolId,
+        userPoolClientId,
         loginWith: {
           oauth: {
-            domain: domain!,
+            domain,
             scopes: ['openid', 'email', 'profile'],
-            redirectSignIn,
-            redirectSignOut,
+            redirectSignIn: [`${origin}/api/auth/sign-in-callback`],
+            redirectSignOut: [`${origin}/api/auth/sign-out-callback`],
             responseType: 'code',
           },
         },
       },
     },
-  })
-
-  configured = true
-  return { configured: true, missing: [] }
+  }
 }

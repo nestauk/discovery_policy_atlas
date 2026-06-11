@@ -1,11 +1,14 @@
 import os
+from contextlib import nullcontext
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from functools import lru_cache
+from typing import Any, ContextManager, Dict, List, Optional
 
 import tiktoken
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import AzureChatOpenAI
 from langchain_openai import ChatOpenAI
+from langfuse import Langfuse
 from langfuse.langchain import CallbackHandler
 from pydantic import BaseModel
 
@@ -20,14 +23,53 @@ except KeyError:
     LLM_SERVICE = "OpenAI"
 
 
-def get_langfuse_handler(session_id: str = None) -> CallbackHandler:
-    """Initialise a Langfuse callback handler"""
+def _langfuse_configured() -> bool:
+    """Return True when Langfuse credentials are available in app settings."""
+    return bool(settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY)
+
+
+@lru_cache(maxsize=1)
+def get_langfuse_client() -> Optional[Langfuse]:
+    """Return a configured Langfuse client, or None when tracing is disabled."""
+    if not _langfuse_configured():
+        return None
+
+    kwargs: Dict[str, str] = {
+        "public_key": settings.LANGFUSE_PUBLIC_KEY,
+        "secret_key": settings.LANGFUSE_SECRET_KEY,
+    }
+    if settings.LANGFUSE_HOST:
+        kwargs["host"] = settings.LANGFUSE_HOST
+
+    return Langfuse(**kwargs)
+
+
+def langfuse_span(
+    name: str,
+    *,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> ContextManager:
+    """Open a Langfuse span when configured, otherwise a no-op context."""
+    client = get_langfuse_client()
+    if client is None:
+        return nullcontext()
+    return client.start_as_current_span(name=name, metadata=metadata or {})
+
+
+def get_langfuse_handler(session_id: str = None) -> Optional[CallbackHandler]:
+    """Initialise a Langfuse callback handler."""
     if session_id is None:
         session_id = f"{datetime.today().isoformat()}"
 
+    if not _langfuse_configured():
+        return None
+
+    # Ensure the singleton client is registered before CallbackHandler resolves it.
+    get_langfuse_client()
+
     # Session scoping is passed through LangChain metadata (`langfuse_session_id`).
     # This SDK version does not support a direct `session_id` constructor arg.
-    return CallbackHandler()
+    return CallbackHandler(public_key=settings.LANGFUSE_PUBLIC_KEY)
 
 
 def resolve_langfuse_session_id(

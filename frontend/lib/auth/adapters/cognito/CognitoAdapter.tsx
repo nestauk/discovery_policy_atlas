@@ -1,123 +1,108 @@
 'use client'
 
-import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  fetchAuthSession,
-  getCurrentUser,
-  signInWithRedirect,
-  signOut as amplifySignOut,
-} from 'aws-amplify/auth'
-import { Hub } from 'aws-amplify/utils'
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AuthContext } from '../../context'
 import { registerExternalTokenGetter } from '../../external'
 import type { AuthContextValue, AuthUser } from '../../types'
-import { configureAmplify } from './config'
+import { getMissingCognitoEnv } from './config'
 
 interface CognitoAdapterProps {
   children: ReactNode
 }
 
+interface SessionResponse {
+  authenticated: boolean
+  accessToken?: string
+  expiresAt?: number | null
+  user?: AuthUser
+}
+
+/** Refresh the access token slightly before expiry to avoid 401 races. */
+const TOKEN_REFRESH_MARGIN_MS = 60_000
+
 /**
- * Cognito-backed implementation of the auth context.
+ * Cognito adapter for the server-side httpOnly flow (Phase 5).
  *
- * Wraps Amplify's Hub events into the same surface as the Clerk adapter so
- * the rest of the app stays provider-agnostic.
+ * Tokens live in httpOnly cookies on the Next.js origin, set by Amplify's
+ * `/api/auth/*` Route Handlers. This adapter never touches client-side
+ * Amplify APIs; it:
+ *  - reads the session (user + short-lived access token) from
+ *    `/api/auth/session` and keeps the access token in memory,
+ *  - drives sign-in/out via top-level navigation to the Amplify routes.
  *
- * Limitations (resolved in Phase 5 + 6):
- *  - Tokens live in localStorage (XSS-exposed). Phase 5 moves them behind
- *    httpOnly cookies via Next.js Route Handlers.
- *  - Organisation state is always empty. Phase 6 introduces app-owned
- *    organisations + memberships.
+ * The refresh token is never exposed to client JS.
+ *
+ * Limitation (Phase 6): organisation state is always empty until app-owned
+ * organisations land.
  */
 export function CognitoAdapter({ children }: CognitoAdapterProps) {
-  const [configReady, setConfigReady] = useState(false)
-  const [missingVars, setMissingVars] = useState<string[]>([])
   const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoaded, setIsLoaded] = useState(false)
+  const tokenRef = useRef<{ token: string; expiresAt: number | null } | null>(null)
 
-  useEffect(() => {
-    const status = configureAmplify()
-    setConfigReady(status.configured)
-    setMissingVars(status.missing)
-    if (!status.configured) {
-      setIsLoaded(true)
-    }
-  }, [])
+  const missingVars = useMemo(() => getMissingCognitoEnv(), [])
 
-  const refreshUser = useCallback(async () => {
+  const loadSession = useCallback(async (): Promise<string | null> => {
     try {
-      const currentUser = await getCurrentUser()
-      const { tokens } = await fetchAuthSession()
-      const idPayload = tokens?.idToken?.payload as Record<string, unknown> | undefined
-      const email =
-        typeof idPayload?.email === 'string' ? (idPayload.email as string) : undefined
-      const name =
-        typeof idPayload?.name === 'string' ? (idPayload.name as string) : undefined
-      const givenName =
-        typeof idPayload?.given_name === 'string'
-          ? (idPayload.given_name as string)
-          : undefined
-
-      setUser({
-        id: currentUser.userId,
-        email,
-        name: name ?? givenName ?? currentUser.username,
-        firstName: givenName,
+      const res = await fetch('/api/auth/session', {
+        credentials: 'include',
+        cache: 'no-store',
       })
-    } catch {
-      setUser(null)
-    } finally {
-      setIsLoaded(true)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!configReady) return
-    void refreshUser()
-
-    const stop = Hub.listen('auth', ({ payload }) => {
-      switch (payload.event) {
-        case 'signedIn':
-        case 'tokenRefresh':
-        case 'signInWithRedirect':
-          void refreshUser()
-          break
-        case 'signedOut':
-          setUser(null)
-          break
-        case 'signInWithRedirect_failure':
-        case 'tokenRefresh_failure':
-          setUser(null)
-          break
+      if (!res.ok) {
+        tokenRef.current = null
+        setUser(null)
+        return null
       }
-    })
-
-    return () => {
-      stop()
-    }
-  }, [configReady, refreshUser])
-
-  const fetchToken = useCallback(async () => {
-    try {
-      const { tokens } = await fetchAuthSession()
-      return tokens?.accessToken?.toString() ?? null
+      const data = (await res.json()) as SessionResponse
+      if (!data.authenticated || !data.accessToken) {
+        tokenRef.current = null
+        setUser(null)
+        return null
+      }
+      tokenRef.current = {
+        token: data.accessToken,
+        expiresAt: data.expiresAt ?? null,
+      }
+      setUser(data.user ?? null)
+      return data.accessToken
     } catch {
+      tokenRef.current = null
+      setUser(null)
       return null
     }
   }, [])
 
   useEffect(() => {
-    return registerExternalTokenGetter(fetchToken)
-  }, [fetchToken])
+    if (missingVars.length > 0) {
+      setIsLoaded(true)
+      return
+    }
+    void loadSession().finally(() => setIsLoaded(true))
+  }, [loadSession, missingVars.length])
+
+  const getToken = useCallback(async () => {
+    const cached = tokenRef.current
+    if (
+      cached &&
+      (cached.expiresAt === null ||
+        cached.expiresAt - Date.now() > TOKEN_REFRESH_MARGIN_MS)
+    ) {
+      return cached.token
+    }
+    return loadSession()
+  }, [loadSession])
+
+  useEffect(() => {
+    return registerExternalTokenGetter(getToken)
+  }, [getToken])
 
   const signIn = useCallback(() => {
-    void signInWithRedirect()
+    window.location.href = '/api/auth/sign-in'
   }, [])
 
   const signOut = useCallback(async () => {
-    await amplifySignOut()
-    setUser(null)
+    window.location.href = '/api/auth/sign-out'
   }, [])
 
   const selectOrganization = useCallback(async () => {
@@ -133,14 +118,14 @@ export function CognitoAdapter({ children }: CognitoAdapterProps) {
       organizations: [],
       organizationsLoaded: true,
       selectOrganization,
-      getToken: fetchToken,
+      getToken,
       signIn,
       signOut,
     }),
-    [isLoaded, user, selectOrganization, fetchToken, signIn, signOut]
+    [isLoaded, user, selectOrganization, getToken, signIn, signOut]
   )
 
-  if (!configReady && missingVars.length > 0) {
+  if (missingVars.length > 0) {
     return (
       <div
         style={{
