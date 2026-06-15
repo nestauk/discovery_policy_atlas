@@ -11,6 +11,7 @@ dependencies = [
     "pyarrow>=15.0.0",        # parquet caches (results/, judgements/)
     "httpx>=0.28.1",          # S2 + Crossref + Europe PMC clients
     "cohere>=5.0.0",          # rerank-english-v3.0 (Arms B & C content blend)
+    "python-dotenv>=1.0.0",   # load backend/.env regardless of cwd (config.py bootstrap)
     "pytest>=8.0.0",          # parity tests (test_metrics.py)
     "pytest-asyncio>=0.23.0",
 ]

@@ -19,6 +19,30 @@ backend/testing/r_and_d/evidence_categorisation/ (default model "gpt-5.2").
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# --------------------------------------------------------------------------- #
+# Env bootstrap (must run before any `app.core.config` import).
+# The backend's pydantic Settings reads `env_file=".env"` RELATIVE TO THE CWD, so when we
+# run from this experiment folder it silently misses backend/.env — dropping e.g.
+# OPENALEX_EMAIL (the polite pool: 10 req/s vs the throttled common pool, which would bite
+# Phase 7's forward-citation snowball). OPENAI_API_KEY only survives because it happens to
+# be exported to the OS env. Loading backend/.env into os.environ here makes every backend
+# setting resolve no matter where the REPL/pytest is launched. config.py is imported by
+# every experiment module, so this is the earliest guaranteed chokepoint.
+# parents[3] of .../backend/testing/r_and_d/search_experiments/config.py is backend/.
+_BACKEND_ENV = Path(__file__).resolve().parents[3] / ".env"
+if _BACKEND_ENV.exists():
+    # override=False: a value already exported to the shell wins over the file.
+    load_dotenv(_BACKEND_ENV, override=False)
+else:  # pragma: no cover - only trips if the experiment is moved without updating this
+    import warnings
+
+    warnings.warn(
+        f"backend/.env not found at {_BACKEND_ENV}; backend settings may be unset"
+    )
 
 
 @dataclass(frozen=True)
