@@ -49,6 +49,53 @@ Expect **33 passed**. The tests assert, among others, the k_est inflation worked
 bounds (sorted-desc → 1.0, sorted-asc → 0.0, all-equal → 0.0), and the 0–3 bucketing
 boundaries.
 
+`test_judge.py` (Phase 2) covers the judge's pure logic offline — dynamic output-field
+construction, weight normalisation, per-row scoring (cross-checked against `metrics.py`),
+and parquet-cache consolidation:
+
+```bash
+uv run pytest -q          # both suites: 43 passed
+```
+
+## The frozen judge (Phase 2)
+
+`judge.py` is the experiment's measuring instrument (spec §4.5): one frozen judge applied
+identically to every arm, so the A→B→C ranking is valid even if the judge is imperfect.
+
+- **Criteria extraction** (gpt-5.5, once/query, cached to `results/judgements/criteria/`):
+  ports PF's `_identify_relevance_criteria_prompt_tmpl` — decomposes the free-text question
+  into weighted, **content-only** criteria summing to 1. No PICO slots, no study-design
+  criteria (relevance = topical bearing, not evidence pedigree).
+- **Per-paper judging** (gpt-5.4-mini, batched via `LLMProcessor`, resumable JSONL shard
+  per query): ports BENCH's per-criterion judge prompt; scored by
+  `metrics.relevance_criteria_score` → `metrics.bucket_0_to_3` (the same functions the
+  recall metric is built on).
+- **Cache** keyed by `(query_id, paper_id)` → `results/judgements/judgements.parquet`. A
+  paper pooled across arms + normalizer runs is judged exactly once; the companion judge
+  spec reuses this cache.
+- The prompts carry a light **policy-research domain framing** (persona + context) for
+  construct validity, but deliberately avoid v2's PICO/evidence-type/hard-geography logic.
+
+### Live smoke test (needs OPENAI access + the gpt-5.x models)
+
+The pure logic is covered offline; to exercise the two real LLM calls from a REPL:
+
+```bash
+uv run python
+```
+```python
+import asyncio
+from judge import extract_criteria, judge_papers, get_cached_levels
+
+crit = extract_criteria("smoke01", "What is the effect of free school meals on attainment in the UK?")
+print([(c.name, c.weight) for c in crit])
+
+papers = [{"paper_id": "P1", "title": "Free school meals and pupil attainment: an RCT",
+           "abstract": "We evaluate universal free school meals on test scores ..."}]
+asyncio.run(judge_papers("smoke01", "...", papers))
+print(get_cached_levels("smoke01"))   # {'P1': 0..3}
+```
+
 ## Conventions
 
 - **REPL-first.** Modules expose objects + `run_xxx()` helpers — no `main()`, no `argparse`,
@@ -67,7 +114,8 @@ boundaries.
 | `config.py` | ✅ Phase 1 | Frozen models, budgets, blend weights, judge thresholds, inflation. |
 | `metrics.py` | ✅ Phase 1 | recall@k_est, corrected nDCG, precision, adjusted F1, k_est inflation. |
 | `test_metrics.py` | ✅ Phase 1 | Parity tests vs BENCH formulas. |
-| `judge.py` | ⬜ Phase 2 | Per-query criteria extraction + per-paper judge + parquet cache. |
+| `judge.py` | ✅ Phase 2 | Per-query criteria extraction + per-paper judge + parquet cache. |
+| `test_judge.py` | ✅ Phase 2 | Offline tests for the judge's pure logic. |
 | `query_analysis.py`, `adaptive.py`, `snowball.py`, `ranking.py` | ⬜ Phase 3 | Shared source-agnostic agentic core. |
 | `retrieval/` | ⬜ Phase 4 | OpenAlex + S2 + dense + enrich + suggest clients. |
 | `queries/queries.jsonl` | ⬜ Phase 5 | ~25 stratified curated queries. |

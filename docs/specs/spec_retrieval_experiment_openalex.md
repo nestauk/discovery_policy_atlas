@@ -418,6 +418,10 @@ report, and the companion judge spec.
 
 **Per-paper judging:**
 - **Model:** gpt-5.4-mini, minimal reasoning, high concurrency (batched, ~50–75 parallel).
+  *(Impl note, 2026-06-15: the backend `get_llm`/`LLMProcessor` path does not expose
+  `reasoning_effort`, so "minimal reasoning" is not yet wired — the model name is set from
+  `config.py`; reasoning-effort is a deferred knob, to add when the judge's cost/quality is
+  tuned. Doesn't affect the parity-tested scoring.)*
 - **Input per paper:** title + abstract (+ enrichment flag) + the query's weighted criteria.
 - **Output per criterion:** `Perfectly Relevant | Somewhat Relevant | Not Relevant`,
   plus a verbatim supporting snippet (≤20 words) and a ≤30-word summary.
@@ -431,6 +435,19 @@ report, and the companion judge spec.
 
 This judge is *used*, not *validated*, in this experiment. Its quality (vs v2's judge and
 vs human labels) is the companion spec's subject.
+
+**Prompt framing (impl note, 2026-06-15).** Both judge prompts carry a light
+**policy-research domain framing** — an "expert research and policy analyst" persona and a
+note that the question comes from an evidence-synthesis context — to improve the judge's
+*construct validity* (proxying a Nesta policy researcher's notion of relevance). Because this
+framing is query-independent and applied identically to every arm, it does not threaten the
+cross-arm ranking validity (§1, §7). It deliberately does **not** import v2's
+`RELEVANCE_SYSTEM_PROMPT` machinery: **no PICO/wizard slots** (population/outcome/geography
+enter via the query text per §4.1, then the criteria-extraction step turns them into content
+criteria), **no evidence-type preference** (study design is the strength-scoring layer's job,
+§4.7 — a judge that rewarded RCTs/SRs would corrupt both recall and the evidence-mix metric),
+and **no hard geography exclusion** (soft prior only, §4.3a). Criteria are content-only,
+matching PF's `_identify_relevance_criteria_prompt_tmpl`.
 
 ### 4.6 Ground truth: padded pooled normalizer
 

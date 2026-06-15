@@ -1,0 +1,9 @@
+# Local env + caches — never commit
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Experiment outputs: judgement cache, parquet results, per-run cost logs.
+# These are regenerable and can be large; keep them out of git.
+results/
