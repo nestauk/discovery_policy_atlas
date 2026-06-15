@@ -575,6 +575,12 @@ The only gating dependency is API throughput (no human-in-the-loop).
   origin attribution will show whether it earns its place.
 - **OpenAlex rate limits:** forward-citation snowballing is request-heavy (one `cites:`
   call per seed). Polite pool + caching mitigate.
+- **Semantic Scholar 1 req/s ceiling (cumulative across *all* endpoints):** the binding
+  throughput constraint for Arm C — dense queries, per-seed forward `/citations`, and batch
+  lookups all draw on the same 1/s budget, so Arm C is effectively serialized. Set the S2
+  client **below** 1 req/s, cache every response, and expect Arm C wall-time to be dominated by
+  this (factor it into the cost co-headline). Cohere trial-key limits are secondary (batch +
+  cache mitigate).
 - **Source coverage:** Arms A/B are OpenAlex-only and Arm C is S2-only; neither covers grey
   literature well, so all three may understate the real coverage gap (grey literature →
   Overton, phase 2).
@@ -613,5 +619,5 @@ The only gating dependency is API throughput (no human-in-the-loop).
 - `OPENALEX_API_KEY` + `OPENALEX_EMAIL` (polite pool) — already in backend config
 - Crossref polite-pool mailto (no key needed)
 - OpenAI access to gpt-5.4-mini and gpt-5.5
-- **Semantic Scholar API key** (Arm C — relevance/snippet/citations/references/batch; higher rate limits than keyless)
-- **Cohere API key** (Arm C blend + §4.7 rerank sweep)
+- **Semantic Scholar API key** (Arm C — relevance/snippet/citations/references/batch). **Rate limit: 1 request/second cumulative across *all* endpoints** — set the client below 1 req/s (serialize + throttle) to avoid rejected requests; cache every call. Dominates Arm C wall-time (§7).
+- **Cohere API key** (Arm B & C content blend + §4.7 rerank sweep). **Trial keys are free, rate-limited, and non-commercial** — fine for this research experiment; if throttling bites, batch ≤500 docs/req (already specced) and cache rerank scores by `(query_id, corpus_id)`.
