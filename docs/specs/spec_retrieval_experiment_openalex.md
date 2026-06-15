@@ -3,7 +3,7 @@
 **Status:** Agreed via design interview, 2026-06-12 (split from the combined spec 2026-06-13). **Rev. 2026-06-15:** added **Arm C** — a faithful Paper Finder agent on the Semantic Scholar (S2) API, now that S2 access is available (§4.3a); related edits throughout (§2, §3, §4.4–4.7, §5–9).
 **Owner:** Aidan Kelly
 **Timebox:** ~3 weeks, one person — **all three arms built and evaluated together** as one three-way deliverable (the A→B→C ladder). The agentic core is built once (source-agnostic) and reused across Arms B and C; Arm A is a thin baseline wrapper (§6).
-**Code location:** `scripts/research/retrieval_experiments/` (untracked research folder — not part of the deployable repo)
+**Code location:** `backend/testing/r_and_d/search_experiments/` (untracked research folder, alongside the other `r_and_d` experiments — not part of the deployable repo). *Rev. 2026-06-15: relocated here from `scripts/research/retrieval_experiments/` so it sits with `evidence_categorisation`/`boolean_queries` and can consume the backend package as an editable path dep.*
 **Deliverable:** Findings report + team session; direct input to the v3 `retrieve` tool spec
 **Companion spec:** `spec_relevance_judge_experiment.md` — evaluates the *quality* of the relevance judge this experiment uses as an instrument. Run **after** this one (it reuses this experiment's candidate pool + cached judgments).
 
@@ -481,8 +481,8 @@ baseline found" exhibit for the team session.
 ## 5. Harness & layout
 
 ```
-scripts/research/retrieval_experiments/
-  pyproject.toml          # uv project; backend as editable path dep (v2 baseline, OpenAlexService reuse)
+backend/testing/r_and_d/search_experiments/
+  pyproject.toml          # uv project; backend as editable path dep at ../../.. (v2 baseline, OpenAlexService reuse)
   README.md
   config.py               # frozen models, budgets, N values, blend-weight table — one dataclass, no config system
   queries/queries.jsonl

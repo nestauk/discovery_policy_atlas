@@ -1,0 +1,25 @@
+[project]
+name = "search-experiments"
+version = "0.1.0"
+description = "ASTA-inspired retrieval experiment (Arms A/B/C) — research code, not shipped"
+requires-python = ">=3.12"
+dependencies = [
+    # The v2 baseline + OpenAlexService + LLM helpers live in the backend package,
+    # which we consume as an editable path dependency (see [tool.uv.sources]).
+    "backend",
+    "pandas>=2.2.3",
+    "pyarrow>=15.0.0",        # parquet caches (results/, judgements/)
+    "httpx>=0.28.1",          # S2 + Crossref + Europe PMC clients
+    "cohere>=5.0.0",          # rerank-english-v3.0 (Arms B & C content blend)
+    "pytest>=8.0.0",          # parity tests (test_metrics.py)
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.uv.sources]
+# Editable so changes to the live backend (e.g. a new OpenAlex field) flow through
+# without reinstalling. Path is relative to this pyproject: this dir lives at
+# backend/testing/r_and_d/search_experiments, so ../../.. is the backend package root.
+backend = { path = "../../..", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
