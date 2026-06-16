@@ -4,21 +4,32 @@ from typing import Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 
+DEFAULT_AUDIENCE = "senior UK policymakers"
 
-def build_discover_themes_prompt() -> ChatPromptTemplate:
+
+def _audience_phrase(user_context: str) -> str:
+    """Return an audience phrase from user_context, falling back to the default."""
+    return user_context.strip() if user_context.strip() else DEFAULT_AUDIENCE
+
+
+def build_discover_themes_prompt(user_context: str = "") -> ChatPromptTemplate:
     """Prompt for discovering themes from concept descriptions, guided by a research question.
+
+    Args:
+        user_context: Free-text user profile for audience framing.
 
     Returns:
         ChatPromptTemplate: Template expecting variables: critique_instruction, rq, concepts
     """
+    audience = _audience_phrase(user_context)
     system = (
         "You are an expert in qualitative data analysis, specialising in synthesising "
-        "complex information for senior UK policymakers. Your core skill is to identify "
+        f"complex information for: {audience}. Your core skill is to identify "
         "a clear, logical, and insightful thematic structure from diverse sources."
     )
     user = (
         "<role>\n"
-        "You are an expert in qualitative data analysis, specialising in synthesising complex information for senior UK policymakers. "
+        f"You are an expert in qualitative data analysis, specialising in synthesising complex information for: {audience}. "
         "Your core skill is to identify a clear, logical, and insightful thematic structure from diverse sources.\n"
         "</role>\n"
         "<task>\n"
@@ -142,22 +153,26 @@ def build_classify_concept_prompt() -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
 
 
-def build_impact_summary_prompt() -> ChatPromptTemplate:
+def build_impact_summary_prompt(user_context: str = "") -> ChatPromptTemplate:
     """Prompt for writing a short impact summary for a theme.
+
+    Args:
+        user_context: Free-text user profile for audience framing.
 
     Returns:
         ChatPromptTemplate: Template expecting variables: name, sample
     """
-    system = "You are a specialist in policy communication. Your expertise is distilling complex evidence into concise, clear, and impactful summaries for senior government officials."
+    audience = _audience_phrase(user_context)
+    system = f"You are a specialist in policy communication. Your expertise is distilling complex evidence into concise, clear, and impactful summaries for: {audience}."
     user = (
         "<role>\n"
-        "You are a specialist in policy communication. Your expertise is distilling complex evidence into concise, clear, and impactful summaries for senior government officials.\n"
+        f"You are a specialist in policy communication. Your expertise is distilling complex evidence into concise, clear, and impactful summaries for: {audience}.\n"
         "</role>\n"
         "<task>\n"
         "Write an evidence-based summary for the policy theme provided below. The summary must focus exclusively on the expected impacts and overall effectiveness of the interventions described in the representative concepts.\n"
         "</task>\n"
         "<constraints>\n\n"
-        "Audience: The summary is for a senior UK policy advisor who needs to understand the key takeaway in under 30 seconds.\n\n"
+        f"Audience: The summary is for: {audience}. They need to understand the key takeaway in under 30 seconds.\n\n"
         "Focus: Synthesise the outcomes and results from the concepts. Do not describe the concepts themselves, only their impact.\n\n"
         "Tone: The tone must be objective, formal, and confident.\n\n"
         "Word Count: Your response must be strictly between 35 and 45 words.\n\n"
@@ -173,19 +188,23 @@ def build_impact_summary_prompt() -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
 
 
-def build_executive_briefing_prompt() -> ChatPromptTemplate:
+def build_executive_briefing_prompt(user_context: str = "") -> ChatPromptTemplate:
     """Prompt for synthesising the final executive briefing.
+
+    Args:
+        user_context: Free-text user profile for audience framing.
 
     Returns:
         ChatPromptTemplate: Template expecting variables: rq, payload
     """
+    audience = _audience_phrase(user_context)
     system = (
-        "You are a Principal Private Secretary in the UK Civil Service. Your primary responsibility is to synthesise complex information into "
-        "authoritative, concise, and politically neutral executive briefings for cabinet ministers."
+        f"You are writing for: {audience}. Your primary responsibility is to synthesise complex information into "
+        "authoritative, concise, and politically neutral executive briefings."
     )
     user = (
         "<role>\n"
-        "You are a Principal Private Secretary in the UK Civil Service. Your primary responsibility is to synthesise complex information into authoritative, concise, and politically neutral executive briefings for cabinet ministers.\n"
+        f"You are writing for: {audience}. Your primary responsibility is to synthesise complex information into authoritative, concise, and politically neutral executive briefings.\n"
         "</role>\n"
         "<task>\n"
         "Synthesise the provided STRUCTURED DATA into a formal executive briefing that directly answers the user's RESEARCH QUESTION. The output must be highly structured and scannable.\n"
@@ -198,7 +217,7 @@ def build_executive_briefing_prompt() -> ChatPromptTemplate:
         "Promising Interventions: Under this heading, provide 2-3 concise bullet points summarising the most effective solutions or policy levers.\n"
         "</briefing_structure>\n\n"
         "<constraints>\n\n"
-        "Audience & Tone: The reader is a time-poor cabinet minister. The tone must be formal, objective, and confident.\n\n"
+        f"Audience & Tone: The reader is: {audience}. The tone must be formal, objective, and confident.\n\n"
         "Evidence Grounding: Your briefing must be a direct synthesis of the provided STRUCTURED DATA only. Do not invent information or draw external conclusions.\n\n"
         "Conciseness: Each bullet point must be a single, clear, and impactful phrase or sentence. Avoid compound sentences.\n\n"
         "Directness: Do not restate or quote the research question in the output; provide the answer as a clear conclusion.\n\n"
@@ -307,20 +326,24 @@ def build_impact_snapshot_prompt() -> ChatPromptTemplate:
 # =============================================================================
 
 
-def build_background_section_prompt() -> ChatPromptTemplate:
+def build_background_section_prompt(user_context: str = "") -> ChatPromptTemplate:
     """Prompt for generating the background/context section using RAG evidence.
+
+    Args:
+        user_context: Free-text user profile for audience framing.
 
     Returns:
         ChatPromptTemplate: Template expecting variables:
             research_question, issues_summary, evidence_context
     """
+    audience = _audience_phrase(user_context)
     system = (
         "You are a policy research analyst. Your task is to write a concise background "
         "section that contextualises a policy issue using evidence from retrieved documents."
     )
     user = (
         "<role>\n"
-        "You are a policy research analyst writing for senior UK government officials.\n"
+        f"You are a policy research analyst writing for: {audience}.\n"
         "</role>\n\n"
         "<task>\n"
         "Write a background section (2-3 paragraphs) that contextualises the policy issue. "
@@ -401,21 +424,25 @@ def build_intervention_impact_prompt() -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
 
 
-def build_recommendations_prompt() -> ChatPromptTemplate:
+def build_recommendations_prompt(user_context: str = "") -> ChatPromptTemplate:
     """Prompt for generating RAG-grounded policy recommendations.
+
+    Args:
+        user_context: Free-text user profile for audience framing.
 
     Returns:
         ChatPromptTemplate: Template expecting variables:
             research_question, top_interventions, evidence_context
     """
+    audience = _audience_phrase(user_context)
     system = (
         "You are a senior policy advisor. Your task is to write actionable, "
-        "evidence-based recommendations for government ministers. "
+        f"evidence-based recommendations for: {audience}. "
         "You will output structured JSON with exactly 3-4 recommendations."
     )
     user = (
         "<role>\n"
-        "You are a senior policy advisor writing recommendations for UK cabinet ministers.\n"
+        f"You are a senior policy advisor writing recommendations for: {audience}.\n"
         "</role>\n\n"
         "<task>\n"
         "Write exactly 3-4 policy recommendations based on the evidence below.\n"
@@ -494,20 +521,24 @@ def build_impact_narrative_prompt() -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages([("system", system), ("user", user)])
 
 
-def build_core_answer_prompt() -> ChatPromptTemplate:
+def build_core_answer_prompt(user_context: str = "") -> ChatPromptTemplate:
     """Prompt for generating the core answer at the top of the briefing.
+
+    Args:
+        user_context: Free-text user profile for audience framing.
 
     Returns:
         ChatPromptTemplate: Template expecting variables:
             research_question, top_interventions, intervention_count, background_context
     """
+    audience = _audience_phrase(user_context)
     system = (
-        "You are a Principal Private Secretary. Your task is to write a headline "
-        "answer that directly addresses a minister's research question."
+        f"You are writing for: {audience}. Your task is to write a headline "
+        "answer that directly addresses their research question."
     )
     user = (
         "<role>\n"
-        "You are a Principal Private Secretary writing executive summaries for UK ministers.\n"
+        f"You are writing executive summaries for: {audience}.\n"
         "</role>\n\n"
         "<task>\n"
         "Write a headline answer (2-3 sentences) that directly addresses the research question. "

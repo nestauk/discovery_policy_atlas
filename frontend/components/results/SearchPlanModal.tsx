@@ -205,6 +205,12 @@ export function SearchPlanModal({ project }: SearchPlanModalProps) {
 
           <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
             <div className="text-xs uppercase tracking-wide text-gray-500">Refinement</div>
+            {searchQuery.user_context && (
+              <div>
+                <span className="font-medium text-sm">Your context</span>
+                <div className="mt-2 text-sm text-gray-700 line-clamp-2">{searchQuery.user_context}</div>
+              </div>
+            )}
             <div>
               <span className="font-medium text-sm">Implementation constraints</span>
               {hasImplementationConstraints ? (

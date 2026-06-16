@@ -352,7 +352,7 @@ requires-dist = [
     { name = "langchain", specifier = ">=0.1.0" },
     { name = "langchain-core", specifier = ">=0.1.0" },
     { name = "langchain-openai", specifier = ">=0.1.0" },
-    { name = "langfuse", specifier = ">=2.60.7" },
+    { name = "langfuse", specifier = "<4" },
     { name = "langgraph", specifier = ">=0.5.4" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.6.14" },

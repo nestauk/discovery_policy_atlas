@@ -1658,8 +1658,14 @@ Additional guidance:
         """Generate recommendations using structured output to ensure format consistency."""
         evidence_context = await self._format_evidence_for_generation(ctx)
 
+        user_context = ctx.state.get("user_context") or ""
+        audience_line = (
+            f"You are writing policy recommendations for the following audience: {user_context}"
+            if user_context
+            else "You are writing policy recommendations for UK cabinet ministers."
+        )
         prompt = f"""
-You are writing policy recommendations for UK cabinet ministers.
+{audience_line}
 
 Requirements:
 - Output exactly 3-4 recommendations.

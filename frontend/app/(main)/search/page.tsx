@@ -100,6 +100,7 @@ export default function SearchPage() {
         max_results: context.maxResults,
         additional_questions: context.additionalQuestions,
         use_case: context.useCase ?? undefined,
+        user_context: context.userContext || undefined,
         ...(hasImplementationConstraints
           ? { implementation_constraints: implementationConstraints }
           : {}),

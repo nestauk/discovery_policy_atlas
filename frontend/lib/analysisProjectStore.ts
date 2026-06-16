@@ -51,6 +51,7 @@ export interface AnalysisProject {
     relevance_enabled?: boolean
     use_abstracts_only?: boolean
     use_case?: string
+    user_context?: string
   }
   progress?: {
     stage_label: string
