@@ -3,6 +3,7 @@
 .pytest_cache/
 __pycache__/
 *.pyc
+*~          # editor backup files
 
 # Experiment outputs: judgement cache, parquet results, per-run cost logs.
 # These are regenerable and can be large; keep them out of git.

@@ -37,11 +37,11 @@ uv sync
 ## Run the parity tests (Phase 1 deliverable)
 
 `metrics.py` reimplements the ASTA-bench metric formulas (~100 lines) so we don't pull in
-`inspect-ai` + a HuggingFace dataset download. `test_metrics.py` pins parity against
+`inspect-ai` + a HuggingFace dataset download. `tests/test_metrics.py` pins parity against
 hand-computed values taken from the BENCH source:
 
 ```bash
-uv run pytest test_metrics.py -v
+uv run pytest tests/test_metrics.py -v
 ```
 
 Expect **33 passed**. The tests assert, among others, the k_est inflation worked examples
@@ -49,12 +49,22 @@ Expect **33 passed**. The tests assert, among others, the k_est inflation worked
 bounds (sorted-desc → 1.0, sorted-asc → 0.0, all-equal → 0.0), and the 0–3 bucketing
 boundaries.
 
-`test_judge.py` (Phase 2) covers the judge's pure logic offline — dynamic output-field
-construction, weight normalisation, per-row scoring (cross-checked against `metrics.py`),
-and parquet-cache consolidation:
+`tests/test_judge.py` (Phase 2) covers the judge's pure logic offline — dynamic
+output-field construction, weight normalisation, per-row scoring (cross-checked against
+`metrics.py`), and parquet-cache consolidation:
 
 ```bash
 uv run pytest -q          # both suites: 43 passed
+```
+
+## Smoke tests (one per phase)
+
+`tests/` asserts pure logic offline; `smoke/` *runs the real pipeline* (live LLM/API calls)
+and **prints what each stage produces**. One script per phase — see `smoke/README.md`:
+
+```bash
+uv run smoke/phase1_metrics.py    # offline — metric worked examples
+uv run smoke/phase2_judge.py      # live — OpenAlex retrieve -> judge -> 0-3 levels
 ```
 
 ## The frozen judge (Phase 2)
@@ -76,25 +86,8 @@ identically to every arm, so the A→B→C ranking is valid even if the judge is
 - The prompts carry a light **policy-research domain framing** (persona + context) for
   construct validity, but deliberately avoid v2's PICO/evidence-type/hard-geography logic.
 
-### Live smoke test (needs OPENAI access + the gpt-5.x models)
-
-The pure logic is covered offline; to exercise the two real LLM calls from a REPL:
-
-```bash
-uv run python
-```
-```python
-import asyncio
-from judge import extract_criteria, judge_papers, get_cached_levels
-
-crit = extract_criteria("smoke01", "What is the effect of free school meals on attainment in the UK?")
-print([(c.name, c.weight) for c in crit])
-
-papers = [{"paper_id": "P1", "title": "Free school meals and pupil attainment: an RCT",
-           "abstract": "We evaluate universal free school meals on test scores ..."}]
-asyncio.run(judge_papers("smoke01", "...", papers))
-print(get_cached_levels("smoke01"))   # {'P1': 0..3}
-```
+The live end-to-end demonstration of the judge (criteria → retrieve → judge → levels) is
+`smoke/phase2_judge.py` above.
 
 ## Conventions
 
@@ -113,9 +106,9 @@ print(get_cached_levels("smoke01"))   # {'P1': 0..3}
 |---|---|---|
 | `config.py` | ✅ Phase 1 | Frozen models, budgets, blend weights, judge thresholds, inflation. |
 | `metrics.py` | ✅ Phase 1 | recall@k_est, corrected nDCG, precision, adjusted F1, k_est inflation. |
-| `test_metrics.py` | ✅ Phase 1 | Parity tests vs BENCH formulas. |
 | `judge.py` | ✅ Phase 2 | Per-query criteria extraction + per-paper judge + parquet cache. |
-| `test_judge.py` | ✅ Phase 2 | Offline tests for the judge's pure logic. |
+| `tests/` | ✅ Phase 1–2 | Offline pytest suites (`test_metrics.py`, `test_judge.py`). |
+| `smoke/` | ✅ Phase 1–2 | Verbose per-phase end-to-end scripts (`phaseN_*.py`). |
 | `query_analysis.py`, `adaptive.py`, `snowball.py`, `ranking.py` | ⬜ Phase 3 | Shared source-agnostic agentic core. |
 | `retrieval/` | ⬜ Phase 4 | OpenAlex + S2 + dense + enrich + suggest clients. |
 | `queries/queries.jsonl` | ⬜ Phase 5 | ~25 stratified curated queries. |

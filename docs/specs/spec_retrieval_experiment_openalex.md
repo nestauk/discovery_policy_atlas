@@ -519,9 +519,14 @@ backend/testing/r_and_d/search_experiments/
   judge.py                # per-query criteria extraction (shared across arms) + criteria-based judge + persistent cache (consumed by companion judge spec too)
   adaptive.py             # Arms B & C: adaptive_load (Batched Thompson Sampling) + HighlyRelevantShortcircuit (PF: dense/relevance_loading_optimization.py)
   metrics.py              # recall@k_est, corrected nDCG, adjusted F1, inflation factor
-  test_metrics.py         # parity tests vs asta-bench formulas (incl. inflation worked examples)
   ranking.py              # Arms B & C: intent blend + Cohere rerank (PF: common/sorting.py, external_api/rerank/cohere.py); C adds snippet term; + weight/rerank sweep
   collect_results.py      # aggregate to per-arm/per-query tables (pandas)
+  tests/                  # pytest unit tests (parity tests vs asta-bench formulas, judge pure logic)
+    test_metrics.py       # parity tests (incl. inflation worked examples)
+    test_judge.py         # judge schema/scoring/consolidation (offline)
+  smoke/                  # one verbose end-to-end script per phase (live calls; prints each stage)
+    _bootstrap.py         # sys.path + backend/.env setup, imported first by each smoke script
+    phaseN_<name>.py      # e.g. phase1_metrics.py, phase2_judge.py
   results/                # parquet + per-run cost logs (incl. the shared judgments/ cache)
   report/findings.md
 ```

@@ -24,3 +24,7 @@ backend = { path = "../../..", editable = true }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# tests/ live in a subdir; pythonpath="." puts the project root (config.py, metrics.py,
+# judge.py) on sys.path so `from metrics import ...` resolves with zero per-test juggling.
+pythonpath = ["."]
+testpaths = ["tests"]
