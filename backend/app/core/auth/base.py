@@ -46,13 +46,24 @@ class ProviderClaims:
 class CurrentUser:
     """The authenticated user as seen by API handlers.
 
-    This is the shape that the existing routes consume. It mirrors
-    ``ProviderClaims`` today; in later phases it will diverge as we add an
-    internal Policy Atlas ``user_id`` and resolve organisations from the
-    database rather than from token claims.
+    ``user_id`` is the provider-specific subject (Clerk ``user_xxx``, Cognito
+    ``sub`` UUID) kept for backward compatibility with existing routes.
+    ``internal_user_id`` is the app-owned UUID from the ``users`` table,
+    populated by ``find_or_provision``. New code should prefer
+    ``internal_user_id``; old code continues to work via ``user_id``.
+
+    Attributes:
+        user_id: Provider-specific subject identifier (legacy).
+        internal_user_id: App-owned UUID from the ``users`` table.
+        email: User email.
+        name: Display name.
+        organization_id: Active organisation ID (provider-specific or app-owned).
+        organization_slug: Organisation slug.
+        organization_role: Role within the active organisation.
     """
 
     user_id: str
+    internal_user_id: Optional[str] = None
     email: Optional[str] = None
     name: Optional[str] = None
     organization_id: Optional[str] = None

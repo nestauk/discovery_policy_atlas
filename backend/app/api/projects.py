@@ -310,6 +310,7 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
                 "p_organization_slug": current_user.organization_slug,
                 "p_demo_org_id": demo_org_id,
                 "p_admin_org_slug": ADMIN_ORG_SLUG,
+                "p_internal_user_id": current_user.internal_user_id,
             },
         ).execute()
 
