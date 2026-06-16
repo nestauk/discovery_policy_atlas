@@ -7,6 +7,7 @@ inflation/recall/nDCG behaviour is visible rather than just asserted. Run:
 """
 
 import _bootstrap  # noqa: F401  -- path + env setup, must be first
+from _bootstrap import rule
 
 from metrics import (
     find_dcg,
@@ -18,12 +19,8 @@ from metrics import (
 )
 
 
-def _rule(title: str) -> None:
-    print("\n" + "=" * 72 + f"\n  {title}\n" + "=" * 72)
-
-
 def run_smoke():
-    _rule("1. inflation_factor / k_est  (pooled-normalizer denominator, §4.6)")
+    rule("1. inflation_factor / k_est  (pooled-normalizer denominator, §4.6)")
     print("   perfect_count  factor   k_est")
     for n in (1, 2, 3, 5, 10, 100):
         print(f"   {n:>12}   {inflation_factor(n):5.3f}   {k_est(n):>5}")
@@ -31,7 +28,7 @@ def run_smoke():
         "   note: only count=2 clears the x2 floor (x2.885); the x10 cap bites only at count=1"
     )
 
-    _rule("2. recall_at_k_est  (Perfect-in-top-k_est / k_est)")
+    rule("2. recall_at_k_est  (Perfect-in-top-k_est / k_est)")
     ranked = ["a", "x", "b", "c"]  # 'x' is unjudged -> dropped before the window
     judgements = {"a": 3, "b": 3, "c": 0}
     pool_perfect = 1  # -> k_est = 10
@@ -42,12 +39,12 @@ def run_smoke():
         "   (denominator is k_est, NOT raw perfect count -> recall is capped at 1/factor)"
     )
 
-    _rule("3. precision_at_k")
+    rule("3. precision_at_k")
     print(
         f"   precision@2 over [a,b,c,d] judged -> {precision_at_k(['a','b','c','d'], {'a':3,'b':0,'c':3,'d':3}, k=2)}"
     )
 
-    _rule("4. find_dcg (NATURAL log) + lower_bound_corrected_ndcg")
+    rule("4. find_dcg (NATURAL log) + lower_bound_corrected_ndcg")
     rels = [3, 0, 2, 1]
     print(f"   relevances={rels}")
     print(f"   find_dcg = {find_dcg(rels):.4f}  (natural-log discount, not log2)")

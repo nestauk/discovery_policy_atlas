@@ -153,6 +153,12 @@ The criteria, in order, are:
 # --------------------------------------------------------------------------- #
 # Criteria extraction (gpt-5.5, once per query, cached)
 # --------------------------------------------------------------------------- #
+def _read_criteria_file(path: Path) -> list[RelevanceCriterion]:
+    """Parse a cached criteria JSON file -> RelevanceCriterion list (no path checks)."""
+    payload = json.loads(path.read_text())
+    return [RelevanceCriterion(**c) for c in payload["criteria"]]
+
+
 def load_criteria(query_id: str) -> list[RelevanceCriterion]:
     """Read cached criteria for a query (no LLM). Raises if not yet extracted."""
     path = CRITERIA_DIR / f"{query_id}.json"
@@ -161,8 +167,7 @@ def load_criteria(query_id: str) -> list[RelevanceCriterion]:
             f"No cached criteria for query {query_id!r} at {path}. "
             f"Run extract_criteria({query_id!r}, query_text) first."
         )
-    payload = json.loads(path.read_text())
-    return [RelevanceCriterion(**c) for c in payload["criteria"]]
+    return _read_criteria_file(path)
 
 
 def _normalise_weights(criteria: list[RelevanceCriterion]) -> list[RelevanceCriterion]:
@@ -289,7 +294,7 @@ def _format_paper(paper: dict) -> str:
     abstract = paper.get("abstract") or ""
     title_only = (not abstract) or paper.get("text_basis") == "title_only"
     flag = " [TITLE ONLY — no abstract available]" if title_only else ""
-    body = abstract if abstract else "No abstract available."
+    body = abstract or "No abstract available."
     return f"Title: {title}{flag}\n\nAbstract: {body}"
 
 
@@ -305,7 +310,7 @@ def score_row(
     treated as Not Relevant (0) with a warning so a single malformed field can't crash a run.
     """
     codes: list[int] = []
-    for i, _c in enumerate(criteria, 1):
+    for i in range(1, len(criteria) + 1):
         label = row.get(f"criterion_{i}_relevance")
         code = CONFIG.judge.label_codes.get(label)
         if code is None:
@@ -397,10 +402,7 @@ def _consolidate(
     records: list[dict] = []
     for shard in shards:
         qid = shard.stem
-        criteria = [
-            RelevanceCriterion(**c)
-            for c in json.loads((criteria_dir / f"{qid}.json").read_text())["criteria"]
-        ]
+        criteria = _read_criteria_file(criteria_dir / f"{qid}.json")
         raw = pd.read_json(shard, lines=True)
         if raw.empty:
             continue
