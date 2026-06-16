@@ -71,12 +71,14 @@ class AnalysisService:
         run_export_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Created run directory: %s", run_export_dir)
 
+        # Compute once for all stages that need it
+        search_context_dict = (
+            config.search_context.model_dump() if config.search_context else None
+        )
+
         # Step 1: build references
         with StageTimer(monitor, "references"):
             references_service = ReferencesService(export_dir=str(run_export_dir))
-            search_context_dict = (
-                config.search_context.model_dump() if config.search_context else None
-            )
 
             (
                 references_csv,
@@ -98,8 +100,6 @@ class AnalysisService:
 
         # Count rows
         try:
-            import pandas as pd
-
             df = pd.read_csv(references_csv)
             total_references = len(df)
         except Exception:
@@ -115,11 +115,6 @@ class AnalysisService:
         if config.relevance_enabled:
             with StageTimer(monitor, "relevance"):
                 logger.info("Run %s starting relevance checking", run_id)
-                search_context_dict = (
-                    config.search_context.model_dump()
-                    if config.search_context
-                    else None
-                )
 
                 relevance_service = RelevanceService(
                     query=config.query,
@@ -264,6 +259,43 @@ class AnalysisService:
                     len(acquired),
                 )
                 monitor.record_metric("parsed_count", parsed_count)
+
+        # Early return for preview mode — skip extraction and synthesis
+        if config.use_abstracts_only:
+            result = RunResult(
+                run_id=run_id,
+                total_references=total_references,
+                relevant_references=relevant_references,
+                references_csv_path=str(references_csv),
+                extractions_json_path=None,
+                boolean_queries=generated_boolean_queries,
+                semantic_query=generated_semantic_query,
+            )
+
+            try:
+                with StageTimer(monitor, "storage"):
+                    logger.info("Starting Supabase upload for preview run %s", run_id)
+                    storage_service = AnalysisStorageService()
+                    storage_project_id = await storage_service.store_analysis_run(
+                        config, result, project_id, user_id, user_name
+                    )
+                    logger.info(
+                        "Successfully stored preview run %s to project %s",
+                        run_id,
+                        storage_project_id or project_id,
+                    )
+            except Exception as e:
+                logger.error(
+                    "Failed to store preview run %s in Supabase: %s", run_id, e
+                )
+
+            if not settings.DEBUG_ANALYSIS_FILES:
+                self._cleanup_run_files(run_export_dir)
+
+            monitor.log_snapshot("Preview pipeline complete (abstracts only)")
+            monitor.log_summary()
+
+            return result
 
         # Step 4: extraction using LangChain workflow
         with StageTimer(monitor, "extraction"):
@@ -595,67 +627,42 @@ class AnalysisService:
         except (ValueError, TypeError):
             return None
 
-    def _parse_authors(self, value) -> List[str] | None:
-        """Parse authors field which might be a string or list."""
-        if pd.isna(value) or value is None or value == "":
-            return None
-
-        if isinstance(value, list):
-            return [str(author) for author in value]
-
-        # Try JSON parsing for list-like strings first
-        try:
-            import json
-
-            parsed = json.loads(str(value))
-            if isinstance(parsed, list):
-                return [str(author) for author in parsed]
-            elif isinstance(parsed, str):
-                return [parsed]
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-        # Try literal_eval for Python list representations like "['Author Name']"
-        try:
-            import ast
-
-            parsed = ast.literal_eval(str(value))
-            if isinstance(parsed, list):
-                return [str(author) for author in parsed]
-            elif isinstance(parsed, str):
-                return [parsed]
-        except (ValueError, SyntaxError):
-            pass
-
-        # Fallback to comma separation
-        return [author.strip() for author in str(value).split(",") if author.strip()]
-
     def _parse_list(self, value) -> List[str] | None:
-        """Parse a generic list field."""
+        """Parse a field that may be a list, JSON string, Python repr, or comma-separated."""
         if pd.isna(value) or value is None or value == "":
             return None
 
         if isinstance(value, list):
             return [str(item) for item in value]
 
-        try:
-            import json
+        import ast
+        import json
 
-            parsed = json.loads(str(value))
+        str_value = str(value)
+
+        # Try JSON first
+        try:
+            parsed = json.loads(str_value)
             if isinstance(parsed, list):
                 return [str(item) for item in parsed]
+            if isinstance(parsed, str):
+                return [parsed]
         except (json.JSONDecodeError, ValueError):
             pass
 
+        # Try Python literal_eval for repr-style strings like "['item']"
         try:
-            import ast
-
-            parsed = ast.literal_eval(str(value))
+            parsed = ast.literal_eval(str_value)
             if isinstance(parsed, list):
                 return [str(item) for item in parsed]
-            elif isinstance(parsed, str):
+            if isinstance(parsed, str):
                 return [parsed]
         except (ValueError, SyntaxError):
             pass
 
-        return [item.strip() for item in str(value).split(",") if item.strip()]
+        # Fallback to comma separation
+        return [item.strip() for item in str_value.split(",") if item.strip()]
+
+    def _parse_authors(self, value) -> List[str] | None:
+        """Parse authors field -- delegates to the generic list parser."""
+        return self._parse_list(value)
