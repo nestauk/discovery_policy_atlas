@@ -78,6 +78,7 @@ class SearchContext(BaseModel):
     max_results: Optional[int] = None
     additional_questions: List[str] = Field(default_factory=list)
     implementation_constraints: Optional[ImplementationConstraints] = None
+    user_context: Optional[str] = None
     # Collected for analytics; does not affect search behavior in alpha
     # Keep in sync with frontend/components/search/SearchWizard.tsx UseCase type
     use_case: Optional[

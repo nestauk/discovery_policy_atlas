@@ -73,6 +73,7 @@ class SynthesisState(TypedDict, total=False):
     target_outcomes: List[str]  # e.g., ["body weight/size reduction"]
     target_geography: List[str]  # e.g., ["UK"]
     target_inner_setting: List[str]  # e.g., ["Schools"]
+    user_context: str  # Free-text user profile for audience framing
 
     # Raw data
     raw_extractions: List[Dict]
