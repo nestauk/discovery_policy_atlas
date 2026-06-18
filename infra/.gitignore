@@ -1,0 +1,18 @@
+*.swp
+package-lock.json
+__pycache__
+.pytest_cache
+.venv
+*.egg-info
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+
+# Ignore CDK context file, which may contain environment-specific values
+cdk.context.json
+
+# Ignore local bundling for run_migrations, if present
+infra/deploy_functions/run_migrations/*
+!infra/deploy_functions/run_migrations/run_migrations.py
+!infra/deploy_functions/run_migrations/migrations

@@ -73,6 +73,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
     target_geography = search_query.get("geography") or ["UK"]
     target_inner_setting = search_query.get("inner_setting") or []
     implementation_constraints = search_query.get("implementation_constraints") or {}
+    user_context = search_query.get("user_context") or ""
     # Normalise to list[str]
     if isinstance(target_population, str):
         target_population = [target_population]
@@ -159,6 +160,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
             "id": str(row.get("id")),
             "doc_uuid": doc_uuid,
             "doc_id": doc_id,
+            "raw_data": raw,
         }
         if et == "intervention":
             raw_st = clean_null_string(raw.get("study_type") or raw.get("type"))
@@ -261,6 +263,7 @@ async def load_raw_extractions(state: SynthesisState) -> SynthesisState:
         "target_geography": target_geography,
         "target_inner_setting": target_inner_setting,
         "implementation_constraints": implementation_constraints,
+        "user_context": user_context,
         "doc_metadata": doc_metadata,
         "doc_scores": doc_scores,
         "extraction_to_doc": extraction_to_doc,

@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { create } from "zustand";
 import { useAPI } from '@/lib/api';
 import type { AnalysisProject } from '@/lib/analysisProjectStore';
+import { useUserProfileStore } from '@/lib/userProfileStore';
 import { estimateAnalysisDurationRange } from '@/lib/analysisTimingHeuristic';
 import { RefineTutorial } from './RefineTutorial';
 import { Badge } from '@/components/ui/badge';
@@ -195,6 +196,7 @@ export type SearchContext = {
   additionalQuestions: string[]; // Additional research questions
   maxResults: number;
   useCase: UseCase | null;
+  userContext: string;
 };
 
 // ---------------- STATE ----------------
@@ -225,6 +227,7 @@ interface WizardState {
   };
   screeningFactors: string[];
   additionalQuestions: string[];
+  userContext: string;
   maxResults: number;
   allStepsVisited: boolean;
   parentProjectId: string | null;
@@ -263,6 +266,7 @@ const INITIAL_WIZARD_STATE = {
   },
   screeningFactors: [] as string[],
   additionalQuestions: [] as string[],
+  userContext: "",
   maxResults: 30,
   allStepsVisited: false,
   parentProjectId: null as string | null,
@@ -304,6 +308,7 @@ export const useWizard = create<WizardState>((set, get) => ({
       additionalQuestions: s.additionalQuestions,
       maxResults: s.maxResults,
       useCase: s.useCase,
+      userContext: s.userContext || useUserProfileStore.getState().userContext,
     };
   },
   initFromSearchQuery: (sq: NonNullable<AnalysisProject['search_query']>, parentProjectId: string) => {
@@ -347,6 +352,7 @@ export const useWizard = create<WizardState>((set, get) => ({
       generatedInnerSettingOptions: innerSetting,
       generatedOutcomeOptions: outcome,
       screeningFactors,
+      userContext: sq.user_context || useUserProfileStore.getState().userContext,
       parameters: {
         sources,
         access: {
@@ -1289,6 +1295,13 @@ function ScreenScreening() {
   const s = useWizard();
   const [customInput, setCustomInput] = useState("");
   const constraintOptions = ["Any", "Low", "Moderate", "High"];
+  const profileStore = useUserProfileStore();
+  const currentContext = s.userContext || profileStore.userContext;
+
+  const handleContextChange = (value: string) => {
+    s.set({ userContext: value });
+    profileStore.setUserContext(value);
+  };
 
   const addFactor = () => {
     if (customInput.trim() && !s.screeningFactors.includes(customInput.trim())) {
@@ -1311,6 +1324,21 @@ function ScreenScreening() {
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
+        <div className="space-y-3">
+          <h3 className="font-semibold text-lg">What is your context</h3>
+          <p className="text-sm text-gray-600">
+            Describe your role and how you&apos;ll use the outputs. This shapes how synthesis results are framed.
+          </p>
+          <textarea
+            className="w-full rounded-xl ring-1 ring-gray-300 px-4 py-3 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-600 resize-y min-h-[80px]"
+            rows={3}
+            value={currentContext}
+            onChange={(e) => handleContextChange(e.target.value)}
+          />
+        </div>
+
+        <div className="h-px bg-gray-100" />
+
         <div className="space-y-4">
           <h3 className="font-semibold text-lg">Implementation constraints</h3>
           <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -1626,6 +1654,12 @@ function ScreenSummary({ isRunning: _isRunning = false }: { isRunning?: boolean 
 
           <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
             <div className="text-xs uppercase tracking-wide text-gray-500">Refinement</div>
+            <button type="button" onClick={() => goToStep("SCREENING")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
+              <span className="font-medium">Your context</span>
+              <div className="mt-2 text-sm text-gray-700 line-clamp-2">
+                {context.userContext || <span className="text-gray-500">Not set</span>}
+              </div>
+            </button>
             <button type="button" onClick={() => goToStep("SCREENING")} className="block w-full text-left rounded-lg p-1 transition hover:bg-gray-50">
               <span className="font-medium">Implementation constraints</span>
               {hasImplementationConstraints ? (

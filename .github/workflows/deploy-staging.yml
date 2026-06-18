@@ -1,0 +1,60 @@
+name: Deploy PolicyAtlas to Staging
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy PolicyAtlasStack
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Install migration Lambda function dependencies
+        run: | # Added in as per suggestion on PR 172
+          pip install pg8000 sqlparse \
+            --target infra/infra/deploy_functions/run_migrations \
+            --platform manylinux2014_x86_64 \
+            --implementation cp \
+            --python-version 3.12 \
+            --only-binary=:all:
+
+      - name: Install CDK Python dependencies
+        working-directory: infra
+        run: pip install -r requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+          aws-region: eu-west-2
+
+      - name: Deploy PolicyAtlasStack
+        working-directory: infra
+        run: cdk deploy PolicyAtlasStack -c env_name=staging --require-approval never --verbose

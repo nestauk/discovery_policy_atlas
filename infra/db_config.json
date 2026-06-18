@@ -1,0 +1,30 @@
+{
+    "staging": {
+        "aws_account_id": "715413099986",
+        "aws_region": "eu-west-2",
+        "writer_instance_size": "t3.medium",
+        "reader_instance_size": "t3.medium",
+        "readers": 0,
+        "studio-meta": {
+            "cpu": 512,
+            "memory_limit_mib": 1024
+        },
+        "base_domain_name": "staging.policyatlas.uk",
+        "studio_subdomain": "studio",
+        "postgres_meta_tag": "v0.96.0",
+        "studio_tag": "v1.24.05",
+        "studio_whitelist_ips": [
+            "104.30.169.130/32",
+            "104.30.178.239/32",
+            "167.98.16.36/32"
+        ],
+        "postgrest-proxy": {
+            "cpu": 256,
+            "memory_limit_mib": 512
+        },
+        "postgrest_tag": "v12.2.3"
+    },
+    "production": {
+        
+    }
+}

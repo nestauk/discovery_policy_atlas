@@ -64,7 +64,8 @@ async def _discover_themes(
         f"model:{THEME_MODEL}",
     ]
     instructions = make_discover_themes_instructions(None)
-    prompt = build_discover_themes_prompt()
+    user_context = state.get("user_context") or ""
+    prompt = build_discover_themes_prompt(user_context=user_context)
     llm = get_llm(THEME_MODEL, temperature=0.0).with_structured_output(ThemesOut)
 
     try:

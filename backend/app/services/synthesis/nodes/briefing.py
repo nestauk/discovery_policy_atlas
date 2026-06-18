@@ -245,6 +245,14 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         if research_question:
             instructions = f"Research Question: {research_question}\n\n{instructions}"
 
+        # Inject user context to tailor audience framing.
+        user_context = state.get("user_context") or ""
+        if user_context:
+            instructions = (
+                f"Audience context: {user_context}\n"
+                "Frame your output for this audience.\n\n" + instructions
+            )
+
         # Inject user intent (population/outcomes) to tailor generation without displaying it explicitly.
         target_population = state.get("target_population") or []
         target_outcomes = state.get("target_outcomes") or []

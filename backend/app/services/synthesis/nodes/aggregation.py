@@ -12,7 +12,6 @@ import math
 from typing import Dict, List, Tuple
 import re
 
-from app.services.vectorization import vectorization_service
 from app.services.synthesis.state import SynthesisState
 from app.services.synthesis.utils import normalize_study_type, normalize_source_type
 from app.services.synthesis.schemas import (
@@ -154,44 +153,31 @@ async def build_aggregated_tables(state: SynthesisState) -> SynthesisState:
     raw_extractions = state.get("raw_extractions") or []
     doc_scores = state.get("doc_scores") or {}
 
-    project_id = state.get("project_id", "")
-    supabase = vectorization_service.supabase
+    doc_metadata = state.get("doc_metadata") or {}
 
-    # Build extraction metadata lookup
+    # Build extraction metadata lookup from in-memory state.
+    # Previously this re-queried analysis_extractions in chunks of 100, but
+    # load_raw_extractions already pulls the same rows (with raw_data) for the
+    # whole project. Re-fetching could overload the local PostgREST/nginx proxy
+    # (large JSONB responses, large IN-lists) and cause 502s.
     all_ex_ids = []
     for t in final_issue_themes + final_intervention_themes + final_outcome_themes:
         all_ex_ids.extend([c.id for c in t.concepts])
     all_ex_ids = list(set(all_ex_ids))
 
-    ex_metadata: Dict[str, Dict] = {}
-    if all_ex_ids:
-        docs_res = (
-            supabase.table("analysis_documents")
-            .select("id, doc_id")
-            .eq("analysis_project_id", project_id)
-            .execute()
-        )
-        uuid_to_doc_id = {
-            str(d["id"]): str(d.get("doc_id") or "") for d in (docs_res.data or [])
-        }
-
-        for i in range(0, len(all_ex_ids), 100):
-            chunk = all_ex_ids[i : i + 100]
-            exts_res = (
-                supabase.table("analysis_extractions")
-                .select("id, analysis_document_id, raw_data")
-                .in_("id", chunk)
-                .execute()
-            )
-            for r in exts_res.data or []:
-                doc_uuid = str(r.get("analysis_document_id") or "")
-                ex_metadata[str(r["id"])] = {
-                    "doc_uuid": doc_uuid,
-                    "doc_id": uuid_to_doc_id.get(doc_uuid, ""),
-                    "raw_data": r.get("raw_data") or {},
-                }
-
     raw_ext_by_id = {str(e["id"]): e for e in raw_extractions}
+
+    ex_metadata: Dict[str, Dict] = {}
+    for ex_id in all_ex_ids:
+        ext = raw_ext_by_id.get(ex_id)
+        if ext is None:
+            continue
+        doc_uuid = str(ext.get("doc_uuid") or "")
+        ex_metadata[ex_id] = {
+            "doc_uuid": doc_uuid,
+            "doc_id": str(doc_metadata.get(doc_uuid, {}).get("doc_id") or ""),
+            "raw_data": ext.get("raw_data") or {},
+        }
     intervention_theme_by_extraction_id: Dict[str, str] = {}
     for t in final_intervention_themes:
         for c in t.concepts:
