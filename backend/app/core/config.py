@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None
     SUPABASE_KEY: Optional[str] = None
 
+    # MCP (Model Context Protocol) Configuration
+    # API key required for remote (SSE) transport only; stdio is local-trusted.
+    # Set this in production; safe to leave unset for local Claude Desktop / mcp-inspector usage.
+    MCP_API_KEY: Optional[str] = None
+
     # Development/Testing
     MOCK_OPENAI: bool = False
     DEBUG_ANALYSIS_FILES: bool = False  # Keep local analysis files for debugging
