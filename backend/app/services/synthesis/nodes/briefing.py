@@ -37,6 +37,7 @@ from app.services.synthesis.tools.orchestrator import (
     BriefingOrchestrator,
     SectionOutput,
 )
+from app.utils.llm.llm_utils import langfuse_span
 
 logger = logging.getLogger(__name__)
 
@@ -190,10 +191,6 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
     # Sub-stage timing + Langfuse span helper
     project_id = state.get("project_id")
 
-    from langfuse import Langfuse
-
-    _langfuse = Langfuse()
-
     def _persist_substage(
         stage_name: str,
         duration: float,
@@ -329,9 +326,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
 
     # Background
     t0 = time.time()
-    with _langfuse.start_as_current_span(
-        name="briefing/background", metadata={"project_id": project_id}
-    ):
+    with langfuse_span("briefing/background", metadata={"project_id": project_id}):
         await _run_section("background")
     _persist_substage(
         "briefing/background", time.time() - t0, metadata=_section_meta("background")
@@ -344,9 +339,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         "and get_intervention_details for delivery features and subgroups."
     )
     t0 = time.time()
-    with _langfuse.start_as_current_span(
-        name="briefing/interventions", metadata={"project_id": project_id}
-    ):
+    with langfuse_span("briefing/interventions", metadata={"project_id": project_id}):
         await _run_section("interventions", additional_extra=f" {inter_extra}")
     _persist_substage(
         "briefing/interventions",
@@ -356,8 +349,8 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
 
     # Decide and generate synthesis sections (always propose up to 2)
     t0 = time.time()
-    with _langfuse.start_as_current_span(
-        name="briefing/synthesis_proposal", metadata={"project_id": project_id}
+    with langfuse_span(
+        "briefing/synthesis_proposal", metadata={"project_id": project_id}
     ):
         proposals = await _decide_synthesis_sections(
             orchestrator=orchestrator,
@@ -375,9 +368,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         stage_name = f"briefing/synthesis_{idx + 1}"
         section_key = f"synthesis_{idx + 1}"
         t0 = time.time()
-        with _langfuse.start_as_current_span(
-            name=stage_name, metadata={"project_id": project_id}
-        ):
+        with langfuse_span(stage_name, metadata={"project_id": project_id}):
             synth_output = await _generate_synthesis_section(
                 orchestrator=orchestrator,
                 proposal=proposal,
@@ -402,9 +393,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
 
     # Core Findings
     t0 = time.time()
-    with _langfuse.start_as_current_span(
-        name="briefing/core_answer", metadata={"project_id": project_id}
-    ):
+    with langfuse_span("briefing/core_answer", metadata={"project_id": project_id}):
         await _run_section("core_answer")
     _persist_substage(
         "briefing/core_answer",
@@ -418,9 +407,7 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
         "Each must include [N] citations."
     )
     t0 = time.time()
-    with _langfuse.start_as_current_span(
-        name="briefing/recommendations", metadata={"project_id": project_id}
-    ):
+    with langfuse_span("briefing/recommendations", metadata={"project_id": project_id}):
         await _run_section("recommendations", additional_extra=f" {rec_extra}")
     _persist_substage(
         "briefing/recommendations",
@@ -452,8 +439,8 @@ async def generate_briefing(state: SynthesisState) -> SynthesisState:
 
     # Build structured briefing from sections
     t0 = time.time()
-    with _langfuse.start_as_current_span(
-        name="briefing/build_structured", metadata={"project_id": project_id}
+    with langfuse_span(
+        "briefing/build_structured", metadata={"project_id": project_id}
     ):
         structured_briefing = await _build_structured_briefing(
             section_outputs,

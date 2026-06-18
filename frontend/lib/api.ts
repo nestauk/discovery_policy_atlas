@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, getExternalToken } from "@/lib/auth";
 import { AnalysisProject } from "./analysisProjectStore";
 
 async function getResponseErrorMessage(response: Response): Promise<string> {
@@ -47,15 +47,7 @@ export const fetchWithAuthExternal = async (
   options: RequestInit = {},
   isStreaming: boolean = false
 ) => {
-  let token: string | null = null;
-  try {
-    if (typeof window !== 'undefined' && (window as unknown as { Clerk?: { session?: { getToken: () => Promise<string> } } }).Clerk?.session) {
-      const clerkWindow = window as unknown as { Clerk?: { session?: { getToken: () => Promise<string> } } }
-      token = await clerkWindow.Clerk!.session!.getToken();
-    }
-  } catch (err) {
-    console.error('Failed to get Clerk token from window:', err);
-  }
+  const token = await getExternalToken();
 
   if (!token) {
     if (process.env.NODE_ENV === 'development') {

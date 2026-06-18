@@ -102,9 +102,23 @@ class Settings(BaseSettings):
     # LLM Configuration
     OPENAI_API_KEY: Optional[str] = None
 
+    # Langfuse observability
+    LANGFUSE_PUBLIC_KEY: Optional[str] = None
+    LANGFUSE_SECRET_KEY: Optional[str] = None
+    LANGFUSE_HOST: Optional[str] = None
+
     # Supabase Configuration
     SUPABASE_URL: Optional[str] = None
     SUPABASE_KEY: Optional[str] = None
+
+    # Authentication
+    AUTH_PROVIDER: str = "clerk"
+    CLERK_JWT_ISSUER: Optional[str] = None
+    CLERK_SECRET_KEY: Optional[str] = None
+    COGNITO_REGION: Optional[str] = None
+    COGNITO_USER_POOL_ID: Optional[str] = None
+    COGNITO_APP_CLIENT_ID: Optional[str] = None
+    DEMO_ORG_ID: Optional[str] = None
 
     # Development/Testing
     MOCK_OPENAI: bool = False

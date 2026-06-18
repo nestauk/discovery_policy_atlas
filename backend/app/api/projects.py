@@ -310,6 +310,7 @@ async def get_analysis_projects(current_user: CurrentUser = Depends(get_current_
                 "p_organization_slug": current_user.organization_slug,
                 "p_demo_org_id": demo_org_id,
                 "p_admin_org_slug": ADMIN_ORG_SLUG,
+                "p_internal_user_id": current_user.internal_user_id,
             },
         ).execute()
 
@@ -1358,6 +1359,7 @@ async def get_detailed_findings(
     issue_theme: Optional[str] = Query(None, description="Filter by issue label/theme"),
 ):
     """Get flattened findings for an intervention or issue."""
+    get_project_with_auth_check(project_id, current_user, select="id")
     try:
         return await get_findings(
             project_id,
@@ -1378,6 +1380,7 @@ async def get_navigator_overview(
     Returns theme names, impact/evidence scores, and study counts
     using parallel DB queries. Much faster than the full navigator endpoint.
     """
+    get_project_with_auth_check(project_id, current_user, select="id")
     try:
         return get_navigator_overview_data(project_id)
     except Exception as e:
@@ -1392,6 +1395,7 @@ async def get_issue_intervention_navigator(
     project_id: str, current_user: CurrentUser = Depends(get_current_user)
 ):
     """Get issue-intervention navigator data using synthesis themes and assignments."""
+    get_project_with_auth_check(project_id, current_user, select="id")
     try:
         return get_navigator_data(project_id)
     except Exception as e:
@@ -1410,6 +1414,7 @@ async def get_navigator_stats(
     Much cheaper than the full navigator endpoint — queries only synthesis_themes
     and theme_assignments + analysis_extractions for distinct label counts.
     """
+    get_project_with_auth_check(project_id, current_user, select="id")
     try:
         sb = vectorization_service.supabase
 
@@ -1964,15 +1969,7 @@ async def get_project_feedback(
 ):
     """Get user feedback for a specific project from the user_feedback table"""
     try:
-        # Check if project exists
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("id")
-            .eq("id", project_id)
-            .execute()
-        )
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
+        get_project_with_auth_check(project_id, current_user, select="id")
 
         # Get feedback for this user and project
         feedback_result = (
@@ -2020,15 +2017,7 @@ async def save_project_feedback(
             raise HTTPException(
                 status_code=400, detail="Comment must be 500 characters or less"
             )
-        # Check if project exists
-        project_result = (
-            vectorization_service.supabase.table("analysis_projects")
-            .select("id")
-            .eq("id", project_id)
-            .execute()
-        )
-        if not project_result.data:
-            raise HTTPException(status_code=404, detail="Project not found")
+        get_project_with_auth_check(project_id, current_user, select="id")
         # Insert new feedback row
         feedback_data = {
             "project_id": project_id,

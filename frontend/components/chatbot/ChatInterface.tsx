@@ -15,7 +15,7 @@ import { useAnalysisProjectStore } from '@/lib/analysisProjectStore'
 import { useAPI } from '@/lib/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { useUser } from '@clerk/nextjs'
+import { useAuth } from '@/lib/auth'
 import Image from 'next/image'
 import { getEvidenceBadgeColors, buildEvidenceBadgeRegex } from '@/lib/evidenceCategories'
 
@@ -407,7 +407,7 @@ export function ChatInterface({
   } = useChatStore()
 
   const { activeProject } = useAnalysisProjectStore()
-  const { user } = useUser()
+  const { user } = useAuth()
   const [inputMessage, setInputMessage] = useState('')
   const [activeContextHint, setActiveContextHint] = useState<{ sectionTitle: string; contextHint: string } | null>(null)
   const [transientAssistantMessage, setTransientAssistantMessage] = useState<ChatMessage | null>(null)

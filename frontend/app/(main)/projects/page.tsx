@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 import { useAPI } from '@/lib/api'
 import { useAnalysisProjectStore, AnalysisProject } from '@/lib/analysisProjectStore'
 import { Switch } from '@/components/ui/switch'
-import { useUser, useOrganization } from '@clerk/nextjs'
+import { useAuth } from '@/lib/auth'
 
 const PROJECTS_LOAD_TIMEOUT_MS = 15000
 
@@ -32,8 +32,7 @@ export default function ProjectsPage() {
     error,
     setError
   } = useAnalysisProjectStore()
-  const { user } = useUser()
-  const { organization } = useOrganization()
+  const { user, organization } = useAuth()
 
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [showInfoDialog, setShowInfoDialog] = useState(false)
@@ -154,8 +153,8 @@ export default function ProjectsPage() {
 
   // Get current user ID for filtering
   const currentUserId = user?.id || ''
-  const currentUserFullName = user?.fullName || ''
-  const currentUserEmail = user?.emailAddresses?.[0]?.emailAddress || ''
+  const currentUserFullName = user?.name || ''
+  const currentUserEmail = user?.email || ''
   const currentUserEmailUsername = currentUserEmail.split('@')[0] || ''
 
   // Default: show only user's own projects + demo projects. When toggled, show all org projects.

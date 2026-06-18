@@ -1,25 +1,15 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { AUTH_PROVIDER } from '@/lib/auth/config'
+import { authMiddleware as clerkMiddleware } from '@/lib/auth/adapters/clerk/middleware'
+import { authMiddleware as cognitoMiddleware } from '@/lib/auth/adapters/cognito/middleware'
 
-const isPublicRoute = createRouteMatcher([
-  '/public/(.*)',
-  '/login',
-  '/login/(.*)',
-  '/',
-  '/privacy',
-  '/terms',
-]);
+const middleware = AUTH_PROVIDER === 'cognito' ? cognitoMiddleware : clerkMiddleware
 
-export default clerkMiddleware(async (auth, req) => {
-  if (!isPublicRoute(req)) {
-    await auth.protect();
-  }
-});
+export default middleware
 
+// Keep matcher local so Next can statically analyze it.
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    // Always run for API routes
     '/(api|trpc)(.*)',
   ],
-};
+}
