@@ -1,0 +1,15 @@
+# Local env + caches — never commit
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*~          # editor backup files
+
+# Experiment outputs: judgement cache, parquet results, per-run cost logs.
+# These are regenerable and can be large; keep them out of git.
+results/
+
+# Phase 5 query data — derived from a prod export of real user research questions
+# (queries.jsonl carries `original_search_context`), so keep ALL query data local and
+# out of git. Regenerate via queries/build_queries.py from the local prod export.
+queries/*.jsonl
