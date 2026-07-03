@@ -1,5 +1,8 @@
 # Search experiments — ASTA-inspired retrieval (Arms A/B/C)
 
+> **New to this project?** Start with [ONBOARDING.md](ONBOARDING.md) — reading path,
+> code map, full runbook, credentials checklist, and the sharp edges.
+
 Research code for the retrieval experiment in
 [`docs/specs/spec_retrieval_experiment_openalex.md`](../../../../docs/specs/spec_retrieval_experiment_openalex.md).
 **Not shipped** — this lives under `backend/testing/r_and_d/` alongside the other
@@ -72,7 +75,7 @@ uv run smoke/phase4_openalex.py   # live — Arm B client: formulate → search 
 
 ## The frozen judge (Phase 2)
 
-`judge.py` is the experiment's measuring instrument (spec §4.5): one frozen judge applied
+`core/judge.py` is the experiment's measuring instrument (spec §4.5): one frozen judge applied
 identically to every arm, so the A→B→C ranking is valid even if the judge is imperfect.
 
 - **Criteria extraction** (gpt-5.5, once/query, cached to `results/judgements/criteria/`):
@@ -109,13 +112,13 @@ The live end-to-end demonstration of the judge (criteria → retrieve → judge 
 |---|---|---|
 | `config.py` | ✅ Phase 1 | Frozen models, budgets, blend weights, judge thresholds, inflation. |
 | `reporting/metrics.py` | ✅ Phase 1 | recall@k_est, corrected nDCG, precision, adjusted F1, k_est inflation. |
-| `judge.py` | ✅ Phase 2 | Per-query criteria extraction + per-paper judge + parquet cache. |
-| `source.py` | ✅ Phase 3a | Source-agnostic contract: `Candidate`, `Capabilities`, `SourceClient`, `FakeSource`. |
+| `core/judge.py` | ✅ Phase 2 | Per-query criteria extraction + per-paper judge + parquet cache. |
+| `core/source.py` | ✅ Phase 3a | Source-agnostic contract: `Candidate`, `Capabilities`, `SourceClient`, `FakeSource`. |
 | `query_analysis.py` | ✅ Phase 3a | Step 0: content extraction + recency/centrality intent (gpt-5.5, cached). |
-| `ranking.py` | ✅ Phase 3a | Step 5: PF content blend + intent weights + Cohere rerank + §4.7 sweep. |
-| `adaptive.py` | ✅ Phase 3b | Batched Thompson Sampling judging + `HighlyRelevantShortcircuit` + reward. |
-| `snowball.py` | ✅ Phase 3b | Edge-sum citation-snowball scoring + top-k promotion (PF-faithful). |
-| `broad_search.py` | ✅ Phase 3b | The shared source-agnostic loop (Steps 1–5); Arms B/C are thin wrappers. |
+| `core/ranking.py` | ✅ Phase 3a | Step 5: PF content blend + intent weights + Cohere rerank + §4.7 sweep. |
+| `core/adaptive.py` | ✅ Phase 3b | Batched Thompson Sampling judging + `HighlyRelevantShortcircuit` + reward. |
+| `core/snowball.py` | ✅ Phase 3b | Edge-sum citation-snowball scoring + top-k promotion (PF-faithful). |
+| `core/broad_search.py` | ✅ Phase 3b | The shared source-agnostic loop (Steps 1–5); Arms B/C are thin wrappers. |
 | `tests/` | ✅ Phase 1–9 | Offline pytest suites (…/arm_a/fanout/arm_b/arm_c/collect_results). |
 | `smoke/` | ✅ Phase 1–8 | Verbose per-phase end-to-end scripts (`phaseN_*.py`). |
 | `retrieval/_cache.py` | ✅ Phase 4 | Content-addressed disk cache for retrieval calls (resumable; mandatory for S2). |
