@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from retrieval import _cache
 from retrieval.suggest import SuggestedPaper, ground_suggestions, title_similarity
-from source import Candidate
+from core.source import Candidate
 
 
 def test_title_similarity_exact_is_one_ignoring_case_punctuation():

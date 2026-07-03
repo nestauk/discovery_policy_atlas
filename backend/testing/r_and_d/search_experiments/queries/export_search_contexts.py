@@ -109,4 +109,6 @@ def run_export():
     print(f"   has content-PICO to fold: {pico_rich} / {len(records)}")
 
 
-run_export()
+# Guarded so importing this module can't hit Supabase.
+if __name__ == "__main__":
+    run_export()

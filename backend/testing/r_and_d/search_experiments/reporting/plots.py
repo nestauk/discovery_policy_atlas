@@ -430,3 +430,9 @@ def plot_cost(
     fig.savefig(out, dpi=130)
     plt.close(fig)
     return out
+
+
+# `uv run python -m reporting.plots` — regenerate the standard plot set into results/plots/.
+if __name__ == "__main__":
+    for p in [*run_distribution_plots(), *run_highly_relevant_plots()]:
+        print(f"plot -> {p}")

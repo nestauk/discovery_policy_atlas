@@ -36,7 +36,7 @@ only `caps.has_snippets` matters here — Arm C adds the +0.025 snippet term, Ar
 
 REPL usage (no main()/argparse — spec conventions):
     import asyncio
-    from ranking import cohere_rerank, rank_candidates, rerank_sweep
+    from core.ranking import cohere_rerank, rank_candidates, rerank_sweep
     from query_analysis import analyse_query
     a = analyse_query("q001", "latest evidence on free school meals and attainment")
     await cohere_rerank("q001", a.content, candidates)   # sets cand.rerank_score (cached)
@@ -57,7 +57,7 @@ from config import CONFIG
 
 if TYPE_CHECKING:  # avoid import cost / cycles at runtime; only for type hints
     from query_analysis import QueryAnalysis
-    from source import Candidate, Capabilities
+    from core.source import Candidate, Capabilities
 
 logger = logging.getLogger(__name__)
 

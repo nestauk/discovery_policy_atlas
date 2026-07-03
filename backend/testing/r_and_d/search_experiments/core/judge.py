@@ -31,7 +31,7 @@ paper pooled across arms + normalizer runs is judged exactly once. Layout:
 
 REPL usage (no main(), no argparse — spec conventions):
     import asyncio
-    from judge import extract_criteria, judge_papers, load_judgements, get_cached_levels
+    from core.judge import extract_criteria, judge_papers, load_judgements, get_cached_levels
     crit = extract_criteria("q001", "RCTs on universal basic income and employment")
     papers = [{"paper_id": "W1", "title": "...", "abstract": "..."}]
     df = asyncio.run(judge_papers("q001", "RCTs on UBI...", papers))

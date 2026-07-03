@@ -37,10 +37,10 @@ from arms.arm_b import (
     _make_judge_fn,
     _ranked_records,
 )  # source-agnostic loop helpers (reused)
-from broad_search import broad_search
+from core.broad_search import broad_search
 from queries.loader import Query, load_queries
 from query_analysis import analyse_query
-from ranking import cohere_rerank
+from core.ranking import cohere_rerank
 
 logger = logging.getLogger(__name__)
 

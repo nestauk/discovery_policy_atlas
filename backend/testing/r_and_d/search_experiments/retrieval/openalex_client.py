@@ -51,7 +51,7 @@ from config import CONFIG
 from retrieval import _cache
 from retrieval._fanout import fanout  # shared SR/RCT expansion (Arms A + B)
 from retrieval.suggest import SuggestedPaper, ground_suggestions, suggest_titles
-from source import Candidate, Capabilities
+from core.source import Candidate, Capabilities
 
 # NB: `app.*` and `pyalex` are LAZY-imported inside __init__ / methods (same convention as
 # judge.py / ranking.py / query_analysis.py) so the pure dict→Candidate mappers below stay

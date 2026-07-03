@@ -101,9 +101,9 @@ none of PF's snippet-as-evidence machinery.
 **What Arm C keeps (the shared spine — faithful):**
 - Dense leg via `/snippet/search` (`retrieval/s2_client.py:283-289, 359-383`), ported from PF's dense
   formulation (`dense_s2.py`). See [[project_arm_c_keyword_leg_weak]] for the two-leg split.
-- `num_snippets` as a saturating ranking term: `ranking.py:80-84` `num_snippets_score_sigmoid` is a
+- `num_snippets` as a saturating ranking term: `core/ranking.py:80-84` `num_snippets_score_sigmoid` is a
   direct port of PF's function; added as `+0.025·sigmoid(num_snippets)` only when `caps.has_snippets`
-  (`ranking.py:195-196`, Arm-C-only — the §4.3 #3 source-forced diff).
+  (`core/ranking.py:195-196`, Arm-C-only — the §4.3 #3 source-forced diff).
 
 **Where Arm C diverges from PF (all about snippet *text*, not retrieval):**
 | Dimension | PF (`asta-paper-finder`) | Arm C |
@@ -111,8 +111,8 @@ none of PF's snippet-as-evidence machinery.
 | Snippets kept/paper | a **list**, section-grouped | **one** (first non-empty), or zero — `s2_client.py:154-155` |
 | Sources | Vespa full-text dense (sections, offsets, `ref_mentions`) **+** citation contexts from *citing* papers (S2 `contexts`) — `dense.py:78-96`, `s2_rest.py:266` | S2 `/snippet/search` only; **no citation contexts** |
 | Judge input | markdown = title + abstract[:1500] + **all snippets** + ≤20 **citation contexts** (`fields.py:13-54`) | `{title, abstract, text_basis}` only (`arm_b.py:73-81`, reused by Arm C) |
-| Rerank text | Cohere over `title + join(snippets)` | Cohere over `title + abstract` only (`ranking.py:343-345`) |
-| Verbatim evidence | LLM extracts `relevant_snippet`, then **fuzzy-matches back** to a real `Snippet`/`CitationContext` for provenance (`relevant_snippets.py:12-72`) | judge *emits* a snippet (`judge.py:144`) but from the abstract; never matched back |
+| Rerank text | Cohere over `title + join(snippets)` | Cohere over `title + abstract` only (`core/ranking.py:343-345`) |
+| Verbatim evidence | LLM extracts `relevant_snippet`, then **fuzzy-matches back** to a real `Snippet`/`CitationContext` for provenance (`relevant_snippets.py:12-72`) | judge *emits* a snippet (`core/judge.py:144`) but from the abstract; never matched back |
 
 **The single decisive line:** `s2_client.py:381` — `if not cand.abstract and info["snippet"]`. Snippet
 text becomes the judged content **only when the paper has no abstract/tldr**. Once batch-hydration fills
@@ -135,17 +135,17 @@ match (the classic "method X buried in §4" case).
    — exactly the body-relevant papers dense retrieval is best at surfacing — understating the source's value.
 
 **Candidate next step — Arm C′ (snippet-evidence variant), NOT built:**
-- Add `Candidate.snippets: list[str]` (the dataclass already accretes fields, `source.py:40-101`); have
+- Add `Candidate.snippets: list[str]` (the dataclass already accretes fields, `core/source.py:40-101`); have
   `_group_snippets` keep all snippet rows, not just the first (`s2_client.py:154-155`).
 - Have the judge_fn concatenate abstract + snippets into the judged text (a snippet-aware variant of
-  `arm_b._make_judge_fn`), and optionally rerank over snippet text too (`ranking.py:343-345`).
+  `arm_b._make_judge_fn`), and optionally rerank over snippet text too (`core/ranking.py:343-345`).
 - Optionally attach citing-paper contexts in the forward snowball (PF `snippet_snowball.py:265-289`;
   ours carries `seed_relevance`/`is_influential` but no context text).
 - This is the arm that actually answers "does snippet evidence lift judged recall?", and it doubles as
   the verbatim-evidence half of any future AstaBench submission (paper_id S2 CorpusID + `markdown_evidence`).
 - Keep it a *separate* arm — C stays the clean B→C source comparison; C′ adds the evidence-enrichment axis.
 
-**Evidence paths:** Arm C `retrieval/s2_client.py:141-155, 352-383`; ranking `ranking.py:80-84, 181-238,
+**Evidence paths:** Arm C `retrieval/s2_client.py:141-155, 352-383`; ranking `core/ranking.py:80-84, 181-238,
 343-345`; judge input `arms/arm_b.py:73-81` (reused by `arms/arm_c.py:34-37`). PF side:
 `libs/dcollection/.../fetchers/dense.py:78-96`, `loaders/s2_rest.py:266`, `loaders/fields.py:13-54`,
 `agents/mabool/.../computed_fields/relevance.py:51-71`, `.../relevant_snippets.py:12-72`,
@@ -263,7 +263,7 @@ Two patterns the user flagged as not-loved, to clean up in a dedicated pass:
 
 1. **Lazy `app.*` / sibling imports inside functions/closures/`__init__`** — e.g. `arm_a.ArmA.__init__`,
    `arm_b._make_judge_fn`/`run_query`, `openalex_client` methods, and the `from app.utils.llm.llm_utils
-   import get_llm` in `judge.py`/`query_analysis.py`/`dense_s2.py`/`keyword_s2.py`/`fold_query.py`.
+   import get_llm` in `core/judge.py`/`query_analysis.py`/`dense_s2.py`/`keyword_s2.py`/`fold_query.py`.
    *Rationale it grew this way:* keep modules import-clean so the pure mappers/helpers stay unit-testable
    with no backend env. *Concern:* it's scattered and obscures dependencies.
    Future options: a single backend-bootstrap seam, dependency injection of the app services, or a
@@ -425,10 +425,10 @@ through the existing `Capabilities` gate:
 
 - **New `retrieval/keyword_s2.py`** — port of PF `_broad_search_prompt_tmpl` (pluralised to N diverse
   content-keyword queries): `formulate_keyword_queries` / `reformulate_keyword_queries`.
-- **`SourceClient` protocol (source.py)** — renamed `formulate_queries`→`formulate_keyword_queries`
+- **`SourceClient` protocol (core/source.py)** — renamed `formulate_queries`→`formulate_keyword_queries`
   and `reformulate`→`reformulate_keyword_queries` (explicit: these are the KEYWORD leg); added
   `formulate_dense_queries` / `reformulate_dense_queries` (DENSE leg, `caps.has_dense` only).
-- **`broad_search.py`** — formulates each leg in its own idiom; `_retrieve_primary` iterates the
+- **`core/broad_search.py`** — formulates each leg in its own idiom; `_retrieve_primary` iterates the
   keyword queries for `keyword_search` and the dense queries for `dense_search`. Dense formulation
   is only called when `caps.has_dense`, so Arm B is untouched.
 - **`s2_client.py`** — keyword methods → `keyword_s2`, dense methods → `dense_s2`.

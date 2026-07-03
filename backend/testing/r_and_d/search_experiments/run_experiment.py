@@ -56,6 +56,8 @@ async def run_experiment():
     return run_collect()
 
 
-_t0 = time.monotonic()
-asyncio.run(run_experiment())
-print(f"\n[full run wall-time: {(time.monotonic() - _t0) / 60:.1f} min]")
+# Guarded so `import run_experiment` (REPL, tooling) can't start a multi-hour run.
+if __name__ == "__main__":
+    _t0 = time.monotonic()
+    asyncio.run(run_experiment())
+    print(f"\n[full run wall-time: {(time.monotonic() - _t0) / 60:.1f} min]")

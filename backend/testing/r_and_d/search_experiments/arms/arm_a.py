@@ -50,7 +50,7 @@ from retrieval.openalex_client import (  # canonical row→Candidate + shared wi
     _row_to_candidate,
     strip_openalex_wildcards,
 )
-from source import Candidate
+from core.source import Candidate
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +257,7 @@ async def run_query(q: Query, *, persist: bool = True, seed: int = 0) -> ArmARes
         for c in to_judge
     ]
 
-    from judge import get_cached_levels, judge_papers  # lazy (pulls backend env)
+    from core.judge import get_cached_levels, judge_papers  # lazy (pulls backend env)
 
     with timer.track("judge"):
         await judge_papers(q.query_id, q.query_text, papers)

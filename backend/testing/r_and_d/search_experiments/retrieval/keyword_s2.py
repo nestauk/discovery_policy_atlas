@@ -40,7 +40,7 @@ from _backend import get_llm
 from config import CONFIG
 from retrieval import _cache
 from retrieval._formulation import exemplar_block
-from source import Candidate
+from core.source import Candidate
 
 logger = logging.getLogger(__name__)
 

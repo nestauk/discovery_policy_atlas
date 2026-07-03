@@ -34,7 +34,7 @@ with `count_bias` and `candidate_count` direction-specific:
 > citation), so build edges before any dedupe/merge folds candidates together.
 
 REPL usage (no main()/argparse — spec conventions):
-    from snowball import SnowballEdge, build_edges, score_snowball_candidate, promote_snowball
+    from core.snowball import SnowballEdge, build_edges, score_snowball_candidate, promote_snowball
     edges = build_edges(seed, source_returned_candidates)        # one seed's hop
     promoted = promote_snowball(all_edges, direction="forward", caps=arm_c_caps)
 """
@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from config import CONFIG
-from source import Candidate, Capabilities
+from core.source import Candidate, Capabilities
 
 Direction = Literal["forward", "backward"]
 

@@ -9,7 +9,7 @@ Arm-C native flag (tldr/snippet) is never clobbered by the A/B classifier.
 from __future__ import annotations
 
 from retrieval.enrich import classify_text_basis, has_abstract
-from source import Candidate
+from core.source import Candidate
 
 
 def test_has_abstract_treats_sentinel_and_blank_as_missing():

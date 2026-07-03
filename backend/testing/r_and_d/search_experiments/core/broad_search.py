@@ -29,7 +29,7 @@ module needs no judge/LLM/network imports — the FakeSource smoke + tests drive
 
 REPL usage (no main()/argparse — spec conventions):
     import asyncio
-    from broad_search import broad_search
+    from core.broad_search import broad_search
     async def judge(batch):           # sets cand.level (FakeSource: deterministic stub)
         for c in batch: c.level = ...
     result = asyncio.run(broad_search(FakeSource(), Capabilities(), analysis, judge_fn=judge))
@@ -44,12 +44,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from _timing import StageTimer
-from adaptive import HighlyRelevantShortcircuit, JudgeFn, StopReason, adaptive_load
+from core.adaptive import HighlyRelevantShortcircuit, JudgeFn, StopReason, adaptive_load
 from config import CONFIG
 from query_analysis import QueryAnalysis
-from ranking import rank_candidates
-from snowball import build_edges, promote_snowball
-from source import Candidate, Capabilities, SourceClient, dedupe
+from core.ranking import rank_candidates
+from core.snowball import build_edges, promote_snowball
+from core.source import Candidate, Capabilities, SourceClient, dedupe
 
 logger = logging.getLogger(__name__)
 

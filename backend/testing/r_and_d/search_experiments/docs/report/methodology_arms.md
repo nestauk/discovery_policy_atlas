@@ -47,12 +47,12 @@ code under `backend/testing/r_and_d/search_experiments/` so claims are defensibl
 
 ## Slide 3 — Arm B: the agentic loop (same source)
 
-**On the slide** — `arms/arm_b.py` → shared `broad_search.py` over `OpenAlexSource`
+**On the slide** — `arms/arm_b.py` → shared `core/broad_search.py` over `OpenAlexSource`
 - Same source (OpenAlex), same multi-query boolean formulation as A, same SR/RCT fan-out, same citation floor.
 - **Adds the loop** (2 iterations): reformulate from what was found → snowball (follow citations/
   references) → parametric LLM suggestions → **adaptive judging** (judge incrementally, stop when enough).
 - Ranks by a **source-agnostic blend**, not OpenAlex's lexical score:
-  `0.9·judge + 0.075·cohere_rerank` (`ranking.py`).
+  `0.9·judge + 0.075·cohere_rerank` (`core/ranking.py`).
 
 **Why it matters (say this)**
 - A→B is "single-pass vs iterative agent, holding source + formulation + citation floor constant." Any
@@ -69,7 +69,7 @@ code under `backend/testing/r_and_d/search_experiments/` so claims are defensibl
 
 **On the slide** — `arms/arm_c.py` (= Arm B with `S2Source` instead of `OpenAlexSource`)
 - **Same loop, same judge, same blend** — only the source changes.
-- S2's capabilities light up legs that were dormant in B (`source.py` `Capabilities`):
+- S2's capabilities light up legs that were dormant in B (`core/source.py` `Capabilities`):
   - **dense search** (`/snippet/search`) — semantic, not just keyword.
   - **influential-citation** weighting in snowball.
   - a **snippet-count** term in the ranking blend.
@@ -86,7 +86,7 @@ code under `backend/testing/r_and_d/search_experiments/` so claims are defensibl
 
 ## Slide 5 — The measuring instrument: one frozen judge + a pooled normalizer
 
-**On the slide** — `judge.py`, `collect_results.py`, `metrics.py`
+**On the slide** — `core/judge.py`, `collect_results.py`, `metrics.py`
 - **Judge** = an LLM scoring each paper 0–3 (Not / Somewhat / Highly / Perfect) against per-query
   relevance criteria. **Frozen and identical for every arm**; each paper judged **once** (shared cache).
 - We have **no ground-truth list** of all relevant papers, so we build a **pooled normalizer**: union the
@@ -169,10 +169,10 @@ code under `backend/testing/r_and_d/search_experiments/` so claims are defensibl
 | Concept | Where |
 |---|---|
 | Arm A (prod single-pass) | `arms/arm_a.py` |
-| Arm B (loop, OpenAlex) | `arms/arm_b.py` → `broad_search.py`, `retrieval/openalex_client.py` |
+| Arm B (loop, OpenAlex) | `arms/arm_b.py` → `core/broad_search.py`, `retrieval/openalex_client.py` |
 | Arm C (loop, S2) | `arms/arm_c.py` → `retrieval/s2_client.py` |
-| Capability flags (the 4 source diffs) | `source.py` `Capabilities` |
-| Frozen judge + shared cache | `judge.py` |
+| Capability flags (the 4 source diffs) | `core/source.py` `Capabilities` |
+| Frozen judge + shared cache | `core/judge.py` |
 | Pooled normalizer, recall@k_est, k_est, Perfect vs Highly | `collect_results.py`, `metrics.py` |
-| Ranking blend (0.9·judge + 0.075·cohere [+ snippet]) | `ranking.py` |
+| Ranking blend (0.9·judge + 0.075·cohere [+ snippet]) | `core/ranking.py` |
 | Plots | `plots.py` |

@@ -25,7 +25,7 @@ from retrieval.s2_client import (
     _group_snippets,
     _paper_to_candidate,
 )
-from source import Candidate
+from core.source import Candidate
 
 
 # --------------------------------------------------------------------------- #

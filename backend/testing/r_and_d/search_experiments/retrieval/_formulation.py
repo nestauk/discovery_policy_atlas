@@ -7,7 +7,7 @@ and cache namespaces, but the way both render judged-relevant exemplars into the
 
 from __future__ import annotations
 
-from source import Candidate
+from core.source import Candidate
 
 
 def exemplar_block(exemplars: list[Candidate], max_chars: int = 300) -> str:

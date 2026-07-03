@@ -318,3 +318,8 @@ def run_cost_report(
         "actual_base": act_b,
         "actual_safe": act_s,
     }
+
+
+# `uv run python -m reporting.cost` — print the cost breakdown over persisted results.
+if __name__ == "__main__":
+    run_cost_report()

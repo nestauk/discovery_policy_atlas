@@ -6,7 +6,7 @@ the backend/.env bootstrap (so OPENALEX_* etc. resolve) BEFORE any `app.*` impor
 
 Usage at the top of a smoke script:
     import _bootstrap  # noqa: F401  -- path + env setup, must be first
-    from judge import ...
+    from core.judge import ...
 
 Also exposes `rule(title)`, the shared section-header printer for smoke output.
 """

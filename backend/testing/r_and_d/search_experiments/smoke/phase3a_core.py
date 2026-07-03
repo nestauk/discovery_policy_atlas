@@ -18,8 +18,13 @@ import _bootstrap  # noqa: F401  -- path + env setup, must be first
 from _bootstrap import rule
 
 from query_analysis import analyse_query
-from ranking import _default_baseline_year, cohere_rerank, rank_candidates, rerank_sweep
-from source import Candidate, Capabilities
+from core.ranking import (
+    _default_baseline_year,
+    cohere_rerank,
+    rank_candidates,
+    rerank_sweep,
+)
+from core.source import Candidate, Capabilities
 
 # Three queries, one per intent branch (ids prefixed so the cache doesn't collide with real runs).
 QUERIES = [
@@ -132,7 +137,7 @@ async def run_smoke():
     rule(
         f"3. rank_candidates(...)  ->  blended order  (ARM C, baseline_year={baseline})"
     )
-    from ranking import (
+    from core.ranking import (
         score,
     )  # local import: only needed to print the per-candidate value
 

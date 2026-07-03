@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from judge import (
+from core.judge import (
     RelevanceCriterion,
     _consolidate,
     _format_paper,

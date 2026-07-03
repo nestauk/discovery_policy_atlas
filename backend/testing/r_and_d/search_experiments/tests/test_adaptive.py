@@ -6,14 +6,14 @@ bandit concentrates budget on rewarding origins and the short-circuit fires corr
 
 from __future__ import annotations
 
-from adaptive import (
+from core.adaptive import (
     HighlyRelevantShortcircuit,
     adaptive_load,
     assign_to_origins,
     to_reward,
 )
 from config import CONFIG
-from source import Candidate
+from core.source import Candidate
 
 
 def _cand(pid: str, origin: str) -> Candidate:

@@ -7,10 +7,10 @@ judgements, source-forced caps honoured (Arm B has no dense leg), and determinis
 
 from __future__ import annotations
 
-from broad_search import broad_search
+from core.broad_search import broad_search
 from config import CONFIG
 from query_analysis import QueryAnalysis, QueryIntent
-from source import Candidate, Capabilities, FakeSource
+from core.source import Candidate, Capabilities, FakeSource
 
 ARM_B = Capabilities()
 ARM_C = Capabilities(has_dense=True, has_influential=True, has_snippets=True)

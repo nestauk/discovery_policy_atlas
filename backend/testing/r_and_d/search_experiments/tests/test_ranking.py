@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from config import CONFIG
 from query_analysis import QueryAnalysis, QueryIntent
-from ranking import (
+from core.ranking import (
     central_first_score_sigmoid,
     central_last_score_sigmoid,
     centrality_score,
@@ -22,7 +22,7 @@ from ranking import (
     score,
     sigmoid,
 )
-from source import Candidate, Capabilities
+from core.source import Candidate, Capabilities
 
 ARM_B = Capabilities()  # no snippets
 ARM_C = Capabilities(has_dense=True, has_influential=True, has_snippets=True)

@@ -27,7 +27,7 @@ and short-circuit are ported verbatim (those are deterministic and mechanism-cri
 
 REPL usage (no main()/argparse — spec conventions):
     import asyncio
-    from adaptive import adaptive_load, HighlyRelevantShortcircuit, to_reward
+    from core.adaptive import adaptive_load, HighlyRelevantShortcircuit, to_reward
     async def judge(batch):           # your judge sets cand.level in place
         for c in batch: c.level = ...
     sc = HighlyRelevantShortcircuit()
@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from config import CONFIG
-from source import Candidate
+from core.source import Candidate
 
 logger = logging.getLogger(__name__)
 

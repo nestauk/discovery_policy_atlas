@@ -32,11 +32,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from _timing import StageTimer, stage_timings
-from broad_search import broad_search
+from core.broad_search import broad_search
 from queries.loader import Query, load_queries
 from query_analysis import analyse_query
-from ranking import cohere_rerank
-from source import Candidate
+from core.ranking import cohere_rerank
+from core.source import Candidate
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,10 @@ def _make_judge_fn(query_id: str, query_text: str, timer: StageTimer | None = No
     timer = timer or StageTimer()
 
     async def judge_fn(batch: list[Candidate]) -> None:
-        from judge import get_cached_levels, judge_papers  # lazy (pulls backend env)
+        from core.judge import (
+            get_cached_levels,
+            judge_papers,
+        )  # lazy (pulls backend env)
         from retrieval.enrich import classify_text_basis
 
         classify_text_basis(

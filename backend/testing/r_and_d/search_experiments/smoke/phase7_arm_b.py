@@ -20,10 +20,10 @@ import _bootstrap  # noqa: F401  -- path + env setup, must be first
 from _bootstrap import rule
 
 from arms.arm_b import _make_judge_fn
-from broad_search import broad_search
+from core.broad_search import broad_search
 from query_analysis import analyse_query
 from queries.loader import load_queries
-from ranking import cohere_rerank
+from core.ranking import cohere_rerank
 
 QUERY_ID = "q11"  # same query as the Arm A smoke, for an A↔B contrast
 

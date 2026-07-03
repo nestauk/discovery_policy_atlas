@@ -20,11 +20,11 @@ from collections import defaultdict
 import _bootstrap  # noqa: F401  -- path + env setup, must be first
 from _bootstrap import rule
 
-from adaptive import HighlyRelevantShortcircuit, adaptive_load, to_reward
-from broad_search import broad_search
+from core.adaptive import HighlyRelevantShortcircuit, adaptive_load, to_reward
+from core.broad_search import broad_search
 from config import CONFIG
 from query_analysis import QueryAnalysis, QueryIntent
-from source import Candidate, Capabilities, FakeSource
+from core.source import Candidate, Capabilities, FakeSource
 
 ARM_C = Capabilities(has_dense=True, has_influential=True, has_snippets=True)
 

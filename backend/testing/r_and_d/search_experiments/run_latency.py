@@ -13,7 +13,7 @@ judging is the heaviest stage, so a cold probe at n=3 re-pays ~15% of the full 2
 FAST retrieval-only picture (the A/B/C differentiator) pass `cold_judge=False` + a `judge_rate`: the
 search/snowball legs run cold while the judge bar is reconstructed from the supplied per-paper rate.
 
-Run it directly (mirrors run_experiment.py — bare module-level asyncio.run, no main()/argparse):
+Run it directly (mirrors run_experiment.py — __main__-guarded asyncio.run, no argparse):
     uv run run_latency.py                                  # default: n=3, fully cold
     LATENCY_N=2 uv run run_latency.py                      # fewer queries (faster)
     LATENCY_COLD_JUDGE=0 LATENCY_JUDGE_RATE=0.04 uv run run_latency.py   # fast retrieval-only
@@ -35,8 +35,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import config  # noqa: F401  -- triggers backend/.env bootstrap before app.* (via arms)
-import judge as _judge_mod
-import ranking as _ranking_mod
+from core import judge as _judge_mod
+from core import ranking as _ranking_mod
 from reporting.plots import plot_latency
 from queries.loader import load_queries
 from retrieval import _cache as _cache_mod
@@ -151,11 +151,13 @@ async def run_latency_probe(
 # Direct-run entry (`uv run run_latency.py`), same pattern as run_experiment.py. Knobs come from env
 # vars so one file serves every case without argparse (spec conventions): LATENCY_N (int),
 # LATENCY_COLD_JUDGE (0/1), LATENCY_JUDGE_RATE (float, used when cold_judge=0).
-_rate_env = os.environ.get("LATENCY_JUDGE_RATE")
-asyncio.run(
-    run_latency_probe(
-        n=int(os.environ.get("LATENCY_N", "3")),
-        cold_judge=os.environ.get("LATENCY_COLD_JUDGE", "1") != "0",
-        judge_rate=float(_rate_env) if _rate_env else None,
+# Guarded so importing this module can't start a live probe.
+if __name__ == "__main__":
+    _rate_env = os.environ.get("LATENCY_JUDGE_RATE")
+    asyncio.run(
+        run_latency_probe(
+            n=int(os.environ.get("LATENCY_N", "3")),
+            cold_judge=os.environ.get("LATENCY_COLD_JUDGE", "1") != "0",
+            judge_rate=float(_rate_env) if _rate_env else None,
+        )
     )
-)

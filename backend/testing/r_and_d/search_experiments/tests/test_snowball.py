@@ -7,13 +7,13 @@ field + penalty, Arm-C-only influence term, and stable top-k promotion.
 from __future__ import annotations
 
 from config import CONFIG
-from snowball import (
+from core.snowball import (
     SnowballEdge,
     build_edges,
     promote_snowball,
     score_snowball_candidate,
 )
-from source import Candidate, Capabilities
+from core.source import Candidate, Capabilities
 
 ARM_B = Capabilities()  # no influence signal
 ARM_C = Capabilities(has_dense=True, has_influential=True, has_snippets=True)

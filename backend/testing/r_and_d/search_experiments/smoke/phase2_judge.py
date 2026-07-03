@@ -11,7 +11,7 @@ import asyncio
 import _bootstrap  # noqa: F401  -- path + env setup, must be first
 from _bootstrap import rule
 from app.services.openalex import OpenAlexService
-from judge import extract_criteria, judge_papers
+from core.judge import extract_criteria, judge_papers
 
 QUERY_ID = "smoke01"
 QUERY = "What is the effect of free school meals on attainment in the UK?"

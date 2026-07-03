@@ -23,8 +23,8 @@ external repos, *acknowledged in the module docstrings themselves*:
 | Experiment module | Ported from | What it is |
 | --- | --- | --- |
 | `query_analysis.py` | **PF** (`asta-paper-finder`) | content / recency / centrality extraction |
-| `ranking.py` | **PF** | ranking sigmoids + Cohere rerank client |
-| `judge.py` | **PF** + **BENCH** | criteria extraction (PF) + per-paper scoring (BENCH) |
+| `core/ranking.py` | **PF** | ranking sigmoids + Cohere rerank client |
+| `core/judge.py` | **PF** + **BENCH** | criteria extraction (PF) + per-paper scoring (BENCH) |
 | `metrics.py` | **BENCH** (`asta-bench`) | ~100-line verbatim port of the metric formulas |
 
 ### Why port instead of `import`
@@ -73,12 +73,12 @@ Today this overlap is **well-managed**:
 - The experiment is a self-contained `uv` project with `backend` as an editable path
   dependency, so **Arm A is a thin wrapper over the real `OpenAlexService`** — it reuses
   production code rather than copying it (see `README.md`).
-- `source.py` defines a `SourceClient` *protocol* (the seam), not a second OpenAlex
+- `core/source.py` defines a `SourceClient` *protocol* (the seam), not a second OpenAlex
   client. The only concrete implementation so far is `FakeSource` (offline, deterministic).
 
 ### Where it could bite: Phase 4
 
-`source.py` states that **Phase 4 will add concrete OpenAlex/S2 clients implementing
+`core/source.py` states that **Phase 4 will add concrete OpenAlex/S2 clients implementing
 `SourceClient`**. That is the moment a *second OpenAlex client* could appear in the
 experiment, parallel to the production one. Comparing the surfaces:
 
@@ -112,12 +112,12 @@ worth deciding on purpose.
 ## One-paragraph summary (for a PR description / reviewer)
 
 The experiment reproduces code in two senses. The PF/BENCH ports
-(`metrics.py`, `ranking.py`, `judge.py`, `query_analysis.py`) are a deliberate
+(`metrics.py`, `core/ranking.py`, `core/judge.py`, `query_analysis.py`) are a deliberate
 *vendor-the-thin-slice* decision: importing upstream would drag in `inspect-ai` + an HF
 dataset download for ~10 pure functions, the copy is frozen for the experiment's
 lifetime, and `tests/test_metrics.py` pins parity — so the usual DRY drift cost doesn't
 apply. Overlap with our own `backend` is currently minimal: Arm A wraps the real
-`OpenAlexService`, and `source.py` defines a protocol seam, not a second client. The only
+`OpenAlexService`, and `core/source.py` defines a protocol seam, not a second client. The only
 forward-looking risk is Phase 4's concrete OpenAlex client, where the keyword leg should
 *wrap* `OpenAlexService` (single source of truth for sanitisation / polite pool /
 pagination) rather than reimplement it.

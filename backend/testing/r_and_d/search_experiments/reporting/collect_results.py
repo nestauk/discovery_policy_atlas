@@ -316,3 +316,8 @@ def run_collect(write: bool = True) -> dict:
         out.write_text(json.dumps(summary, ensure_ascii=False, indent=2))
         print(f"\nwrote {out}")
     return summary
+
+
+# `uv run python -m reporting.collect_results` — aggregate persisted arm results, print headline.
+if __name__ == "__main__":
+    run_collect()

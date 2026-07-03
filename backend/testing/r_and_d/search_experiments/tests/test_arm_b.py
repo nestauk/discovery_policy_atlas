@@ -8,7 +8,7 @@ full live path by smoke/phase7_arm_b.py. The one genuinely new pure unit here is
 from __future__ import annotations
 
 from arms.arm_b import _ranked_records
-from source import Candidate
+from core.source import Candidate
 
 
 def test_ranked_records_assigns_ranks_and_carries_level_plus_blend_features():

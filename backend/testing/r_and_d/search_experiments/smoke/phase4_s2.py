@@ -29,7 +29,7 @@ from _bootstrap import rule
 from retrieval import _cache
 from retrieval.enrich import classify_text_basis
 from retrieval.s2_client import S2Source
-from snowball import build_edges, promote_snowball
+from core.snowball import build_edges, promote_snowball
 
 CONTENT = "effect of free school meals on educational attainment in the UK"
 

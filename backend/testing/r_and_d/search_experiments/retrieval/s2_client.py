@@ -56,7 +56,7 @@ from retrieval.keyword_s2 import (
     reformulate_keyword_queries as _reformulate_keyword,
 )
 from retrieval.suggest import SuggestedPaper, ground_suggestions, suggest_titles
-from source import Candidate, Capabilities
+from core.source import Candidate, Capabilities
 
 logger = logging.getLogger(__name__)
 

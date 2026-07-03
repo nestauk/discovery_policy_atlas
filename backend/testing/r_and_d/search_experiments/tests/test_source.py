@@ -6,7 +6,7 @@ end up with ALL its origins (the bandit's arms, Phase 3b) and its richest metada
 
 from __future__ import annotations
 
-from source import Candidate, Capabilities, FakeSource, dedupe
+from core.source import Candidate, Capabilities, FakeSource, dedupe
 
 
 def _cand(pid: str, **kw) -> Candidate:

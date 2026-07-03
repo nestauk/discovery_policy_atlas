@@ -106,4 +106,6 @@ def run_build():
             print(f"     qt : {_short(rec['query_text'])}")
 
 
-run_build()
+# Guarded so importing this module can't spend LLM calls.
+if __name__ == "__main__":
+    run_build()

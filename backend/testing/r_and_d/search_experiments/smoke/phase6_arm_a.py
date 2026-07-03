@@ -67,7 +67,7 @@ async def run_smoke():
     rule(
         f"3. judge — frozen criteria-based judge on top {JUDGE_SAMPLE} (real run: top-250)"
     )
-    from judge import get_cached_levels, judge_papers
+    from core.judge import get_cached_levels, judge_papers
 
     sample = cands[:JUDGE_SAMPLE]
     papers = [
