@@ -11,17 +11,25 @@ import json
 
 import pytest
 
-from queries.loader import DENSITIES, EXCLUDED_QUERY_IDS, load_queries
-
+from queries.loader import DEFAULT_PATH, DENSITIES, EXCLUDED_QUERY_IDS, load_queries
 
 # --------------------------------------------------------------------------- #
 # The real artefact (queries/queries.jsonl)
 # --------------------------------------------------------------------------- #
+# queries.jsonl is gitignored (prod-derived data), so a fresh clone doesn't have it.
+requires_query_set = pytest.mark.skipif(
+    not DEFAULT_PATH.exists(),
+    reason="queries/queries.jsonl not built yet — run ONBOARDING.md §4.1 steps 1-2",
+)
+
+
+@requires_query_set
 def test_query_set_loads_and_is_in_spec_band():
     qs = load_queries()
     assert 20 <= len(qs) <= 30  # spec §4.1: ~20-30 curated queries
 
 
+@requires_query_set
 def test_excluded_queries_are_dropped():
     # q01/q23 (over-folded → OpenAlex 500s, 2026-06-26) live in queries.jsonl for provenance but
     # load_queries skips them, so arms/metrics never see them.
@@ -30,6 +38,7 @@ def test_excluded_queries_are_dropped():
     assert not (loaded & EXCLUDED_QUERY_IDS)
 
 
+@requires_query_set
 def test_ids_unique_and_arm_input_nonempty():
     qs = load_queries()
     ids = [q.query_id for q in qs]
@@ -39,6 +48,7 @@ def test_ids_unique_and_arm_input_nonempty():
     )  # query_text is the arm input — never empty
 
 
+@requires_query_set
 def test_densities_valid_and_all_strata_present():
     qs = load_queries()
     present = {q.literature_density for q in qs}
@@ -48,6 +58,7 @@ def test_densities_valid_and_all_strata_present():
     )  # stratification intent: dense + medium + sparse all represented
 
 
+@requires_query_set
 def test_use_case_diversity_and_context_retained():
     qs = load_queries()
     distinct_uc = {q.use_case for q in qs if q.use_case}

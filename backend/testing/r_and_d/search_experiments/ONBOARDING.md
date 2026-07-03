@@ -83,7 +83,9 @@ live; that's fine, the comparisons are within-run.
 ```bash
 cd backend/testing/r_and_d/search_experiments
 uv sync          # self-contained env; backend is an editable path dep
-uv run pytest    # 183 passed = your env is sane (all offline, no keys needed)
+uv run pytest    # fresh clone: 178 passed, 5 skipped (all offline, no keys needed).
+                 # The 5 skips are query-set checks — they un-skip (→ 183 passed)
+                 # once you've built queries/queries.jsonl in §4.1 steps 1-2.
 ```
 
 Credentials — all read from `backend/.env` (loaded by `config.py` no matter the cwd),
