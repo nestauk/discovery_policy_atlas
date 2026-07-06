@@ -49,6 +49,15 @@ def _env(name: str) -> str:
     return val
 
 
+def _normalize_clerk_role(role: str | None) -> str:
+    """Strip Clerk's ``org:`` role prefix for app-owned membership storage."""
+    if not role:
+        return "member"
+    if role.startswith("org:"):
+        return role[4:] or "member"
+    return role
+
+
 def fetch_clerk_paginated(path: str, headers: dict) -> list[dict]:
     """Fetch all pages from a Clerk list endpoint."""
     items: list[dict] = []
@@ -224,7 +233,7 @@ def main() -> None:
         )
         for m in members:
             user_clerk_id = m.get("public_user_data", {}).get("user_id")
-            role = m.get("role", "member")
+            role = _normalize_clerk_role(m.get("role"))
             if not user_clerk_id:
                 continue
             membership_count += 1

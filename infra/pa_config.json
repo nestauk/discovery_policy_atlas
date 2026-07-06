@@ -28,7 +28,8 @@
                 "cpu_target_utilization_percent": 50,
                 "memory_target_utilization_percent": 50,
                 "registry_tag": "backend",
-                "secret_name": "policy_atlas/backend"
+                "secret_name": "policy_atlas/backend",
+                "cognito_user_pool_id": "eu-west-2_EglbtbuJL"
             }
         }
     }

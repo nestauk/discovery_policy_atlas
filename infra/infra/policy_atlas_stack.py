@@ -315,6 +315,20 @@ class PolicyAtlasStack(Stack):
         db_secret.grant_read(be_task_def.task_role)
         jwt_secret.grant_read(be_task_def.task_role)
 
+        # Allow the backend to read Cognito user attributes (email, name,
+        # email_verified) via Admin GetUser, used by the auth layer to resolve
+        # and link app-owned identities. Scoped to the configured user pool.
+        cognito_user_pool_id = be_config.get("cognito_user_pool_id")
+        if cognito_user_pool_id:
+            be_task_def.add_to_task_role_policy(
+                iam.PolicyStatement(
+                    actions=["cognito-idp:AdminGetUser"],
+                    resources=[
+                        f"arn:aws:cognito-idp:{self.region}:{self.account}:userpool/{cognito_user_pool_id}"
+                    ],
+                )
+            )
+
         be_service = ecs.FargateService(self, "PolicyAtlasBackendService",
             cluster=cluster,
             task_definition=be_task_def,

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import jwt
 import pytest
 
-from app.core.auth.base import AuthError
+from app.core.auth.base import AuthError, ProviderClaims
 from app.core.auth.factory import get_auth_provider
 from app.core.auth.providers.cognito import CognitoAuthProvider
 
@@ -163,19 +163,64 @@ async def test_verify_token_maps_expired_to_auth_error():
 
 
 @pytest.mark.asyncio
-async def test_enrich_is_noop():
+async def test_enrich_populates_email_name_and_verified():
     provider = _provider()
-    payload = _access_token_payload()
+    claims = ProviderClaims(sub="cognito-user-123", raw={"username": "alice"})
+
+    attrs = {
+        "email": "[email protected]",
+        "name": "Alice Example",
+        "email_verified": "true",
+    }
+    with patch.object(provider, "_fetch_attributes_cached", return_value=attrs):
+        enriched = await provider.enrich(claims)
+
+    assert enriched.email == "[email protected]"
+    assert enriched.name == "Alice Example"
+    assert enriched.raw["email_verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_enrich_marks_unverified_email():
+    provider = _provider()
+    claims = ProviderClaims(sub="cognito-user-123", raw={"username": "alice"})
+
+    attrs = {"email": "[email protected]", "email_verified": "false"}
+    with patch.object(provider, "_fetch_attributes_cached", return_value=attrs):
+        enriched = await provider.enrich(claims)
+
+    assert enriched.email == "[email protected]"
+    assert enriched.raw["email_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_enrich_degrades_gracefully_on_failure():
+    provider = _provider()
+    claims = ProviderClaims(
+        sub="cognito-user-123", name="alice", raw={"username": "alice"}
+    )
 
     with patch.object(
-        provider._jwks_client,
-        "get_signing_key_from_jwt",
-        return_value=MagicMock(key="key"),
-    ), patch("app.core.auth.providers.cognito.jwt.decode", return_value=payload):
-        claims = await provider.verify_token("fake-token")
+        provider, "_fetch_attributes_cached", side_effect=RuntimeError("no creds")
+    ):
+        enriched = await provider.enrich(claims)
 
-    enriched = await provider.enrich(claims)
     assert enriched is claims
+
+
+@pytest.mark.asyncio
+async def test_enrich_negatively_caches_failures():
+    provider = _provider()
+    idp = MagicMock()
+    idp.admin_get_user.side_effect = RuntimeError("AccessDenied")
+
+    with patch.object(provider, "_get_idp_client", return_value=idp):
+        for _ in range(5):
+            claims = ProviderClaims(sub="cognito-user-123", raw={"username": "alice"})
+            enriched = await provider.enrich(claims)
+            assert enriched is claims
+
+    assert idp.admin_get_user.call_count == 1
 
 
 def test_factory_returns_cognito_provider():
