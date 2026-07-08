@@ -261,11 +261,20 @@ class PolicyAtlasStack(Stack):
         )
 
         # --- Backend ---
+        # LH 25/06/2026: Add an IAM role directly to the backend task definition.
+        # This is primarily to give it a 'fixed name' which we can then reference later in an ARN
+        # to hook it up to JV's Bedrock implementation.
+        be_task_iam_role = iam.Role(self, "PolicyAtlasBackendTaskRole",
+            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+            role_name="policy-atlas-backend-task-role",
+        )
+
 
         be_task_def = ecs.FargateTaskDefinition(self, "PolicyAtlasBackendTaskDef",
             cpu=be_config["cpu"],
             memory_limit_mib=be_config["memory_limit_mib"],
             family="policy-atlas-backend",
+            task_role=be_task_iam_role
         )
 
         # Derive the Cloud Map namespace name for the SUPABASE_URL.
