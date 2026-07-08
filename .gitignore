@@ -41,6 +41,10 @@ next-env.d.ts
 **/.env.*
 .env
 .env.*
+# editor backups of env files (trailing ~), e.g. .env~ / .env.local~ — the rules
+# above miss a bare `.env~` (no dot after "env"), so catch every .env*~ variant.
+**/.env*~
+.env*~
 !**/.env.example
 
 # ========================================
