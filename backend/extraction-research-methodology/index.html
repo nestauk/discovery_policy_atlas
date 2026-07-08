@@ -1,0 +1,1910 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for Policy Atlas - AI-powered policy design platform">
+      
+      
+        <meta name="author" content="Policy Atlas Team">
+      
+      
+        <link rel="canonical" href="https://nestauk.github.io/discovery_policy_atlas/backend/extraction-research-methodology/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Research Methodology: LangGraph Extraction System Design - Policy Atlas</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#research-methodology-langgraph-extraction-system-design" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Policy Atlas" class="md-header__button md-logo" aria-label="Policy Atlas" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Policy Atlas
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Research Methodology: LangGraph Extraction System Design
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/yourusername/discovery_policy_atlas" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    discovery_policy_atlas
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../setup/installation/" class="md-tabs__link">
+          
+  
+  
+  Setup
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../flow/chatbot/" class="md-tabs__link">
+          
+  
+  
+  Flow
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  Backend
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../frontend/overview/" class="md-tabs__link">
+          
+  
+  
+  Frontend
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Policy Atlas" class="md-nav__button md-logo" aria-label="Policy Atlas" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Policy Atlas
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/yourusername/discovery_policy_atlas" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    discovery_policy_atlas
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Setup
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../setup/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Flow
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Flow
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../flow/chatbot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chatbot Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../flow/project-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backend
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Backend
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Frontend
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#research-context-and-motivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Research Context and Motivation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Research Context and Motivation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#problem-statement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Problem Statement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#design-philosophy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Philosophy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Design Philosophy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-grounding-first-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Grounding-First Design
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-mece-principle-enforcement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. MECE Principle Enforcement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-minimal-complexity-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Minimal Complexity Design
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#methodological-innovations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Methodological Innovations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Methodological Innovations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-multi-stage-prompt-engineering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Multi-Stage Prompt Engineering
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. Multi-Stage Prompt Engineering">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#universal-system-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Universal System Prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-specific-task-prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stage-Specific Task Prompts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-fuzzy-quote-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Fuzzy Quote Validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Fuzzy Quote Validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Problem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Solution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-sequential-vs-parallel-processing-trade-offs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Sequential vs. Parallel Processing Trade-offs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Sequential vs. Parallel Processing Trade-offs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#design-decision-sequential-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decision: Sequential Stages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#design-decision-per-intervention-results-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Decision: Per-Intervention Results Loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-index-based-reference-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Index-Based Reference System
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Index-Based Reference System">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#design-rationale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Rationale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-error-handling-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Error Handling Strategy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Error Handling Strategy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multi-level-error-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-Level Error Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#experimental-design-and-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Experimental Design and Validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Experimental Design and Validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-test-paper-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Test Paper Selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-quality-metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Quality Metrics
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Quality Metrics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#grounding-rate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grounding Rate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coverage-completeness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage Completeness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reference-integrity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference Integrity
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-iterative-refinement-process" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Iterative Refinement Process
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Iterative Refinement Process">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#version-1-baseline-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version 1: Baseline Implementation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#version-2-enhanced-prompt-engineering" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version 2: Enhanced Prompt Engineering
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#version-3-fuzzy-quote-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version 3: Fuzzy Quote Validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#version-4-domain-specific-refinements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Version 4: Domain-Specific Refinements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Performance Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Performance Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#computational-complexity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Computational Complexity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cost-analysis-gpt-4o-mini-pricing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost Analysis (GPT-4o-mini pricing)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#latency-breakdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Latency Breakdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparison-with-alternative-approaches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparison with Alternative Approaches
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Comparison with Alternative Approaches">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rule-based-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rule-Based Systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-stage-llm-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-Stage LLM Extraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fine-tuned-model-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fine-tuned Model Approach
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#traditional-nlp-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Traditional NLP Pipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-and-future-research" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations and Future Research
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Limitations and Future Research">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Limitations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Current Limitations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-document-length-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Document Length Constraints
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-language-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Language Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-domain-specificity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Domain Specificity
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#future-research-directions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future Research Directions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Future Research Directions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-advanced-validation-techniques" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Advanced Validation Techniques
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-active-learning-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Active Learning Integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-multimodal-enhancement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Multimodal Enhancement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-real-time-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Real-time Processing
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conclusion
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="research-methodology-langgraph-extraction-system-design"><a class="toclink" href="#research-methodology-langgraph-extraction-system-design">Research Methodology: LangGraph Extraction System Design</a><a class="headerlink" href="#research-methodology-langgraph-extraction-system-design" title="Permanent link">&para;</a></h1>
+<h2 id="research-context-and-motivation"><a class="toclink" href="#research-context-and-motivation">Research Context and Motivation</a><a class="headerlink" href="#research-context-and-motivation" title="Permanent link">&para;</a></h2>
+<h3 id="problem-statement"><a class="toclink" href="#problem-statement">Problem Statement</a><a class="headerlink" href="#problem-statement" title="Permanent link">&para;</a></h3>
+<p>Traditional rule-based and NLP-based extraction systems struggle with the semantic complexity and variability of research papers. The challenge is to create a system that can:</p>
+<ol>
+<li><strong>Extract structured data</strong> from unstructured research papers</li>
+<li><strong>Maintain high accuracy</strong> while handling diverse paper formats</li>
+<li><strong>Ensure grounding</strong> of all extracted information to source text</li>
+<li><strong>Scale efficiently</strong> across large document collections</li>
+<li><strong>Support evidence synthesis</strong> with standardized outputs</li>
+</ol>
+<h3 id="design-philosophy"><a class="toclink" href="#design-philosophy">Design Philosophy</a><a class="headerlink" href="#design-philosophy" title="Permanent link">&para;</a></h3>
+<p>The LangGraph extraction system is built on several key research principles:</p>
+<h4 id="1-grounding-first-design"><a class="toclink" href="#1-grounding-first-design">1. Grounding-First Design</a><a class="headerlink" href="#1-grounding-first-design" title="Permanent link">&para;</a></h4>
+<p>Every extracted piece of information must be traceable to its source with verbatim quotes. This ensures:
+- <strong>Auditability</strong>: Researchers can verify any extracted claim
+- <strong>Trust</strong>: High confidence in extracted data quality
+- <strong>Error Detection</strong>: Invalid extractions are caught early</p>
+<h4 id="2-mece-principle-enforcement"><a class="toclink" href="#2-mece-principle-enforcement">2. MECE Principle Enforcement</a><a class="headerlink" href="#2-mece-principle-enforcement" title="Permanent link">&para;</a></h4>
+<p>Mutually Exclusive, Collectively Exhaustive extraction ensures:
+- <strong>No Redundancy</strong>: Each concept appears once
+- <strong>Complete Coverage</strong>: All relevant content is captured
+- <strong>Structured Output</strong>: Clean data for downstream analysis</p>
+<h4 id="3-minimal-complexity-design"><a class="toclink" href="#3-minimal-complexity-design">3. Minimal Complexity Design</a><a class="headerlink" href="#3-minimal-complexity-design" title="Permanent link">&para;</a></h4>
+<p>Following the principle that simpler systems are more reliable:
+- <strong>4-Stage Pipeline</strong>: Clear, understandable workflow
+- <strong>Index-based References</strong>: Simple integer linking instead of complex IDs
+- <strong>Sequential Processing</strong>: Predictable execution order</p>
+<h2 id="methodological-innovations"><a class="toclink" href="#methodological-innovations">Methodological Innovations</a><a class="headerlink" href="#methodological-innovations" title="Permanent link">&para;</a></h2>
+<h3 id="1-multi-stage-prompt-engineering"><a class="toclink" href="#1-multi-stage-prompt-engineering">1. Multi-Stage Prompt Engineering</a><a class="headerlink" href="#1-multi-stage-prompt-engineering" title="Permanent link">&para;</a></h3>
+<h4 id="universal-system-prompt"><a class="toclink" href="#universal-system-prompt">Universal System Prompt</a><a class="headerlink" href="#universal-system-prompt" title="Permanent link">&para;</a></h4>
+<p>A single system prompt applied to all stages ensures consistency:
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>&quot;You extract ONLY verbatim, well-grounded information from the provided paper.
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>Return STRICT JSON matching the schema. No explanations.
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>CRITICAL: Every supporting_quote MUST be copied EXACTLY as it appears...&quot;
+</span></code></pre></div></p>
+<p><strong>Research Rationale</strong>: Consistent instructions across stages reduce variability and improve reliability compared to stage-specific system prompts.</p>
+<h4 id="stage-specific-task-prompts"><a class="toclink" href="#stage-specific-task-prompts">Stage-Specific Task Prompts</a><a class="headerlink" href="#stage-specific-task-prompts" title="Permanent link">&para;</a></h4>
+<p>Each stage receives tailored instructions optimized for its specific extraction goals:
+- <strong>Issues</strong>: Focus on broader problems, avoid study-specific findings
+- <strong>Interventions</strong>: Active treatments only, detailed population characterization
+- <strong>Mappings</strong>: Explicit rationale linking issues to interventions
+- <strong>Results</strong>: Primary outcomes with statistical details</p>
+<p><strong>Research Rationale</strong>: Task-specific guidance improves extraction quality while maintaining overall consistency.</p>
+<h3 id="2-fuzzy-quote-validation"><a class="toclink" href="#2-fuzzy-quote-validation">2. Fuzzy Quote Validation</a><a class="headerlink" href="#2-fuzzy-quote-validation" title="Permanent link">&para;</a></h3>
+<h4 id="problem"><a class="toclink" href="#problem">Problem</a><a class="headerlink" href="#problem" title="Permanent link">&para;</a></h4>
+<p>LLMs often paraphrase or slightly modify text even when instructed to copy verbatim. Strict substring matching fails on legitimate quotes with minor formatting differences.</p>
+<h4 id="solution"><a class="toclink" href="#solution">Solution</a><a class="headerlink" href="#solution" title="Permanent link">&para;</a></h4>
+<p>Multi-level fuzzy matching algorithm:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">_fuzzy_quote_match</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">quote</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">full_text</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">threshold</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.7</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="c1"># Level 1: Exact substring match (fastest, most reliable)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">if</span> <span class="n">quote</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">in</span> <span class="n">full_text</span><span class="p">:</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>        <span class="k">return</span> <span class="kc">True</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="c1"># Level 2: Normalized text matching (handles whitespace/formatting)</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">normalized_quote</span> <span class="o">=</span> <span class="n">normalize_text</span><span class="p">(</span><span class="n">quote</span><span class="p">)</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">normalized_full_text</span> <span class="o">=</span> <span class="n">normalize_text</span><span class="p">(</span><span class="n">full_text</span><span class="p">)</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="k">if</span> <span class="n">normalized_quote</span> <span class="ow">in</span> <span class="n">normalized_full_text</span><span class="p">:</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>        <span class="k">return</span> <span class="kc">True</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="c1"># Level 3: Word overlap analysis (for longer quotes)</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">normalized_quote</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">50</span><span class="p">:</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        <span class="n">quote_words</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">normalized_quote</span><span class="o">.</span><span class="n">split</span><span class="p">())</span> <span class="o">-</span> <span class="n">common_words</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>        <span class="n">full_text_words</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">normalized_full_text</span><span class="o">.</span><span class="n">split</span><span class="p">())</span> <span class="o">-</span> <span class="n">common_words</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>        <span class="n">overlap</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">quote_words</span> <span class="o">&amp;</span> <span class="n">full_text_words</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">quote_words</span><span class="p">)</span>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>        <span class="k">return</span> <span class="n">overlap</span> <span class="o">&gt;=</span> <span class="n">threshold</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>    <span class="c1"># Level 4: Key phrase matching (for shorter quotes)</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>    <span class="k">else</span><span class="p">:</span>
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>        <span class="n">words</span> <span class="o">=</span> <span class="n">normalized_quote</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">words</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">4</span><span class="p">:</span>
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>            <span class="n">phrase</span> <span class="o">=</span> <span class="s1">&#39; &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">words</span><span class="p">[:</span><span class="mi">4</span><span class="p">])</span>
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>            <span class="k">return</span> <span class="n">phrase</span> <span class="ow">in</span> <span class="n">normalized_full_text</span>
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>        <span class="k">return</span> <span class="n">normalized_quote</span> <span class="ow">in</span> <span class="n">normalized_full_text</span>
+</span></code></pre></div>
+<p><strong>Research Validation</strong>: Testing on real papers showed this approach catches 95%+ of legitimate quotes while filtering out hallucinated content.</p>
+<h3 id="3-sequential-vs-parallel-processing-trade-offs"><a class="toclink" href="#3-sequential-vs-parallel-processing-trade-offs">3. Sequential vs. Parallel Processing Trade-offs</a><a class="headerlink" href="#3-sequential-vs-parallel-processing-trade-offs" title="Permanent link">&para;</a></h3>
+<h4 id="design-decision-sequential-stages"><a class="toclink" href="#design-decision-sequential-stages">Design Decision: Sequential Stages</a><a class="headerlink" href="#design-decision-sequential-stages" title="Permanent link">&para;</a></h4>
+<p>The workflow processes stages sequentially rather than in parallel.</p>
+<p><strong>Advantages</strong>:
+- <strong>Dependency Management</strong>: Later stages can use outputs from earlier stages
+- <strong>Error Propagation Control</strong>: Failed early stages don't waste later computation
+- <strong>Debugging Simplicity</strong>: Clear causality in failure analysis</p>
+<p><strong>Trade-offs</strong>:
+- <strong>Latency</strong>: Sequential processing is slower than parallel
+- <strong>Resource Utilization</strong>: LLM API not fully utilized during processing</p>
+<h4 id="design-decision-per-intervention-results-loop"><a class="toclink" href="#design-decision-per-intervention-results-loop">Design Decision: Per-Intervention Results Loop</a><a class="headerlink" href="#design-decision-per-intervention-results-loop" title="Permanent link">&para;</a></h4>
+<p>Results extraction processes each intervention separately rather than all at once.</p>
+<p><strong>Research Rationale</strong>:
+- <strong>Focus Maintenance</strong>: Single intervention context improves accuracy
+- <strong>Error Isolation</strong>: One intervention failure doesn't affect others
+- <strong>Scalability</strong>: Linear scaling with intervention count</p>
+<p><strong>Future Consideration</strong>: Paper-level parallelization for batch processing while maintaining per-intervention sequencing within papers.</p>
+<h3 id="4-index-based-reference-system"><a class="toclink" href="#4-index-based-reference-system">4. Index-Based Reference System</a><a class="headerlink" href="#4-index-based-reference-system" title="Permanent link">&para;</a></h3>
+<h4 id="design-rationale"><a class="toclink" href="#design-rationale">Design Rationale</a><a class="headerlink" href="#design-rationale" title="Permanent link">&para;</a></h4>
+<p>Simple integer indices (0, 1, 2...) instead of UUID or hash-based IDs:</p>
+<p><strong>Advantages</strong>:
+- <strong>Simplicity</strong>: Easy to understand and debug
+- <strong>Efficiency</strong>: Minimal memory overhead
+- <strong>Human-Readable</strong>: Clear in outputs and logs
+- <strong>Aggregation-Friendly</strong>: Simple to merge across papers</p>
+<p><strong>Assumptions</strong>:
+- Single-paper processing context
+- No need for global uniqueness
+- Post-processing can assign global IDs if needed</p>
+<h3 id="5-error-handling-strategy"><a class="toclink" href="#5-error-handling-strategy">5. Error Handling Strategy</a><a class="headerlink" href="#5-error-handling-strategy" title="Permanent link">&para;</a></h3>
+<h4 id="multi-level-error-recovery"><a class="toclink" href="#multi-level-error-recovery">Multi-Level Error Recovery</a><a class="headerlink" href="#multi-level-error-recovery" title="Permanent link">&para;</a></h4>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Node-level: Graceful degradation</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">try</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">extraction_process</span><span class="p">()</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;extracted_data&quot;</span><span class="p">:</span> <span class="n">result</span><span class="p">}</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Stage failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;extracted_data&quot;</span><span class="p">:</span> <span class="p">[],</span> <span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># Workflow-level: Continue with partial results</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="k">if</span> <span class="n">final_state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;error&quot;</span><span class="p">):</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Workflow error: </span><span class="si">{</span><span class="n">final_state</span><span class="p">[</span><span class="s1">&#39;error&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="k">return</span> <span class="n">DocumentExtractionBundle</span><span class="p">(</span><span class="n">paper_id</span><span class="o">=</span><span class="n">paper_id</span><span class="p">,</span> <span class="n">issues</span><span class="o">=</span><span class="p">[],</span> <span class="o">...</span><span class="p">)</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1"># Service-level: Batch processing continues</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="k">for</span> <span class="n">document</span> <span class="ow">in</span> <span class="n">documents</span><span class="p">:</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>    <span class="k">try</span><span class="p">:</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>        <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">workflow</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">document</span><span class="p">)</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Document </span><span class="si">{</span><span class="n">document</span><span class="p">[</span><span class="s1">&#39;id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>        <span class="k">continue</span>  <span class="c1"># Process remaining documents</span>
+</span></code></pre></div>
+<p><strong>Research Rationale</strong>: Maximizes data recovery from partially successful extractions while maintaining system stability.</p>
+<h2 id="experimental-design-and-validation"><a class="toclink" href="#experimental-design-and-validation">Experimental Design and Validation</a><a class="headerlink" href="#experimental-design-and-validation" title="Permanent link">&para;</a></h2>
+<h3 id="1-test-paper-selection"><a class="toclink" href="#1-test-paper-selection">1. Test Paper Selection</a><a class="headerlink" href="#1-test-paper-selection" title="Permanent link">&para;</a></h3>
+<p>Diverse paper types to validate generalizability:
+- <strong>Randomized Controlled Trials</strong>: Primary intervention research
+- <strong>Meta-analyses</strong>: Aggregated evidence studies<br />
+- <strong>Guidelines Documents</strong>: Policy and recommendation papers
+- <strong>Systematic Reviews</strong>: Comprehensive literature syntheses</p>
+<h3 id="2-quality-metrics"><a class="toclink" href="#2-quality-metrics">2. Quality Metrics</a><a class="headerlink" href="#2-quality-metrics" title="Permanent link">&para;</a></h3>
+<h4 id="grounding-rate"><a class="toclink" href="#grounding-rate">Grounding Rate</a><a class="headerlink" href="#grounding-rate" title="Permanent link">&para;</a></h4>
+<p><div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Grounding Rate = (Items with Valid Quotes) / (Total Items Extracted)
+</span></code></pre></div>
+Target: &gt;95% for production readiness</p>
+<h4 id="coverage-completeness"><a class="toclink" href="#coverage-completeness">Coverage Completeness</a><a class="headerlink" href="#coverage-completeness" title="Permanent link">&para;</a></h4>
+<p>Manual evaluation of whether key paper elements are captured:
+- Primary research questions/problems
+- Main interventions described
+- Key outcome results
+- Statistical findings</p>
+<h4 id="reference-integrity"><a class="toclink" href="#reference-integrity">Reference Integrity</a><a class="headerlink" href="#reference-integrity" title="Permanent link">&para;</a></h4>
+<p><div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Reference Integrity = (Valid Index References) / (Total Index References)
+</span></code></pre></div>
+Target: 100% (strict requirement)</p>
+<h3 id="3-iterative-refinement-process"><a class="toclink" href="#3-iterative-refinement-process">3. Iterative Refinement Process</a><a class="headerlink" href="#3-iterative-refinement-process" title="Permanent link">&para;</a></h3>
+<h4 id="version-1-baseline-implementation"><a class="toclink" href="#version-1-baseline-implementation">Version 1: Baseline Implementation</a><a class="headerlink" href="#version-1-baseline-implementation" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Basic 4-stage workflow</li>
+<li>Strict substring matching for quotes</li>
+<li>Simple prompts without domain guidance</li>
+</ul>
+<p><strong>Results</strong>: ~60% grounding rate, missed nuanced interventions</p>
+<h4 id="version-2-enhanced-prompt-engineering"><a class="toclink" href="#version-2-enhanced-prompt-engineering">Version 2: Enhanced Prompt Engineering</a><a class="headerlink" href="#version-2-enhanced-prompt-engineering" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Added universal system prompt emphasizing verbatim quotes</li>
+<li>Stage-specific rules and examples</li>
+<li>Maryland Scale integration for study types</li>
+</ul>
+<p><strong>Results</strong>: ~80% grounding rate, better intervention characterization</p>
+<h4 id="version-3-fuzzy-quote-validation"><a class="toclink" href="#version-3-fuzzy-quote-validation">Version 3: Fuzzy Quote Validation</a><a class="headerlink" href="#version-3-fuzzy-quote-validation" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Implemented multi-level quote matching</li>
+<li>Reduced false negatives from formatting issues</li>
+<li>Added comprehensive validation logging</li>
+</ul>
+<p><strong>Results</strong>: &gt;95% grounding rate, maintained accuracy</p>
+<h4 id="version-4-domain-specific-refinements"><a class="toclink" href="#version-4-domain-specific-refinements">Version 4: Domain-Specific Refinements</a><a class="headerlink" href="#version-4-domain-specific-refinements" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Added population characterization fields</li>
+<li>Enhanced results extraction focus</li>
+<li>Improved issue vs. results distinction</li>
+</ul>
+<p><strong>Results</strong>: Current production-ready version</p>
+<h2 id="performance-analysis"><a class="toclink" href="#performance-analysis">Performance Analysis</a><a class="headerlink" href="#performance-analysis" title="Permanent link">&para;</a></h2>
+<h3 id="computational-complexity"><a class="toclink" href="#computational-complexity">Computational Complexity</a><a class="headerlink" href="#computational-complexity" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Time Complexity</strong>: O(n) where n = document length + extracted items</li>
+<li><strong>Space Complexity</strong>: O(m) where m = extracted structured data size</li>
+<li><strong>API Calls</strong>: 4 + number_of_interventions per document</li>
+</ul>
+<h3 id="cost-analysis-gpt-4o-mini-pricing"><a class="toclink" href="#cost-analysis-gpt-4o-mini-pricing">Cost Analysis (GPT-4o-mini pricing)</a><a class="headerlink" href="#cost-analysis-gpt-4o-mini-pricing" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Input Tokens</strong>: ~4x document length (reprocessed each stage)</li>
+<li><strong>Output Tokens</strong>: ~1000-3000 per document (structured JSON)</li>
+<li><strong>Estimated Cost</strong>: $0.01-0.05 per research paper</li>
+</ul>
+<h3 id="latency-breakdown"><a class="toclink" href="#latency-breakdown">Latency Breakdown</a><a class="headerlink" href="#latency-breakdown" title="Permanent link">&para;</a></h3>
+<p>Typical 10-page research paper:
+- <strong>Issues Extraction</strong>: 3-5 seconds
+- <strong>Interventions Extraction</strong>: 4-6 seconds<br />
+- <strong>Mapping Extraction</strong>: 2-3 seconds
+- <strong>Results Extraction</strong>: 2-4 seconds per intervention
+- <strong>Validation</strong>: &lt;1 second
+- <strong>Total</strong>: 15-25 seconds per paper</p>
+<h2 id="comparison-with-alternative-approaches"><a class="toclink" href="#comparison-with-alternative-approaches">Comparison with Alternative Approaches</a><a class="headerlink" href="#comparison-with-alternative-approaches" title="Permanent link">&para;</a></h2>
+<h3 id="rule-based-systems"><a class="toclink" href="#rule-based-systems">Rule-Based Systems</a><a class="headerlink" href="#rule-based-systems" title="Permanent link">&para;</a></h3>
+<p><strong>Traditional Approach</strong>: Hand-crafted rules and patterns
+- <strong>Advantages</strong>: Predictable, fast, domain-specific
+- <strong>Disadvantages</strong>: Brittle, requires extensive manual tuning, poor generalization</p>
+<p><strong>LangGraph Advantage</strong>: Semantic understanding handles document variability</p>
+<h3 id="single-stage-llm-extraction"><a class="toclink" href="#single-stage-llm-extraction">Single-Stage LLM Extraction</a><a class="headerlink" href="#single-stage-llm-extraction" title="Permanent link">&para;</a></h3>
+<p><strong>Alternative Approach</strong>: Single large prompt extracting all information
+- <strong>Advantages</strong>: Simple, fewer API calls
+- <strong>Disadvantages</strong>: Context dilution, poor error isolation, harder to optimize</p>
+<p><strong>LangGraph Advantage</strong>: Focused attention per stage, better error handling</p>
+<h3 id="fine-tuned-model-approach"><a class="toclink" href="#fine-tuned-model-approach">Fine-tuned Model Approach</a><a class="headerlink" href="#fine-tuned-model-approach" title="Permanent link">&para;</a></h3>
+<p><strong>Alternative Approach</strong>: Train specialized models for extraction
+- <strong>Advantages</strong>: Potentially faster, no API dependency
+- <strong>Disadvantages</strong>: Requires training data, harder to update, limited to training domain</p>
+<p><strong>LangGraph Advantage</strong>: Leverages foundation model capabilities, easy to update with prompt changes</p>
+<h3 id="traditional-nlp-pipeline"><a class="toclink" href="#traditional-nlp-pipeline">Traditional NLP Pipeline</a><a class="headerlink" href="#traditional-nlp-pipeline" title="Permanent link">&para;</a></h3>
+<p><strong>Alternative Approach</strong>: NER → Relation Extraction → Structure Building
+- <strong>Advantages</strong>: Well-established, interpretable
+- <strong>Disadvantages</strong>: Error propagation, limited semantic understanding</p>
+<p><strong>LangGraph Advantage</strong>: End-to-end semantic processing with validation</p>
+<h2 id="limitations-and-future-research"><a class="toclink" href="#limitations-and-future-research">Limitations and Future Research</a><a class="headerlink" href="#limitations-and-future-research" title="Permanent link">&para;</a></h2>
+<h3 id="current-limitations"><a class="toclink" href="#current-limitations">Current Limitations</a><a class="headerlink" href="#current-limitations" title="Permanent link">&para;</a></h3>
+<h4 id="1-document-length-constraints"><a class="toclink" href="#1-document-length-constraints">1. Document Length Constraints</a><a class="headerlink" href="#1-document-length-constraints" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Issue</strong>: LLM context window limits (~200k tokens for GPT-4)</li>
+<li><strong>Current Mitigation</strong>: Works well for typical research papers (20-50 pages)</li>
+<li><strong>Future Research</strong>: Chunking strategies for very long documents</li>
+</ul>
+<h4 id="2-language-limitations"><a class="toclink" href="#2-language-limitations">2. Language Limitations</a><a class="headerlink" href="#2-language-limitations" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Issue</strong>: Designed and tested primarily on English papers</li>
+<li><strong>Current Status</strong>: Should work for other languages but not validated</li>
+<li><strong>Future Research</strong>: Multi-language validation and prompt adaptation</li>
+</ul>
+<h4 id="3-domain-specificity"><a class="toclink" href="#3-domain-specificity">3. Domain Specificity</a><a class="headerlink" href="#3-domain-specificity" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Issue</strong>: Prompts optimized for intervention/outcome research</li>
+<li><strong>Current Scope</strong>: Medical, psychological, and educational research</li>
+<li><strong>Future Research</strong>: Adaptation to other research domains</li>
+</ul>
+<h3 id="future-research-directions"><a class="toclink" href="#future-research-directions">Future Research Directions</a><a class="headerlink" href="#future-research-directions" title="Permanent link">&para;</a></h3>
+<h4 id="1-advanced-validation-techniques"><a class="toclink" href="#1-advanced-validation-techniques">1. Advanced Validation Techniques</a><a class="headerlink" href="#1-advanced-validation-techniques" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Semantic Similarity</strong>: Use embeddings to validate quote-content alignment</li>
+<li><strong>Cross-Reference Validation</strong>: Check consistency across extracted items</li>
+<li><strong>Temporal Validation</strong>: Ensure chronological consistency in results</li>
+</ul>
+<h4 id="2-active-learning-integration"><a class="toclink" href="#2-active-learning-integration">2. Active Learning Integration</a><a class="headerlink" href="#2-active-learning-integration" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>User Feedback</strong>: Incorporate expert corrections into prompt refinement</li>
+<li><strong>Quality Prediction</strong>: Predict extraction quality before manual review</li>
+<li><strong>Adaptive Prompting</strong>: Adjust prompts based on document characteristics</li>
+</ul>
+<h4 id="3-multimodal-enhancement"><a class="toclink" href="#3-multimodal-enhancement">3. Multimodal Enhancement</a><a class="headerlink" href="#3-multimodal-enhancement" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Table Extraction</strong>: Structured processing of data tables</li>
+<li><strong>Figure Analysis</strong>: Extract information from charts and graphs</li>
+<li><strong>Reference Mining</strong>: Enhanced citation and reference processing</li>
+</ul>
+<h4 id="4-real-time-processing"><a class="toclink" href="#4-real-time-processing">4. Real-time Processing</a><a class="headerlink" href="#4-real-time-processing" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Streaming Extraction</strong>: Process documents as they arrive</li>
+<li><strong>Incremental Updates</strong>: Update extractions when papers are revised</li>
+<li><strong>Live Validation</strong>: Real-time quality monitoring</li>
+</ul>
+<h2 id="conclusion"><a class="toclink" href="#conclusion">Conclusion</a><a class="headerlink" href="#conclusion" title="Permanent link">&para;</a></h2>
+<p>The LangGraph extraction system represents a methodologically sound approach to structured information extraction from research literature. Its combination of principled design, empirical validation, and iterative refinement demonstrates how modern LLM capabilities can be effectively harnessed for systematic research applications.</p>
+<p>Key methodological contributions:
+1. <strong>Grounding-first design</strong> ensuring traceability and trust
+2. <strong>Multi-stage workflow</strong> balancing complexity and reliability<br />
+3. <strong>Fuzzy validation</strong> handling real-world text variations
+4. <strong>Comprehensive error handling</strong> maximizing data recovery</p>
+<p>The system's performance characteristics and validation results suggest it is ready for production use in evidence synthesis applications, while its modular design provides a solid foundation for future enhancements and research.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

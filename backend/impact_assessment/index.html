@@ -1,0 +1,2730 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for Policy Atlas - AI-powered policy design platform">
+      
+      
+        <meta name="author" content="Policy Atlas Team">
+      
+      
+        <link rel="canonical" href="https://nestauk.github.io/discovery_policy_atlas/backend/impact_assessment/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Impact assessment methodology - Policy Atlas</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#impact-assessment-methodology" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Policy Atlas" class="md-header__button md-logo" aria-label="Policy Atlas" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Policy Atlas
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Impact assessment methodology
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/yourusername/discovery_policy_atlas" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    discovery_policy_atlas
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../setup/installation/" class="md-tabs__link">
+          
+  
+  
+  Setup
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../flow/chatbot/" class="md-tabs__link">
+          
+  
+  
+  Flow
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+  Backend
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../frontend/overview/" class="md-tabs__link">
+          
+  
+  
+  Frontend
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Policy Atlas" class="md-nav__button md-logo" aria-label="Policy Atlas" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Policy Atlas
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/yourusername/discovery_policy_atlas" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    discovery_policy_atlas
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Setup
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../setup/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Flow
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Flow
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../flow/chatbot/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Chatbot Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../flow/project-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backend
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Backend
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user-management/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Frontend
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../frontend/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+  
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#core-principle-impact-is-a-structured-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core principle: impact is a structured profile
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core principle: impact is a structured profile">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scalar-impact-scores-secondary-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scalar impact scores (secondary output)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#evidence-quality-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Evidence quality score
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Evidence quality score">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#score-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Score provenance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inputs-and-outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inputs and outputs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inputs and outputs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outputs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Outputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-1-reader-atomic-extraction-per-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tier 1 ("Reader"): atomic extraction per document
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 1 (&#34;Reader&#34;): atomic extraction per document">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#results-outcomes-per-intervention" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results (outcomes per intervention)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interventions-implementation-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interventions (implementation profile)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conclusions-document-level-risk-and-quality-assessment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conclusions (document-level risk and quality assessment)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-2-judge-cross-document-synthesis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tier 2 ("Judge"): cross-document synthesis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 2 (&#34;Judge&#34;): cross-document synthesis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#high-level-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        High-level workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verdict-labels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verdict labels
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Verdict labels">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#canonical-verdict-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Canonical verdict set
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verdict-thresholds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verdict thresholds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#contribution-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contribution fallback
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#magnitude" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Magnitude
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Magnitude">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#hybrid-magnitude-estimation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hybrid magnitude estimation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#magnitude-aggregation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Magnitude aggregation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#magnitude-detail-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Magnitude detail structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#semantic-magnitude-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Semantic magnitude type
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#causal-mechanism" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Causal mechanism
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transferability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transferability
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Transferability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#context-dimensions-llm-assessed-semantic-similarity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context dimensions (LLM-assessed semantic similarity)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation-dimensions-ordinal-evidence-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation dimensions (ordinal evidence inference)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#transferabilitybreakdown-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TransferabilityBreakdown schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#harm-warning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Harm warning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Harm warning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tier-2-harm-warning-cross-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tier 2 harm warning (cross-document)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#document-level-harm-warning-tier-1-utility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document-level harm warning (Tier 1 utility)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#null-vs-no-data-vs-mixedinconclusive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Null vs "no data" vs mixed/inconclusive
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#discord-contested-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discord / contested evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scalar-impact-scores" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scalar impact scores
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scalar impact scores">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#document-level-transferability-numeric-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document-level transferability (numeric score)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Document-level transferability (numeric score)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inputs_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inputs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-fit-continuous" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context fit (continuous)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#constraint-penalty-multiplicative" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Constraint penalty (multiplicative)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#final-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Final score
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#breakdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Breakdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#document-level-impact-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Document-level impact score
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tier-2-calibration-pass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tier 2 calibration pass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#intervention-level-impact-score" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Intervention-level impact score
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#impact-summary-text-intervention-level" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Impact summary text (intervention-level)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-evidence-quality-is-and-is-not-used" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where evidence quality is and is not used
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#authoritative-code-locations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authoritative code locations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#persistence-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistence (database)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Persistence (database)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tables
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-and-frontend-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API and frontend usage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="API and frontend usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#search-wizard-target-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search wizard: target context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#synthesis-summary-payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synthesis summary payload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="impact-assessment-methodology"><a class="toclink" href="#impact-assessment-methodology">Impact assessment methodology</a><a class="headerlink" href="#impact-assessment-methodology" title="Permanent link">&para;</a></h1>
+<p>Impact assessment answers five questions per intervention–outcome pair:</p>
+<ul>
+<li><strong>Does it work?</strong> (directional consensus via verdict labels)</li>
+<li><strong>How much does it work?</strong> (calibrated magnitude estimate)</li>
+<li><strong>How strong is the causal claim?</strong> (causal mechanism — attribution / contribution / correlation)</li>
+<li><strong>Will it work here?</strong> (transferability / context fit)</li>
+<li><strong>What could go wrong?</strong> (risk themes and harm warnings)</li>
+</ul>
+<hr />
+<h2 id="core-principle-impact-is-a-structured-profile"><a class="toclink" href="#core-principle-impact-is-a-structured-profile">Core principle: impact is a structured profile</a><a class="headerlink" href="#core-principle-impact-is-a-structured-profile" title="Permanent link">&para;</a></h2>
+<p>The primary output is a structured <strong>Impact Profile</strong> — a multi-dimensional
+vector of verdict, magnitude, causality, transferability, and risk — assembled
+across two tiers:</p>
+<ul>
+<li><strong>Tier 1 ("Reader")</strong>: document-level, factual extraction.</li>
+<li><strong>Tier 2 ("Judge")</strong>: cross-document synthesis using evidence-quality
+  weighting, including calibrated magnitude thresholds.</li>
+</ul>
+<h3 id="scalar-impact-scores-secondary-output"><a class="toclink" href="#scalar-impact-scores-secondary-output">Scalar impact scores (secondary output)</a><a class="headerlink" href="#scalar-impact-scores-secondary-output" title="Permanent link">&para;</a></h3>
+<p>In addition to the Impact Profile, the system computes <strong>scalar impact scores</strong>
+at both document and intervention level.  These scores exist primarily for
+ranking and sorting in the UI, and should not be treated as the full assessment.</p>
+<ul>
+<li><strong>Document-level impact score</strong> (1.0–5.0): computed in Tier 1 from signed
+  magnitude, outcome similarity, causal weights, and transferability; may be
+  <strong>overwritten</strong> by Tier 2 calibration (see §Tier 2 calibration pass below).</li>
+<li><strong>Intervention-level impact score</strong> (1.0–5.0): aggregated from
+  document-level scores using a maximum-based strategy with evidence caps and
+  a proportional discord penalty (see §Intervention-level impact score).</li>
+</ul>
+<p>Both scores use labels: Very high (≥ 4.5), High (≥ 3.5), Moderate (≥ 2.5),
+Low (≥ 1.5), Very low (&lt; 1.5).</p>
+<hr />
+<h2 id="evidence-quality-score"><a class="toclink" href="#evidence-quality-score">Evidence quality score</a><a class="headerlink" href="#evidence-quality-score" title="Permanent link">&para;</a></h2>
+<p>Each document receives an <strong>evidence quality score</strong> on an integer <strong>0–5</strong>
+scale.  This score is the weighting factor used throughout synthesis.</p>
+<table>
+<thead>
+<tr>
+<th>Score</th>
+<th>Typical category</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5</td>
+<td>Systematic review / meta-analysis</td>
+<td>Highest methodological tier</td>
+</tr>
+<tr>
+<td>4</td>
+<td>RCT / quasi-experimental</td>
+<td>Strong causal designs</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Observational research</td>
+<td>Non-randomised evidence</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Modelling, policy synthesis, qualitative</td>
+<td>Lower causal certainty</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Expert opinion / commentary</td>
+<td>Minimal empirical backing</td>
+</tr>
+<tr>
+<td>0</td>
+<td>No qualifying evidence or unknown</td>
+<td>Cannot be scored</td>
+</tr>
+</tbody>
+</table>
+<h3 id="score-provenance"><a class="toclink" href="#score-provenance">Score provenance</a><a class="headerlink" href="#score-provenance" title="Permanent link">&para;</a></h3>
+<p>Evidence quality is <strong>preferentially loaded from the stored conclusion</strong>
+(<code>extraction_results.conclusion.evidence_strength.stars</code>), which is set during
+Tier 1 extraction.  If that value is absent, Tier 2 <strong>recomputes</strong> it from the
+document's evidence category using <code>calculate_document_evidence_score()</code> in
+<code>analysis/evidence/strength.py</code>.  This recomputation applies a <strong>sample-size
+penalty</strong> (−1 star) when the evidence category is causal (RCT or
+observational) and the known sample size is below 100.</p>
+<p><strong>Implementation</strong>: <code>data_loading.py → get_or_calculate_document_evidence()</code>.</p>
+<hr />
+<h2 id="inputs-and-outputs"><a class="toclink" href="#inputs-and-outputs">Inputs and outputs</a><a class="headerlink" href="#inputs-and-outputs" title="Permanent link">&para;</a></h2>
+<h3 id="inputs"><a class="toclink" href="#inputs">Inputs</a><a class="headerlink" href="#inputs" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Documents</strong> (papers / reports) and associated metadata.</li>
+<li><strong>Tier 1 extractions</strong> (atomic signals per document).</li>
+<li><strong>Evidence quality scores</strong> (0–5) per document.</li>
+<li><strong>User target context</strong> (from the search wizard / project <code>search_query</code>):</li>
+<li>population</li>
+<li>inner setting (delivery environment)</li>
+<li>geography — although collected, <strong>transferability geography is hard-fixed
+    to UK</strong> in the current implementation (see §Transferability).</li>
+<li>outcomes of interest</li>
+<li>implementation constraints (optional): cost, staffing, implementation
+    complexity</li>
+</ul>
+<h3 id="outputs"><a class="toclink" href="#outputs">Outputs</a><a class="headerlink" href="#outputs" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Outcome-level impact profile</strong> (one per intervention–outcome pair):</li>
+<li>verdict label + description</li>
+<li>discord/contested flag + reason (where applicable)</li>
+<li>predicted magnitude + structured magnitude detail (direction, bucket
+    counts, source/measurement counts, dominant scale, thresholds)</li>
+<li>causal mechanism (attribution / contribution / correlation) + structured
+    quality-weighted support counts</li>
+<li>per-outcome <strong>consensus meter</strong> (directional evidence counts) for the UI</li>
+<li><strong>Intervention-level outputs</strong>:</li>
+<li><strong>Context Fit</strong> rating + breakdown (inner setting, population, geography)</li>
+<li><strong>Implementation requirements</strong> rating (Low / Medium / High / Unknown)
+    derived from evidence levels</li>
+<li>Implementation dimensions always show <strong>evidence levels</strong>
+    (low / moderate / high / unknown)</li>
+<li>When user tolerances are provided, show an <strong>exceeds tolerance</strong> flag per
+    dimension</li>
+<li>LLM-based explanations per dimension in breakdown notes</li>
+<li><strong>Impact summary</strong> — LLM-generated natural-language synthesis</li>
+<li><strong>Scalar impact score</strong> + label + breakdown (secondary ranking output)</li>
+<li><strong>Risk profile</strong>:</li>
+<li>clustered risk themes</li>
+<li>harm warning flag (boolean; see §Harm warning)</li>
+<li>primary + secondary linkage between risk themes and intervention themes</li>
+</ul>
+<hr />
+<h2 id="tier-1-reader-atomic-extraction-per-document"><a class="toclink" href="#tier-1-reader-atomic-extraction-per-document">Tier 1 ("Reader"): atomic extraction per document</a><a class="headerlink" href="#tier-1-reader-atomic-extraction-per-document" title="Permanent link">&para;</a></h2>
+<p>Tier 1 runs a multi-stage extraction pipeline:</p>
+<p><code>extract_issues → extract_interventions → extract_mappings → extract_results → extract_conclusions</code></p>
+<h3 id="results-outcomes-per-intervention"><a class="toclink" href="#results-outcomes-per-intervention">Results (outcomes per intervention)</a><a class="headerlink" href="#results-outcomes-per-intervention" title="Permanent link">&para;</a></h3>
+<p>Tier 1 extracts factual outcome signals per intervention:</p>
+<ul>
+<li><strong>effect_direction</strong>: <code>increase | decrease | null | mixed | inconclusive</code></li>
+<li><strong>effect_size_type</strong>: raw metric label (e.g., "Cohen's d", "OR")</li>
+<li><strong>effect_size</strong>: raw value (e.g., "0.3 SD", "15%", "OR 0.85")</li>
+<li><strong>causality_claim</strong>: <code>attribution | contribution | correlation</code></li>
+<li><strong>negative_impact_flag</strong>: boolean (true if harm / adverse effects are indicated)</li>
+<li><strong>is_primary</strong>: boolean (true for primary outcomes the study was designed to measure)</li>
+<li><strong>is_beneficial</strong>: boolean (true if the outcome change benefits the population)</li>
+<li><strong>is_prevalence_only</strong>: boolean (true for descriptive snapshots with no intervention comparison)</li>
+<li><strong>magnitude_estimate</strong>: <code>substantial | large | moderate | marginal | unknown</code>
+  — an initial semantic bucket assigned at extraction time.  Tier 2 may
+  overwrite this with calibrated thresholds.</li>
+<li>supporting quote(s)</li>
+</ul>
+<p><strong>Note on magnitude</strong>: Tier 1 assigns a preliminary <code>magnitude_estimate</code> based
+on the LLM's interpretation of the effect size.  Cross-document calibration
+happens in Tier 2, where outcome-specific thresholds are generated and applied.
+If calibrated thresholds are available, they take precedence over the Tier 1
+bucket.</p>
+<h3 id="interventions-implementation-profile"><a class="toclink" href="#interventions-implementation-profile">Interventions (implementation profile)</a><a class="headerlink" href="#interventions-implementation-profile" title="Permanent link">&para;</a></h3>
+<p>Tier 1 extracts the intervention plus CFIR-inspired delivery characteristics:</p>
+<ul>
+<li><strong>country</strong> (outer setting proxy)</li>
+<li><strong>population_intervened</strong> (beneficiary proxy)</li>
+<li><strong>population_demographics</strong></li>
+<li><strong>sample_size</strong></li>
+<li><strong>inner_setting</strong> (e.g., School, Clinical/Hospital, Prison, Community) — uses
+  the recipient-facing setting, not the policy-making body</li>
+<li><strong>cost_level</strong> + justification (High / Moderate / Low / null)</li>
+<li><strong>staffing_level</strong> + justification (High / Moderate / Low / null)</li>
+<li><strong>implementation_complexity_level</strong> + justification (High / Moderate / Low / null)</li>
+<li>supporting quote(s)</li>
+</ul>
+<h3 id="conclusions-document-level-risk-and-quality-assessment"><a class="toclink" href="#conclusions-document-level-risk-and-quality-assessment">Conclusions (document-level risk and quality assessment)</a><a class="headerlink" href="#conclusions-document-level-risk-and-quality-assessment" title="Permanent link">&para;</a></h3>
+<p>Conclusions include:</p>
+<ul>
+<li><strong>evidence_strength</strong> — a <code>stars</code> rating (0–5) plus justification and an
+  optional <code>evidence_gap</code> note</li>
+<li><strong>risk_assessment</strong>:</li>
+<li><code>risks_identified</code>: list of intervention-related risks (harms, adverse
+    effects, implementation challenges) — does <strong>not</strong> include the underlying
+    problem the intervention addresses</li>
+<li><code>unintended_consequences_detected</code>: boolean</li>
+<li><strong>study_context</strong> — fallback document-level context (country, population,
+  inner_setting, cost/staffing/complexity levels) used when intervention-level
+  data is sparse</li>
+</ul>
+<hr />
+<h2 id="tier-2-judge-cross-document-synthesis"><a class="toclink" href="#tier-2-judge-cross-document-synthesis">Tier 2 ("Judge"): cross-document synthesis</a><a class="headerlink" href="#tier-2-judge-cross-document-synthesis" title="Permanent link">&para;</a></h2>
+<p>Tier 2 consumes Tier 1 extractions and produces theme-level synthesis with
+evidence-quality weighted logic.</p>
+<h3 id="high-level-workflow"><a class="toclink" href="#high-level-workflow">High-level workflow</a><a class="headerlink" href="#high-level-workflow" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Load</strong> (<code>data_loading.py</code>)</li>
+<li>Load raw extractions and document evidence-quality scores.</li>
+<li>If a stored evidence strength score exists it is used; otherwise it is
+     recomputed from evidence category (with sample-size penalty).</li>
+<li>
+<p>Load <strong>target context</strong> (inner setting, population, outcomes, geography,
+     implementation constraints) from project <code>search_query</code>.</p>
+</li>
+<li>
+<p><strong>Canonical concept creation</strong> (<code>data_loading.py</code>)</p>
+</li>
+<li>Create canonical concepts for clustering from each extraction type.</li>
+<li>
+<p>Extract <strong>risk concepts</strong> from:</p>
+<ul>
+<li>conclusion <code>risk_assessment.risks_identified</code></li>
+<li>results marked with <code>negative_impact_flag=true</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Theme discovery</strong> — parallel for each branch (<code>theme_discovery.py</code>)</p>
+</li>
+<li>issue themes</li>
+<li>intervention themes</li>
+<li>outcome themes (semantic equivalence clustering)</li>
+<li>
+<p>risk themes</p>
+</li>
+<li>
+<p><strong>Aggregation</strong> (<code>aggregation.py</code>)</p>
+</li>
+<li>Compute <strong>quality-weighted directional counts</strong> for outcomes:<ul>
+<li>Each result extraction contributes <code>evidence_score / 5</code> to its
+   directional bucket (positive, negative, or null).</li>
+<li>Buckets are rounded up (<code>math.ceil</code>) to whole numbers for display.</li>
+<li><strong>Counting unit</strong>: individual result extractions, not documents.  A
+   single high-quality document with multiple extracted results contributes
+   multiple weighted increments. (TODO: consider changing to document level counting instead of result level)</li>
+</ul>
+</li>
+<li><strong>Handling of mixed/inconclusive directions</strong>: results with
+     <code>effect_direction</code> of <code>mixed</code> or <code>inconclusive</code> do not increment any
+     bucket (equivalent to "no data" for aggregation purposes). (TODO: handle these)</li>
+<li>Select representative effect sizes (quality-prioritised, numeric-biased,
+     deduplicated).</li>
+<li>
+<p>Build theme→extraction ID and theme→document UUID mappings.</p>
+</li>
+<li>
+<p><strong>Impact synthesis (enrichment)</strong> (<code>impact_synthesis.py</code>)</p>
+</li>
+<li>Verdict label + description (see §Verdict labels)</li>
+<li>Discord flag + reason (see §Discord / contested evidence)</li>
+<li>Predicted magnitude + structured <code>MagnitudeDetail</code> (see §Magnitude)</li>
+<li>Causal mechanism + <code>CausalityDetail</code> (see §Causal mechanism)</li>
+<li>Transferability rating + <code>TransferabilityBreakdown</code> (see §Transferability)</li>
+<li>Risk themes linked to interventions + harm warning flag</li>
+<li>LLM-generated <code>impact_summary</code> per intervention</li>
+<li>Scalar impact score per intervention</li>
+</ol>
+<hr />
+<h2 id="verdict-labels"><a class="toclink" href="#verdict-labels">Verdict labels</a><a class="headerlink" href="#verdict-labels" title="Permanent link">&para;</a></h2>
+<p>Verdicts communicate <strong>direction</strong> and <strong>evidence strength</strong> (not magnitude or
+causality).  Direction uses <strong>positive/negative</strong> terminology (not
+increase/decrease), based on the <code>is_beneficial</code> flag — the frontend interprets direction in outcome context
+(e.g., a decrease in obesity counts as a positive outcome).</p>
+<h3 id="canonical-verdict-set"><a class="toclink" href="#canonical-verdict-set">Canonical verdict set</a><a class="headerlink" href="#canonical-verdict-set" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>VerdictType = Literal[
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    &quot;well_evidenced_positive&quot;,
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    &quot;well_evidenced_negative&quot;,
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    &quot;evidenced_positive&quot;,
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    &quot;evidenced_negative&quot;,
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    &quot;suggested_positive&quot;,
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    &quot;suggested_negative&quot;,
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    &quot;contested&quot;,
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    &quot;no_effect&quot;,
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    &quot;insufficient_evidence&quot;,
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    &quot;probable_contribution&quot;,
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>]
+</span></code></pre></div>
+<h3 id="verdict-thresholds"><a class="toclink" href="#verdict-thresholds">Verdict thresholds</a><a class="headerlink" href="#verdict-thresholds" title="Permanent link">&para;</a></h3>
+<p>Verdicts are determined by the quality-weighted directional counts using the
+following thresholds:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Total weight &lt; <strong>3</strong></td>
+<td><code>insufficient_evidence</code></td>
+</tr>
+<tr>
+<td>min(pos, neg) / max(pos, neg) &gt; <strong>0.4</strong></td>
+<td><code>contested</code></td>
+</tr>
+<tr>
+<td>null &gt; pos AND null &gt; neg</td>
+<td><code>no_effect</code></td>
+</tr>
+<tr>
+<td>pos &gt; neg AND pos &gt; <strong>15</strong></td>
+<td><code>well_evidenced_positive</code></td>
+</tr>
+<tr>
+<td>pos &gt; neg AND pos &gt; <strong>8</strong></td>
+<td><code>evidenced_positive</code></td>
+</tr>
+<tr>
+<td>pos &gt; neg</td>
+<td><code>suggested_positive</code></td>
+</tr>
+<tr>
+<td>neg &gt; pos (same tiers)</td>
+<td><code>…_negative</code> equivalents</td>
+</tr>
+<tr>
+<td>pos == neg</td>
+<td><code>insufficient_evidence</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="contribution-fallback"><a class="toclink" href="#contribution-fallback">Contribution fallback</a><a class="headerlink" href="#contribution-fallback" title="Permanent link">&para;</a></h3>
+<p>If a verdict would be <code>well_evidenced_positive</code> or <code>well_evidenced_negative</code>
+but <strong>no attribution-quality evidence</strong> exists for the outcome (i.e., no result
+extraction has <code>causality_claim == "attribution"</code>), the verdict is downgraded
+to <code>probable_contribution</code> to avoid overstating causal certainty.</p>
+<p><strong>Implementation</strong>: <code>impact_synthesis.py → determine_verdict()</code>.</p>
+<hr />
+<h2 id="magnitude"><a class="toclink" href="#magnitude">Magnitude</a><a class="headerlink" href="#magnitude" title="Permanent link">&para;</a></h2>
+<h3 id="hybrid-magnitude-estimation"><a class="toclink" href="#hybrid-magnitude-estimation">Hybrid magnitude estimation</a><a class="headerlink" href="#hybrid-magnitude-estimation" title="Permanent link">&para;</a></h3>
+<p>Magnitude is estimated using a two-stage approach:</p>
+<ol>
+<li><strong>Static scale detection</strong>: the effect size type is matched against known
+   scales with built-in thresholds:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Scale</th>
+<th>Marginal</th>
+<th>Moderate</th>
+<th>Large</th>
+<th>Substantial</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cohen's d / SMD</td>
+<td>&lt; 0.2</td>
+<td>0.2–0.5</td>
+<td>0.5–0.8</td>
+<td>&gt; 0.8</td>
+</tr>
+<tr>
+<td>OR / RR</td>
+<td>&lt; 1.2</td>
+<td>1.2–1.5</td>
+<td>1.5–2.0</td>
+<td>&gt; 2.0</td>
+</tr>
+<tr>
+<td>Percentage</td>
+<td>&lt; 5%</td>
+<td>5–15%</td>
+<td>15–30%</td>
+<td>&gt; 30%</td>
+</tr>
+</tbody>
+</table>
+<ol>
+<li><strong>Dynamic LLM-calibrated thresholds</strong>: for each outcome theme, an LLM
+   (default: GPT-4o-mini) examines all extracted effect sizes for that outcome
+   across interventions and generates <strong>domain-appropriate thresholds</strong>.  These
+   are cached per outcome and take precedence over the static scales when
+   available.</li>
+</ol>
+<h3 id="magnitude-aggregation"><a class="toclink" href="#magnitude-aggregation">Magnitude aggregation</a><a class="headerlink" href="#magnitude-aggregation" title="Permanent link">&para;</a></h3>
+<p>Within an outcome–intervention pair:</p>
+<ul>
+<li>Only effects aligned with the dominant direction (or all, if <code>contested</code>)
+  are counted.</li>
+<li>Each effect contributes its calibrated magnitude bucket weighted by evidence
+  quality.</li>
+<li>When the highest-weighted bucket is tied, the <strong>lower</strong> (more conservative)
+  bucket is chosen — the "prudence check".</li>
+</ul>
+<h3 id="magnitude-detail-structure"><a class="toclink" href="#magnitude-detail-structure">Magnitude detail structure</a><a class="headerlink" href="#magnitude-detail-structure" title="Permanent link">&para;</a></h3>
+<p>The <code>MagnitudeDetail</code> object stores:</p>
+<ul>
+<li><code>direction</code>: <code>increase | decrease | contested</code></li>
+<li><code>bucket_counts</code>: quality-weighted counts per magnitude bucket</li>
+<li><code>source_count</code> / <code>total_sources</code> / <code>measurement_count</code></li>
+<li><code>dominant_scale</code>: the most common effect size type</li>
+<li><code>thresholds</code>: human-readable threshold text for tooltips</li>
+</ul>
+<h3 id="semantic-magnitude-type"><a class="toclink" href="#semantic-magnitude-type">Semantic magnitude type</a><a class="headerlink" href="#semantic-magnitude-type" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>SemanticMagnitudeType = Literal[
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    &quot;transformational&quot;, &quot;substantial&quot;, &quot;large&quot;, &quot;moderate&quot;, &quot;marginal&quot;, &quot;unknown&quot;
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>]
+</span></code></pre></div>
+<p><strong>Implementation</strong>: <code>impact_synthesis.py → compute_magnitude_hybrid()</code>,
+<code>generate_dynamic_thresholds()</code>.</p>
+<hr />
+<h2 id="causal-mechanism"><a class="toclink" href="#causal-mechanism">Causal mechanism</a><a class="headerlink" href="#causal-mechanism" title="Permanent link">&para;</a></h2>
+<p>The primary causal mechanism is determined per outcome–intervention pair from
+result-level <code>causality_claim</code> fields, weighted by evidence quality score:</p>
+<ul>
+<li>Each result extraction contributes its evidence quality score to the
+  corresponding claim bucket (attribution / contribution / correlation).</li>
+<li>The mechanism with the highest cumulative weight is the primary.</li>
+</ul>
+<p>The <code>CausalityDetail</code> object stores the quality-weighted counts for each claim
+type.</p>
+<p><strong>Implementation</strong>: <code>impact_synthesis.py → compute_causal_mechanism()</code>.</p>
+<hr />
+<h2 id="transferability"><a class="toclink" href="#transferability">Transferability</a><a class="headerlink" href="#transferability" title="Permanent link">&para;</a></h2>
+<p>Transferability is assessed at the <strong>intervention</strong> level across six dimensions
+split into two groups:</p>
+<h3 id="context-dimensions-llm-assessed-semantic-similarity"><a class="toclink" href="#context-dimensions-llm-assessed-semantic-similarity">Context dimensions (LLM-assessed semantic similarity)</a><a class="headerlink" href="#context-dimensions-llm-assessed-semantic-similarity" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Target source</th>
+<th>Evidence source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Inner setting</td>
+<td><code>search_query.inner_setting</code></td>
+<td>Extraction <code>inner_setting</code></td>
+</tr>
+<tr>
+<td>Population</td>
+<td><code>search_query.population</code></td>
+<td>Extraction <code>population_intervened</code></td>
+</tr>
+<tr>
+<td>Geography</td>
+<td><strong>Hard-fixed to <code>["UK"]</code></strong></td>
+<td>Extraction <code>country</code> (with fallback to <code>doc_metadata.source_country</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Geography note</strong>: although the search wizard collects user-specified
+geography and this value is loaded into Tier 2 state, the transferability
+computation currently <strong>ignores</strong> it and uses <code>DEFAULT_TARGET_GEOGRAPHY =
+["UK"]</code>.  This is by design for Policy Atlas's UK policymaker audience.</p>
+<p>Each context dimension is assessed using an <strong>LLM semantic similarity call</strong>
+(default model: GPT-4o-mini) that compares target and evidence values and
+returns one of:</p>
+<ul>
+<li><code>match</code> → 1.0</li>
+<li><code>similar</code> → 0.85</li>
+<li><code>comparable</code> → 0.70</li>
+<li><code>partial</code> → 0.40</li>
+<li><code>mismatch</code> → 0.0</li>
+<li><code>unknown</code> → excluded from average</li>
+<li><code>not_compared</code> → returned when no target is specified; excluded from average</li>
+</ul>
+<p>The <strong>Context Fit rating</strong> is the headline transferability output and is
+computed from the average of the three context dimension scores:</p>
+<table>
+<thead>
+<tr>
+<th>Average score</th>
+<th>Rating</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>≥ 0.85</td>
+<td>Excellent Fit</td>
+</tr>
+<tr>
+<td>≥ 0.70</td>
+<td>Good Fit</td>
+</tr>
+<tr>
+<td>≥ 0.50</td>
+<td>Moderate Fit</td>
+</tr>
+<tr>
+<td>≥ 0.30</td>
+<td>Limited Fit</td>
+</tr>
+<tr>
+<td>&lt; 0.30 or any mismatch</td>
+<td>Poor Fit</td>
+</tr>
+<tr>
+<td>Fewer than 2 valid scores</td>
+<td>Unknown</td>
+</tr>
+</tbody>
+</table>
+<h3 id="implementation-dimensions-ordinal-evidence-inference"><a class="toclink" href="#implementation-dimensions-ordinal-evidence-inference">Implementation dimensions (ordinal evidence inference)</a><a class="headerlink" href="#implementation-dimensions-ordinal-evidence-inference" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Evidence source</th>
+<th>Aggregation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cost</td>
+<td><code>cost_level</code></td>
+<td>Most-common level across extractions</td>
+</tr>
+<tr>
+<td>Staffing</td>
+<td><code>staffing_level</code></td>
+<td>Most-common level across extractions</td>
+</tr>
+<tr>
+<td>Implementation complexity</td>
+<td><code>implementation_complexity_level</code></td>
+<td>Most-common level across extractions</td>
+</tr>
+</tbody>
+</table>
+<p>These dimensions are <strong>not</strong> weighted by evidence quality — they use simple
+mode (most-common) aggregation.</p>
+<p>Each dimension produces:</p>
+<ul>
+<li><strong>Evidence level</strong>: low / moderate / high / unknown</li>
+<li><strong>Exceeds tolerance flag</strong>: true when evidence level &gt; user-specified
+  tolerance (only when user constraints are provided)</li>
+<li><strong>LLM explanation</strong>: a one-sentence note contextualising the evidence or
+  tolerance alignment</li>
+</ul>
+<p>The <strong>Implementation requirements rating</strong> is the maximum of the three
+evidence levels: Low / Medium / High / Unknown.</p>
+<h3 id="transferabilitybreakdown-schema"><a class="toclink" href="#transferabilitybreakdown-schema">TransferabilityBreakdown schema</a><a class="headerlink" href="#transferabilitybreakdown-schema" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>TransferabilityBreakdown:
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    inner_setting: str          # match level
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    population: str             # match level
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    geography: str              # match level
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    notes: Dict[str, str]       # per-dimension LLM explanations
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    data_availability: Dict     # e.g., &quot;3 of 5&quot; extractions have data
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    context_fit_rating: str     # headline rating
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    implementation_requirements_rating: str
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    implementation_constraints_specified: bool
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    implementation_evidence: Dict[str, str]
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    implementation_constraints: Dict[str, str]
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    implementation_exceeds_tolerance: Dict[str, bool]
+</span></code></pre></div>
+<p><strong>Implementation</strong>: <code>impact_synthesis.py → compute_transferability()</code>,
+<code>assess_transferability_dimension()</code>.</p>
+<hr />
+<h2 id="harm-warning"><a class="toclink" href="#harm-warning">Harm warning</a><a class="headerlink" href="#harm-warning" title="Permanent link">&para;</a></h2>
+<p>Harm warnings are computed at the <strong>risk theme</strong> level using conclusion-level
+risk assessment data.</p>
+<h3 id="tier-2-harm-warning-cross-document"><a class="toclink" href="#tier-2-harm-warning-cross-document">Tier 2 harm warning (cross-document)</a><a class="headerlink" href="#tier-2-harm-warning-cross-document" title="Permanent link">&para;</a></h3>
+<p>The function examines documents linked to a risk theme and checks whether</p>
+<blockquote>
+<p>20% of <strong>high-quality</strong> documents (evidence score ≥ 4) have
+<code>unintended_consequences_detected == true</code> in their conclusion risk assessment.</p>
+</blockquote>
+<p>The output is a <strong>boolean flag only</strong> (<code>has_harm_warning</code>).  A human-readable
+reason is not generated at synthesis time.</p>
+<p><strong>Note</strong>: the Tier 2 harm warning uses conclusion-level
+<code>unintended_consequences_detected</code>, not the result-level
+<code>negative_impact_flag</code>.  Result-level negative flags are used during risk
+<em>concept</em> creation (i.e., they feed into the risk theme clustering pipeline)
+but do not directly trigger the harm warning.</p>
+<h3 id="document-level-harm-warning-tier-1-utility"><a class="toclink" href="#document-level-harm-warning-tier-1-utility">Document-level harm warning (Tier 1 utility)</a><a class="headerlink" href="#document-level-harm-warning-tier-1-utility" title="Permanent link">&para;</a></h3>
+<p>A separate utility in <code>analysis/scoring.py → compute_harm_warning()</code> computes
+a document-level <code>(flag, reason)</code> tuple from <code>has_negative_impact</code> and number
+of <code>risks_identified</code>.  This is used during Tier 1 storage and is distinct from
+the Tier 2 cross-document harm warning.</p>
+<p><strong>Implementation</strong>: <code>impact_synthesis.py → compute_harm_warning()</code> (Tier 2),
+<code>analysis/scoring.py → compute_harm_warning()</code> (Tier 1).</p>
+<hr />
+<h2 id="null-vs-no-data-vs-mixedinconclusive"><a class="toclink" href="#null-vs-no-data-vs-mixedinconclusive">Null vs "no data" vs mixed/inconclusive</a><a class="headerlink" href="#null-vs-no-data-vs-mixedinconclusive" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Direction value</th>
+<th>Treatment in aggregation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>null</code> / <code>none</code> / <code>no effect</code></td>
+<td>Counts as evidence in the <strong>null</strong> bucket (quality-weighted)</td>
+</tr>
+<tr>
+<td><code>increase</code> or <code>is_beneficial=true</code></td>
+<td>Counts in the <strong>positive</strong> bucket</td>
+</tr>
+<tr>
+<td><code>decrease</code> or <code>is_beneficial=false</code></td>
+<td>Counts in the <strong>negative</strong> bucket</td>
+</tr>
+<tr>
+<td><code>mixed</code> / <code>inconclusive</code></td>
+<td><strong>Does not increment any bucket</strong> — treated as absent evidence</td>
+</tr>
+<tr>
+<td>Absent / not extracted</td>
+<td>Does not contribute to any bucket</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="discord-contested-evidence"><a class="toclink" href="#discord-contested-evidence">Discord / contested evidence</a><a class="headerlink" href="#discord-contested-evidence" title="Permanent link">&para;</a></h2>
+<p>Discord is detected by comparing quality-weighted positive and negative counts:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ratio = min(positive, negative) / max(positive, negative)
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>if ratio &gt; 0.4:
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    verdict = &quot;contested&quot;
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    discord_reason = f&quot;Evidence split: {positive}↑ vs {negative}↓&quot;
+</span></code></pre></div>
+<p>Discord detection runs <strong>before</strong> strength-tier assignment.  If evidence is
+contested, no strength tier is applied.</p>
+<hr />
+<h2 id="scalar-impact-scores"><a class="toclink" href="#scalar-impact-scores">Scalar impact scores</a><a class="headerlink" href="#scalar-impact-scores" title="Permanent link">&para;</a></h2>
+<h3 id="document-level-transferability-numeric-score"><a class="toclink" href="#document-level-transferability-numeric-score">Document-level transferability (numeric score)</a><a class="headerlink" href="#document-level-transferability-numeric-score" title="Permanent link">&para;</a></h3>
+<p>Before the document impact score can be computed, a <strong>numeric transferability
+score</strong> (0.2–1.0) is calculated per document.  This is a Tier 1 computation
+(<code>analysis/scoring.py → compute_document_transferability()</code>) that runs at
+extraction-storage time, distinct from the Tier 2 categorical Context Fit
+rating described above.</p>
+<h4 id="inputs_1"><a class="toclink" href="#inputs_1">Inputs</a><a class="headerlink" href="#inputs_1" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>doc_context</code></td>
+<td>Aggregated from all interventions extracted for the document: <code>country</code>, <code>population_intervened</code>, <code>inner_setting</code></td>
+</tr>
+<tr>
+<td><code>target_context</code></td>
+<td>From project <code>search_query</code>: geography (hard-fixed to <code>["UK"]</code>), population, inner setting</td>
+</tr>
+<tr>
+<td><code>implementation_evidence</code></td>
+<td>Aggregated <code>cost_level</code>, <code>staffing_level</code>, <code>implementation_complexity_level</code> from extractions</td>
+</tr>
+<tr>
+<td><code>user_constraints</code></td>
+<td>Optional tolerance limits from <code>search_query.implementation_constraints</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="context-fit-continuous"><a class="toclink" href="#context-fit-continuous">Context fit (continuous)</a><a class="headerlink" href="#context-fit-continuous" title="Permanent link">&para;</a></h4>
+<p>Each of the three context dimensions (geography, population, inner_setting) is
+assessed via the same LLM semantic similarity call as Tier 2 (<code>assess_dimension()</code>),
+returning a match level that maps to a numeric score.</p>
+<p><strong>Document-level match scores</strong> (note: these differ from Tier 2):</p>
+<table>
+<thead>
+<tr>
+<th>Match level</th>
+<th>Score</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>match</code></td>
+<td>1.0</td>
+</tr>
+<tr>
+<td><code>similar</code></td>
+<td>0.85</td>
+</tr>
+<tr>
+<td><code>comparable</code></td>
+<td>0.7</td>
+</tr>
+<tr>
+<td><code>partial</code></td>
+<td>0.4</td>
+</tr>
+<tr>
+<td><code>mismatch</code></td>
+<td>0.15</td>
+</tr>
+<tr>
+<td><code>unknown</code></td>
+<td>0.5</td>
+</tr>
+</tbody>
+</table>
+<p>Key differences from the Tier 2 transferability match scores:</p>
+<ul>
+<li><code>mismatch</code> → <strong>0.15</strong> (not 0.0) — avoids completely zeroing a document score
+  on a single dimension mismatch.</li>
+<li><code>unknown</code> → <strong>0.5</strong> (not excluded) — contributes a neutral value rather than
+  being dropped from the average.</li>
+</ul>
+<p><code>context_fit = mean(valid_scores)</code> (all three are always included since
+<code>unknown</code> has a numeric value).  Falls back to 0.5 if no scores are valid.</p>
+<h4 id="constraint-penalty-multiplicative"><a class="toclink" href="#constraint-penalty-multiplicative">Constraint penalty (multiplicative)</a><a class="headerlink" href="#constraint-penalty-multiplicative" title="Permanent link">&para;</a></h4>
+<p>For each implementation dimension (cost, staffing, implementation_complexity):</p>
+<ul>
+<li>Normalise both the user tolerance and the evidence level to <code>low</code> / <code>moderate</code> / <code>high</code>.</li>
+<li>If the evidence level <strong>exceeds</strong> the user tolerance (e.g., evidence is
+  "high" but user tolerance is "moderate"), apply a <strong>0.5× penalty</strong> per
+  exceeding dimension.</li>
+</ul>
+<p>The penalties stack multiplicatively (e.g., two exceeding dimensions →
+0.5 × 0.5 = 0.25).</p>
+<h4 id="final-score"><a class="toclink" href="#final-score">Final score</a><a class="headerlink" href="#final-score" title="Permanent link">&para;</a></h4>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>transferability = clamp(context_fit × constraint_penalty, 0.2, 1.0)
+</span></code></pre></div>
+<p>The floor of 0.2 ensures even heavily penalised documents still contribute
+a non-trivial score rather than collapsing to zero.</p>
+<h4 id="breakdown"><a class="toclink" href="#breakdown">Breakdown</a><a class="headerlink" href="#breakdown" title="Permanent link">&para;</a></h4>
+<p>The returned breakdown dict includes: <code>context_fit</code>, per-dimension match
+levels, <code>constraints_provided</code>, <code>constraint_levels</code>, <code>implementation_evidence</code>,
+<code>extracted_context</code>, and <code>exceeds_constraints</code>.</p>
+<p><strong>Implementation</strong>: <code>analysis/scoring.py → compute_document_transferability()</code>,
+<code>analysis/storage.py → _compute_document_scores()</code>.</p>
+<hr />
+<h3 id="document-level-impact-score"><a class="toclink" href="#document-level-impact-score">Document-level impact score</a><a class="headerlink" href="#document-level-impact-score" title="Permanent link">&para;</a></h3>
+<p>Computed by <code>analysis/scoring.py → compute_document_impact_score()</code>.  Takes the
+document-level transferability score (above) as an input.</p>
+<ol>
+<li>
+<p><strong>Filter outcomes</strong>: remove prevalence-only results, then keep only primary
+   outcomes.  If no primary outcomes remain, the document receives no score.</p>
+</li>
+<li>
+<p><strong>Per-outcome signals</strong> — for each included primary outcome, three values
+   are computed:</p>
+</li>
+<li>
+<p><strong>Signed magnitude</strong> (<code>signed_mag</code>, range −1.0 to +1.0): looked up from
+     the <code>MAGNITUDE_NORMALISED</code> table below, then negated when the outcome is
+     harmful (<code>is_beneficial=false</code>).  For directions of <code>null</code>, <code>mixed</code>, or
+     <code>inconclusive</code> the signed magnitude is 0.0.</p>
+<table>
+<thead>
+<tr>
+<th>Magnitude bucket</th>
+<th>Normalised value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>substantial</code></td>
+<td>1.0</td>
+</tr>
+<tr>
+<td><code>transformational</code></td>
+<td>1.0</td>
+</tr>
+<tr>
+<td><code>large</code></td>
+<td>0.75</td>
+</tr>
+<tr>
+<td><code>moderate</code></td>
+<td>0.5</td>
+</tr>
+<tr>
+<td><code>marginal</code></td>
+<td>0.25</td>
+</tr>
+<tr>
+<td><code>unknown</code></td>
+<td>0.25</td>
+</tr>
+</tbody>
+</table>
+</li>
+<li>
+<p><strong>Outcome similarity</strong> (<code>similarity</code>, 0.0–1.0): how relevant this
+     extracted outcome is to the user's target outcomes, assessed via an LLM
+     call.  If the user did not specify target outcomes, similarity defaults
+     to 1.0.  Outcomes with similarity &lt; 0.5 are <strong>excluded</strong> from the score
+     entirely.</p>
+</li>
+<li>
+<p><strong>Causal weight</strong> (<code>causal_w</code>): reflects confidence in the causal claim.</p>
+<table>
+<thead>
+<tr>
+<th>Causality claim</th>
+<th>Weight</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>attribution</code></td>
+<td>1.0</td>
+</tr>
+<tr>
+<td><code>contribution</code></td>
+<td>0.9</td>
+</tr>
+<tr>
+<td><code>correlation</code></td>
+<td>0.7</td>
+</tr>
+<tr>
+<td>missing / unknown</td>
+<td>0.9</td>
+</tr>
+</tbody>
+</table>
+</li>
+<li>
+<p><strong>Net magnitude</strong> — a weighted average of signed magnitudes across all
+   included outcomes.  The weight for each outcome is its
+   <code>similarity × causal_w</code>:</p>
+</li>
+</ol>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>For each outcome i:
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    weight_i      = similarity_i × causal_w_i
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    contribution_i = signed_mag_i × weight_i
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>net_magnitude = Σ contribution_i  /  Σ weight_i
+</span></code></pre></div>
+<p>This is a standard weighted mean.  Outcomes that are more relevant to the
+   user's targets (high similarity) and backed by stronger causal designs
+   (high causal weight) contribute proportionally more to the overall
+   magnitude.  The result ranges from −1.0 (all outcomes harmful at maximum
+   magnitude) to +1.0 (all outcomes beneficial at maximum magnitude).</p>
+<ol>
+<li><strong>Base score</strong>: centres the net magnitude on a 1–5 scale:</li>
+</ol>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>base_score = 2.5 + (net_magnitude × 2.5)
+</span></code></pre></div>
+<p>A net magnitude of 0 → base score of 2.5 (neutral).  Fully beneficial
+   → 5.0.  Fully harmful → 0.0.</p>
+<ol>
+<li><strong>Transferability dampening</strong>: reduces the score proportionally to how
+   transferable the evidence is to the user's context:</li>
+</ol>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>dampened = base_score × transferability^0.3
+</span></code></pre></div>
+<p>The exponent of 0.3 means the penalty is mild — a transferability of 0.5
+   only reduces the score by ~19%.  This avoids over-penalising documents
+   from different contexts while still rewarding high transferability.</p>
+<ol>
+<li><strong>Clamp</strong> to 1.0–5.0.</li>
+</ol>
+<h3 id="tier-2-calibration-pass"><a class="toclink" href="#tier-2-calibration-pass">Tier 2 calibration pass</a><a class="headerlink" href="#tier-2-calibration-pass" title="Permanent link">&para;</a></h3>
+<p>After Tier 2 generates dynamic magnitude thresholds, document-level impact
+scores are <strong>recalculated</strong> using the calibrated magnitudes
+(<code>rescore_document_scores_with_calibration()</code>).  This ensures document scores
+are consistent with the synthesis-level magnitude buckets.  The recalculated
+scores are written back to <code>doc_scores</code> and persisted to <code>analysis_documents</code>.</p>
+<h3 id="intervention-level-impact-score"><a class="toclink" href="#intervention-level-impact-score">Intervention-level impact score</a><a class="headerlink" href="#intervention-level-impact-score" title="Permanent link">&para;</a></h3>
+<p>Computed by <code>analysis/scoring.py → compute_intervention_impact_score()</code>:</p>
+<ol>
+<li>Exclude floor-one documents (those with score=1.0 and labels like "No
+   Outcomes" or notes indicating no usable outcomes).</li>
+<li>Select the <strong>best-evidence document</strong> (highest evidence score; ties broken
+   by highest impact score).</li>
+<li>Apply <strong>moderate caps</strong> on the base score:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Cap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Single contributing study</td>
+<td>4.0</td>
+</tr>
+<tr>
+<td>≤ 3 contributing studies</td>
+<td>4.3</td>
+</tr>
+<tr>
+<td>Best evidence score &lt; 3</td>
+<td>3.0</td>
+</tr>
+<tr>
+<td>Best evidence score &lt; 4</td>
+<td>3.5</td>
+</tr>
+<tr>
+<td>Best causality weight &lt; 0.6</td>
+<td>3.5</td>
+</tr>
+</tbody>
+</table>
+<ol>
+<li>Apply <strong>discord penalty</strong>: proportional to the quality-weighted fraction of
+   negative-direction documents (capped at 4.0 before penalty; penalty =
+   neg_proportion × 1.0).</li>
+<li>Clamp to 1.0–5.0.</li>
+</ol>
+<p>The aggregation method is recorded as <code>"maximum"</code> in the breakdown.</p>
+<p><strong>Implementation</strong>: <code>analysis/scoring.py → compute_intervention_impact_score()</code>,
+<code>impact_synthesis.py → build_intervention()</code>.</p>
+<hr />
+<h2 id="impact-summary-text-intervention-level"><a class="toclink" href="#impact-summary-text-intervention-level">Impact summary text (intervention-level)</a><a class="headerlink" href="#impact-summary-text-intervention-level" title="Permanent link">&para;</a></h2>
+<p>An LLM (default: GPT-4o-mini) generates a 2–3 sentence <code>impact_summary</code> per
+intervention.  The prompt instructs:</p>
+<ul>
+<li>Directly state the intervention's effect on user-specified outcomes</li>
+<li>Note the evidence strength tier</li>
+<li>Flag any contested or insufficient evidence areas</li>
+<li>Reference the research question for focus</li>
+<li>Use plain language suitable for a non-specialist policy audience</li>
+</ul>
+<p><strong>Implementation</strong>: <code>impact_synthesis.py → generate_impact_summary()</code>.</p>
+<hr />
+<h2 id="where-evidence-quality-is-and-is-not-used"><a class="toclink" href="#where-evidence-quality-is-and-is-not-used">Where evidence quality is and is not used</a><a class="headerlink" href="#where-evidence-quality-is-and-is-not-used" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th style="text-align: center;">Quality-weighted?</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Directional bucket counts (pos/neg/null)</td>
+<td style="text-align: center;">✓</td>
+<td><code>evidence_score / 5</code> per result extraction</td>
+</tr>
+<tr>
+<td>Magnitude bucket voting</td>
+<td style="text-align: center;">✓</td>
+<td>Evidence quality used as magnitude bucket weight</td>
+</tr>
+<tr>
+<td>Causal mechanism voting</td>
+<td style="text-align: center;">✓</td>
+<td>Evidence quality used as claim weight</td>
+</tr>
+<tr>
+<td>Discord detection</td>
+<td style="text-align: center;">✓</td>
+<td>Via quality-weighted directional counts</td>
+</tr>
+<tr>
+<td>Verdict determination</td>
+<td style="text-align: center;">✓</td>
+<td>Via quality-weighted counts</td>
+</tr>
+<tr>
+<td>Transferability context (inner setting / population / geography)</td>
+<td style="text-align: center;">✗</td>
+<td>LLM semantic similarity; no quality weighting</td>
+</tr>
+<tr>
+<td>Implementation evidence levels (cost / staffing / complexity)</td>
+<td style="text-align: center;">✗</td>
+<td>Simple mode (most-common) aggregation</td>
+</tr>
+<tr>
+<td>Harm warning</td>
+<td style="text-align: center;">Indirect</td>
+<td>Only high-quality docs (score ≥ 4) are checked</td>
+</tr>
+<tr>
+<td>Representative effect size selection</td>
+<td style="text-align: center;">✓</td>
+<td>Quality-prioritised ranking</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="authoritative-code-locations"><a class="toclink" href="#authoritative-code-locations">Authoritative code locations</a><a class="headerlink" href="#authoritative-code-locations" title="Permanent link">&para;</a></h2>
+<p>Several modules participate in impact assessment.  This table clarifies which
+module is authoritative for each concern:</p>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Authoritative module</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Document evidence score</td>
+<td><code>analysis/evidence/strength.py</code></td>
+<td>0–5 scale; Tier 1 stores, Tier 2 recomputes if missing</td>
+</tr>
+<tr>
+<td>Document impact score</td>
+<td><code>analysis/scoring.py</code></td>
+<td>Initial computation; Tier 2 may overwrite via calibration</td>
+</tr>
+<tr>
+<td>Intervention impact score</td>
+<td><code>analysis/scoring.py</code></td>
+<td>Called by Tier 2 <code>impact_synthesis.py</code></td>
+</tr>
+<tr>
+<td>Outcome similarity</td>
+<td><code>analysis/scoring.py</code></td>
+<td>LLM-based outcome relevance scoring</td>
+</tr>
+<tr>
+<td>Verdict + discord</td>
+<td><code>synthesis/nodes/impact_synthesis.py</code></td>
+<td>Tier 2 only</td>
+</tr>
+<tr>
+<td>Magnitude (calibrated)</td>
+<td><code>synthesis/nodes/impact_synthesis.py</code></td>
+<td>Tier 2 dynamic thresholds override Tier 1 buckets</td>
+</tr>
+<tr>
+<td>Causal mechanism</td>
+<td><code>synthesis/nodes/impact_synthesis.py</code></td>
+<td>Tier 2 only</td>
+</tr>
+<tr>
+<td>Transferability (intervention-level)</td>
+<td><code>synthesis/nodes/impact_synthesis.py</code></td>
+<td>Tier 2 implementation; uses LLM for context dimensions</td>
+</tr>
+<tr>
+<td>Document transferability (Tier 1)</td>
+<td><code>analysis/scoring.py</code></td>
+<td>Numeric 0.2–1.0 score; feeds into document impact score dampening; stored on <code>analysis_documents</code></td>
+</tr>
+<tr>
+<td>Harm warning (cross-document)</td>
+<td><code>synthesis/nodes/impact_synthesis.py</code></td>
+<td>Boolean; conclusion-based</td>
+</tr>
+<tr>
+<td>Harm warning (document-level)</td>
+<td><code>analysis/scoring.py</code></td>
+<td><code>(flag, reason)</code> tuple; result/risk-count based</td>
+</tr>
+<tr>
+<td>Impact summary</td>
+<td><code>synthesis/nodes/impact_synthesis.py</code></td>
+<td>LLM-generated</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="persistence-database"><a class="toclink" href="#persistence-database">Persistence (database)</a><a class="headerlink" href="#persistence-database" title="Permanent link">&para;</a></h2>
+<p>Tier 2 persists synthesis results via <code>synthesis/logbook.py →
+write_run_from_state()</code>.  The cache uses a version field (currently <code>version:
+4</code>) and an overwrite strategy for document scores.</p>
+<h3 id="tables"><a class="toclink" href="#tables">Tables</a><a class="headerlink" href="#tables" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>synthesis_runs</code></strong></li>
+<li>One row per synthesis execution.  Stores <code>executive_briefing</code>,
+    <code>evidence_coverage</code>, <code>structured_briefing_data</code>, and run metadata.</li>
+<li>Status lifecycle: <code>running → completed</code> (or <code>failed</code>).</li>
+<li>
+<p>Old completed runs are set to <code>invalidated</code> before a new run is written.</p>
+</li>
+<li>
+<p><strong><code>synthesis_themes</code></strong></p>
+</li>
+<li>Stores issue, intervention, and risk themes (distinguished by
+    <code>theme_type</code>).</li>
+<li>Intervention themes include: <code>transferability_rating</code>,
+    <code>transferability_note</code>, <code>transferability_breakdown</code>, <code>impact_score</code>,
+    <code>impact_score_label</code>, <code>impact_score_breakdown</code>, <code>impact_summary</code>,
+    effect consensus and counts.</li>
+<li>
+<p>Risk themes include: <code>has_harm_warning</code>, <code>linked_intervention_theme_id</code>.</p>
+</li>
+<li>
+<p><strong><code>theme_intervention_links</code></strong></p>
+</li>
+<li>
+<p>Many-to-many links between risk themes and intervention themes, with
+    <code>link_strength</code> (primary / secondary) determined by document overlap.</p>
+</li>
+<li>
+<p><strong><code>synthesis_outcome_themes</code></strong></p>
+</li>
+<li>One row per intervention–outcome pair.</li>
+<li>Stores verdict, magnitude, discord, causal mechanism fields.</li>
+<li><code>magnitude_detail</code> and <code>causal_mechanism_detail</code> are stored as JSON.</li>
+<li>
+<p>Links to interventions via <code>intervention_theme_id</code>.</p>
+</li>
+<li>
+<p><strong><code>theme_assignments</code></strong> / <strong><code>outcome_theme_assignments</code></strong></p>
+</li>
+<li>Extraction-to-theme mappings, deduplicated by (theme_id, extraction_id).</li>
+<li>
+<p>Outcome assignments also store <code>calibrated_magnitude</code> per extraction.</p>
+</li>
+<li>
+<p><strong><code>analysis_documents</code></strong> (overwrite)</p>
+</li>
+<li>
+<p>After Tier 2 calibration, <code>impact_score</code>, <code>impact_score_label</code>, and
+    <code>impact_score_breakdown</code> are written back to each document row.</p>
+</li>
+<li>
+<p><strong><code>synthesis_citations</code></strong></p>
+</li>
+<li>Citation references for the structured briefing, keyed by citation number.</li>
+</ul>
+<hr />
+<h2 id="api-and-frontend-usage"><a class="toclink" href="#api-and-frontend-usage">API and frontend usage</a><a class="headerlink" href="#api-and-frontend-usage" title="Permanent link">&para;</a></h2>
+<h3 id="search-wizard-target-context"><a class="toclink" href="#search-wizard-target-context">Search wizard: target context</a><a class="headerlink" href="#search-wizard-target-context" title="Permanent link">&para;</a></h3>
+<p>The search wizard collects:</p>
+<ul>
+<li><strong>Population</strong> (e.g., "Children under 5") → <code>search_query.population</code></li>
+<li><strong>Outcomes</strong> (e.g., "BMI reduction") → <code>search_query.outcome</code></li>
+<li><strong>Inner setting</strong> (e.g., "Schools") → <code>search_query.inner_setting</code></li>
+<li><strong>Geography</strong> (e.g., "UK") → <code>search_query.geography</code> (currently overridden
+  by the hard-fixed UK default for transferability)</li>
+<li><strong>Implementation constraints</strong> → <code>search_query.implementation_constraints</code></li>
+</ul>
+<h3 id="synthesis-summary-payload"><a class="toclink" href="#synthesis-summary-payload">Synthesis summary payload</a><a class="headerlink" href="#synthesis-summary-payload" title="Permanent link">&para;</a></h3>
+<p>The API exposes (and the frontend renders):</p>
+<ul>
+<li>Outcome verdicts (label + description)</li>
+<li>Discord flags (contested evidence)</li>
+<li>Magnitude estimate + structured <code>MagnitudeDetail</code></li>
+<li>Causal mechanism at outcome level + <code>CausalityDetail</code></li>
+<li>Context Fit rating + <code>TransferabilityBreakdown</code> at intervention level</li>
+<li>Implementation requirements rating + per-dimension evidence/tolerance</li>
+<li>Risk themes + harm warnings linked to interventions</li>
+<li>Scalar impact score + label (for ranking/sorting)</li>
+<li>LLM-generated impact summary per intervention</li>
+</ul>
+<hr />
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
