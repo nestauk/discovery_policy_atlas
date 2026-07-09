@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
+    "@aws-amplify/adapter-nextjs": "^1.7.3",
     "@clerk/nextjs": "^6.21.0",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-collapsible": "^1.1.11",
@@ -25,6 +26,7 @@
     "@radix-ui/react-tooltip": "^1.2.7",
     "@types/d3": "^7.4.3",
     "antd": "^5.26.0",
+    "aws-amplify": "^6.17.0",
     "bcryptjs": "^3.0.2",
     "chart.js": "^4.4.2",
     "class-variance-authority": "^0.7.1",
