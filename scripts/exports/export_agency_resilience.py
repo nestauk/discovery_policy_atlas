@@ -27,20 +27,21 @@ BASE_PUBLIC_PROJECT_URL = (
 )
 INSUFFICIENT_VERDICTS = {"insufficient_evidence", "insufficient evidence"}
 
-# Maps a short key to (project description filter, Google Sheet ID).
+# Maps a short key to (project description filter, env var holding the
+# Google Sheet ID). Sheet IDs live in backend/.env, not in the repo.
 # Add new entries here as new export targets are defined.
 EXPORT_TARGETS: dict[str, dict[str, str]] = {
     "ar_bottom_up": {
         "description": "AR bottom up",
-        "sheet_id": "1s6jM46z65H3Nc_OMYWEZNfm12BLCQwXge58k2zmHna4",
+        "sheet_id_env": "AR_BOTTOM_UP_SHEET_ID",
     },
     "ar_top_down": {
         "description": "Final Top Down AR",
-        "sheet_id": "1TBZhimzQ2y066VCLyteiAP3kBaPoo8ivYSmNiIKre-U",
+        "sheet_id_env": "AR_TOP_DOWN_SHEET_ID",
     },
     "ar_wildcard": {
         "description": "AR wildcard",
-        "sheet_id": "12_D2WTjXnoHmkgXioXKmb1v3JkAIMXMwD-I_wqRL1lQ",
+        "sheet_id_env": "AR_WILDCARD_SHEET_ID",
     },
 }
 
@@ -1789,11 +1790,12 @@ def main() -> None:
     print(f"NotebookLM sources: {notebook_dir}")
 
     if args.upload:
-        sheet_id = target_config["sheet_id"]
+        sheet_id_env = target_config["sheet_id_env"]
+        sheet_id = os.getenv(sheet_id_env)
         if not sheet_id:
             raise ValueError(
                 f"No Google Sheet ID configured for target '{args.target}'. "
-                "Fill in the sheet_id in EXPORT_TARGETS."
+                f"Set {sheet_id_env} in backend/.env."
             )
         credentials_path = _find_google_credentials(args.google_credentials)
         print(f"Using Google credentials: {credentials_path}")
