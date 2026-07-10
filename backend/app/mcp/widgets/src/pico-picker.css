@@ -1,0 +1,122 @@
+@import "./host-styles.css";
+
+h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+p.subtitle {
+  margin: 0 0 16px;
+  color: var(--pa-muted);
+  font-size: 13px;
+}
+
+.facet {
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: var(--pa-radius);
+  background: var(--pa-card);
+  border: 1px solid var(--pa-border);
+}
+
+.facet h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--pa-muted);
+}
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.option:hover { background: rgba(127, 127, 127, 0.08); }
+.option input[type="checkbox"] { margin-top: 2px; }
+.option .label { font-weight: 500; }
+.option .desc { color: var(--pa-muted); font-size: 12px; margin-top: 2px; }
+
+.custom-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--pa-border);
+}
+
+.custom-row input[type="text"] {
+  flex: 1;
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--pa-border);
+  background: var(--pa-bg);
+  color: var(--pa-fg);
+}
+
+.custom-row button {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.custom-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 4px 0 0;
+  padding: 3px 8px;
+  font-size: 12px;
+  background: var(--pa-bg);
+  border: 1px solid var(--pa-accent);
+  color: var(--pa-accent);
+  border-radius: 12px;
+}
+
+.custom-tag button {
+  background: none;
+  border: none;
+  color: var(--pa-accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+button {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--pa-border);
+  background: var(--pa-bg);
+  color: var(--pa-fg);
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--pa-accent);
+  color: var(--pa-accent-fg);
+  border-color: var(--pa-accent);
+  font-weight: 600;
+}
+
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.status {
+  margin-left: auto;
+  color: var(--pa-muted);
+  font-size: 12px;
+}

@@ -43,6 +43,7 @@ dependencies = [
     "vl-convert-python>=1.8.0",
     "argilla>=2.8.0",
     "boto3>=1.42.0",
+    "mcp>=1.0.0",
 ]
 
 [tool.setuptools]

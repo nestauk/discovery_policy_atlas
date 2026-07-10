@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Evidence Results</title>
+  </head>
+  <body>
+    <main class="container" id="root">
+      <div class="loading">
+        <p class="loading-text">Searching evidence…</p>
+        <div class="progress"><div class="progress-bar"></div></div>
+        <p class="loading-hint">
+          Querying OpenAlex &amp; Overton — this usually takes ~25 seconds.
+        </p>
+      </div>
+    </main>
+    <script type="module" src="/src/search-evidence.ts"></script>
+  </body>
+</html>
